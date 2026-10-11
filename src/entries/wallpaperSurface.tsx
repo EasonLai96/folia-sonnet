@@ -99,13 +99,21 @@ export type WallpaperPayload = {
     lines?: WallpaperTimedLine[];
     firstIndex?: number;
     /**
-     * 封面（base64 data URL），换歌时由原生跟着 payload 一起推下来。
+     * 封面 base64（data URL）。
      *
-     * 没有它的话，莫奈那类「封面是构图一部分」的模式在叠层里只剩一层半透明底板
-     * —— 看着像「封面是半透明的、什么都看不见」，其实是一直没拿到图。
-     * 原生的壁纸那层早就有一份（拿去做模糊背景 / 取色），只是没往页面这边给。
+     * 只用来兜底：它是 App 抓图转出来的，那一首没转成（跨域 / 还没解码好）时
+     * 原生这边就不更新，只靠它会出现「换歌封面不更新」。
      */
     cover?: string | null;
+    /**
+     * 封面的原始地址，**优先用它**。
+     *
+     * 每首歌都在变，页面可以直接 `<img>` 去拉（img 不受 CORS 约束），
+     * 所以封面一定跟着歌走。原生经单独那条通道推下来（见 WallpaperOverlay
+     * .pushCoverIfChanged），不跟着整包 —— 整包是「签名变了才推」的离散模型，
+     * 挤在里面时只要那一次没送达，封面就永远停在上一首。
+     */
+    coverUrl?: string | null;
 };
 
 // 壁纸这边拿不到音频频谱：叠层页面不在播放会话里，没有 AnalyserNode。
@@ -170,6 +178,14 @@ declare global {
          */
         __foliaWallpaperLatest?: WallpaperPayload;
         __foliaWallpaperReceivedAt?: number;
+        /**
+         * 封面单独那条通道：`{ url?, data? }`。
+         *
+         * 和整包分开是为了不被「签名去重」吞掉 —— 封面是 App 异步抓图之后才到的，
+         * 挤在整包里时只要那一次桥调用没送达，封面就永远停在上一首，
+         * 而歌词看起来还在正常走（位置是页面自己按墙钟外推的），症状很隐蔽。
+         */
+        __foliaWallpaperPushCover?: (payload: { url?: string; data?: string }) => void;
     }
 }
 
@@ -204,12 +220,35 @@ window.__foliaWallpaperPush = (incoming) => {
             lines: lastGoodLines ?? payload.lines,
         };
     }
+    /*
+     * 封面走的是单独那条通道，整包里通常不带这两个字段 ——
+     * 不能让整包把已经到位的封面冲掉（那会让封面在每次换歌推送后又变回「没有」）。
+     */
+    if (!payload.coverUrl && !payload.cover && (latest.coverUrl || latest.cover)) {
+        payload = { ...payload, coverUrl: latest.coverUrl, cover: latest.cover };
+    }
     latest = payload;
     receivedAtMs = performance.now();
     window.__foliaWallpaperPushCount = (window.__foliaWallpaperPushCount ?? 0) + 1;
     window.__foliaWallpaperLastTitle = payload.title ?? '';
     window.__foliaWallpaperLatest = payload;
     window.__foliaWallpaperReceivedAt = receivedAtMs;
+    subscribers.forEach(notify => notify());
+};
+
+/**
+ * 封面单独那条通道。
+ *
+ * 写在 `latest` 上而不是另开一份 state：封面只是这幅画面里的一个字段，
+ * 和歌词/主题走同一份快照，组件那边才不会拿到两套互相打架的数据。
+ */
+window.__foliaWallpaperPushCover = (incoming) => {
+    if (!incoming || typeof incoming !== 'object') return;
+    const url = typeof incoming.url === 'string' && incoming.url ? incoming.url : null;
+    const data = typeof incoming.data === 'string' && incoming.data ? incoming.data : null;
+    if (!url && !data) return;
+    if (latest.coverUrl === url && latest.cover === data) return;
+    latest = { ...latest, coverUrl: url, cover: data };
     subscribers.forEach(notify => notify());
 };
 
@@ -585,8 +624,10 @@ const WallpaperSurface: React.FC = () => {
                 /*
                  * 封面：只把它交给可视化自己那一层构图中的封面（莫奈的右侧封面列等），
                  * 底下的背景仍然由原生壁纸负责，所以这里不会去动 transparent。
+                 *
+                 * 优先用地址：它每首必变、能直接加载；base64 那份只在地址也没有时才用。
                  */
-                coverUrl={payload.cover ?? null}
+                coverUrl={payload.coverUrl ?? payload.cover ?? null}
                 /*
                  * 叠层的封面默认是隐藏的。
                  *

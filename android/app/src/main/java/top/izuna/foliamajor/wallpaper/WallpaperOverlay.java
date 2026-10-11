@@ -2271,6 +2271,19 @@ public final class WallpaperOverlay {
                 // 只取散列，不把上百 KB 的 base64 拼进签名（Java 的 String hashCode 有缓存，
                 // 同一个 String 对象后续取散列是常数级）。
                 + "@" + (snapshot.cover == null ? 0 : snapshot.cover.hashCode());
+        /*
+         * 封面走**单独一条通道**，不跟着整包走。
+         *
+         * 为什么分开：整包是「签名变了才构造、才推」的离散模型，
+         * 而封面是 App 异步抓图转 base64 之后才到的第四类事件 —— 挤在整包里时，
+         * 只要那一次桥调用没送达（页面还在导航 / JSON 因为多了几十 KB 逐字轴而变大），
+         * 封面就永远停在上一首，而歌词看起来照常在走（位置是页面自己按墙钟推的），
+         * 症状非常隐蔽：「换歌封面不更新」。
+         *
+         * 分开之后这条消息只有地址 + base64 两个字段，跟时间轴解耦，
+         * 页面重载时会在 onPageFinished 把 lastPushedCover 清掉重推一次。
+         */
+        pushCoverIfChanged();
         // 注意 lastSignature 在 detach 时会被清空：页面是重新加载出来的，
         // 「上次推过什么」对它没有意义。不清的话切回桌面后签名没变、一次都不推，
         // 就会出现「回到桌面没歌词，非得暂停一下触发事件才更新」。
@@ -2326,6 +2339,60 @@ public final class WallpaperOverlay {
         if (fadeInPending && pageReady && hasContent) {
             fadeInPending = false;
             awaitPaintedThenFade(SystemClock.elapsedRealtime() + FADE_IN_TIMEOUT_MS);
+        }
+    }
+
+    /** 上一次单独推给页面的封面（地址 + base64 拼成的判重键）。 */
+    private String lastPushedCover = null;
+
+    /**
+     * 封面变了就单独推一次给页面。
+     *
+     * 判重键带上 base64：同一首歌的图不会变，但 App 每次 publish 都会把地址再发一遍，
+     * 只按地址判重会在每 250ms 的巡检里重复推同一张图。
+     */
+    private void pushCoverIfChanged() {
+        if (webView == null || !pageReady) {
+            return;
+        }
+
+        String url = WallpaperLyricsState.coverUrl();
+        String data = WallpaperLyricsState.get().cover;
+        if ((url == null || url.isEmpty()) && (data == null || data.isEmpty())) {
+            return;
+        }
+
+        String key = (url == null ? "" : url) + "|" + (data == null ? "" : data.hashCode());
+        if (key.equals(lastPushedCover)) {
+            return;
+        }
+        lastPushedCover = key;
+
+        /*
+         * 两个值都是**纯 URL / base64 文本**：字符集合是 [A-Za-z0-9+/=:_.&%-?]，
+         * 不会出现引号和反斜杠，所以直接拼进 JS 字符串字面量是安全的。
+         * 用 JSON 包一层是为了让页面那侧只解析一次、也不用手写拼接。
+         */
+        JSONObject payload = new JSONObject();
+        try {
+            if (url != null) {
+                payload.put("url", url);
+            }
+            if (data != null) {
+                payload.put("data", data);
+            }
+        } catch (JSONException error) {
+            return;
+        }
+        try {
+            webView.evaluateJavascript(
+                    "(function(){if(window.__foliaWallpaperPushCover){"
+                            + "window.__foliaWallpaperPushCover(" + payload.toString() + ");return 1;}"
+                            + "return 0;})()",
+                    null);
+        } catch (Throwable ignored) {
+            // 页面还在导航期会静默失败；把判重键清掉，下一轮巡检会再推一次。
+            lastPushedCover = null;
         }
     }
 
@@ -2417,20 +2484,6 @@ public final class WallpaperOverlay {
                 lines.put(entry);
             }
             out.put("lines", lines);
-            /*
-             * 封面（base64 data URL）也要跟着下去。
-             *
-             * 莫奈那一类模式把封面当成构图的一部分（右侧那一整列）。
-             * 之前这里只给原生壁纸（模糊封面 / 取色）用它，页面那份 payload 里没有 ——
-             * 于是叠层里的封面永远拿不到 src，画出来的就是那层半透明底板，
-             * 看着像「封面是半透明的、什么都看不见」。
-             *
-             * 只在**非空**时写：缺这个字段页面会退回 App 那侧推下来的封面逻辑，
-             * 不会为了占位塞一个空串进去。
-             */
-            if (snapshot.cover != null && !snapshot.cover.isEmpty()) {
-                out.put("cover", snapshot.cover);
-            }
             return out.toString();
         } catch (Throwable error) {
             return null;
@@ -2476,6 +2529,13 @@ public final class WallpaperOverlay {
              * 才会同步一次。
              */
             lastSignature = null;
+            /*
+             * 页面是全新的，封面必须**重推一次**。
+             *
+             * 封面那条通道是靠 lastPushedCover 判重的，不清的话新页面永远等不到封面 ——
+             * 表现是「刚挂上叠层时没有封面，非得换一首歌才出现」。
+             */
+            lastPushedCover = null;
             handler.postDelayed(WallpaperOverlay.this::pushState, PAGE_PUSH_DELAY_MS);
         }
 

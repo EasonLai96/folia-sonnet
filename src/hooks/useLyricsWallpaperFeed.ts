@@ -358,6 +358,13 @@ export const useLyricsWallpaperFeed = ({
             themeJson: themeJson || undefined,
             motion: MOTION_BY_INTENSITY[animationIntensity ?? 'normal'] ?? 1,
             cover: wallpaperCover,
+            /*
+             * 封面地址一起下发。
+             *
+             * base64 那份是 App 抓图转出来的，转不成（跨域 / 还没解码好）时原生就不更新，
+             * 叠层会一直挂着上一首的封面 —— 地址短、每首必变，叠层可以直接拿它去加载。
+             */
+            coverUrl: coverUrl || null,
             background: backgroundMode,
             image: backgroundImage,
             visualizer: wallpaperVisualizer,

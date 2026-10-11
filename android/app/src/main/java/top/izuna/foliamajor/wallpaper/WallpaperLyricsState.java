@@ -52,6 +52,27 @@ public final class WallpaperLyricsState {
     /** 纯音乐时的占位文案。没有歌词就画它，别留一块黑屏。 */
     private static final String INSTRUMENTAL_TEXT = "纯音乐，请欣赏";
 
+    /*
+     * 封面的**原始地址**。
+     *
+     * 不进 Snapshot：那边的构造器已经有十几个参数了，而这份数据只有一个消费者
+     * （叠层页面）。base64 那份（`Snapshot.cover`）是 App 抓图转出来的，
+     * 转不成时它就不动 —— 叠层于是永远挂着上一首的封面，看起来就是「封面不更新」。
+     * 地址短、每首必变，叠层能直接 `<img>` 去拉，所以单独存一份。
+     */
+    private static String lastCoverUrl = null;
+
+    /** 只在非空时更新：心跳那几次 publish 不带封面，不能把已有地址清掉。 */
+    public static void setCoverUrl(String coverUrl) {
+        if (coverUrl != null && !coverUrl.isEmpty()) {
+            lastCoverUrl = coverUrl;
+        }
+    }
+
+    public static String coverUrl() {
+        return lastCoverUrl;
+    }
+
     public static final class TimedLine {
         public final String text;
         public final long startMs;

@@ -89,6 +89,13 @@ public class FoliaWallpaperPlugin extends Plugin {
             call.getString("secondaryColor"),
             call.getString("themeJson"));
 
+        /*
+         * 封面地址单独存一份，不跟着 Snapshot 走。
+         * 见 WallpaperLyricsState.lastCoverUrl：base64 那份抓不成功时它不动，
+         * 叠层就一直挂着上一首的封面。地址每首必变，是封面更新的可靠依据。
+         */
+        WallpaperLyricsState.setCoverUrl(call.getString("coverUrl"));
+
         if (timeline == null && positionMs >= 0L) {
             // 常规心跳：只挪时间锚点，不碰时间轴，也不落盘。
             // 开关本身走 setAppearance，心跳不带时间轴时不重复写盘。

@@ -80,6 +80,18 @@ export interface FoliaWallpaperPublishOptions {
     motion?: number;
     /** 封面 base64。体积大，只在换歌时发。 */
     cover?: string | null;
+    /**
+     * 封面的**原始地址**。
+     *
+     * 叠层的封面之前只能靠上面那份 base64：它是 App 用 canvas 抓图转出来的，
+     * 一旦那一首没转成（跨域 / 解码失败 / 图还没到），原生这边 `cover` 就不动，
+     * 叠层就一直挂着上一首的封面 —— 表现是「换歌封面不更新」。
+     *
+     * 带上地址之后叠层可以直接 `<img>` 去拉（img 不受 CORS 约束），
+     * 每首歌地址都在变，所以封面一定会跟着换；base64 那份留着当兜底
+     * （已经下载好了，断网也能显示）。
+     */
+    coverUrl?: string | null;
     /** 背景模式：cover = 模糊封面，color = 主题色渐变，image = 自选图片。 */
     background?: FoliaWallpaperBackgroundMode;
     /** 自选背景图的 base64，background=image 时生效。 */
