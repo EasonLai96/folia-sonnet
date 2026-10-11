@@ -2450,6 +2450,17 @@ export default {
     "playbackFadeDesc": "Kecilkan suara sebentar sebelum menjeda dan naikkan kembali saat melanjutkan, bukan memotongnya. Fade dilewati bila audio tidak melalui mesin audio.",
     "keepScreenOnWhilePlaying": "Jaga layar tetap menyala saat memutar",
     "keepScreenOnWhilePlayingDesc": "Cegah layar mati hanya saat audio sedang diputar, dan kembalikan kendali ke sistem begitu pemutaran dijeda. Hanya berlaku saat aplikasi di latar depan; sistem tetap akan menidurkan layar setelah Anda keluar.",
+    "deviceTypeSection": "Jenis perangkat",
+    "deviceType": "Ponsel atau tablet",
+    "deviceTypeDesc": "Di ponsel, seluruh layar diperkecil sedikit saat lanskap agar kontrol tidak saling menutupi. Tablet ditampilkan ukuran penuh di kedua orientasi.",
+    "deviceTypePhone": "Ponsel",
+    "deviceTypeTablet": "Tablet",
+    "lyricFlatSection": "Lirik datar",
+    "lyricFlat": "Lirik datar warna solid",
+    "lyricFlatDesc": "Hilangkan efek cahaya (glow) pada lirik di halaman pemutar dan ubah warna gradien menjadi warna solid. Hanya lapisan pemutar yang terdampak — teks di palet perintah dan dialog tidak berubah.",
+    "glassSurfaceSection": "Kaca buram",
+    "glassSurface": "Panel kaca buram",
+    "glassSurfaceDesc": "Efek buram tembus pandang pada kotak pencarian, bilah sisi, palet perintah, dan popover. Mematikannya membuat panel-panel itu menjadi buram dan datar serta lebih ringan digambar — pada perangkat lemah, lapisan blur ini adalah sumber utama frame yang terbuang.",
     "screenAwakeSection": "Layar tetap menyala",
     "keepScreenAwake": "Jaga layar tetap menyala",
     "keepScreenAwakeDesc": "Layar tidak akan mati sendiri selama aplikasi berada di latar depan, baik sedang memutar audio maupun tidak. Sistem tetap menidurkan layar setelah Anda keluar dari aplikasi; gunakan pengaturan pemutaran bila hanya ingin menyala saat memutar.",
@@ -3553,6 +3564,19 @@ export default {
       "title": "Bravais",
       "tag": "Tanpa batas",
       "description": "Satu dinding ubin tanpa ujung yang bisa digeser. Konten berganti di dinding, sementara info dan tindakan halaman ada di celah di tengahnya."
+    }
+  },
+  "deviceTypeOnboarding": {
+    "title": "Ini ponsel atau tablet?",
+    "description": "Jika ponsel, seluruh layar akan diperkecil sedikit saat lanskap — elemen menjadi lebih kecil sehingga lebih banyak yang muat dan kontrol tidak saling menutupi.",
+    "settingsHint": "Anda dapat mengubahnya kapan saja di Pengaturan → Umum → Jenis perangkat.",
+    "phone": {
+      "title": "Ponsel",
+      "description": "Layar diperkecil otomatis saat lanskap agar tidak ada yang bertumpuk."
+    },
+    "tablet": {
+      "title": "Tablet",
+      "description": "Layarnya sudah cukup lebar — ditampilkan ukuran penuh di kedua orientasi."
     }
   },
   "userGuide": {

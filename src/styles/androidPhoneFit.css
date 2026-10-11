@@ -536,3 +536,16 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 手机横屏：整屏缩一点。
+ *
+ * 手机上横过来时，桌面那套按宽屏排的布局会被压得互相遮挡 —— 说白了就是同一屏塞不下
+ * 那么多东西。缩小整屏等价于把这块屏的 dpi 调小：元素变小，看到的内容范围反而变大。
+ *
+ * 缩的是 <html>，不是 body：fixed 定位的弹层、播放条都以根元素的布局视口为基准，
+ * 跟着一起缩才不会出现「内容小了、弹层还是原来那么大」。
+ *
+ * 只在这一条属性上生效，样式之外没人关心设备类型。 */
+html[data-folia-ui-scale='compact'] {
+  zoom: 0.86;
+}

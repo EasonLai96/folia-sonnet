@@ -339,3 +339,41 @@ html[data-folia-background='1'] * {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
+
+/* 关掉毛玻璃（设置 → 常规里的开关，由 useGlassSurfaceSettingsStore 挂 data-glass）。
+
+   全站一百多处 backdrop-blur 面板一次性覆盖掉，不去逐个组件加判断 —— 它们散在各处，
+   还有不少是第三方组件自带的，枚举必然漏。
+
+   底色要一起压实：原来那层 40%~85% 的半透明是配着模糊用的，模糊一撤，身后的歌词和封面
+   会直接透上来糊成一团。这里换成主题背景色，面板重新变成一块实心的面。 */
+html[data-glass='off'] * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+html[data-glass='off'] [class*='backdrop-blur'],
+html[data-glass='off'] .theme-glass-panel {
+    background-color: var(--bg-color, #09090b) !important;
+}
+
+/* 歌词扁平化（设置里的开关，由 useLyricFlatSettingsStore 挂 data-lyric-flat）。
+
+   歌词的画法按可视化模式分在好几个渲染器里，发光（text-shadow）和渐变染色（
+   background-clip: text）都是各自算好写成内联样式的 —— 逐个渲染器去读开关改不完，所以
+   这里在可视化层那个作用域内统一覆盖：`!important` 压得住内联样式。
+
+   两条都做了限定，避免波及作用域外的界面文字：
+   发光那条圈在可视化层里；渐变那条只挑**真的设了 background-clip 内联样式**的元素，
+   没设的说明本来就是纯色字，不该被改成别的颜色。 */
+html[data-lyric-flat='1'] [data-folia-lyric-surface] * {
+    text-shadow: none !important;
+}
+
+html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'],
+html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'] * {
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    -webkit-text-fill-color: var(--text-primary, currentColor) !important;
+}

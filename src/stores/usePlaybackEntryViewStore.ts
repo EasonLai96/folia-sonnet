@@ -42,7 +42,7 @@ const ENTRY_VIEW_CHOSEN_KEY = 'playback_entry_view_chosen';
 const LIBRARY_SUITE_PROMPT_SEEN_KEY = 'library_suite_prompt_seen';
 
 /** The pages the startup prompt can show, in order. */
-export type StartupPromptPage = 'library-suite' | 'playback-entry-view';
+export type StartupPromptPage = 'library-suite' | 'playback-entry-view' | 'device-type';
 
 const readEntryView = (): PlaybackEntryView => {
     const stored = getStoredString(ENTRY_VIEW_KEY, 'player');
@@ -71,9 +71,11 @@ export type PlaybackEntryViewState = {
     /**
      * Opens the prompt with the pages still unanswered: the library-interface page when `withLibrarySuite`
      * (both suites exist in this build) and it has not been shown yet, the playback page when that has not been
-     * chosen. Returns whether it opened (nothing left to ask → false).
+     * chosen, and the device-type page when `withDeviceType` (Android, and not answered yet — the caller
+     * decides, because store modules must not import each other).
+     * Returns whether it opened (nothing left to ask → false).
      */
-    requestPlaybackEntryViewPrompt: (options?: { withLibrarySuite?: boolean }) => boolean;
+    requestPlaybackEntryViewPrompt: (options?: { withLibrarySuite?: boolean; withDeviceType?: boolean }) => boolean;
     /** Closes the prompt and records both questions as answered, so it never opens again. */
     closePlaybackEntryViewPrompt: () => void;
     /** Raises the FM notice, restarting it if one is already showing. */
@@ -98,7 +100,7 @@ export const usePlaybackEntryViewStore = create<PlaybackEntryViewState>((set, ge
         setStoredBoolean(ENTRY_VIEW_CHOSEN_KEY, true);
         set({ playbackEntryView: view, hasChosenPlaybackEntryView: true });
     },
-    requestPlaybackEntryViewPrompt: ({ withLibrarySuite = false } = {}) => {
+    requestPlaybackEntryViewPrompt: ({ withLibrarySuite = false, withDeviceType = false } = {}) => {
         const state = get();
         if (state.isPlaybackEntryViewPromptOpen) {
             return false;
@@ -106,6 +108,8 @@ export const usePlaybackEntryViewStore = create<PlaybackEntryViewState>((set, ge
         const pages: StartupPromptPage[] = [];
         if (withLibrarySuite && !state.hasSeenLibrarySuitePrompt) pages.push('library-suite');
         if (!state.hasChosenPlaybackEntryView) pages.push('playback-entry-view');
+        // 设备类型只在安卓上问：桌面端的窗口尺寸自己说了算，问「手机还是平板」没有意义。
+        if (withDeviceType) pages.push('device-type');
         if (pages.length === 0) {
             return false;
         }
@@ -124,7 +128,7 @@ export const usePlaybackEntryViewStore = create<PlaybackEntryViewState>((set, ge
 }));
 
 /** Module-level handle for the assembly layer; it is an action, so it needs no subscription. */
-export const requestPlaybackEntryViewPrompt = (options?: { withLibrarySuite?: boolean }) => (
+export const requestPlaybackEntryViewPrompt = (options?: { withLibrarySuite?: boolean; withDeviceType?: boolean }) => (
     usePlaybackEntryViewStore.getState().requestPlaybackEntryViewPrompt(options)
 );
 

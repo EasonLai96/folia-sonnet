@@ -14,6 +14,7 @@ const readyState = {
     isReleaseNotesOpen: false,
     hasChosenPlaybackEntryView: false,
     needsLibrarySuitePrompt: false,
+    needsDeviceTypePrompt: false,
     isPlaybackEntryViewPromptOpen: false,
     isPonderOnboardingOpen: false,
 };

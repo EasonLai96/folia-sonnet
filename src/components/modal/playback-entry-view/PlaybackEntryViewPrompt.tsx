@@ -3,10 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { PlaybackEntryViewOptions } from './PlaybackEntryViewOptions';
 import { LibrarySuiteOnboardingOptions } from './LibrarySuiteOnboardingOptions';
+import { DeviceTypeOptions } from './DeviceTypeOptions';
 import { usePlaybackEntryViewStore, type StartupPromptPage } from '../../../stores/usePlaybackEntryViewStore';
 import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { resolveReducedMotion, useMotionSettingsStore } from '../../../stores/useMotionSettingsStore';
 import { confirmOnboardingLibrarySuite } from '../../../library/app/librarySuiteChoice';
+import { useDeviceProfileStore } from '../../../stores/useDeviceProfileStore';
 import { OVERLAY_CALM_TRANSITION, OVERLAY_TRANSITION } from '../../shared/overlayEntranceMotion';
 import type { Theme } from '../../../types';
 
@@ -44,7 +46,10 @@ export const PlaybackEntryViewPrompt: React.FC<{ theme?: Theme | null }> = ({ th
     const pages = usePlaybackEntryViewStore(state => state.promptPages);
     const closeStoredPrompt = usePlaybackEntryViewStore(state => state.closePlaybackEntryViewPrompt);
     const closePrompt = useCallback(() => {
-        if (usePlaybackEntryViewStore.getState().promptPages.includes('library-suite')) confirmOnboardingLibrarySuite();
+        const pages = usePlaybackEntryViewStore.getState().promptPages;
+        if (pages.includes('library-suite')) confirmOnboardingLibrarySuite();
+        // 直接关掉也是「问过了」：没选的人不该每次启动都被问一遍，设置里随时能改。
+        if (pages.includes('device-type')) useDeviceProfileStore.getState().markDeviceTypeAnswered();
         closeStoredPrompt();
     }, [closeStoredPrompt]);
 
@@ -95,7 +100,11 @@ const PromptPanel: React.FC<{ theme?: Theme | null; pages: readonly PromptPage[]
     const secondaryBtnClass = isDaylight
         ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700'
         : 'bg-white/[0.06] hover:bg-white/10 text-zinc-200';
-    const namespace = page === 'library-suite' ? 'librarySuiteOnboarding' : 'playbackEntryView';
+    const namespace = page === 'library-suite'
+        ? 'librarySuiteOnboarding'
+        : page === 'device-type'
+            ? 'deviceTypeOnboarding'
+            : 'playbackEntryView';
     const motionContext: PageMotionContext = { direction, calm };
 
     return (
@@ -132,6 +141,8 @@ const PromptPanel: React.FC<{ theme?: Theme | null; pages: readonly PromptPage[]
                     <div className="mt-5">
                         {page === 'library-suite' ? (
                             <LibrarySuiteOnboardingOptions isDaylight={isDaylight} accentColor={accentColor} />
+                        ) : page === 'device-type' ? (
+                            <DeviceTypeOptions isDaylight={isDaylight} accentColor={accentColor} />
                         ) : (
                             <PlaybackEntryViewOptions
                                 value={playbackEntryView}

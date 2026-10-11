@@ -2584,6 +2584,17 @@ export default {
     "playbackFadeDesc": "Fade the sound out briefly before pausing and back in when resuming, instead of cutting it. Skips the fade when audio is not routed through the audio engine.",
     "keepScreenOnWhilePlaying": "Keep screen awake while playing",
     "keepScreenOnWhilePlayingDesc": "Prevent the screen from turning off only while audio is playing, and hand control back to the system as soon as playback pauses. Applies to the foreground app only; the system still sleeps the screen once you leave it.",
+    "deviceTypeSection": "Device type",
+    "deviceType": "Phone or tablet",
+    "deviceTypeDesc": "On a phone, the whole screen is scaled down a little in landscape so controls stop overlapping. A tablet is shown at full size in both orientations.",
+    "deviceTypePhone": "Phone",
+    "deviceTypeTablet": "Tablet",
+    "lyricFlatSection": "Flat lyrics",
+    "lyricFlat": "Flat, solid-colour lyrics",
+    "lyricFlatDesc": "Drop the glow around the lyrics on the player page and paint gradient-filled lines in a solid colour instead. Only the player layer is affected — text in the command palette and dialogs keeps its own styling.",
+    "glassSurfaceSection": "Frosted glass",
+    "glassSurface": "Frosted glass panels",
+    "glassSurfaceDesc": "The translucent blur on the search box, sidebar, command palette and popovers. Turning it off makes those panels opaque and flat, and costs less to draw — on weaker devices these blur layers are the main source of dropped frames.",
     "screenAwakeSection": "Screen awake",
     "keepScreenAwake": "Keep screen awake",
     "keepScreenAwakeDesc": "Keep the screen on whenever the app is in the foreground, whether or not audio is playing. The system still sleeps the screen once you leave the app; use the playback setting instead if you only want it while playing.",
@@ -3668,6 +3679,19 @@ export default {
       "title": "Bravais",
       "tag": "Infinite",
       "description": "One endless wall of tiles you drag around. Content flips into place on the wall, and the page's info and actions sit in a seam in the middle."
+    }
+  },
+  "deviceTypeOnboarding": {
+    "title": "Is this a phone or a tablet?",
+    "description": "On a phone, the whole screen is scaled down a little in landscape — elements get smaller so more fits on screen and controls stop overlapping.",
+    "settingsHint": "You can change this any time under Settings → General → Device type.",
+    "phone": {
+      "title": "Phone",
+      "description": "Scales the interface down in landscape so nothing overlaps."
+    },
+    "tablet": {
+      "title": "Tablet",
+      "description": "Wide enough already — shown at full size in both orientations."
     }
   },
   "userGuide": {

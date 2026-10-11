@@ -6,7 +6,7 @@ import { installDebugModule } from './services/debug/debugModule';
 import { installMemorySampleFeed } from './services/debug/memorySamples';
 import { installNativeAndroidBridge } from './services/nativeAndroidBridge';
 import { installPerfDiagnosticsSwitch } from './utils/frameTimingDiagnostics';
-import { installAndroidPhoneFitPreference } from './services/androidPhoneLayout';
+import { installAndroidPhoneFitPreference, installDeviceProfilePreference } from './services/androidPhoneLayout';
 // import { installCoverSizeAudit } from './services/debug/coverSizeSamples';
 // @ts-ignore
 globalThis.Buffer = Buffer;
@@ -50,5 +50,8 @@ void installNativeAndroidBridge();
 // 手机适配的属性必须在首帧之前落到 <html> 上：否则用户开了开关后，React 挂载那一瞬
 // 会先按桌面布局量一遍尺寸，再被 CSS 拉回手机布局，开屏那一下看得见跳变。
 installAndroidPhoneFitPreference();
+// 设备类型（手机 / 平板）：选了手机的话横屏整屏缩一档，同样要在首帧之前落到 <html> 上，
+// 否则第一帧按原始尺寸铺完再缩，开屏那一下看得见跳变。
+installDeviceProfilePreference();
 
 void import('./bootstrap');

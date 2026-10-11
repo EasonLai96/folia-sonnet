@@ -3,6 +3,8 @@ import { USER_GUIDE_AUTO_OPEN_VERSION } from '../components/modal/userGuideConte
 import { hasOnboardingLibrarySuiteChoice } from '../library/app/librarySuiteChoice';
 import { requestPlaybackEntryViewPrompt, usePlaybackEntryViewStore } from '../stores/usePlaybackEntryViewStore';
 import { useSettingsModalStore } from '../stores/useSettingsModalStore';
+import { useDeviceProfileStore } from '../stores/useDeviceProfileStore';
+import { isAndroidNativeRuntime } from '../services/nativeLocalMusic';
 
 // src/hooks/useStartupExperienceGate.ts
 
@@ -31,6 +33,11 @@ type StartupExperienceState = {
      * else here it is not gated by the release: everyone is asked once (2026-10-10), whatever version they are on.
      */
     needsLibrarySuitePrompt: boolean;
+    /**
+     * 设备类型（手机 / 平板）还没问过。只在安卓上成立 —— 桌面端窗口多宽自己说了算。
+     * 与资料库界面那页一样按安装计、不看版本，但同样只问一次。
+     */
+    needsDeviceTypePrompt: boolean;
     isPlaybackEntryViewPromptOpen: boolean;
     isPonderOnboardingOpen: boolean;
 };
@@ -46,6 +53,7 @@ export const resolveStartupExperienceStep = ({
     isReleaseNotesOpen,
     hasChosenPlaybackEntryView,
     needsLibrarySuitePrompt,
+    needsDeviceTypePrompt,
     isPlaybackEntryViewPromptOpen,
     isPonderOnboardingOpen,
 }: StartupExperienceState): StartupExperienceStep => {
@@ -66,7 +74,9 @@ export const resolveStartupExperienceStep = ({
         return 'release-notes';
     }
     // The library-interface page is owed once to every install, outside the release gate.
-    if ((releaseDue && !hasChosenPlaybackEntryView) || needsLibrarySuitePrompt) {
+    // 设备类型同理：它是后来才加的一页，已经回答过「播放后进入的视图」的人也该被问到，
+    // 否则一个装了旧版本的人永远不会看到它。
+    if ((releaseDue && !hasChosenPlaybackEntryView) || needsLibrarySuitePrompt || needsDeviceTypePrompt) {
         return 'playback-entry-view';
     }
     return releaseDue && !hasSeenPonder ? 'ponder' : null;
@@ -94,6 +104,8 @@ export const useStartupExperienceGate = () => {
     const hasChosenPlaybackEntryView = usePlaybackEntryViewStore(state => state.hasChosenPlaybackEntryView);
     const hasSeenLibrarySuitePrompt = usePlaybackEntryViewStore(state => state.hasSeenLibrarySuitePrompt);
     const needsLibrarySuitePrompt = hasOnboardingLibrarySuiteChoice() && !hasSeenLibrarySuitePrompt;
+    const hasAnsweredDeviceType = useDeviceProfileStore(state => state.hasAnsweredDeviceType);
+    const needsDeviceTypePrompt = isAndroidNativeRuntime() && !hasAnsweredDeviceType;
     const isPlaybackEntryViewPromptOpen = usePlaybackEntryViewStore(state => state.isPlaybackEntryViewPromptOpen);
     const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState(readLastSeenReleaseNotesVersion);
     const [hasSeenFreeSoftwareNotice, setHasSeenFreeSoftwareNotice] = useState(readHasSeenFreeSoftwareNotice);
@@ -111,6 +123,7 @@ export const useStartupExperienceGate = () => {
         isReleaseNotesOpen,
         hasChosenPlaybackEntryView,
         needsLibrarySuitePrompt,
+        needsDeviceTypePrompt,
         isPlaybackEntryViewPromptOpen,
         isPonderOnboardingOpen,
     });
@@ -121,7 +134,12 @@ export const useStartupExperienceGate = () => {
         } else if (nextStep === 'release-notes') {
             setIsReleaseNotesOpen(true);
         } else if (nextStep === 'playback-entry-view') {
-            requestPlaybackEntryViewPrompt({ withLibrarySuite: hasOnboardingLibrarySuiteChoice() });
+            requestPlaybackEntryViewPrompt({
+                withLibrarySuite: hasOnboardingLibrarySuiteChoice(),
+                // 设备类型这一页由这里决定要不要出现：store 之间不互相引用（storeContract 守着），
+                // 所以「安卓」和「问没问过」这两件事在调用方合成。
+                withDeviceType: needsDeviceTypePrompt,
+            });
         } else if (nextStep === 'ponder') {
             setIsPonderOnboardingOpen(true);
         }

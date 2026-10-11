@@ -1648,6 +1648,17 @@ export default function App() {
         defaultTheme: DEFAULT_THEME,
         transparentBackground: shouldUseTransparentAppBackground,
     }), [bgMode, isDaylight, shouldUseTransparentAppBackground, theme]);
+    /*
+     * 主题变量原本只挂在 App 根节点的 inline style 上，而弹层、面板这些 portal 到 body 的
+     * 节点读不到它 —— 关掉毛玻璃时它们要靠 --bg-color 撑出不透明底色，拿不到就会掉回
+     * 深色兜底，在浅色主题下变成一块黑板。这里往 <html> 同步一份。
+     */
+    useEffect(() => {
+        const backgroundColor = (appStyle as Record<string, string>)['--bg-color'];
+        if (backgroundColor) {
+            document.documentElement.style.setProperty('--bg-color', backgroundColor);
+        }
+    }, [appStyle]);
     const { visualizerTheme, visualizerSubtitleTheme, visualizerGeometrySeed } = useMemo(() => buildVisualizerTheme({
         appStyle,
         theme,
@@ -2878,6 +2889,9 @@ export default function App() {
             <div
                 className={`absolute inset-0 z-0${shouldHidePlayerCursor ? ' cursor-auto-hidden' : ''}`}
                 data-testid="player-visual-surface"
+                // 歌词扁平化开关的作用域：CSS 只在这一层里关发光与渐变，弹窗、命令面板这些
+                // 兄弟节点不受影响（见 index.css 的 [data-lyric-flat] 段）。
+                data-folia-lyric-surface="1"
                 data-library-backdrop-blur={blursVisualizerBackdrop || undefined}
                 style={visualizerBackdropStyle(blursVisualizerBackdrop)}
                 onClick={handleContainerClick}

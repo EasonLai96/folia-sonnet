@@ -2585,6 +2585,17 @@ export default {
     "playbackFadeDesc": "暂停前先短暂淡出声音，恢复播放时再淡入，而不是瞬间切断。音频未接入音频引擎时会直接暂停。",
     "keepScreenOnWhilePlaying": "播放时保持屏幕常亮",
     "keepScreenOnWhilePlayingDesc": "只在播放中让屏幕不自动熄灭，暂停或空闲时立即交还给系统。仅在前台生效，退到后台后系统仍会正常熄屏。",
+    "deviceTypeSection": "设备类型",
+    "deviceType": "这是手机还是平板",
+    "deviceTypeDesc": "选了手机的话，横屏时自动把整屏缩小一点，避免控件互相遮挡。平板上横竖屏都按原始尺寸显示。",
+    "deviceTypePhone": "手机",
+    "deviceTypeTablet": "平板",
+    "lyricFlatSection": "歌词扁平化",
+    "lyricFlat": "歌词改为纯色扁平",
+    "lyricFlatDesc": "去掉播放页歌词的外发光，渐变染色的字改成纯色。只作用在播放页那一层，命令面板、弹窗里的文字不受影响。",
+    "glassSurfaceSection": "毛玻璃",
+    "glassSurface": "毛玻璃面板",
+    "glassSurfaceDesc": "搜索框、侧栏、命令面板、弹层上的半透明模糊。关掉后这些面板变成不透明实色，界面更扁平，也更省性能 —— 中低端机上这些模糊层是掉帧的主要来源。",
     "screenAwakeSection": "屏幕常亮",
     "keepScreenAwake": "保持屏幕常亮",
     "keepScreenAwakeDesc": "开启后只要应用在前台，屏幕就不会自动熄灭（与是否在播放无关）。退到后台后系统仍会正常熄屏；只想播放时常亮的话，用播放设置里那个开关就够了。",
@@ -3667,6 +3678,19 @@ export default {
       "title": "Bravais",
       "tag": "无限",
       "description": "一整面没有尽头的磁贴墙，拖动着浏览；内容在墙上翻牌更替，这一页的信息和操作在墙中间的缝里。"
+    }
+  },
+  "deviceTypeOnboarding": {
+    "title": "这是手机还是平板？",
+    "description": "选了手机的话，横屏时会自动把整屏缩小一点 —— 元素变小，同一块屏能装下的内容更多，控件才不会互相压住。",
+    "settingsHint": "之后可以在「设置 → 常规 → 设备类型」里随时更改。",
+    "phone": {
+      "title": "手机",
+      "description": "横屏时自动缩小显示，避免控件互相遮挡。"
+    },
+    "tablet": {
+      "title": "平板",
+      "description": "屏幕够宽，横竖屏都按原始尺寸显示。"
     }
   },
   "userGuide": {

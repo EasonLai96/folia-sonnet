@@ -9,6 +9,9 @@ import PinnedCommandSettings from './PinnedCommandSettings';
 import { supportsLocalMusicImport } from '../../../platform/runtime';
 import PonderHintSettingsSection from './PonderHintSettingsSection';
 import AndroidPhoneFitSetting from './AndroidPhoneFitSetting';
+import DeviceTypeSetting from './DeviceTypeSetting';
+import GlassSurfaceSetting from './GlassSurfaceSetting';
+import LyricFlatSetting from './LyricFlatSetting';
 import AndroidScreenAwakeSetting from './AndroidScreenAwakeSetting';
 import PlaybackEntryViewSection from './PlaybackEntryViewSection';
 import LibrarySuiteSection from './LibrarySuiteSection';
@@ -232,6 +235,25 @@ const GeneralSettingsSubview: React.FC<GeneralSettingsSubviewProps> = ({
                 settingsCardClass={settingsCardClass}
                 isDaylight={isDaylight}
                 accentColor={theme?.accentColor}
+            />
+
+            <GlassSurfaceSetting
+                isDaylight={isDaylight}
+                settingsCardClass={settingsCardClass}
+                theme={theme}
+            />
+
+            <LyricFlatSetting
+                isDaylight={isDaylight}
+                settingsCardClass={settingsCardClass}
+                theme={theme}
+            />
+
+            {/* 同上，只在 Android 上出现。 */}
+            <DeviceTypeSetting
+                isDaylight={isDaylight}
+                settingsCardClass={settingsCardClass}
+                theme={theme}
             />
 
             {/* 只在 Android 上出现（组件内部自行判断运行时），网页与桌面端不显示。 */}
