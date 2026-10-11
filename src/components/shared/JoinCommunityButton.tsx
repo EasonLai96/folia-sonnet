@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Copy, ExternalLink, Users } from 'lucide-react';
+import { Check, ChevronDown, Copy, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { discordIconUrl, openDiscordInvite } from './discordCommunity';
 import { QQ_COMMUNITY_GROUP_NUMBER } from './qqCommunity';
 import { copyTextToClipboard } from '../../utils/clipboard';
 
 // src/components/shared/JoinCommunityButton.tsx
-// 帮助页的「加入社区」：一颗胶囊，点开向上弹出两个去处——Discord（打开邀请链接）与 QQ 自助交流群（复制群号）。
+// 帮助页的「加入社区」：一颗胶囊，点开向上弹出去处——目前只有 QQ 自助交流群（复制群号）。
+// Discord 入口已经整条撤掉，只剩一项时菜单仍然保留：它是「复制群号」而不是「打开链接」，
+// 需要一个落点显示复制结果，直接把按钮变成复制键会让人以为点了就已经加进去了。
 
 const COPIED_FEEDBACK_MS = 1800;
 
@@ -43,11 +44,6 @@ export const JoinCommunityButton: React.FC = () => {
         return () => window.clearTimeout(timer);
     }, [qqCopied]);
 
-    const joinDiscord = () => {
-        setIsOpen(false);
-        openDiscordInvite();
-    };
-
     // QQ 群没有能直接打开的入群链接：复制群号，菜单留着让这一项显示「群号已复制」。
     const copyQqGroup = async () => {
         try {
@@ -61,13 +57,13 @@ export const JoinCommunityButton: React.FC = () => {
 
     return (
         <div ref={containerRef} className="relative">
-            {/* 一排单色胶囊里唯一带颜色的那颗，靠色彩而不是体积被看见。 */}
+            {/* 与旁边「遇到问题？」同一颗胶囊：入口撤掉后不再有品牌色可言，靠同一排的视觉重量被看见。 */}
             <button
                 type="button"
                 onClick={() => setIsOpen(current => !current)}
                 aria-haspopup="menu"
                 aria-expanded={isOpen}
-                className="px-6 py-2 bg-[#5865F2]/15 hover:bg-[#5865F2]/25 ring-1 ring-inset ring-[#5865F2]/30 transition-colors rounded-full text-sm font-medium flex items-center gap-2"
+                className="px-6 py-2 bg-white/10 hover:bg-white/20 transition-colors rounded-full text-sm font-medium flex items-center gap-2"
                 style={{ color: 'var(--text-primary)' }}
             >
                 <Users size={16} aria-hidden />
@@ -88,13 +84,6 @@ export const JoinCommunityButton: React.FC = () => {
                         className="absolute bottom-full left-1/2 z-20 mb-2 w-64 rounded-2xl border p-1.5 shadow-xl backdrop-blur-2xl theme-glass-panel"
                         style={{ color: 'var(--text-primary)' }}
                     >
-                        <CommunityMenuItem
-                            icon={<img src={discordIconUrl} alt="" aria-hidden className="h-[18px] w-[18px] rounded-[5px]" />}
-                            label={t('help.communityDiscord')}
-                            hint={t('help.communityDiscordHint')}
-                            trailing={<ExternalLink size={14} aria-hidden className="opacity-50" />}
-                            onClick={joinDiscord}
-                        />
                         <CommunityMenuItem
                             icon={qqCopied ? <Check size={18} aria-hidden className="text-emerald-500" /> : <Users size={18} aria-hidden />}
                             label={t('help.communityQq')}

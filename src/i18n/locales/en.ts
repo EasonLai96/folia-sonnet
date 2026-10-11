@@ -1456,8 +1456,6 @@ export default {
     "browserFullscreen": "Fullscreen",
     "madeBy": "Project:",
     "joinCommunity": "Join the community",
-    "communityDiscord": "Discord server",
-    "communityDiscordHint": "Open the invite link",
     "communityQq": "QQ self-help group",
     "communityQqHint": "{{number}} · click to copy",
     "qqGroupNumberCopied": "Group number copied",
@@ -3794,9 +3792,6 @@ export default {
     "docsTitle": "Read the Folia documentation",
     "docsDescription": "Find usage instructions, configuration details, and troubleshooting guidance.",
     "openDocs": "Open docs",
-    "discordTitle": "Ask in the Discord community",
-    "discordDescription": "Troubleshoot with other users and the developers, and hear about new releases first.",
-    "openDiscord": "Join",
     "askAiTitle": "Still need help? Ask AI",
     "askAiDescription": "Describe your issue, then paste this prompt so the AI can use Folia documentation and source code as context.",
     "usageHint": "How to use it: open the official site for the model you use, describe your specific problem first, then paste this prompt below your question and send both together.",
@@ -3805,6 +3800,17 @@ export default {
     "copyPromptDesc": "Copy the prompt and paste it into any AI model to generate your theme.",
     "importJsonTitle": "2. Paste JSON Result",
     "prompt": "I am using the folia-major music player on GitHub and need help with a problem.\n\nFolia Guide: {{guideUrl}}\nFolia repository: {{repoUrl}}\n\nPlease use these references as context, then help me understand and solve the problem I describe next. If any information is missing, ask what I should provide before making uncertain assumptions."
+  },
+  "freeSoftwareNotice": {
+    "title": "Folia is free software",
+    "freeForever": "Folia is completely free, and every feature is open to everyone.",
+    "noPaidTier": "There is no paid membership, activation code or unlocked edition, and we will never charge you.",
+    "paidIsScam": "If you paid for it through a third party, that was not official — please ask for a refund.",
+    "joinGroup": "Join the official QQ group",
+    "joinGroupHint": "Official QQ group {{number}} · click to copy",
+    "groupCopied": "Group number copied",
+    "officialChannels": "The app itself and the official QQ group are the only places we post news.",
+    "acknowledge": "Got it"
   },
   "ponder": {
     "openPage": "Ponder this page",

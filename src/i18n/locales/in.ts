@@ -1449,8 +1449,6 @@ export default {
     "browserFullscreen": "Layar penuh",
     "madeBy": "Proyek:",
     "joinCommunity": "Gabung komunitas",
-    "communityDiscord": "Server Discord",
-    "communityDiscordHint": "Buka tautan undangan",
     "communityQq": "Grup bantuan mandiri QQ",
     "communityQqHint": "{{number}} · klik untuk menyalin",
     "qqGroupNumberCopied": "Nomor grup disalin",
@@ -3679,9 +3677,6 @@ export default {
     "docsTitle": "Baca dokumentasi Folia",
     "docsDescription": "Temukan petunjuk penggunaan, detail konfigurasi, dan panduan pemecahan masalah.",
     "openDocs": "Buka dokumen",
-    "discordTitle": "Tanya di komunitas Discord",
-    "discordDescription": "Pecahkan masalah bersama pengguna lain dan para pengembang, dan dapatkan kabar rilis baru lebih dulu.",
-    "openDiscord": "Gabung",
     "askAiTitle": "Masih butuh bantuan? Tanya AI",
     "askAiDescription": "Jelaskan masalah Anda, lalu tempel prompt ini agar AI dapat menggunakan dokumentasi dan kode sumber Folia sebagai konteks.",
     "usageHint": "Cara menggunakannya: buka situs resmi untuk model yang Anda gunakan, jelaskan masalah spesifik Anda terlebih dahulu, lalu tempel prompt ini di bawah pertanyaan Anda dan kirim keduanya bersamaan.",
@@ -3690,6 +3685,17 @@ export default {
     "copyPromptDesc": "Salin prompt dan tempelkan ke model AI apa pun untuk menghasilkan tema Anda.",
     "importJsonTitle": "2. Tempel Hasil JSON",
     "prompt": "Saya menggunakan pemutar musik folia-major di GitHub dan perlu bantuan untuk masalah.\n\nPanduan Folia: {{guideUrl}}\nRepositori Folia: {{repoUrl}}\n\nHarap gunakan referensi ini sebagai konteks, lalu bantu saya memahami dan menyelesaikan masalah yang saya jelaskan berikutnya. Jika ada informasi yang kurang, tanyakan apa yang harus saya berikan sebelum membuat asumsi yang tidak pasti."
+  },
+  "freeSoftwareNotice": {
+    "title": "Folia adalah perangkat lunak gratis",
+    "freeForever": "Folia sepenuhnya gratis, dan semua fitur terbuka untuk semua orang.",
+    "noPaidTier": "Tidak ada keanggotaan berbayar, kode aktivasi, atau versi tidak terkunci, dan kami tidak akan pernah memungut biaya.",
+    "paidIsScam": "Jika Anda membayarnya melalui pihak ketiga, itu tidak resmi — mohon minta pengembalian dana.",
+    "joinGroup": "Gabung grup QQ resmi",
+    "joinGroupHint": "Grup QQ resmi {{number}} · klik untuk menyalin",
+    "groupCopied": "Nomor grup disalin",
+    "officialChannels": "Aplikasi ini dan grup QQ resmi adalah satu-satunya tempat kami mengumumkan kabar.",
+    "acknowledge": "Saya mengerti"
   },
   "ponder": {
     "openPage": "Ponder halaman ini",

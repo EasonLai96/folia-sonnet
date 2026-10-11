@@ -4,6 +4,9 @@ import { resolveStartupExperienceStep } from '../../../src/hooks/useStartupExper
 // test/unit/hooks/startupExperienceGate.test.ts
 
 const readyState = {
+    // 免费软件声明默认当作已经看过：下面每条断言讲的都是发版说明那一条序列。
+    needsFreeSoftwareNotice: false,
+    isFreeSoftwareNoticeOpen: false,
     isCurrentRelease: true,
     hasSeenPonder: false,
     hasFinishedThisRelease: false,
@@ -61,6 +64,19 @@ describe('startup experience gate', () => {
 
     it('stays quiet on builds without release notes', () => {
         expect(resolveStartupExperienceStep({ ...readyState, isCurrentRelease: false })).toBeNull();
+    });
+
+    // 免费软件声明排在整个序列最前面，而且不看版本：每个安装只看一次。
+    it('shows the free software notice first, once per install', () => {
+        const owed = { ...readyState, needsFreeSoftwareNotice: true };
+        // 压过发版说明。
+        expect(resolveStartupExperienceStep(owed)).toBe('free-software-notice');
+        // 不是自动弹发版说明的那一版也弹。
+        expect(resolveStartupExperienceStep({ ...owed, isCurrentRelease: false })).toBe('free-software-notice');
+        // 开着时后面的都等着，不叠弹窗。
+        expect(resolveStartupExperienceStep({ ...owed, isFreeSoftwareNoticeOpen: true })).toBeNull();
+        // 看过就回到原序列。
+        expect(resolveStartupExperienceStep({ ...owed, needsFreeSoftwareNotice: false })).toBe('release-notes');
     });
 
     // 2026-10-10：「资料库界面」那一页每个安装都问一次，不看版本（发版说明的版本号每版都变，不能拿来门控它）。

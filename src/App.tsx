@@ -25,6 +25,7 @@ const loadLattice = () => import('./components/app/lattice/Lattice');
 const Lattice = lazy(loadLattice);
 import { UserGuideModal } from './components/modal/UserGuideModal';
 import ReleaseNotesDialog from './components/modal/ReleaseNotesDialog';
+import FreeSoftwareNoticeModal from './components/modal/FreeSoftwareNoticeModal';
 import { PlaybackEntryViewPrompt } from './components/modal/playback-entry-view/PlaybackEntryViewPrompt';
 import { LatticeFmNotice } from './components/modal/playback-entry-view/LatticeFmNotice';
 import { useStartupExperienceGate } from './hooks/useStartupExperienceGate';
@@ -2972,6 +2973,11 @@ export default function App() {
             />
 
             <AppDialogs model={appDialogsModel} />
+            <FreeSoftwareNoticeModal
+                isOpen={startupExperience.isFreeSoftwareNoticeOpen}
+                isDaylight={isDaylight}
+                onClose={startupExperience.closeFreeSoftwareNotice}
+            />
             <ReleaseNotesDialog
                 isOpen={startupExperience.isReleaseNotesOpen}
                 isDaylight={isDaylight}

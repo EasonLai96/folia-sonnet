@@ -7,10 +7,14 @@ import { useSettingsModalStore } from '../stores/useSettingsModalStore';
 // src/hooks/useStartupExperienceGate.ts
 
 const LAST_SEEN_RELEASE_NOTES_VERSION_STORAGE_KEY = 'folia_last_seen_guide_version';
+const FREE_SOFTWARE_NOTICE_SEEN_STORAGE_KEY = 'folia_free_software_notice_seen';
 
-export type StartupExperienceStep = 'release-notes' | 'playback-entry-view' | 'ponder' | null;
+export type StartupExperienceStep = 'free-software-notice' | 'release-notes' | 'playback-entry-view' | 'ponder' | null;
 
 type StartupExperienceState = {
+    /** 免费软件声明还没看过。按安装计，不看版本。 */
+    needsFreeSoftwareNotice: boolean;
+    isFreeSoftwareNoticeOpen: boolean;
     isCurrentRelease: boolean;
     /** Ponder onboarding was completed in some version (it is shown once per install). */
     hasSeenPonder: boolean;
@@ -33,6 +37,8 @@ type StartupExperienceState = {
 
 /** Chooses the next blocking surface while ensuring that two startup dialogs never overlap. */
 export const resolveStartupExperienceStep = ({
+    needsFreeSoftwareNotice,
+    isFreeSoftwareNoticeOpen,
     isCurrentRelease,
     hasSeenPonder,
     hasFinishedThisRelease,
@@ -43,8 +49,14 @@ export const resolveStartupExperienceStep = ({
     isPlaybackEntryViewPromptOpen,
     isPonderOnboardingOpen,
 }: StartupExperienceState): StartupExperienceStep => {
-    if (isReleaseNotesOpen || isPlaybackEntryViewPromptOpen || isPonderOnboardingOpen) {
+    if (isFreeSoftwareNoticeOpen || isReleaseNotesOpen || isPlaybackEntryViewPromptOpen || isPonderOnboardingOpen) {
         return null;
+    }
+    // 声明排在最前面，而且不受版本门控：它回答的是「这是什么」，不是「这次更新了什么」，
+    // 每个安装只看一次。放在这里而不是外面单独渲染，是为了让它和其它启动弹窗共用同一个
+    // 「同时只开一个」的约束。
+    if (needsFreeSoftwareNotice) {
+        return 'free-software-notice';
     }
     // The release sequence (notes, the playback choice, the Ponder gate) only runs on the release that auto-opens
     // it, and not again once finished. Release notes are per version; the playback choice and the Ponder gate are
@@ -66,6 +78,10 @@ const readLastSeenReleaseNotesVersion = (): string | null => (
         : localStorage.getItem(LAST_SEEN_RELEASE_NOTES_VERSION_STORAGE_KEY)
 );
 
+const readHasSeenFreeSoftwareNotice = (): boolean => (
+    typeof window !== 'undefined' && localStorage.getItem(FREE_SOFTWARE_NOTICE_SEEN_STORAGE_KEY) === '1'
+);
+
 /**
  * Runs the first-launch sequence: release notes, the two-page choice prompt (library interface, then
  * playback destination), then the Ponder shortcut gate. The prompt is gated by the playback choice alone,
@@ -80,10 +96,14 @@ export const useStartupExperienceGate = () => {
     const needsLibrarySuitePrompt = hasOnboardingLibrarySuiteChoice() && !hasSeenLibrarySuitePrompt;
     const isPlaybackEntryViewPromptOpen = usePlaybackEntryViewStore(state => state.isPlaybackEntryViewPromptOpen);
     const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState(readLastSeenReleaseNotesVersion);
+    const [hasSeenFreeSoftwareNotice, setHasSeenFreeSoftwareNotice] = useState(readHasSeenFreeSoftwareNotice);
+    const [isFreeSoftwareNoticeOpen, setIsFreeSoftwareNoticeOpen] = useState(false);
     const [isReleaseNotesOpen, setIsReleaseNotesOpen] = useState(false);
     const appVersion = typeof __APP_VERSION__ === 'undefined' ? null : __APP_VERSION__;
 
     const nextStep = resolveStartupExperienceStep({
+        needsFreeSoftwareNotice: !hasSeenFreeSoftwareNotice,
+        isFreeSoftwareNoticeOpen,
         isCurrentRelease: Boolean(appVersion && USER_GUIDE_AUTO_OPEN_VERSION === appVersion),
         hasSeenPonder: lastSeenPonderVersion !== null,
         hasFinishedThisRelease: Boolean(appVersion && lastSeenPonderVersion === appVersion),
@@ -96,7 +116,9 @@ export const useStartupExperienceGate = () => {
     });
 
     useEffect(() => {
-        if (nextStep === 'release-notes') {
+        if (nextStep === 'free-software-notice') {
+            setIsFreeSoftwareNoticeOpen(true);
+        } else if (nextStep === 'release-notes') {
             setIsReleaseNotesOpen(true);
         } else if (nextStep === 'playback-entry-view') {
             requestPlaybackEntryViewPrompt({ withLibrarySuite: hasOnboardingLibrarySuiteChoice() });
@@ -113,5 +135,22 @@ export const useStartupExperienceGate = () => {
         setIsReleaseNotesOpen(false);
     }, [appVersion]);
 
-    return { isReleaseNotesOpen, closeReleaseNotes };
+    // 关掉就记下看过。它不是「同意才能用」，所以关闭路径（右上角 X、点遮罩）也走这里 ——
+    // 不记的话每次冷启动都会再弹一次。
+    const closeFreeSoftwareNotice = useCallback(() => {
+        try {
+            localStorage.setItem(FREE_SOFTWARE_NOTICE_SEEN_STORAGE_KEY, '1');
+        } catch (error) {
+            console.warn('[startup] Failed to persist the free-software notice flag:', error);
+        }
+        setHasSeenFreeSoftwareNotice(true);
+        setIsFreeSoftwareNoticeOpen(false);
+    }, []);
+
+    return {
+        isFreeSoftwareNoticeOpen,
+        closeFreeSoftwareNotice,
+        isReleaseNotesOpen,
+        closeReleaseNotes,
+    };
 };

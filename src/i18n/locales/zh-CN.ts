@@ -1455,8 +1455,6 @@ export default {
     "browserFullscreen": "全屏",
     "madeBy": "Project:",
     "joinCommunity": "加入社区",
-    "communityDiscord": "Discord 社区",
-    "communityDiscordHint": "打开邀请链接",
     "communityQq": "QQ 自助交流群",
     "communityQqHint": "{{number}} · 点击复制群号",
     "qqGroupNumberCopied": "群号已复制",
@@ -3793,9 +3791,6 @@ export default {
     "docsTitle": "先查看 Folia 文档",
     "docsDescription": "查看使用说明、功能配置和常见问题排查指南。",
     "openDocs": "打开文档",
-    "discordTitle": "去 Discord 社区问问",
-    "discordDescription": "和其他用户、开发者一起排查问题，新版本发布也会先在这里说。",
-    "openDiscord": "加入",
     "askAiTitle": "仍未解决？询问 AI",
     "askAiDescription": "先描述你的具体问题，再粘贴这段提示词，让 AI 结合 Folia 文档和源码协助排查。",
     "usageHint": "用法：打开AI聊天软件，先描述你的具体问题，然后把这段提示词粘贴到问题后面一起发送(需要使用具有联网搜索能力的模型）。",
@@ -3804,6 +3799,17 @@ export default {
     "copyPromptDesc": "将提示词复制并粘贴到任意大模型对话中，生成主题 JSON 数据。",
     "importJsonTitle": "2. 粘贴并导入 JSON",
     "prompt": "我正在使用 GitHub 上的 folia-major 音乐播放器，遇到了一个问题，需要你协助排查。\n\nFolia 使用指南：{{guideUrl}}\nFolia 源码仓库：{{repoUrl}}\n\n请把这些资料作为上下文，结合我接下来描述的问题，帮我判断可能原因并给出处理步骤。如果信息不足，请先询问我需要补充什么，不要直接做不确定的假设。"
+  },
+  "freeSoftwareNotice": {
+    "title": "Folia 是免费软件",
+    "freeForever": "Folia 完全免费，所有功能对所有人开放。",
+    "noPaidTier": "官方没有付费会员、激活码或「解锁版」，也永远不会向您收取任何费用。",
+    "paidIsScam": "如果您是从第三方渠道付费获得的，那不是官方行为，请尽快申请退款。",
+    "joinGroup": "加入官方 QQ 群",
+    "joinGroupHint": "官方 QQ 群 {{number}} · 点击复制群号",
+    "groupCopied": "群号已复制",
+    "officialChannels": "软件内与官方 QQ 群是我们唯一发布消息的地方。",
+    "acknowledge": "我知道了"
   },
   "ponder": {
     "openPage": "思索当前页面",
