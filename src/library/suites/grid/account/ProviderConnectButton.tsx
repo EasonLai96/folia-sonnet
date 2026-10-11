@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { useReducedMotionFor } from '../../../../hooks/useReducedMotionFor';
 import { pillChromeClassesFor as gridChromeClassesFor } from '../../../../components/shared/pillChrome';
+import { getProviderAppIcon, PROVIDER_APP_ICONS } from '../../../../assets/providers/appIcons';
 import type { ProviderAccountSummary } from '../../../../types/onlineMusic';
 
 // src/library/suites/grid/account/ProviderConnectButton.tsx
@@ -18,11 +19,12 @@ type Props = {
     onSelect: (provider: ProviderAccountSummary) => void;
 };
 
-// 在线平台使用统一的纯色圆形文字徽章；Mod 音源取名称首字。
-const badges: Record<string, [string, string]> = {
-    netease: ['云', 'bg-red-500'], kugou: ['K', 'bg-blue-500'],
-    qq: ['Q', 'bg-emerald-500'], bodian: ['波', 'bg-teal-500'],
-};
+// 有本尊图的平台（netease/qq/kugou/bodian/feiniu）直接亮 App 图标；Mod 音源等没图的
+// 回落名称首字的纯色圆形徽章，与切换器的做法一致。
+const fallbackBadge = (provider: ProviderAccountSummary, isDaylight: boolean): [string, string] => ([
+    Array.from(provider.shortName || provider.displayName)[0] || '?',
+    isDaylight ? 'bg-zinc-500' : 'bg-zinc-600',
+]);
 
 const SPRING = { type: 'spring', stiffness: 460, damping: 36, mass: 0.9 } as const;
 // 与 SPRING 的落定时间大致对齐；锁定期间的悬停不切换展开项。
@@ -52,8 +54,8 @@ export default function ProviderConnectButton({ providers, isDaylight, getAction
                 const active = provider.providerId === selected?.providerId;
                 const configured = provider.availability.configured;
                 const label = getActionLabel(provider);
-                const [badge, color] = badges[provider.providerId]
-                    ?? [Array.from(provider.shortName || provider.displayName)[0] || '?', isDaylight ? 'bg-zinc-500' : 'bg-zinc-600'];
+                const [badge, color] = fallbackBadge(provider, isDaylight);
+                const hasAppIcon = provider.providerId in PROVIDER_APP_ICONS;
                 return (
                     <motion.button
                         key={provider.providerId}
@@ -85,12 +87,24 @@ export default function ProviderConnectButton({ providers, isDaylight, getAction
                                 className={`absolute inset-0 rounded-full ${chrome.activePill}`}
                             />
                         )}
-                        <span
-                            aria-hidden="true"
-                            className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold leading-none text-white transition-opacity ${color} ${
-                                !configured ? 'opacity-35 grayscale' : active ? '' : 'opacity-75'
-                            }`}
-                        >{badge}</span>
+                        {hasAppIcon ? (
+                            /* App 本尊图自带圆角与留白，直接铺满徽章位即可，不必再套彩色圆底。 */
+                            <img
+                                src={getProviderAppIcon(provider.providerId)}
+                                alt=""
+                                aria-hidden="true"
+                                className={`relative h-7 w-7 shrink-0 object-contain transition-opacity ${
+                                    !configured ? 'opacity-35 grayscale' : active ? '' : 'opacity-90'
+                                }`}
+                            />
+                        ) : (
+                            <span
+                                aria-hidden="true"
+                                className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold leading-none text-white transition-opacity ${color} ${
+                                    !configured ? 'opacity-35 grayscale' : active ? '' : 'opacity-75'
+                                }`}
+                            >{badge}</span>
+                        )}
                         {active && (
                             <motion.span
                                 key={provider.providerId}

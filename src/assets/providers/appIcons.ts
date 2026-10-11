@@ -1,7 +1,7 @@
 import neteaseIcon from './netease.png';
-import qqMusicIcon from './qqmusic.png';
-import kugouIcon from './kugou.png';
-import bodianIcon from './bodian.jpg';
+import qqMusicIcon from './qqmusic.webp';
+import kugouIcon from './kugou.webp';
+import bodianIcon from './bodian.webp';
 import feiniuIcon from './feiniu.svg';
 import foliaIcon from './folia.svg';
 

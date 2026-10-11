@@ -3,6 +3,7 @@ import { ChevronRight, LogIn, LogOut, UserRound } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValueEvent } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { OnlineProviderId, ProviderAccountSummary } from '../../../../types/onlineMusic';
+import { getProviderAppIcon } from '../../../../assets/providers/appIcons';
 import { canSwitchToProviderDirectly } from '../../../core/model/onlineProviderAccountView';
 import { canLogoutProvider } from '../../../core/model/accountRules';
 import { playerBottomBarLiveOffset } from '../../../../stores/motionSignals';
@@ -22,12 +23,14 @@ type OnlineProviderSwitcherProps = {
     onBackToPlayer: () => void;
 };
 
-// 在线平台使用统一的纯色圆形文字徽章。
+// 在线平台未登录时亮各家 App 本尊图标（圆形裁切）；iconUrl 只是加载前的兜底底色，
+// 没图的（Folium mod 源）才退回名称首字。
 const AVATAR_BADGE_BY_PROVIDER: Record<string, { label: string; iconUrl?: string; className: string }> = {
-    netease: { label: '云', className: 'bg-red-600' },
-    kugou: { label: 'K', className: 'bg-blue-600' },
-    qq: { label: 'Q', className: 'bg-green-600' },
-    bodian: { label: '波', className: 'bg-teal-600' },
+    netease: { label: '云', iconUrl: getProviderAppIcon('netease'), className: 'bg-red-600' },
+    kugou: { label: 'K', iconUrl: getProviderAppIcon('kugou'), className: 'bg-blue-600' },
+    qq: { label: 'Q', iconUrl: getProviderAppIcon('qq'), className: 'bg-emerald-600' },
+    bodian: { label: '波', iconUrl: getProviderAppIcon('bodian'), className: 'bg-teal-600' },
+    feiniu: { label: '飞', iconUrl: getProviderAppIcon('feiniu'), className: 'bg-zinc-600' },
 };
 
 // Providers without a builtin badge (Folium mod sources) get their name's first letter, like the
@@ -47,7 +50,7 @@ const ProviderAvatar = ({ provider, className }: { provider: ProviderAccountSumm
                 className={`${className} flex items-center justify-center overflow-hidden font-black text-white ${badge.className}`}
             >
                 {badge.iconUrl
-                    ? <img src={badge.iconUrl} alt="" aria-hidden="true" className="h-3/5 w-3/5 object-contain" />
+                    ? <img src={badge.iconUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
                     : badge.label || <UserRound size={20} />}
             </span>
         );
