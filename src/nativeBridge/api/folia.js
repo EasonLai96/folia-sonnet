@@ -407,10 +407,48 @@ async function handleUserPlaylists(url, cookie) {
   };
 }
 
+/**
+ * 歌单曲目按 trackIds 归位。
+ *
+ * 安卓上歌单详情走的是 eapi 的 /api/v6/playlist/detail（见下面 handlePlaylistDetail），
+ * 它带回来的 playlist.tracks 是**倒着**的 —— 最后加进歌单的那首排在最前面。桌面端走
+ * Node 版 NeteaseCloudMusicApi，那边按 playlist.trackIds 给，顺序是对的；于是同一个歌单
+ * 在电脑上看是正序、在手机上看是反的。
+ *
+ * trackIds 才是歌单真正的顺序，用它把 tracks 排回去。两道保险：一个 id 都没对上说明
+ * trackIds 这份数据不可信（接口换了形态），原样返回；对上了但 trackIds 里没有的（接口
+ * 偶尔漏给）按原顺序接在后面 —— 排序的代价不能是丢歌。
+ */
+const orderPlaylistTracks = (tracks, trackIds) => {
+  if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
+  const byId = new Map();
+  tracks.forEach((track) => {
+    const id = Number(track && track.id);
+    if (Number.isFinite(id) && id > 0 && !byId.has(id)) byId.set(id, track);
+  });
+  const ordered = [];
+  trackIds.forEach((entry) => {
+    // 新版接口的 trackIds 是 { id, v, at }，老版是纯数字。
+    const id = Number(entry && typeof entry === 'object' ? entry.id : entry);
+    const track = byId.get(id);
+    if (!track) return;
+    ordered.push(track);
+    byId.delete(id);
+  });
+  if (ordered.length === 0) return tracks;
+  byId.forEach((track) => ordered.push(track));
+  return ordered;
+};
+
 async function handlePlaylistDetail(url, cookie) {
   const id = firstValue(url.searchParams.get('id'), url.searchParams.get('pid'));
   if (!id) return { code: 200, playlist: null };
   const body = await eapiJson('/api/v6/playlist/detail', { id, n: 1000, s: 8 }, cookie);
+  const playlist = body?.playlist;
+  // 顺手把顺序校正好：下游（handlePlaylistTrackAll 等）拿到的就是排好的 tracks。
+  if (playlist && Array.isArray(playlist.tracks) && Array.isArray(playlist.trackIds)) {
+    playlist.tracks = orderPlaylistTracks(playlist.tracks, playlist.trackIds);
+  }
   return { ...body, code: Number(body.code) || 200 };
 }
 

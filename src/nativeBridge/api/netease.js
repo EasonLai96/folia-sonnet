@@ -732,6 +732,33 @@ export async function handleUserPlaylists(cookie, limit) {
   return { loggedIn: true, userId: info.userId, nickname: info.nickname || '', avatar: info.avatar || '', playlists: list };
 }
 
+/**
+ * 歌单曲目按 trackIds 归位 —— 与 folia.js 里那份是同一个修法。
+ *
+ * /api/v6/playlist/detail 带回来的 playlist.tracks 是**倒着**的（最后加进去的排最前），
+ * 而桌面端走 Node 版接口，按 trackIds 给，顺序是对的。手机上看同一个歌单就是反的。
+ * trackIds 才是歌单真正的顺序。
+ */
+function orderPlaylistTracks(tracks, trackIds) {
+  if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
+  const byId = new Map();
+  tracks.forEach((track) => {
+    const id = Number(track && track.id);
+    if (Number.isFinite(id) && id > 0 && !byId.has(id)) byId.set(id, track);
+  });
+  const ordered = [];
+  trackIds.forEach((entry) => {
+    const id = Number(entry && typeof entry === 'object' ? entry.id : entry);
+    const track = byId.get(id);
+    if (!track) return;
+    ordered.push(track);
+    byId.delete(id);
+  });
+  if (ordered.length === 0) return tracks;
+  byId.forEach((track) => ordered.push(track));
+  return ordered;
+}
+
 export async function handlePlaylistTracks(id, cookie) {
   cookie = await ensureNeteaseCookieHeader(cookie);
   let body = {};
@@ -749,7 +776,9 @@ export async function handlePlaylistTracks(id, cookie) {
       rawTracks = pl.tracks || all.tracks || (all.data && all.data.tracks) || rawTracks;
     } catch (_) {}
   }
-  const tracks = (Array.isArray(rawTracks) ? rawTracks : []).map(mapSongRecord).filter((s) => s.id);
+  const tracks = orderPlaylistTracks(Array.isArray(rawTracks) ? rawTracks : [], pl.trackIds)
+    .map(mapSongRecord)
+    .filter((s) => s.id);
   const meta = {
     id: pl.id || id,
     name: pl.name || '',
