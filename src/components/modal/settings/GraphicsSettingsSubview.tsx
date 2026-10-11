@@ -126,6 +126,8 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     const onToggleWallpaperOverlayHideWhenPaused = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayHideWhenPaused);
     const wallpaperOverlayHideAfterLyricsEnd = useVisualizerSettingsStore(state => state.wallpaperOverlayHideAfterLyricsEnd);
     const onToggleWallpaperOverlayHideAfterLyricsEnd = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayHideAfterLyricsEnd);
+    const wallpaperOverlayHideCoverArt = useVisualizerSettingsStore(state => state.wallpaperOverlayHideCoverArt);
+    const onToggleWallpaperOverlayHideCoverArt = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayHideCoverArt);
     const imageInputRef = React.useRef<HTMLInputElement | null>(null);
 
     /*
@@ -605,6 +607,28 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                     style={{ backgroundColor: wallpaperOverlayHideAfterLyricsEnd ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
                                 >
                                     <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideAfterLyricsEnd ? 'translate-x-6' : 'translate-x-0'}`} />
+                                </button>
+                            )}
+                        />
+                        {/*
+                          叠层里的封面要不要显示。
+
+                          默认隐藏：封面是一整块不透明的方形图，挂在叠层上就把底下的原生壁纸
+                          糊掉一大块，而叠层存在的意义恰恰是透出壁纸。想要莫奈那套完整构图的
+                          再关掉这一项。
+                        */}
+                        <SettingsRow
+                            title={t('options.wallpaperOverlayHideCoverArt')}
+                            description={t('options.wallpaperOverlayHideCoverArtDesc')}
+                            dividerClass={dividerClass}
+                            control={(
+                                <button
+                                    type="button"
+                                    onClick={() => onToggleWallpaperOverlayHideCoverArt(!wallpaperOverlayHideCoverArt)}
+                                    className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideCoverArt ? toggleOffBackgroundClass : ''}`}
+                                    style={{ backgroundColor: wallpaperOverlayHideCoverArt ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                                >
+                                    <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideCoverArt ? 'translate-x-6' : 'translate-x-0'}`} />
                                 </button>
                             )}
                         />

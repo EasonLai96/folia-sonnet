@@ -91,6 +91,14 @@ export type WallpaperPayload = {
     visualizer?: string;
     lines?: WallpaperTimedLine[];
     firstIndex?: number;
+    /**
+     * 封面（base64 data URL），换歌时由原生跟着 payload 一起推下来。
+     *
+     * 没有它的话，莫奈那类「封面是构图一部分」的模式在叠层里只剩一层半透明底板
+     * —— 看着像「封面是半透明的、什么都看不见」，其实是一直没拿到图。
+     * 原生的壁纸那层早就有一份（拿去做模糊背景 / 取色），只是没往页面这边给。
+     */
+    cover?: string | null;
 };
 
 // 壁纸这边拿不到音频频谱：叠层页面不在播放会话里，没有 AnalyserNode。
@@ -313,6 +321,19 @@ const WallpaperSurface: React.FC = () => {
         return {
             ...base,
             name: 'wallpaper',
+            /*
+             * AI 主题那份「指定词高亮」在叠层里必须丢掉。
+             *
+             * 原生推下来的整行只有一个起止时间，这里的行被当成一个**整体词**
+             * （见 toLines），而 App 内是逐字的。关键词着色是按「token 与命中范围
+             * 有交集就染色」算的 —— token 就是整行，于是命中任何一个词，
+             * 整句都被染成那个高亮色：用户看到的就是「一整段全是高亮色」。
+             * App 内同一个主题是逐词的，所以只有那几个词变色，症状只在叠层出现。
+             *
+             * 叠层没有逐字时间轴，做不到「只染那几个字」，与其整块染错不如不用。
+             * 以后原生把逐字时间轴也推下来，这两行删掉即可恢复。
+             */
+            wordColors: [],
             backgroundColor: smoothBase || payload.backgroundColor || skeleton.backgroundColor,
             primaryColor: primary,
             accentColor: accent,
@@ -559,6 +580,19 @@ const WallpaperSurface: React.FC = () => {
                 audioBands={audioBands}
                 songTitle={payload.title}
                 songArtist={payload.artist}
+                /*
+                 * 封面：只把它交给可视化自己那一层构图中的封面（莫奈的右侧封面列等），
+                 * 底下的背景仍然由原生壁纸负责，所以这里不会去动 transparent。
+                 */
+                coverUrl={payload.cover ?? null}
+                /*
+                 * 叠层的封面默认是隐藏的。
+                 *
+                 * 封面是一整块不透明的方形图，而叠层存在的意义是**透出底下的壁纸**
+                 * —— 挂着它等于把壁纸糊掉一大块。所以默认不画，留一个开关
+                 * （「桌面叠层显示封面」）给想要那套完整构图的人。
+                 */
+                hideCoverArt={settings.wallpaperOverlayHideCoverArt !== false}
                 showText
                 seed={payload.title || 'folia-wallpaper'}
                 paused={!payload.playing}

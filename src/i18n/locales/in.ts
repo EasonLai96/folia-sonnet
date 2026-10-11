@@ -1874,6 +1874,8 @@ export default {
     "wallpaperOverlayAllAppsDesc": "Tetap tampilkan lapisan saat aplikasi lain di depan, bukan hanya di layar utama.",
     "wallpaperOverlayHideNativeLyrics": "Sembunyikan lirik native",
     "wallpaperOverlayHideNativeLyricsDesc": "Di mode ikuti, lapisan menggambar liriknya sendiri. Aktifkan untuk menyembunyikan lirik native di bawahnya.",
+    "wallpaperOverlayHideCoverArt": "Sembunyikan sampul di lapisan",
+    "wallpaperOverlayHideCoverArtDesc": "Mode seperti Monet memakai sampul sebagai bagian komposisi (kolom di kanan). Sampul berupa kotak buram yang menutupi wallpaper di bawahnya, jadi disembunyikan secara bawaan — matikan ini untuk menampilkannya.",
     "wallpaperOverlayHideNativeProgress": "Sembunyikan bilah progres native",
     "wallpaperOverlayHideNativeProgressDesc": "Sama, untuk bilah progres lagu penuh milik native.",
     "wallpaperOverlaySkipInstrumental": "Sembunyikan saat instrumental",

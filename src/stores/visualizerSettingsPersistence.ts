@@ -101,6 +101,20 @@ export const readStoredWallpaperOverlayHideNativeLyrics = () =>
     && localStorage.getItem(WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY) === 'true';
 
 /**
+ * 桌面叠层里要不要显示封面。
+ *
+ * 默认**隐藏**：叠层是浮在原生壁纸之上的一层，而封面是一整块不透明的方形图，
+ * 画上去就是把壁纸糊掉一大块 —— 叠层存在的意义恰恰是透出壁纸。
+ * 在此之前封面根本没推给叠层页面（那里只有一层半透明底板），
+ * 现在链路修好了，想要完整构图的人可以按这个开关打开。
+ */
+export const WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY = 'folia.wallpaperOverlayHideCoverArt';
+
+export const readStoredWallpaperOverlayHideCoverArt = () =>
+    typeof window === 'undefined'
+    || localStorage.getItem(WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY) !== 'false';
+
+/**
  * 纯音乐（没有歌词）时是否不显示叠层。
  *
  * 纯音乐下可视化只能画背景，画不出歌词；有人要的就是这时候干净点，

@@ -1882,6 +1882,8 @@ export default {
     "wallpaperOverlayAllAppsDesc": "Keep the overlay visible while other apps are in the foreground, not just on the home screen.",
     "wallpaperOverlayHideNativeLyrics": "Hide native lyrics",
     "wallpaperOverlayHideNativeLyricsDesc": "In follow mode the overlay draws its own lyrics. Turn this on to hide the original native layer underneath.",
+    "wallpaperOverlayHideCoverArt": "Hide overlay cover art",
+    "wallpaperOverlayHideCoverArtDesc": "Modes like Monet treat the cover as part of the composition (the column on the right). It is an opaque square sitting on top of the wallpaper, so it is hidden by default — turn this off to show the cover.",
     "wallpaperOverlayHideNativeProgress": "Hide native progress bar",
     "wallpaperOverlayHideNativeProgressDesc": "Same idea, for the native whole-track progress bar.",
     "wallpaperOverlaySkipInstrumental": "Hide on instrumental tracks",

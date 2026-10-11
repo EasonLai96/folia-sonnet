@@ -1881,6 +1881,8 @@ export default {
     "wallpaperOverlayAllAppsDesc": "打开后回到其它应用也保持显示，而不是只在桌面。",
     "wallpaperOverlayHideNativeLyrics": "隐藏原生歌词",
     "wallpaperOverlayHideNativeLyricsDesc": "跟随模式下叠层自己会画歌词；打开这一项把原来那层原生歌词关掉，避免两层叠在一起。",
+    "wallpaperOverlayHideCoverArt": "隐藏叠层封面",
+    "wallpaperOverlayHideCoverArtDesc": "像莫奈那一类模式会把封面当构图的一部分（右侧那一列）。封面是一整块不透明的方形图，挂在叠层上就把底下的壁纸糊掉一大块 —— 默认隐藏，关掉这一项才会显示封面。",
     "wallpaperOverlayHideNativeProgress": "隐藏原生进度条",
     "wallpaperOverlayHideNativeProgressDesc": "同上，只是关掉原生那条整首歌进度条。",
     "wallpaperOverlaySkipInstrumental": "纯音乐时不显示",

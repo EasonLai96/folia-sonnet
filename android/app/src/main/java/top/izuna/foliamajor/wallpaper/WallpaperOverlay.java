@@ -2263,7 +2263,14 @@ public final class WallpaperOverlay {
                 + "@" + snapshot.visualizerMode
                 + "@" + snapshot.backgroundMode
                 + "@" + snapshot.showTranslation
-                + "@" + snapshot.stamp;
+                + "@" + snapshot.stamp
+                // 封面必须进签名：它是异步抓的（App 先推「有歌名」，几十到几百毫秒后
+                // 封面才跟着下一次 publish 到）。不进签名的话那一次 publish 其它字段全没变，
+                // 会被这里直接判定成「状态没变」跳过 —— 叠层的封面就永远停在
+                // 「第一份 payload 里的那个值」，也就是永远没有。
+                // 只取散列，不把上百 KB 的 base64 拼进签名（Java 的 String hashCode 有缓存，
+                // 同一个 String 对象后续取散列是常数级）。
+                + "@" + (snapshot.cover == null ? 0 : snapshot.cover.hashCode());
         // 注意 lastSignature 在 detach 时会被清空：页面是重新加载出来的，
         // 「上次推过什么」对它没有意义。不清的话切回桌面后签名没变、一次都不推，
         // 就会出现「回到桌面没歌词，非得暂停一下触发事件才更新」。
@@ -2387,6 +2394,20 @@ public final class WallpaperOverlay {
                 lines.put(entry);
             }
             out.put("lines", lines);
+            /*
+             * 封面（base64 data URL）也要跟着下去。
+             *
+             * 莫奈那一类模式把封面当成构图的一部分（右侧那一整列）。
+             * 之前这里只给原生壁纸（模糊封面 / 取色）用它，页面那份 payload 里没有 ——
+             * 于是叠层里的封面永远拿不到 src，画出来的就是那层半透明底板，
+             * 看着像「封面是半透明的、什么都看不见」。
+             *
+             * 只在**非空**时写：缺这个字段页面会退回 App 那侧推下来的封面逻辑，
+             * 不会为了占位塞一个空串进去。
+             */
+            if (snapshot.cover != null && !snapshot.cover.isEmpty()) {
+                out.put("cover", snapshot.cover);
+            }
             return out.toString();
         } catch (Throwable error) {
             return null;

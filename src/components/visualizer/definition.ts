@@ -45,6 +45,14 @@ export interface VisualizerSharedProps {
     songAlbum?: string | null;
     coverUrl?: string | null;
     /**
+     * 只画歌词、不画封面那一块（莫奈的右侧封面列等）。
+     *
+     * 壁纸叠层是浮在原生壁纸之上的一层：封面是一张不透明的方形图，
+     * 挂上去就是把壁纸糊掉一大块 —— 而叠层存在的意义恰恰是**透出壁纸**。
+     * 所以叠层传 true，App 内播放页不传（那里封面本来就是构图的一部分）。
+     */
+    hideCoverArt?: boolean;
+    /**
      * Tempera canvas images shipped inline by the OBS overlay. That page is a separate browsing
      * context with no access to the app's IndexedDB, so when this is present the visualizer uses
      * it instead of reading the pool from storage.

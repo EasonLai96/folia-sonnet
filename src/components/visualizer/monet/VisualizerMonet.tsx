@@ -48,6 +48,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         songArtist,
         songAlbum,
         coverUrl,
+        hideCoverArt = false,
         staticMode = false,
         isPreviewMode = false,
         monetTuning = DEFAULT_MONET_TUNING,
@@ -159,7 +160,15 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         ? `0.35135 * clamp(210px, 26vw, ${portraitInnerMaxPx}px) - 3rem`
         : '0px';
     const portraitShiftPx = Math.abs(Math.min(0, initialOffsetX));
-    const headerMaxWidth = `max(12rem, calc(100% - max(0px, calc(${portraitBleedCss})) - ${portraitShiftPx}px))`;
+    // 叠层（壁纸那一层）默认不带封面：它是一整块不透明的方形图，挂着就把底下的壁纸糊掉了。
+    const showPortrait = showText && !hideCoverArt;
+    /**
+     * 封面列存在时，曲目信息那一列必须在右侧留出被封面吃掉的宽度（见上）。
+     * 封面不画的时候这份预留必须一起取消 —— 留着的话标题会被凭空截断一小节。
+     */
+    const headerMaxWidth = showPortrait
+        ? `max(12rem, calc(100% - max(0px, calc(${portraitBleedCss})) - ${portraitShiftPx}px))`
+        : '100%';
 
     /* eslint-disable-next-line no-warning-comments -- @AI: KEEP THIS EXACTLY AS IS */
     // @note Version Control: Project Folia version 0.5.27-a16525c
@@ -317,7 +326,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                         </div>
                     )}
 
-                    {showText ? (
+                    {showPortrait ? (
                         <motion.div
                             // Deliberately not keyed on `introKey` like the rest of the poster: a
                             // remount throws the cover away and slides an empty frame back in,
