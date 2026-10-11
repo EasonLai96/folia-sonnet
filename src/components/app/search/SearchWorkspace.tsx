@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, Loader2, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +15,10 @@ import { useOnlineProviderAccountStore } from '../../../stores/useOnlineProvider
 import { omni } from '../../../services/onlineMusic/omni';
 
 // src/components/app/search/SearchWorkspace.tsx
+
+// 平台注册表会在运行时增删（Folium mod 源），源列表要跟着它变，所以订阅版本号而不是只在挂载时读一次。
+const subscribeProviderRegistry = (listener: () => void) => omni.subscribeProviders(listener);
+const readProviderRegistryVersion = () => omni.getProviderRegistryVersion();
 
 type SearchWorkspaceProps = {
     theme: Theme;
@@ -77,7 +81,27 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         return resolveTrackDisplay ? raw.map(resolveTrackDisplay) : raw;
     }, [resolveTrackDisplay, searchResults]);
     const activeOnlineProviderId = useOnlineProviderAccountStore(state => state.activeProviderId);
-    const sources = useMemo<SearchSource[]>(() => [activeOnlineProviderId, 'local', 'navidrome'], [activeOnlineProviderId]);
+    const providerRegistryVersion = useSyncExternalStore(
+        subscribeProviderRegistry,
+        readProviderRegistryVersion,
+    );
+    /**
+     * 源列表 = 所有能搜的在线平台 + 本地 + Navidrome。
+     *
+     * 原来只列当前平台那一个，于是从本地页签进来时列表里根本没有网易云 —— 就是「搜索之后
+     * 切不到网易云」。当前平台仍然排最前（它在的时候是默认源），其余按注册表顺序跟上。
+     */
+    const sources = useMemo<SearchSource[]>(() => {
+        const online = omni.getProviderSummaries()
+            .filter(summary => omni.getProviderCapabilities(summary.providerId).search)
+            .map(summary => summary.providerId);
+        return [
+            activeOnlineProviderId,
+            ...online.filter(id => id !== activeOnlineProviderId),
+            'local',
+            'navidrome',
+        ];
+    }, [activeOnlineProviderId, providerRegistryVersion]);
     const hasCollection = useCollectionNavigationStore(state => Boolean(state.snapshot?.stack.length));
     const getSourceLabel = (source: SearchSource) => {
         if (source === 'local') return t('search.sourceLocal');
@@ -96,6 +120,40 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [hasCollection, isSearchOpen, onClose]);
+
+    /**
+     * 带着词进来但还没有结果时，自己补一次提交。
+     *
+     * 墙上的搜索框（bravais）走的是 onSearchCommitted → navigateToSearch，只写历史、不发请求，
+     * 于是进了搜索页「未找到相关结果」，必须再点一次搜索才真的搜。老套件 Grid3D 是先
+     * submitSearch 再 onSearchCommitted，bravais 漏了这一步；把补提交放在这里而不是回墙上，
+     * 是因为浏览器后退、刷新进 #search/... 这些入口同样需要它。
+     *
+     * 按「源 + 词」记一次，避免换源 / 改词时反复提交；关掉搜索页就清掉。
+     */
+    const autoSubmittedRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!isSearchOpen) {
+            autoSubmittedRef.current = null;
+        }
+    }, [isSearchOpen]);
+
+    useEffect(() => {
+        if (!isSearchOpen || hasCollection) return;
+        const trimmedQuery = searchQuery.trim();
+        // 出错与「确实没有结果」都把 searchResults 落成了 []，不是 null，所以不会在这里空转。
+        if (!trimmedQuery || isSearching || searchResults !== null) return;
+        const key = `${searchSourceTab}:${trimmedQuery.toLowerCase()}`;
+        if (autoSubmittedRef.current === key) return;
+        autoSubmittedRef.current = key;
+        void onSubmitSearch(searchSourceTab);
+    }, [hasCollection, isSearchOpen, isSearching, onSubmitSearch, searchQuery, searchResults, searchSourceTab]);
+
+    // 上面那次补提交到达之前，results 还是 null：那一帧不该画「未找到相关结果」。
+    const awaitingFirstResult = !hasCollection
+        && searchResults === null
+        && !searchError
+        && Boolean(searchQuery.trim());
 
     return (
         <AnimatePresence>
@@ -149,7 +207,13 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                             </button>
                         </div>
 
-                        <nav className="flex gap-2 overflow-x-auto pb-1">
+                        {/*
+                            横向滚动而不是换行：平台多了（现在列出所有能搜的源）之后，窄屏上这一排放不下。
+                            关键是每个按钮上的 shrink-0 —— flex 子项默认可压缩，不给它就会被挤扁、
+                            里面的文字折成两行，看着像「自动换行」。
+                            -mx-1 / px-1 是为了焦点环不被 overflow 裁掉。
+                        */}
+                        <nav className="hide-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                             {sources.map(source => (
                                 <button
                                     type="button"
@@ -159,7 +223,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                                             onSubmitSearch(source);
                                         }
                                     }}
-                                    className={`rounded-full px-4 py-2 text-xs font-medium transition-colors ${
+                                    className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-xs font-medium transition-colors ${
                                         source === searchSourceTab
                                             ? 'shadow-sm'
                                             : isDaylight
@@ -178,7 +242,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                     </header>
 
                     <div className="mx-auto mt-3 min-h-0 w-full max-w-5xl flex-1">
-                        {isSearching ? (
+                        {isSearching || awaitingFirstResult ? (
                             <div className="flex h-full items-center justify-center">
                                 <Loader2 className="h-9 w-9 animate-spin opacity-45" />
                             </div>

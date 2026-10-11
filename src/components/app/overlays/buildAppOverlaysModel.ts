@@ -289,7 +289,11 @@ export const buildAppOverlaysModel = ({
             secondaryColor: 'var(--text-secondary)',
             theme,
             isDaylight,
-            isHidden: currentView === 'player' && isPlayerChromeHidden,
+            // 搜索页是整屏接管（fixed inset-0），而胶囊的 z 比它高、又贴着底边，最后几行结果
+            // 会被压在下面 —— 于是「搜索页底部的播放条和内容重叠」。搜索开着就整条收起来，
+            // 关掉搜索（hideSearchOverlay）它自然会回来。
+            isHidden: (currentView === 'player' && isPlayerChromeHidden)
+                || (currentView === 'home' && isSearchOpen),
             hideControlBar: shouldHidePlayerProgressBar,
             slotPrimary: playerControlSlotPrimary,
             slotSecondary: playerControlSlotSecondary,
