@@ -316,3 +316,26 @@ html[data-click-through='active'] body .click-through-interactive * {
 :root[data-reduce-motion~='uiMicroMotion'] .ponder-skeleton-label-in {
     animation: none;
 }
+
+/* 后台：画面反正没人看，把纯装饰的合成开销一次性关掉。
+
+   属性由 utils/backgroundRenderGate.ts 在退后台时挂到 <html> 上。这里用 CSS 兜住
+   那些没有统一 JS 开关的动画 —— 第三方组件、散在各处的 @keyframes、以及每个元素上
+   零零散散的 transition。逐组件去判断既写不完也容易漏。
+
+   `animation-play-state: paused` 而不是 `animation: none`：前者保留动画进度，回前台
+   接着走；后者会把元素瞬移回初始状态，转场中的节点会跳一下。
+
+   backdrop-filter 是这里最贵的一项：每个带毛玻璃的元素都要把身后的画面抓一份出来
+   模糊，一层就是一次全屏读取，而这些元素在播放页上同时存在十几层。 */
+html[data-folia-background='1'] *,
+html[data-folia-background='1'] *::before,
+html[data-folia-background='1'] *::after {
+    animation-play-state: paused !important;
+    transition: none !important;
+}
+
+html[data-folia-background='1'] * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}

@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { ensureBackgroundRenderGateInstalled } from './utils/backgroundRenderGate';
 import { installGlobalVisualizerFrameRateLimiter } from './utils/frameRateLimiter';
 import { installConsoleLogCapture } from './utils/consoleLogBuffer';
 import { installDebugModule } from './services/debug/debugModule';
@@ -23,6 +24,15 @@ installMemorySampleFeed();
 // only even then: a packaged build has nothing to do with the answer, so it should not pay the
 // observer or the rows it retains.
 // if (import.meta.env.DEV) installCoverSizeAudit();
+/*
+ * 后台渲染总闸。必须装在下面那个帧率限制器**之前**：限制器会把「当时的」原生 rAF 存起来
+ * 当底层用，装在它后面就只能拦到没被限制的那部分循环。
+ *
+ * 装了不等于暂停 —— 只是把 rAF 过一道闸，真正翻转开关的是 useBackgroundRenderPause
+ * （挂在主界面上）。壁纸叠层是另一个入口（wallpaper.html），不经过这里，所以它在桌面
+ * 上照常渲染。
+ */
+ensureBackgroundRenderGateInstalled();
 installGlobalVisualizerFrameRateLimiter();
 /*
  * 帧耗时 / 长任务采样。用户报「卡顿」时靠它区分「我们的渲染开销」与「设备性能不足」，

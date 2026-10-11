@@ -92,6 +92,7 @@ import { useMediaSessionBridge } from './hooks/useMediaSessionBridge';
 import { useCapacitorSystemBars } from './hooks/useCapacitorSystemBars';
 import { useCapacitorPlaybackBridge } from './hooks/useCapacitorPlaybackBridge';
 import { useNativeBackButton } from './hooks/useNativeBackButton';
+import { useBackgroundRenderPause } from './hooks/useBackgroundRenderPause';
 import { noteAudioEvent, resetMediaDiagnostics } from './utils/mediaDiagnostics';
 import { useLyricsWallpaperFeed } from './hooks/useLyricsWallpaperFeed';
 import { useLyriconFeed } from './hooks/useLyriconFeed';
@@ -449,6 +450,8 @@ export default function App() {
     useCapacitorSystemBars(isDaylight);
     // Android 返回键：先当 Escape 交给弹层，没人接管才退出（原生侧已把事件转过来）。
     useNativeBackButton();
+    // 退后台就停渲染：把 CPU 让给音频解码，后台播放才不会跟画面抢时间片。
+    useBackgroundRenderPause();
     const {
         globalLyricTimelineOffsetMs,
         lyricFilterPattern,

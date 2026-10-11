@@ -160,6 +160,23 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // 回前台：把渲染放回来。
+        FoliaNativePlugin.emitAppBackground(false);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // 真的看不见了：让网页停掉整套渲染，把 CPU 让给音频解码。
+        //
+        // 放在 onStop 而不是 onPause —— 下拉通知栏、切多任务只到 onPause，那时画面还
+        // 露着一半，停了会看到动画僵在半途。
+        FoliaNativePlugin.emitAppBackground(true);
+    }
+
+    @Override
     public void onPause() {
         super.onPause();
         top.izuna.foliamajor.wallpaper.WallpaperOverlay.shared(this).setAppForeground(false);

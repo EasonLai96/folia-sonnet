@@ -121,6 +121,28 @@ public class FoliaNativePlugin extends Plugin {
         return true;
     }
 
+    /**
+     * 前后台：告诉网页现在还看不看得见。
+     *
+     * 网页拿这个信号去停掉整套渲染（见 src/utils/backgroundRenderGate.ts）。退后台后画面
+     * 没人看，可 WebView 里的动画循环照样按 60fps 跑，和音频解码抢同一颗核 —— 抢输了就
+     * 是后台播放的撕裂声。
+     *
+     * 这里是 Activity 的 onStop / onStart 在调，不是 onPause / onResume：下拉通知栏、
+     * 切多任务只到 onPause，那时画面还露着一半，不该停。
+     *
+     * 没有监听者时直接返回，和返回键那条链路一样 —— 事件没人接，发了也没意义。
+     */
+    static void emitAppBackground(boolean background) {
+        FoliaNativePlugin plugin = instance;
+        if (plugin == null || !plugin.hasListeners("appBackground")) return;
+        Activity activity = plugin.getActivity();
+        if (activity == null) return;
+        JSObject payload = new JSObject();
+        payload.put("background", background);
+        activity.runOnUiThread(() -> plugin.notifyListeners("appBackground", payload));
+    }
+
     @PluginMethod
     public void cookiesGetAll(PluginCall call) {
         String url = call.getString("url", "");

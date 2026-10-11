@@ -22,6 +22,7 @@ import { modeNeedsBeatGrid } from './automix/transitionStrategy';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { useAutomixSettingsStore } from '../stores/useAutomixSettingsStore';
 import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
+import { isBackgroundRenderSuspended, subscribeBackgroundRenderSuspended } from '../utils/backgroundRenderGate';
 
 // Prefetch configuration
 //
@@ -46,6 +47,23 @@ const MAX_PREFETCH_CACHE_SIZE = 200; // Evict least recently used entries beyond
  * URL", and the analyser finds those on its own - so it gets a null instead of a string it would
  * try to fetch. Never awaited: a slow decode must not hold up the song after this one.
  */
+/**
+ * 退后台时把活压后，回前台立刻补上。返回 true 表示这次没执行、已经挂起了。
+ *
+ * 预取这一串（解析播放地址、抓歌词、做在线匹配；开了混音还要整首解码再过一遍节拍模型）
+ * 是为了「下一首来得快」。后台没人按下一首，可它们要占 CPU 与网络 —— 恰好是后台播放最
+ * 不需要的那一份，抢的就是音频解码的时间片。
+ */
+const deferWhileBackground = (job: () => void, signal: AbortSignal): boolean => {
+    if (!isBackgroundRenderSuspended()) return false;
+    const unsubscribe = subscribeBackgroundRenderSuspended(suspended => {
+        if (suspended || signal.aborted) return;
+        unsubscribe();
+        job();
+    });
+    return true;
+};
+
 const analyseForAutomix = (song: SongResult, audioUrl: string | null | undefined) => {
   const settingsAudioSettings = useAudioSettingsStore.getState();
   const settingsAutomixSettings = useAutomixSettingsStore.getState();
@@ -466,11 +484,17 @@ export const prefetchNearbySongs = async (
     // The track playing right now is the other half of every transition it is about to be in, and
     // it is not in the prefetch set, so it would otherwise only ever be analysed on a second
     // listen. Its own prefetch entry usually still holds the URL it was resolved from.
-    analyseForAutomix(currentSong, prefetchCache.get(currentSongKey)?.audioUrl);
+    // 整首解码 + 节拍模型是这里最重的一份活，后台更不该碰。
+    const analyseCurrent = () => analyseForAutomix(currentSong, prefetchCache.get(currentSongKey)?.audioUrl);
+    if (!deferWhileBackground(analyseCurrent, signal)) {
+        analyseCurrent();
+    }
 
     // Prefetch using requestIdleCallback for non-blocking execution
     const prefetchWithIdle = (songs: SongResult[], index: number) => {
         if (signal.aborted || index >= songs.length) return;
+        // 逐首走的，中途进后台也得停在当前这一首，而不是把剩下的都跑完。
+        if (deferWhileBackground(() => prefetchWithIdle(songs, index), signal)) return;
 
         const song = songs[index];
 
