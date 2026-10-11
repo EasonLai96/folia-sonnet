@@ -5,6 +5,11 @@ import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
 import { useTransitionBorderCue } from './now-playing-toast/useTransitionBorderCue';
 import { usePlayerBottomBarBottomPx } from '../../../hooks/usePlayerBottomBarBottomPx';
+import { useAppViewStore } from '../../../stores/useAppViewStore';
+import {
+    PLAYER_BOTTOM_BAR_SUBTITLE_BLOCK_PX,
+    PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX,
+} from '../../../utils/playerBottomBarLayout';
 
 // src/components/app/overlays/NowPlayingToast.tsx
 // 播放器与 Lattice 左下角的 now playing 卡片（playing-toast 样式：圆角 2xl、44px 封面、底部滑入）。
@@ -80,7 +85,16 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
     // 所以拿到非空 cue 就意味着「过渡动画开着 + 模式是 automix」，不用再问一遍 prop。
     // 它同时参与下面的 holdOpen：混音期间卡片必须留在屏幕上，否则描边跟着卡片一起卸载，
     // 而全屏圆环已经让位了。
-    const bottomBarBottomPx = usePlayerBottomBarBottomPx();
+    // 不用默认基线：那一条是胶囊自己的底边，窄屏上气泡（左下、至少 240px 宽）和居中的胶囊
+    // 横向也重叠，出歌这一下正好压在控制条上。
+    //
+    // 抬多少看页面上还有什么：播放页底部还压着一条字幕（它就落在胶囊顶边之上），抬到那里
+    // 等于拿气泡去盖歌词，得再上一层；其它页面底部只有胶囊，到胶囊顶边就够了。
+    const view = useAppViewStore(state => state.view);
+    const toastBaseBottomPx = view === 'player'
+        ? PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX + PLAYER_BOTTOM_BAR_SUBTITLE_BLOCK_PX
+        : PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX;
+    const bottomBarBottomPx = usePlayerBottomBarBottomPx(toastBaseBottomPx);
     const transitionCue = useTransitionBorderCue();
 
     // 可见性状态机：never 不渲染；always 常驻；auto 换歌重新计时。
@@ -136,8 +150,8 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -16 }}
                     transition={{ duration: 0.35, ease: 'easeOut' }}
-                    // 底边跟右下角面板开关按钮和中间的进度条胶囊落在同一条基线上，
-                    // 由共享 MotionValue 直接驱动 bottom（默认 32，即原来的 bottom-8）。
+                    // 底边落在胶囊顶边之上（见 PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX），
+                    // 由共享 MotionValue 直接驱动 bottom，跟右下角面板开关、侧边面板同一套抬升。
                     style={{ bottom: bottomBarBottomPx }}
                     className="pointer-events-none fixed left-6 z-40"
                 >

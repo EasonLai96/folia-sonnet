@@ -11,6 +11,25 @@ export const PLAYER_BOTTOM_BAR_BASE_OFFSET_PX = 32;
  */
 export const PLAYER_BOTTOM_BAR_SUBTITLE_CLEARANCE_PX = 80;
 
+/**
+ * now playing 气泡的底距：胶囊之上，和字幕同一条线。
+ *
+ * 它原来和胶囊共用基线（32），而两者在窄屏上横向也重叠 —— 气泡 left-6 起、至少 240px 宽，
+ * 居中的胶囊在手机上几乎占满宽度，于是一出歌气泡就压在控制条上。抬到胶囊之上即可，
+ * 抬多少沿用字幕那份净空：那是同一条「胶囊顶边之上」的线，不另立一个数字。
+ * 仍然走 usePlayerBottomBarBottomPx，所以用户把基线抬高时它跟着一起走。
+ */
+export const PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX =
+    PLAYER_BOTTOM_BAR_BASE_OFFSET_PX + PLAYER_BOTTOM_BAR_SUBTITLE_CLEARANCE_PX;
+
+/**
+ * 播放页那条字幕自己占的高度。气泡要站到字幕上面去时，得再抬这么多。
+ *
+ * 是估算而不是量出来的：字幕字号由可视化器的设置给，行数也随内容变（主行之外可能有
+ * 翻译行、预告行，space-y-2）。取偏大的值 —— 气泡站高一点也不打紧，压住歌词不行。
+ */
+export const PLAYER_BOTTOM_BAR_SUBTITLE_BLOCK_PX = 76;
+
 /** 展开态胶囊的高度预留（标题行 + 48px 播放按钮行 + 进度行 + p-3），用于算上限。 */
 const EXPANDED_CAPSULE_HEIGHT_PX = 132;
 
