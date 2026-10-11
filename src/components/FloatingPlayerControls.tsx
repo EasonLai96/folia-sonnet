@@ -40,6 +40,8 @@ const HOVER_COLLAPSE_DELAY_MS = 100;
 const HOVER_HITBOX_BOTTOM_BUFFER_PX = 32;
 /** 暂停时自动展开露出的时间：够看见并点到控件，之后自己缩回一条进度条。 */
 const AUTO_EXPAND_DURATION_MS = 4000;
+/** 按下与松手之间超过这个距离就算拖动，不再当成点击（进度条 seek 完不该触发胶囊的动作）。 */
+const CLICK_SLOP_PX = 8;
 /*
  * 模组可以通过公开变量 --folium-player-bar-extra 加宽胶囊，补回进度条两侧按钮占掉的长度。
  * 外层 max-width 已经加了一份 extra；收起的胶囊是外层的 80% / 60%，所以只再补 (1 - 比例) 份，
@@ -71,7 +73,6 @@ interface FloatingPlayerControlsProps {
     onTogglePlay: () => void;
     onToggleLoop: () => void;
     onNavigateToPlayer: () => void;
-    onFocusLatticeCurrentSong?: () => void;
     noTrackText?: string;
     primaryColor?: string;
     secondaryColor?: string;
@@ -106,7 +107,6 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     onTogglePlay,
     onToggleLoop,
     onNavigateToPlayer,
-    onFocusLatticeCurrentSong,
     noTrackText = 'No Track',
     primaryColor = 'var(--text-primary)',
     secondaryColor = 'var(--text-secondary)',
@@ -141,6 +141,8 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     const autoCollapseTimeoutRef = useRef<number | null>(null);
     /** 命中区（含向下那块补丁）的整体：点它以外的地方算「点周围」。 */
     const hitboxRef = useRef<HTMLDivElement | null>(null);
+    /** 按下时的指针位置：松手时位移超过阈值就是拖动，不算点击。 */
+    const pressOriginRef = useRef<{ x: number; y: number; } | null>(null);
 
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
     const isPositioning = usePlayerBottomBarLayoutStore(state => state.isPositioning);
@@ -163,12 +165,8 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     // 定位模式强制展开：用户要看到的是最终形态的胶囊，而不是一条细进度条。
     const showExpanded = isPositioning || isHovered || autoExpanded;
 
-    useEffect(() => {
-        if (!wantsAutoExpand) {
-            setAutoExpanded(false);
-            return;
-        }
-        setAutoExpanded(true);
+    /** 排一次「过几秒收起」：暂停自动展开与手动展开共用这一条收回路径。 */
+    const scheduleAutoCollapse = useCallback(() => {
         if (autoCollapseTimeoutRef.current !== null) {
             window.clearTimeout(autoCollapseTimeoutRef.current);
         }
@@ -176,13 +174,22 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
             autoCollapseTimeoutRef.current = null;
             setAutoExpanded(false);
         }, AUTO_EXPAND_DURATION_MS);
+    }, []);
+
+    useEffect(() => {
+        if (!wantsAutoExpand) {
+            setAutoExpanded(false);
+            return;
+        }
+        setAutoExpanded(true);
+        scheduleAutoCollapse();
         return () => {
             if (autoCollapseTimeoutRef.current !== null) {
                 window.clearTimeout(autoCollapseTimeoutRef.current);
                 autoCollapseTimeoutRef.current = null;
             }
         };
-    }, [wantsAutoExpand]);
+    }, [scheduleAutoCollapse, wantsAutoExpand]);
 
     // 点胶囊以外的任何地方：自动展开的那一下立刻收起，不必等定时器走完。
     useEffect(() => {
@@ -364,16 +371,52 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
         }, HOVER_COLLAPSE_DELAY_MS);
     };
 
-    const handleClick = () => {
-        if (isPositioning) {
+    const handleBarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        pressOriginRef.current = { x: event.clientX, y: event.clientY };
+        handlePositionDragStart(event);
+    }, [handlePositionDragStart]);
+
+    /**
+     * 「点了一下」在松手时判，不在 click 上判：进度条那个 range 会 stopPropagation，
+     * 收起态的胶囊几乎整块都是它，click 根本到不了这里 —— 而用户点胶囊想的是先把控件
+     * 露出来（原先在队列磁贴里这一下直接跳去聚焦当前歌）。
+     */
+    const handleBarPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        const origin = pressOriginRef.current;
+        pressOriginRef.current = null;
+        handlePositionDragEnd(event);
+        if (isPositioning || !origin) {
             return;
         }
-        if (currentView !== 'lattice') {
-            onNavigateToPlayer();
-        } else {
-            onFocusLatticeCurrentSong?.();
+        // 拖进度条、拖胶囊之后松手也会来一次 pointerup：动过就不算点。
+        if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > CLICK_SLOP_PX) {
+            return;
         }
-    };
+        const target = event.target instanceof Element ? event.target : null;
+        // 展开态里这些元素各管各的：按钮有自己的 onClick，进度条那一下只 seek ——
+        // 都不该再被当成「点了胶囊」（否则调个进度就被送去播放页）。
+        if (showExpanded && target?.closest('button, a, [role="button"], [data-folium-part^="progress"]')) {
+            return;
+        }
+        if (!showExpanded) {
+            setAutoExpanded(true);
+            scheduleAutoCollapse();
+            return;
+        }
+        // 展开态：队列磁贴里再点一下收起（那里不该跳走），其余视图照旧进播放页。
+        if (currentView === 'lattice') {
+            setAutoExpanded(false);
+            return;
+        }
+        onNavigateToPlayer();
+    }, [
+        currentView,
+        handlePositionDragEnd,
+        isPositioning,
+        onNavigateToPlayer,
+        scheduleAutoCollapse,
+        showExpanded,
+    ]);
 
     if (hideControlBar) {
         return null;
@@ -422,16 +465,15 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                     <motion.div
                         layout
                         transition={{ layout: CONTROL_LAYOUT_SPRING }}
-                        onClick={handleClick}
                         // 用原生 pointer 事件而不是 framer-motion 的 drag：位移已经由 playerBottomBarLiveOffset
                         // 经外层 lift 表达，再让 drag 往这个节点写一份 y 会叠加成两倍位移；
                         // 而且 dragConstraints 依赖的起始值放在 ref 里不会触发重渲染，读到的会是上一帧的。
                         data-ponder="player-bar"
                         // 手机适配的 CSS 靠它区分展开态与收起态（两者的内边距/高度规则不同）。
                         data-folia-player-bar-expanded={showExpanded ? 'true' : 'false'}
-                        onPointerDown={handlePositionDragStart}
+                        onPointerDown={handleBarPointerDown}
                         onPointerMove={handlePositionDragMove}
-                        onPointerUp={handlePositionDragEnd}
+                        onPointerUp={handleBarPointerUp}
                         onPointerCancel={handlePositionDragEnd}
                         style={{ touchAction: isPositioning ? 'none' : undefined }}
                         className={`backdrop-blur-xl shadow-2xl overflow-hidden rounded-full relative transition-colors duration-300

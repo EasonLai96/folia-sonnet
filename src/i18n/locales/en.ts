@@ -4400,13 +4400,13 @@ export default {
         "settingsDirectNavigation": "You rarely need to browse every category: search the setting name in the command palette and Folia opens the exact section and anchor."
       },
       "playerBar": {
-        "basicsAutoExpand": "It is not only hover that opens it. Whenever playback is paused and you are somewhere other than the home screen, the capsule stays expanded on its own \u2014 the moment you are most likely to want the controls is the moment it stops hiding them. Start playing again, or go back home, and it slims down.",
+        "basicsAutoExpand": "It is not only hover that opens it. Whenever playback is paused and you are somewhere other than the home screen, the capsule opens on its own \u2014 the moment you are most likely to want the controls is the moment it stops hiding them. It folds back after a few seconds, or as soon as you tap anywhere outside it.",
         "basicsIntro": "Folia's playback controls are this one capsule. The permanent row other players put along the bottom — previous, next, shuffle, repeat, volume — has no fixed place here at all.",
         "basicsPlay": "The only button that is always present is play / pause. On a wide window it sits at the far left; when the row is too narrow for one line it moves to the middle of a second row, with the two slots on either side.",
         "basicsTitle": "Changing tracks goes through the title, not a button. Hover it and arrows appear on both sides, previewing the previous and next track names — you pick where to go by reading it, not by pressing blind.",
-        "basicsProgress": "Drag or click the progress bar to seek. Clicking anywhere else on the capsule does not pause: it opens the player page, or on Lattice pulls the view back to the current song.",
+        "basicsProgress": "Drag or click the progress bar to seek. Tapping the capsule expands it; once it is open, tapping an empty spot opens the player page, or on Lattice folds the capsule back.",
         "basicsSlots": "Everything else lives in these two places on the right. You pick two of ten actions to put there; the rest stay off the bar — that is why there is no fixed row of buttons.",
-        "basicsCollapsed": "Move the pointer away and the capsule folds back into a single progress bar. That is the shape you normally see; approach it and it expands again.",
+        "basicsCollapsed": "The capsule folds back into a single progress bar \u2014 that is the shape you normally see. Tap it, or move the mouse over it, and it expands again.",
         "heightIntro": "How far this bar sits from the bottom of the screen can be changed, and song cards and side panels follow it on every page.",
         "heightSettings": "It lives in Settings \u2192 Bottom UI: a slider sets the number directly, and \u201cReposition on the player page\u201d next to it turns the capsule into something you can drag. Searching the same command in the palette does the same thing. The button below takes you straight there.",
         "heightDrag": "Once repositioning is on, hold the capsule anywhere and drag it up or down. Letting go applies it, and it is remembered.",

@@ -284,7 +284,6 @@ export const buildAppOverlaysModel = ({
             onTogglePlay: togglePlay,
             onToggleLoop: toggleLoop,
             onNavigateToPlayer: navigateFromPlayerCapsule,
-            onFocusLatticeCurrentSong: () => { focusLatticeCurrentSong(); },
             noTrackText,
             primaryColor: 'var(--text-primary)',
             secondaryColor: 'var(--text-secondary)',

@@ -4285,13 +4285,13 @@ export default {
         "settingsDirectNavigation": "Anda tidak perlu menelusuri setiap kategori: cari nama pengaturan di palette perintah dan Folia membuka bagian serta jangkar yang tepat."
       },
       "playerBar": {
-        "basicsAutoExpand": "Bukan hanya menggantung penunjuk yang membukanya. Selama pemutaran dijeda dan kamu sedang tidak di layar beranda, kapsulnya tetap terbentang sendiri \u2014 saat kamu paling mungkin ingin menjangkau kontrolnya, justru saat itu ia berhenti menyembunyikannya. Putar lagi, atau kembali ke beranda, dan ia mengurus lagi.",
+        "basicsAutoExpand": "Bukan hanya menggantung penunjuk yang membukanya. Selama pemutaran dijeda dan kamu sedang tidak di layar beranda, kapsulnya terbentang sendiri \u2014 saat kamu paling mungkin ingin menjangkau kontrolnya, justru saat itu ia berhenti menyembunyikannya. Ia melipat lagi setelah beberapa detik, atau begitu kamu mengetuk di luarnya.",
         "basicsIntro": "Kontrol pemutaran Folia hanya kapsul ini. Deretan tombol permanen yang dipasang pemutar lain di bawah — sebelumnya, berikutnya, acak, ulang, volume — tidak punya tempat tetap di sini.",
         "basicsPlay": "Satu-satunya tombol yang selalu ada adalah putar / jeda. Pada jendela lebar ia di paling kiri; saat barisnya terlalu sempit untuk satu baris, ia pindah ke tengah baris kedua, dengan dua slot di kedua sisinya.",
         "basicsTitle": "Ganti lagu lewat judul, bukan tombol. Arahkan penunjuk ke judul, panah muncul di kedua sisi dan mempratinjau nama lagu sebelumnya dan berikutnya — kamu memilih sambil membaca, bukan menekan buta.",
-        "basicsProgress": "Seret atau klik bilah kemajuan untuk melompat. Mengklik bagian kapsul yang lain bukan jeda: itu membuka halaman pemutar, atau di Lattice menarik tampilan kembali ke lagu saat ini.",
+        "basicsProgress": "Seret atau klik bilah kemajuan untuk melompat. Mengetuk kapsul akan mengembangkannya; setelah terbuka, mengetuk area kosong membuka halaman pemutar, atau di Lattice melipat kapsul kembali.",
         "basicsSlots": "Sisanya ditaruh di dua posisi kanan ini. Kamu memilih dua dari sepuluh aksi; selebihnya tidak ada di bilah — itulah sebabnya di sini tidak ada deretan tombol tetap.",
-        "basicsCollapsed": "Jauhkan penunjuk dan kapsul melipat kembali jadi satu bilah kemajuan. Bentuk inilah yang biasa kamu lihat; dekati dan ia mengembang lagi.",
+        "basicsCollapsed": "Kapsul melipat kembali jadi satu bilah kemajuan \u2014 bentuk inilah yang biasa kamu lihat. Ketuk, atau arahkan penunjuk ke atasnya, dan ia mengembang lagi.",
         "heightIntro": "Jarak bilah ini dari tepi bawah layar bisa diubah, dan kartu lagu serta panel samping di setiap halaman ikut bergeser.",
         "heightSettings": "Pintunya di Pengaturan \u2192 UI Bawah: satu penggeser untuk angkanya, dan \u201cAtur posisi di halaman pemutar\u201d di sebelahnya mengubah kapsul jadi sesuatu yang bisa diseret. Mencari perintah yang sama di command palette sama saja. Tombol di bawah membawamu ke sana.",
         "heightDrag": "Setelah mode atur posisi aktif, tahan kapsul di mana saja lalu seret ke atas atau bawah. Lepaskan untuk menerapkan, dan pengaturannya diingat.",
