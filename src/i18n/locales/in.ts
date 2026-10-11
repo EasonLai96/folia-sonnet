@@ -2028,6 +2028,8 @@ export default {
     "disableVisualizerVignette": "Nonaktifkan vignette",
     "disableVisualizerVignetteDesc": "Hanya menghapus vignette tepi latar belakang geometris. Latar belakang transparan dan bentuk geometris tetap terpisah.",
     "latticeSettings": "Tampilan dinding kolase",
+    "latticePerformanceMode": "Utamakan performa",
+    "latticePerformanceModeDesc": "Hanya mempertahankan flip, gelombang masuk, dan buka-tutup celah. Mematikan grain, vignette, tint, dan transisi bayangan, menurunkan resolusi sampul, serta mempersempit jangkauan kolase.",
     "latticeVignette": "Vignette tepi",
     "latticeVignetteDesc": "Gelapkan tepi kolase antrean dan dinding pustaka agar poster di tengah lebih menonjol.",
     "latticePosterTint": "Warna fokus poster",

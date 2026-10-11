@@ -13,6 +13,7 @@ import {
 import type { WallCameraRange } from '../../../components/wall/finiteWall';
 import { BRAVAIS_CAMERA_TWEEN_S, BRAVAIS_CULL_EDGE_MARGIN, BRAVAIS_OVERSCAN } from './bravaisConstants';
 import { rubberBand } from './bravaisFiniteWall';
+import { useLatticeSettingsStore } from '../../../stores/useLatticeSettingsStore';
 import type { BravaisFrameState } from './useBravaisFrame';
 
 // src/library/suites/bravais/useBravaisCamera.ts
@@ -60,6 +61,9 @@ export const useBravaisCamera = ({
     // useWallPointerPan 读写的是 Lattice 形状的平移相机：每次移动都同步它。
     const cameraRef = useRef<LatticeCamera>({ x: 0, y: 0, scale: 1 });
     const viewportRef = useRef({ width: 1, height: 1 });
+    // 性能优先：补间途中只保留目的地那一屏（预留得越多，world 层被重画的面积越大）。
+    const performanceMode = useLatticeSettingsStore(state => state.latticePerformanceMode);
+    const reservedViewports = performanceMode ? 1 : MAX_RESERVED_VIEWPORTS;
 
     const syncPointerCamera = useCallback(() => {
         const { view, center } = frameRef.current;
@@ -118,7 +122,8 @@ export const useBravaisCamera = ({
                     top: Math.min(current.top, destination.top),
                     bottom: Math.max(current.bottom, destination.bottom),
                 };
-                return area(merged) > area(destination) * MAX_RESERVED_VIEWPORTS ? destination : merged;
+                // 性能优先：飞行途中只保留目的地那一屏（预留得越多，world 层被重画的面积越大）。
+                return area(merged) > area(destination) * reservedViewports ? destination : merged;
             });
         }
         if (reducedMotion || duration <= 0) {
@@ -141,7 +146,7 @@ export const useBravaisCamera = ({
                 moveTo(target, true);
             },
         });
-    }, [frameRef, moveTo, reducedMotion, renderFrame, stopCamera, syncPointerCamera]);
+    }, [frameRef, moveTo, reducedMotion, renderFrame, reservedViewports, stopCamera, syncPointerCamera]);
 
     // B7 有限拼贴的相机范围：拖动中超出范围按阻尼走（弹性），惯性与滚轮硬钳制，松手后补间回范围里。
     const rangeRef = useRef<WallCameraRange | null>(null);

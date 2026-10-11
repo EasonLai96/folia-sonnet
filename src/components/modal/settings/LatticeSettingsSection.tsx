@@ -27,6 +27,8 @@ const LatticeSettingsSection: React.FC<LatticeSettingsSectionProps> = ({
     theme,
 }) => {
     const { t } = useTranslation();
+    const latticePerformanceMode = useLatticeSettingsStore(state => state.latticePerformanceMode);
+    const handleToggleLatticePerformanceMode = useLatticeSettingsStore(state => state.handleToggleLatticePerformanceMode);
     const latticeVignette = useLatticeSettingsStore(state => state.latticeVignette);
     const handleToggleLatticeVignette = useLatticeSettingsStore(state => state.handleToggleLatticeVignette);
     const posterTint = useLatticeSettingsStore(useShallow(state => ({
@@ -42,6 +44,26 @@ const LatticeSettingsSection: React.FC<LatticeSettingsSectionProps> = ({
 
     return (
         <div className={`p-4 rounded-xl border space-y-4 ${settingsCardClass}`}>
+            <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                    <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {t('options.latticePerformanceMode')}
+                    </div>
+                    <div className="text-xs opacity-50 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
+                        {t('options.latticePerformanceModeDesc')}
+                    </div>
+                </div>
+                <button
+                    onClick={() => handleToggleLatticePerformanceMode(!latticePerformanceMode)}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${!latticePerformanceMode ? toggleOffBackgroundClass : ''}`}
+                    style={{ backgroundColor: latticePerformanceMode ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                    aria-pressed={latticePerformanceMode}
+                    aria-label={t('options.latticePerformanceMode')}
+                >
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${latticePerformanceMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+            </div>
+            <div className={`border-t pt-4 ${settingsDividerClassFor(isDaylight)}`} />
             <div className="flex items-center justify-between gap-4">
                 <div className="space-y-1">
                     <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>

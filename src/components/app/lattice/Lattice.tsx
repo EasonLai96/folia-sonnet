@@ -62,6 +62,7 @@ export default function Lattice({
 }: LatticeProps) {
     countRender('Lattice');
     const { t } = useTranslation();
+    const performanceMode = useLatticeSettingsStore(state => state.latticePerformanceMode);
     const vignette = useLatticeSettingsStore(state => state.latticeVignette);
     const lightsOn = useLatticeSettingsStore(state => state.latticeLightsOn);
     const posterTintEnabled = useLatticeSettingsStore(state => state.latticePosterTintEnabled);
@@ -121,7 +122,7 @@ export default function Lattice({
         <LatticeLyricsProvider source={lyricSource} songKey={currentSong ? getPlaybackSongKey(currentSong) : ''}
             keywordColoringEnabled={lyricKeywordColoringEnabled}>
         <section
-            className={`lattice-root lattice-queue-root ${isDaylight ? 'is-daylight' : ''} ${vignette ? 'has-vignette' : ''} ${lightsOn ? '' : 'is-lights-out'} ${posterTintEnabled ? 'has-poster-tint' : ''} ${posterTintUseCustomColor ? 'uses-custom-poster-tint' : ''} ${surfaceOff ? 'is-handoff-surface-off' : ''}`}
+            className={`lattice-root lattice-queue-root ${isDaylight ? 'is-daylight' : ''} ${performanceMode ? 'is-performance' : ''} ${vignette ? 'has-vignette' : ''} ${lightsOn ? '' : 'is-lights-out'} ${posterTintEnabled ? 'has-poster-tint' : ''} ${posterTintUseCustomColor ? 'uses-custom-poster-tint' : ''} ${surfaceOff ? 'is-handoff-surface-off' : ''}`}
             data-wall-handoff={handoffRole ?? undefined}
             data-wall-handoff-phase={handoffPhase}
             data-wall-handoff-mode={handoffSession?.mode}
