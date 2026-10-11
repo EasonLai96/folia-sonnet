@@ -64,6 +64,7 @@ const BravaisAccount: React.FC<LibraryAccountSurfaceProps> = ({ account, isInter
     tRef.current = t;
     const actions = useMemo<BravaisAccountActions>(() => ({
         selectMethod: methodId => void accountRef.current.selectLoginMethod(methodId),
+        submitPassword: values => void accountRef.current.submitPasswordLogin(values),
         retry: () => void accountRef.current.retryLogin(),
         restart: () => void accountRef.current.restartLoginBackend(),
         copyDiagnostics: async () => {

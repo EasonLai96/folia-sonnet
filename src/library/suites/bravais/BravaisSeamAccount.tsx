@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import { AlertTriangle, Check, Loader2, RotateCcw, ServerCog, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Loader2, LogIn, RotateCcw, ServerCog, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { BravaisAccountForm, BravaisConfirmForm, BravaisLoginForm } from './bravaisAccountModel';
+import type { BravaisAccountForm, BravaisConfirmForm, BravaisLoginForm, BravaisLoginPassword } from './bravaisAccountModel';
 import { setBravaisAccountElement, useBravaisAccountStore, type BravaisAccountActions } from './bravaisAccountStore';
 import type { BravaisAccountSeamVariant } from './bravaisSeamTarget';
 import BravaisLoginFailureHelpView from './BravaisLoginFailureHelp';
@@ -44,6 +44,88 @@ const LoginQr: React.FC<{ qr: BravaisLoginForm['qr'] }> = ({ qr }) => (
         )}
     </div>
 );
+
+/**
+ * 密码登录的表单（飞牛这类自建服务）。三个框自己持有状态：提交失败时用户改过的东西必须还在，
+ * 而登录快照一变就会重渲染整个表单。提交走 actions.submitPassword，失败原因由快照带回来显示。
+ */
+const PasswordLoginForm: React.FC<{
+    password: BravaisLoginPassword;
+    onSubmit: (values: { serverUrl?: string; username: string; password: string }) => void;
+}> = ({ password, onSubmit }) => {
+    const [serverUrl, setServerUrl] = useState(password.serverUrl);
+    const [username, setUsername] = useState('');
+    const [userPassword, setUserPassword] = useState('');
+    const usernameRef = useRef<HTMLInputElement | null>(null);
+    // 缝里也是每次打开都是新的一次登录，焦点落在第一个要填的框上（独占按键层另外截住了按键）。
+    useEffect(() => { usernameRef.current?.focus({ preventScroll: true }); }, []);
+
+    const { busy } = password;
+    const canSubmit = !busy && username.trim().length > 0 && userPassword.length > 0
+        && (!password.needsServerUrl || serverUrl.trim().length > 0);
+    const submit = () => {
+        if (!canSubmit) return;
+        onSubmit({
+            ...(password.needsServerUrl ? { serverUrl: serverUrl.trim() } : {}),
+            username: username.trim(),
+            password: userPassword,
+        });
+    };
+    return (
+        <form
+            className="bravais-login-password"
+            data-bravais-login-password
+            onSubmit={event => { event.preventDefault(); submit(); }}
+        >
+            {password.needsServerUrl && (
+                <label className="bravais-login-field">
+                    <span className="is-label">{password.serverLabel}</span>
+                    <input
+                        type="text"
+                        value={serverUrl}
+                        disabled={busy}
+                        onChange={event => setServerUrl(event.target.value)}
+                        placeholder={password.serverPlaceholder}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                    />
+                </label>
+            )}
+            <label className="bravais-login-field">
+                <span className="is-label">{password.usernameLabel}</span>
+                <input
+                    ref={usernameRef}
+                    type="text"
+                    value={username}
+                    disabled={busy}
+                    onChange={event => setUsername(event.target.value)}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                />
+            </label>
+            <label className="bravais-login-field">
+                <span className="is-label">{password.passwordLabel}</span>
+                <input
+                    type="password"
+                    value={userPassword}
+                    disabled={busy}
+                    onChange={event => setUserPassword(event.target.value)}
+                />
+            </label>
+            {password.error && (
+                <p className="bravais-form-error" data-bravais-login-password-error>{password.error}</p>
+            )}
+            <span className="bravais-form-buttons">
+                <button type="submit" className="bravais-chrome-button is-primary" data-bravais-form-action="submit" disabled={!canSubmit}>
+                    {busy ? <Loader2 aria-hidden className="animate-spin" /> : <LogIn aria-hidden />}
+                    {busy ? password.submittingLabel : password.submitLabel}
+                </button>
+            </span>
+        </form>
+    );
+};
 
 const LoginView: React.FC<{ form: BravaisLoginForm; actions: BravaisAccountActions; live: boolean }> = ({ form, actions, live }) => {
     const { t } = useTranslation();
@@ -98,8 +180,11 @@ const LoginView: React.FC<{ form: BravaisLoginForm; actions: BravaisAccountActio
                     </div>
                 </div>
             )}
-            <BravaisSeamFlip flipKey={form.qr.kind} style={QR_FACE_STYLE}>
-                <LoginQr qr={form.qr} />
+            {/* 密码登录（飞牛这类自建服务）没有二维码：二维码位整块换成用户名 / 密码表单。 */}
+            <BravaisSeamFlip flipKey={form.password ? 'password' : form.qr.kind} style={QR_FACE_STYLE}>
+                {form.password
+                    ? <PasswordLoginForm password={form.password} onSubmit={values => actions.submitPassword(values)} />
+                    : <LoginQr qr={form.qr} />}
             </BravaisSeamFlip>
             {methods?.current && <p className="bravais-login-current">{methods.current}</p>}
             {form.status && (

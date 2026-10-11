@@ -73,6 +73,44 @@
 .bravais-login-method-options img { width: 18px; height: 18px; object-fit: contain; }
 .bravais-login-method-options svg { width: 13px; height: 13px; color: var(--text-accent, currentColor); }
 
+/* 密码登录（飞牛这类自建服务）：二维码位整块换成这张表单，宽度与二维码位对齐（缝里不跳动）。 */
+.bravais-login-password {
+    display: flex;
+    width: 216px;
+    flex: none;
+    flex-direction: column;
+    gap: 10px;
+    box-sizing: border-box;
+    align-self: center;
+}
+
+.bravais-login-password .bravais-login-field { display: flex; flex-direction: column; gap: 3px; }
+
+.bravais-login-password .is-label {
+    color: var(--bravais-seam-ink-soft);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.bravais-login-password input {
+    width: 100%;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    border-radius: 10px;
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    background: color-mix(in srgb, currentColor 6%, transparent);
+    outline: none;
+}
+
+.bravais-login-password input:focus { border-color: var(--text-accent, currentColor); }
+.bravais-login-password input:disabled { opacity: 0.5; }
+
 /* 二维码位：200px 的码 + 8px 白边，选方式的占位与后端故障同一个尺寸。 */
 .bravais-login-qr {
     display: grid;

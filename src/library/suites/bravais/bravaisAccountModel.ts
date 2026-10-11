@@ -33,6 +33,27 @@ export type BravaisLoginQr =
 
 export type BravaisLoginMethodOption = { id: string; label: string; iconKey: string; selected: boolean };
 
+/**
+ * 密码登录的表单（飞牛这类自建服务：没有二维码，只有用户名 + 密码，外加每家都不一样的服务器地址）。
+ * 二维码位整块换成这张表单；文案由 core 翻译好带过来，缝里不另起一套 i18n。
+ */
+export type BravaisLoginPassword = {
+    /** 要不要填服务器地址（飞牛要，因为地址每家都不一样）。 */
+    needsServerUrl: boolean;
+    /** 上一次填过的服务器地址（登出不清地址，重登时少填一项）。 */
+    serverUrl: string;
+    /** 提交中：输入框锁住、按钮转圈。 */
+    busy: boolean;
+    /** 上一次提交失败的原因（已翻译）；没有时不显示。 */
+    error: string | null;
+    serverLabel: string;
+    serverPlaceholder: string;
+    usernameLabel: string;
+    passwordLabel: string;
+    submitLabel: string;
+    submittingLabel: string;
+};
+
 /** 自检的一项：失败 / 提示项的文字带上错误码与域名，悬停提示是完整内容（与 grid 的自检摘要同一取法）。 */
 export type BravaisLoginSelfCheckItem = {
     id: LoginSelfCheckItem['id'];
@@ -76,6 +97,8 @@ export type BravaisLoginForm = {
     status: string | null;
     tone: 'normal' | 'success' | 'error';
     qr: BravaisLoginQr;
+    /** 密码登录（飞牛这类）：不为 null 时二维码位整块换成这张表单。 */
+    password: BravaisLoginPassword | null;
     /** provider 声明了多种方式（QQ 两步式）；current 是已选方式的说明，还没选时为 null。 */
     methods: { title: string; hint: string; current: string | null; options: readonly BravaisLoginMethodOption[] } | null;
     /**
@@ -150,6 +173,22 @@ export const projectBravaisLoginForm = (view: LibraryLoginView, features: Bravai
                 ? { kind: 'image', url: session.qrImageUrl }
                 : { kind: 'loading' };
     const canOfferRetry = (session.phase === 'expired' || session.phase === 'error') && !awaitingMethod && !backendFailure;
+    // 密码登录的表单：提交中 controller 把 phase 借给了 loading（与 grid 登录弹窗同一取法），所以按
+    // 「表单还在 + phase 是 loading」判 busy，别只看 phase —— 要码中也是 loading。
+    const password: BravaisLoginPassword | null = view.passwordForm
+        ? {
+            needsServerUrl: view.passwordForm.needsServerUrl,
+            serverUrl: view.passwordForm.serverUrl,
+            busy: session.phase === 'loading',
+            error: view.passwordForm.error,
+            serverLabel: view.passwordForm.serverLabel,
+            serverPlaceholder: view.passwordForm.serverPlaceholder,
+            usernameLabel: view.passwordForm.usernameLabel,
+            passwordLabel: view.passwordForm.passwordLabel,
+            submitLabel: view.passwordForm.submitLabel,
+            submittingLabel: view.passwordForm.submittingLabel,
+        }
+        : null;
     return {
         kind: 'login',
         providerId: session.providerId,
@@ -157,9 +196,11 @@ export const projectBravaisLoginForm = (view: LibraryLoginView, features: Bravai
         phase: session.phase,
         title: view.title,
         note: view.note,
-        status: view.status,
+        // 密码登录没有「刷新二维码」这回事：失败就在表单上方改，状态行会把人带偏。
+        status: password ? null : view.status,
         tone: resolveLoginTone(view),
         qr,
+        password,
         methods: methodStep
             ? {
                 title: methodStep.title,

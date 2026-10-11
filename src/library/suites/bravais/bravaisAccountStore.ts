@@ -11,6 +11,8 @@ import type { BravaisAccountForm } from './bravaisAccountModel';
 /** 表单里的动作（surface 给，身份稳定；每个都直接调账户 controller，不 await 它的事务）。 */
 export type BravaisAccountActions = {
     selectMethod: (methodId: string) => void;
+    /** 密码登录（飞牛这类自建服务）提交用户名 / 密码（外加服务器地址）。 */
+    submitPassword: (values: { serverUrl?: string; username: string; password: string }) => void;
     retry: () => void;
     restart: () => void;
     /** 生成诊断报告并复制到剪贴板：report 是生成出来的报告（生成失败为 null），copied 是复制成功。 */
