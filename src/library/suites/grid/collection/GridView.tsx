@@ -405,6 +405,8 @@ export const GridView: React.FC<GridViewProps> = ({
     const [isPlaylistPickerOpen, setIsPlaylistPickerOpen] = useState(false);
     const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState(false);
     const [isDeleteFolderOpen, setIsDeleteFolderOpen] = useState(false);
+    /** 待确认的本地删歌：文件夹集合里删一首是真的从曲库移除（安卓还删副本），所以先问一句。 */
+    const [pendingLocalRemoval, setPendingLocalRemoval] = useState<{ track: SongResult; entryKey: string } | null>(null);
     const [showCutInPanel, setShowCutInPanel] = useState(false);
     const [showSidePanel, setShowSidePanel] = useState(false);
     // 退场动画期间旧网格仍挂着：只有在场的那一个接键盘、筛选框和命令面板，
@@ -469,6 +471,7 @@ export const GridView: React.FC<GridViewProps> = ({
     const supportsLocalTrackSorting = isLocalCollection && collection?.type === 'folder';
     const {
         isLocalFolderCollection,
+        isLocalAllSongsCollection,
         canEditOwnedPlaylist,
         canEditProviderPlaylist,
         canEditPlaylist,
@@ -598,10 +601,15 @@ export const GridView: React.FC<GridViewProps> = ({
         await mutations.setDailyDate(date, { afresh });
     }, [mutationCapabilities.dailyDate.supported, mutations]);
 
+    // 本地文件夹（含虚拟的「全部歌曲」）里删一首是真的从曲库移除：安卓上导入时复制的那份音频也一起删，
+    // 所以要确认；歌单里的「删」只是把歌挪出歌单，不用问。
+    const confirmLocalSongRemoval = mutationCapabilities.removeEntry.supported
+        && (isLocalFolderCollection || isLocalAllSongsCollection);
+
     // 删一个条目（每日推荐是「不喜欢并换一首」）：先按住展示，控制器在上游确认后立即提交给资源；成功就给卡片
     // 打上 removing 播退出动画，动画结束再放开展示，失败立即放开。entryKey 就是卡片 id：重复序号在完整的
     // 展示列表上算（不受筛选影响），控制器自己在资源里解出原始下标。
-    const handleRemoveTrack = useCallback(async (track: SongResult, entryKey: string) => {
+    const runRemoveTrack = useCallback(async (track: SongResult, entryKey: string) => {
         if (!mutations || trackRemovalTimeoutsRef.current.has(entryKey)) return;
         trackRemovalSeqRef.current += 1;
         // 每次点击一个 token：同一张卡连点时，被挡掉（busy）的那一次只放开自己的，不会提前放开第一次的。
@@ -617,6 +625,14 @@ export const GridView: React.FC<GridViewProps> = ({
         if (!isMountedRef.current) return;
         if (result.ok) {
             playTrackRemovalAnimation(entryKey, holdToken);
+            // 本地曲库的删歌没有「撤销」：告诉用户一声，顺便说明副本也删了。
+            if (confirmLocalSongRemoval) {
+                onStatusMessage?.({
+                    type: 'success',
+                    text: t('localMusic.songRemoved', { name: track.name }),
+                    nonce: Date.now(),
+                });
+            }
             return;
         }
         releasePresentation(holdToken);
@@ -634,6 +650,7 @@ export const GridView: React.FC<GridViewProps> = ({
             });
         }
     }, [
+        confirmLocalSongRemoval,
         holdPresentation,
         isDailyRecommendationsCollection,
         mutations,
@@ -642,6 +659,15 @@ export const GridView: React.FC<GridViewProps> = ({
         releasePresentation,
         t,
     ]);
+
+    // 卡片上的删除按钮走这里：本地曲库的删歌先弹确认，其余照旧直接删。
+    const handleRemoveTrack = useCallback(async (track: SongResult, entryKey: string) => {
+        if (!confirmLocalSongRemoval) {
+            await runRemoveTrack(track, entryKey);
+            return;
+        }
+        setPendingLocalRemoval({ track, entryKey });
+    }, [confirmLocalSongRemoval, runRemoveTrack]);
 
     // 网格项**惰性**塑形（见 lazyGridItems.ts）：length 立刻可用，真对象只在被读到下标时才塑形。
     // 原来整表 map 一遍，5000 首实测 120ms，而分页每来一页都要重算 —— 大歌单打开时卡在这里。
@@ -1857,7 +1883,10 @@ export const GridView: React.FC<GridViewProps> = ({
                                         {isSourceActionPending ? <Loader2 size={14} className="animate-spin" /> : <Pencil size={14} />}
                                         {isDailyRecommendationsCollection
                                             ? (isEditMode ? t('home.finishManagingRecommendations') : t('home.manageRecommendations'))
-                                            : (isEditMode ? t('localMusic.finishEditing') : t('localMusic.editPlaylist'))}
+                                            : confirmLocalSongRemoval
+                                                // 文件夹集合：这个开关用来逐首删歌，不是编辑歌单。
+                                                ? (isEditMode ? t('localMusic.finishManaging') : t('localMusic.manageSongs'))
+                                                : (isEditMode ? t('localMusic.finishEditing') : t('localMusic.editPlaylist'))}
                                     </button>
                                 )}
                                 {mutationCapabilities.exportPlaylist.supported && (
@@ -1922,6 +1951,20 @@ export const GridView: React.FC<GridViewProps> = ({
                 onConfirm={(name) => {
                     void handleCreateNavidromePlaylist(name);
                 }}
+                isDaylight={isDaylight}
+            />
+            <ConfirmDialog
+                isOpen={Boolean(pendingLocalRemoval)}
+                title={t('localMusic.deleteSongTitle')}
+                description={t('localMusic.deleteSongMessage', { name: pendingLocalRemoval?.track.name ?? '' })}
+                confirmText={t('localMusic.deleteFromLibrary')}
+                confirmVariant="danger"
+                onConfirm={() => {
+                    const pending = pendingLocalRemoval;
+                    setPendingLocalRemoval(null);
+                    if (pending) void runRemoveTrack(pending.track, pending.entryKey);
+                }}
+                onClose={() => setPendingLocalRemoval(null)}
                 isDaylight={isDaylight}
             />
             <ConfirmDialog

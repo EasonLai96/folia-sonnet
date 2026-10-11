@@ -26,6 +26,11 @@ export type LibraryPlaylistOption = { id: string | number; name: string; descrip
 /** 本地曲库的来源动作；最后三个只打开宿主挂载的对话框。 */
 export interface LibraryLocalMutationPort {
     removePlaylistSongs?: (playlistId: string, songIds: string[]) => Promise<void> | void;
+    /**
+     * 从本地曲库删掉这几首歌（按曲库的 songId）。与 removePlaylistSongs 不同：那是把歌挪出歌单，
+     * 这是把歌从曲库里移除（安卓上连导入时复制的那份音频一起删），所以文件夹集合才有这个动作。
+     */
+    removeLocalSongs?: (songIds: string[]) => Promise<void> | void;
     /** 重新读取本地曲库（歌单、歌曲）。 */
     refresh?: () => Promise<void> | void;
     renamePlaylist?: (playlistId: string, name: string) => Promise<void> | void;

@@ -70,12 +70,18 @@ export const resolveCollectionMutationBranches = (input: CollectionMutationBranc
         && online.isOwned === true
         && canEditOnlineCollectionTracks,
     );
+    // 本地文件夹（含虚拟的「全部歌曲」）：能逐首删歌时就也有编辑开关 —— 它删的是曲库里的这首歌，
+    // 而安卓上导入的歌还带一份私有副本，一起删掉，所以这里要端口真的有 removeLocalSongs 才算。
+    const canManageLocalSongs = Boolean(
+        (isLocalFolderCollection || isLocalAllSongsCollection) && input.port.local?.removeLocalSongs,
+    );
     const canEditPlaylist = Boolean(
         canEditOwnedPlaylist
         || canEditProviderPlaylist
         || (isDailyRecommendationsCollection && !input.dailyDate)
         || isLocalPlaylistCollection
-        || isNavidromePlaylistCollection,
+        || isNavidromePlaylistCollection
+        || canManageLocalSongs,
     );
 
     const isCloudDrive = Boolean(collection && input.isCloudDrive);
@@ -108,8 +114,16 @@ export const resolveCollectionMutationBranches = (input: CollectionMutationBranc
     };
 };
 
-/** 删一个条目走哪条路。daily：不喜欢并换一首；local / navidrome：宿主端口；online：omni。 */
-export type CollectionEntryRemovalKind = 'daily-dislike' | 'local-playlist' | 'navidrome-playlist' | 'online-playlist';
+/**
+ * 删一个条目走哪条路。daily：不喜欢并换一首；local-songs：从本地曲库删掉这首歌（文件夹集合）；
+ * local / navidrome playlist：从歌单里挪出去；online：omni。
+ */
+export type CollectionEntryRemovalKind =
+    | 'daily-dislike'
+    | 'local-songs'
+    | 'local-playlist'
+    | 'navidrome-playlist'
+    | 'online-playlist';
 
 /**
  * 与 GridView 的 handleRemoveTrack 分支顺序一致。不同的是：没有对应端口时直接判为不支持，
@@ -122,6 +136,11 @@ export const resolveEntryRemovalKind = (
     if (branches.isDailyRecommendationsCollection) {
         // 看历史日期时没有编辑开关（canEditPlaylist 为假），也就删不了。
         return branches.canEditPlaylist ? 'daily-dislike' : null;
+    }
+    // 文件夹（含「全部歌曲」）在歌单分支之前判：两者互斥，但先判文件夹更好懂——
+    // 歌单是「挪出去」，文件夹是「从曲库删掉」。
+    if (branches.isLocalFolderCollection || branches.isLocalAllSongsCollection) {
+        return port.local?.removeLocalSongs ? 'local-songs' : null;
     }
     if (branches.isLocalPlaylistCollection) return port.local?.removePlaylistSongs ? 'local-playlist' : null;
     if (branches.isNavidromePlaylistCollection) return port.navidrome?.removePlaylistSongs ? 'navidrome-playlist' : null;

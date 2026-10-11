@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import type { UnifiedSong } from '../../types';
 import type { LocalGridViewCollectionDescriptor } from '../core/contracts/collection';
 import type { LibraryMutationPort, LibraryPlaylistOption } from '../core/contracts/ports';
-import { deleteFolderSongs, resyncAllFolders, resyncFolder } from '../../services/localMusicService';
+import { deleteFolderSongs, deleteSongsByIds, resyncAllFolders, resyncFolder } from '../../services/localMusicService';
 import { deleteLocalPlaylist, removeSongsFromLocalPlaylist, updateLocalPlaylist } from '../../services/localPlaylistService';
 import { downloadLocalPlaylistM3u8 } from '../../services/localPlaylistFileService';
 import { getNavidromeConfig, navidromeApi } from '../../services/navidromeService';
@@ -90,6 +90,11 @@ export const createLibraryMutationPort = ({
         },
         removePlaylistSongs: async (playlistId, songIds) => {
             await removeSongsFromLocalPlaylist(playlistId, songIds);
+        },
+        removeLocalSongs: async (songIds) => {
+            // 曲库里删掉（安卓上连导入时复制的音频一起删）；服务自己会通知曲库更新，这里再刷一次宿主的状态。
+            await deleteSongsByIds(songIds);
+            await surface.onRefreshLocalSongs();
         },
     },
     navidrome: {

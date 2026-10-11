@@ -232,6 +232,27 @@ export const createCollectionMutationController = (
 
     type RemovePlaylistSongs<T> = (playlistId: string, items: T[]) => Promise<void> | void;
 
+    /**
+     * 从本地曲库删掉这一首（文件夹 / 「全部歌曲」）。歌单里删是「挪出去」，这里是真删：
+     * 库记录、缓存封面、安卓上导入时复制的那份音频一并清掉，所以 renderer 要先问用户一句。
+     */
+    const removeLocalSong = async (
+        entry: LibraryEntryRef,
+        removeLocalSongs: (songIds: string[]) => Promise<void> | void,
+    ): Promise<LibraryMutationResult> => {
+        const songId = localSongIdOf(entry.track);
+        if (!songId) return fail('unsupported');
+        await removeLocalSongs([songId]);
+        // 与歌单那一条同理：按 songId 删，资源里同一首的全部条目一起去掉；本地资源会随曲库刷新换新。
+        try {
+            await inputs.resource?.removeTracks(track => localSongIdOf(track) === songId);
+        } catch (error) {
+            console.warn('[LibraryUi] Failed to commit local song removal:', error);
+        }
+        followUp('Refreshing local library', () => inputs.port.local?.refresh?.());
+        return OK;
+    };
+
     const removeLocal = async (
         entry: LibraryEntryRef,
         playlistId: string,
@@ -291,9 +312,10 @@ export const createCollectionMutationController = (
     // 同一首歌（在线 / 本地按歌删）或整个集合（串行的删除）作为去重范围。
     const removalScope = (kind: CollectionEntryRemovalKind, entry: LibraryEntryRef) => {
         if (isSerializedRemoval(kind)) return 'collection';
-        return kind === 'local-playlist'
-            ? `local:${localPlaylistSongIdOf(entry.track)}`
-            : `song:${getPlaybackSongKey(entry.track)}`;
+        // 本地按 songId 删（曲库里删一首 / 歌单里挪走一首）：同一首的全部条目算同一次。
+        if (kind === 'local-playlist') return `local:${localPlaylistSongIdOf(entry.track)}`;
+        if (kind === 'local-songs') return `local-song:${localSongIdOf(entry.track) ?? getPlaybackSongKey(entry.track)}`;
+        return `song:${getPlaybackSongKey(entry.track)}`;
     };
 
     const removeEntry = async (entry: LibraryEntryRef): Promise<LibraryMutationResult> => {
@@ -309,9 +331,12 @@ export const createCollectionMutationController = (
 
         let run: () => Promise<LibraryMutationResult>;
         const removeLocalSongs = port.local?.removePlaylistSongs;
+        const removeLibrarySongs = port.local?.removeLocalSongs;
         const removeNavidromeSongs = port.navidrome?.removePlaylistSongs;
         if (kind === 'daily-dislike') {
             run = () => removeDaily(entry);
+        } else if (kind === 'local-songs' && removeLibrarySongs) {
+            run = () => removeLocalSong(entry, removeLibrarySongs);
         } else if (kind === 'local-playlist' && descriptor.source === 'local' && descriptor.playlistId && removeLocalSongs) {
             const playlistId = descriptor.playlistId;
             run = () => removeLocal(entry, playlistId, removeLocalSongs);
