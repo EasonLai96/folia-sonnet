@@ -197,6 +197,11 @@ export interface LibraryHomePort {
     resyncAllFolders(): Promise<number>;
     /** 用宿主此刻的曲库匹配 m3u 文件里的路径并建歌单。 */
     importPlaylistFile(file: File): Promise<LibraryHomePlaylistImportResult>;
+    /**
+     * 从本地曲库删掉这几首歌（按曲库的 songId）。与集合里的「从歌单挪走」不同：这是真删
+     * —— 库记录、缓存封面，安卓上还有导入时复制的那份音频。
+     */
+    deleteLocalSongs(songIds: readonly string[]): Promise<void>;
     /** 重新读取本地曲库。 */
     refreshLocalSongs(): Promise<void> | void;
     /** 订阅扫描进度；返回退订函数。 */
@@ -222,6 +227,8 @@ export interface LibraryHomeActionsController {
     scanDeviceMusic(): Promise<LibraryHomeActionResult>;
     refreshFolders(): Promise<LibraryHomeActionResult>;
     importPlaylistFile(file: File): Promise<LibraryHomeActionResult>;
+    /** 从本地曲库删歌（管理对话框用）；删完刷新曲库并提示删了几首。 */
+    deleteLocalSongs(songIds: readonly string[]): Promise<LibraryHomeActionResult>;
     /** 取私人 FM 并从第一首开始播放（取不到歌时什么都不做）。 */
     playPersonalFm(): Promise<LibraryHomeActionResult>;
     /** 打开在线卡片：私人 FM 直接播放，其余交给宿主打开集合。 */

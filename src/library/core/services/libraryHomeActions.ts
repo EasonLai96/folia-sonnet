@@ -149,6 +149,24 @@ export const createLibraryHomeActions = (port: LibraryHomePort): LibraryHomeActi
             }
         },
 
+        /**
+         * 从本地曲库删歌。与导入共用「忙」：正在导入时删会让两边看到的曲库不一致
+         * （删掉的歌可能正被重扫带回来），所以直接回 busy。
+         */
+        deleteLocalSongs: async (songIds) => {
+            const ids = Array.from(new Set(songIds));
+            if (ids.length === 0) return OK;
+            if (isHomeImportBusy(snapshot)) return BUSY;
+            await port.deleteLocalSongs(ids);
+            await port.refreshLocalSongs();
+            port.notify({
+                kind: 'status',
+                type: 'success',
+                message: { key: 'localMusic.songsRemoved', values: { count: ids.length } },
+            });
+            return OK;
+        },
+
         playPersonalFm,
 
         openOnlineCard: async (card: LibraryHomeCard, providerId: string, open: LibraryHomeOpenCollection) => {

@@ -26,6 +26,7 @@ const createPort = (patch: Partial<LibraryHomePort> = {}) => {
         importFolder: vi.fn(async () => 2),
         resyncAllFolders: vi.fn(async () => 1),
         importPlaylistFile: vi.fn(async () => ({ playlistName: 'List', matchedCount: 3, skippedCount: 0 })),
+        deleteLocalSongs: vi.fn(async () => {}),
         refreshLocalSongs: vi.fn(),
         subscribeScanProgress: vi.fn((listener) => {
             scanListener = listener;
@@ -101,6 +102,29 @@ describe('createLibraryHomeActions — local imports', () => {
         expect(notices).toEqual([]);
         expect(port.refreshLocalSongs).not.toHaveBeenCalled();
         error.mockRestore();
+    });
+
+    it('deleting local songs removes them, refreshes the library and reports the count', async () => {
+        const { port, notices } = createPort();
+        const actions = createLibraryHomeActions(port);
+        expect(await actions.deleteLocalSongs(['a', 'b', 'a'])).toEqual({ ok: true });
+        // 去重写进了端口：同一首重复选中时只删一次。
+        expect(port.deleteLocalSongs).toHaveBeenCalledWith(['a', 'b']);
+        expect(port.refreshLocalSongs).toHaveBeenCalledTimes(1);
+        expect(notices).toEqual([{ kind: 'status', type: 'success', message: { key: 'localMusic.songsRemoved', values: { count: 2 } } }]);
+    });
+
+    it('deleting nothing is a no-op; deleting while an import runs is busy', async () => {
+        const { port, emitScan } = createPort();
+        const actions = createLibraryHomeActions(port);
+        expect(await actions.deleteLocalSongs([])).toEqual({ ok: true });
+        expect(port.deleteLocalSongs).not.toHaveBeenCalled();
+
+        const unsubscribe = actions.subscribe(() => {});
+        emitScan({ active: true, folderName: 'Music', totalSongs: 10, completedSongs: 2 });
+        expect(await actions.deleteLocalSongs(['a'])).toEqual({ ok: false, reason: 'busy' });
+        expect(port.deleteLocalSongs).not.toHaveBeenCalled();
+        unsubscribe();
     });
 
     it('an active scan blocks folder import and refresh, but not a playlist file import', async () => {

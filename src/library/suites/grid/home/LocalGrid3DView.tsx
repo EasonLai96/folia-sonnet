@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileUp, FolderOpen, Loader2, Music, ListMusic, User, Disc3, RefreshCw, Smartphone } from 'lucide-react';
+import { FileUp, FolderOpen, Loader2, Music, ListMusic, User, Disc3, RefreshCw, Smartphone, ListChecks } from 'lucide-react';
 import DesktopGrid3DSurface, { DesktopGrid3DAction } from './DesktopGrid3DSurface';
+import LocalSongManagerDialog from './LocalSongManagerDialog';
 import { LocalPlaylist, LocalSong, Theme } from '../../../../types';
 import type { GridViewCollectionDescriptor } from '../../../../components/app/home/gridViewCollectionAdapters';
 import { useDebouncedFocusSync } from '../../../../hooks/useDebouncedFocusSync';
@@ -34,6 +35,7 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
     'refresh-folders': <RefreshCw size={13} />,
     'import-playlist': <FileUp size={13} />,
     'scan-device-music': <Smartphone size={13} />,
+    'manage-songs': <ListChecks size={13} />,
 };
 
 interface LocalGrid3DViewProps {
@@ -95,6 +97,8 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
 }) => {
     const { t } = useTranslation();
     const playlistFileInputRef = useRef<HTMLInputElement>(null);
+    // 「管理歌曲」对话框：本地曲库删歌的唯一入口（文件夹里的逐首删在集合视图，这里是整库的管理）。
+    const [isManageOpen, setIsManageOpen] = useState(false);
     const directoryTrees = useLocalDirectoryTrees(directoryTreesResource, localSongs);
     const local = useLibraryHomeLocal({ localSongs, localPlaylists, catalog: localLibraryCatalog, activeRow });
     const { snapshot: actionState, importBusy } = useLibraryHomeActions(homeActions);
@@ -137,11 +141,14 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
         else if (id === 'refresh-folders') void homeActions.refreshFolders();
         else if (id === 'import-playlist') playlistFileInputRef.current?.click();
         else if (id === 'scan-device-music') void homeActions.scanDeviceMusic();
+        else if (id === 'manage-songs') setIsManageOpen(true);
     };
 
     // 安卓原生才有「扫描设备音乐库」：core 不做平台判定，由这里按运行时告诉它。
+    // 「管理歌曲」的对话框是这个 suite 挂的，所以也由这里告诉 core 有这条入口。
     const localActions = resolveLocalHomeActions(actionState, {
         deviceScan: isAndroidNativeRuntime(),
+        manageSongs: true,
     });
     const actions: DesktopGrid3DAction[] = localActions.map(action => ({
         id: action.id,
@@ -240,6 +247,15 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
                 batchConfig={localBatchConfig}
                 ponderControls="local-grid-controls"
                 gridMapPonderScope="local-grid-map-page"
+            />
+            <LocalSongManagerDialog
+                isOpen={isManageOpen}
+                songs={localSongs}
+                isDaylight={isDaylight}
+                onDelete={async (songIds) => {
+                    await homeActions.deleteLocalSongs(songIds);
+                }}
+                onClose={() => setIsManageOpen(false)}
             />
         </>
     );

@@ -279,7 +279,7 @@ export const localBatchSelectionType = (section: LocalHomeSectionKey): LibraryDi
  */
 export const resolveLocalHomeActions = (
     snapshot: LibraryHomeActionsSnapshot,
-    options: { deviceScan?: boolean } = {},
+    options: { deviceScan?: boolean; manageSongs?: boolean } = {},
 ): LibraryHomeListAction[] => {
     const busy = isHomeImportBusy(snapshot);
     const scanning = Boolean(snapshot.scan?.active) || snapshot.refreshingFolders;
@@ -305,6 +305,15 @@ export const resolveLocalHomeActions = (
             pending: snapshot.importingPlaylist,
             disabled: busy || snapshot.importingPlaylist,
         },
+        // 「管理歌曲」打开一个能逐首 / 批量删歌的对话框：只有网格 suite 挂了这个对话框，
+        // TUI 那种纯文本列表没有它，按钮就不该出现。
+        ...(options.manageSongs ? [{
+            id: 'manage-songs' as const,
+            labelKey: 'localMusic.manageSongs',
+            titleKey: 'localMusic.manageSongs',
+            pending: false,
+            disabled: busy,
+        }] : []),
         // 安卓专属：系统文件管理器挑不出「设备里已经收录的所有音乐」，得靠 MediaStore 扫。
         ...(options.deviceScan ? [{
             id: 'scan-device-music' as const,
