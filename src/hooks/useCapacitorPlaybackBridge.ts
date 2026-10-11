@@ -3,6 +3,7 @@ import { registerPlugin } from '@capacitor/core';
 import { isCapacitorAndroid } from '../platform/runtime';
 import type { SongResult } from '../types';
 import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../services/onlineMusic/songMetadata';
+import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 
@@ -29,6 +30,14 @@ interface FoliaPlaybackPlugin {
     durationMs?: number;
     /** 通知栏封面角标用哪颗图标（当前播放来源的平台，本地等自家人传 'folia'）。 */
     providerBadge?: string | null;
+    /**
+     * 当前这首歌的身份。
+     *
+     * 原生拿它跟上一首比：不一样就是换歌了，先把上一首的封面丢掉。没有它就分不清
+     * 「这首歌没有封面」和「还没拿到封面」——后一种情况下旧封面会被一直挂着，
+     * 通知栏于是先画出上一首的图，等原生按 URL 下载完才换成当前的。
+     */
+    songKey?: string | null;
   }): Promise<void>;
   /** 更新播放状态。playing=true 时服务会真正进入前台。 */
   setState(options: {
@@ -187,20 +196,35 @@ export const useCapacitorPlaybackBridge = ({
       return;
     }
     const coverUrl = cachedCoverUrl || getSongCoverUrl(currentSong) || '';
+    const songKey = getPlaybackSongKey(currentSong);
+    const metadata = {
+      title: currentSong.name || '',
+      artist: getSongArtistLabel(currentSong) || '',
+      album: getSongAlbumLabel(currentSong) || '',
+      // 封面地址一并给过去：WebView 里 fetch 远端封面常被 CORS 挡掉，
+      // 原生下载没有这个限制，通知栏因此总能拿到对应的封面。
+      artworkUrl: coverUrl || null,
+      durationMs: getDurationMs(currentSong),
+      providerBadge: resolveProviderBadge(currentSong),
+      songKey,
+    };
+
+    // 分两次发：先不带封面发一次，让原生立刻换标题并把上一首的封面丢掉，再等封面抓到补一次。
+    //
+    // 合成一次（等 base64 拿到再发）的话，封面抓取的这一段时间里原生手上的还是上一首的图，
+    // 通知栏就先画出上一首的封面，等下载线程跑完才换成当前歌 —— 看着就是封面慢了一拍。
+    let cancelled = false;
     void (async () => {
-      const artworkBase64 = coverUrl ? await loadArtworkAsBase64(coverUrl) : null;
-      await FoliaPlayback.update({
-        title: currentSong.name || '',
-        artist: getSongArtistLabel(currentSong) || '',
-        album: getSongAlbumLabel(currentSong) || '',
-        artworkBase64,
-        // 封面地址一并给过去：WebView 里 fetch 远端封面常被 CORS 挡掉，
-        // 原生下载没有这个限制，通知栏因此总能拿到对应的封面。
-        artworkUrl: coverUrl || null,
-        durationMs: getDurationMs(currentSong),
-        providerBadge: resolveProviderBadge(currentSong),
-      });
+      await FoliaPlayback.update({ ...metadata, artworkBase64: null });
+      if (!coverUrl) return;
+      const artworkBase64 = await loadArtworkAsBase64(coverUrl);
+      // 抓封面期间可能已经切歌了，晚到的这张不能贴到新歌上。
+      if (cancelled || !artworkBase64) return;
+      await FoliaPlayback.update({ ...metadata, artworkBase64 });
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [enabled, currentSong, cachedCoverUrl]);
 
   // 播放状态：playing 时服务进入前台，这是后台网络不被节流的关键。

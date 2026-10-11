@@ -81,6 +81,9 @@ public class FoliaPlaybackPlugin extends Plugin {
         // 封面角标用哪颗图标：当前播放来源的平台（netease/qq/kugou/bodian/folia）。
         String providerBadge = call.getString("providerBadge");
         if (providerBadge != null) intent.putExtra(FoliaPlaybackService.EXTRA_PROVIDER_BADGE, providerBadge);
+        // 当前这首歌的身份：服务端拿它判断是不是换歌了，换歌时要先丢掉上一首的封面。
+        String songKey = call.getString("songKey");
+        if (songKey != null) intent.putExtra(FoliaPlaybackService.EXTRA_SONG_KEY, songKey);
 
         startServiceCompat(activity, intent);
         call.resolve();

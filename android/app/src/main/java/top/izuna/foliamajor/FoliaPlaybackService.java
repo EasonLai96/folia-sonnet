@@ -60,6 +60,8 @@ public class FoliaPlaybackService extends android.app.Service {
     private String cachedArtist = "";
     private String cachedAlbum = "";
     private Bitmap cachedArtwork;
+    /** 上一首歌的身份（Web 层给的 songKey），用来判断这次 update 是不是换歌了。 */
+    private String cachedSongKey = null;
     private int cachedState = PlaybackStateCompat.STATE_NONE;
     private long cachedDurationMs = 0L;
     private long cachedPositionMs = 0L;
@@ -264,8 +266,23 @@ public class FoliaPlaybackService extends android.app.Service {
         String artworkUrl = intent.getStringExtra(EXTRA_ARTWORK_URL);
         long durationMs = intent.getLongExtra(EXTRA_DURATION, 0L);
         String providerBadge = intent.getStringExtra(EXTRA_PROVIDER_BADGE);
+        String songKey = intent.getStringExtra(EXTRA_SONG_KEY);
         if (providerBadge != null) {
             cachedBadgeRes = providerIconRes(providerBadge);
+        }
+
+        // 换歌了：先把上一首的封面丢掉。
+        //
+        // 原来只在 decodeArtwork 拿到新图时才覆盖 cachedArtwork，于是「新封面还没到」和
+        // 「这首歌没有封面」这两种情况都会让上一首的 Bitmap 一直挂着 —— 换歌那一刻 Web 层
+        // 给的 base64 通常还是 null（封面要抓取 + 编码，慢一拍），通知栏就先画出上一首的
+        // 封面，等下面按 URL 的下载跑完才换成当前歌。宁可中间没有大图，也不要错的图。
+        boolean songChanged = songKey != null && !songKey.equals(cachedSongKey);
+        if (songChanged) {
+            cachedSongKey = songKey;
+            cachedArtwork = null;
+            // 让这次的 artworkUrl 能重新触发下载（同一个地址在同一首歌里只下一次）。
+            pendingArtworkUrl = null;
         }
 
         // 先更新缓存，再重建通知：metadata 与 state 是两次独立调用，
@@ -302,17 +319,32 @@ public class FoliaPlaybackService extends android.app.Service {
             pendingArtworkUrl = artworkUrl;
             fetchArtwork(artworkUrl);
         }
+
+        // 已经贴出去的通知要再 post 一次才会带上新内容。
+        //
+        // promoteToForeground() 在已经前台化时会直接返回（那是它按设计该做的：位置每秒推一次，
+        // 不该每秒重建一遍通知），而它也是 onStartCommand 里唯一的重建点 —— 于是 metadata 变了
+        // 通知却不刷新，只有下载线程那条路径会顺手 notify 一次。这也是「封面慢一拍」的一半原因。
+        if (foregrounded) {
+            notificationManager.notify(NOTIFICATION_ID, buildForegroundNotification());
+        }
     }
 
-    /** 上一次已经发起下载的封面地址，避免同一首歌反复下载。 */
-    private String pendingArtworkUrl = null;
+    /**
+     * 上一次已经发起下载的封面地址，避免同一首歌反复下载。
+     *
+     * volatile：下载线程回来时要读它判断自己是不是已经过期了，而写发生在主线程。
+     */
+    private volatile String pendingArtworkUrl = null;
 
     private void fetchArtwork(final String url) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 Bitmap bitmap = downloadBitmap(url);
-                if (bitmap == null) {
+                // 下载期间可能已经切歌了：pendingArtworkUrl 已经换成新歌的地址，这张晚到的图要丢掉，
+                // 否则会把上一首的封面贴到当前歌上。
+                if (bitmap == null || !url.equals(pendingArtworkUrl)) {
                     return;
                 }
                 cachedArtwork = bitmap;
@@ -615,6 +647,8 @@ public class FoliaPlaybackService extends android.app.Service {
     static final String EXTRA_DURATION = "duration";
     /** 封面角标（通知 small icon）用哪颗图标：当前播放来源的平台 key。 */
     static final String EXTRA_PROVIDER_BADGE = "providerBadge";
+    /** 当前这首歌的身份：与上一次不同就是换歌了，换歌时先丢掉上一首的封面。 */
+    static final String EXTRA_SONG_KEY = "songKey";
     static final String EXTRA_STATE = "state";
     static final String EXTRA_POSITION = "position";
     /** 拖动通知栏进度条时带回的目标位置（毫秒）。 */
