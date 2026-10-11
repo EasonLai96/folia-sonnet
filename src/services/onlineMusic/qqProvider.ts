@@ -593,6 +593,42 @@ const checkQr = async (key: string): Promise<QrLoginState> => {
     };
 };
 
+/**
+ * 从 `/user/playlist` 的回包里把歌单数组尽量捞全。
+ *
+ * 后端是用户自己部署的 qq-music-api，版本之间回包形状并不一致：
+ * 有的把「自建 + 收藏」合在 `playlist` 一个数组里（GetPlaylistByUin），
+ * 有的把它们分开放在 `create` / `collect`（或整体再套一层 `data`）。
+ * 只认 `playlist` 一种，就会出现「只拿到我喜欢的音乐，收藏的那些一个都没有」。
+ * 所以这里把所有出现过的数组都收进来，再按 id 去重。
+ */
+const collectPlaylistArrays = (response: unknown): unknown[] => {
+    const root = (response ?? {}) as Record<string, any>;
+    const data = (root.data ?? {}) as Record<string, any>;
+    const creator = (data.creator ?? root.creator ?? {}) as Record<string, any>;
+    const buckets: unknown[] = [
+        root.playlist, root.list, root.create, root.created, root.collect, root.collected,
+        data.playlist, data.list, data.create, data.created, data.collect, data.collected,
+        creator.create, creator.created, creator.collect, creator.collected,
+    ];
+    const merged: unknown[] = [];
+    const seen = new Set<string>();
+    for (const bucket of buckets) {
+        if (!Array.isArray(bucket)) continue;
+        for (const item of bucket) {
+            const key = (() => {
+                const record = (item ?? {}) as Record<string, any>;
+                const id = record.tid ?? record.dissid ?? record.dirId ?? record.dirid ?? record.id;
+                return id === undefined ? JSON.stringify(item) : String(id);
+            })();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(item);
+        }
+    }
+    return merged;
+};
+
 // `/user/playlist` returns the whole GetPlaylistByUin list and takes no upstream paging parameters,
 // so the Omni page window is applied locally instead of being forwarded.
 const getUserPlaylists = async (
@@ -603,18 +639,25 @@ const getUserPlaylists = async (
     // 不传 `uid`：会话账号是这条 route 唯一读得到的账号，而后端从凭据里挑出来的账号 ID 比前端
     // 手上这个展示用的可靠 —— 微信凭据的 `musicid` 是占位的 0，回传它只会让自建歌单整段消失。
     const response = await requestQq<any>('user_playlist', {});
-    const playlists = Array.isArray(response?.playlist) ? response.playlist : [];
+    const playlists = collectPlaylistArrays(response);
     const items = playlists
         .slice(offset, offset + Math.max(0, limit))
         .map((item: unknown) => normalizeQqCollection(item));
     const nextOffset = offset + items.length;
-    const total = Number(response?.total);
+    const total = Number(response?.total ?? response?.data?.total);
     if (offset === 0) {
         // `more` reports an upstream continuation this endpoint cannot request, so it is only observable here.
         console.info('[QQProvider] playlists:loaded', {
             count: playlists.length,
             ...(Number.isFinite(total) ? { total } : {}),
             more: Boolean(response?.more),
+            // 回包到底长什么样只在这里记一次：只拿到「我喜欢的音乐」时，
+            // 一眼就能看出后端是把收藏放在了另一个字段里，还是压根没给。
+            rootKeys: Object.keys((response ?? {}) as Record<string, unknown>),
+            ...(Array.isArray(response?.playlist) ? { rawPlaylistCount: response.playlist.length } : {}),
+            firstItemKeys: playlists.length > 0
+                ? Object.keys((playlists[0] ?? {}) as Record<string, unknown>)
+                : [],
         });
     }
 
