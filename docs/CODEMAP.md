@@ -36,12 +36,12 @@
 | 512+ | `src/types.ts` |
 | 128+ | `src/types/onlineMusic.ts` |
 | 64+ | `src/components/command-palette/types.ts` |
+| 64+ | `src/components/visualizer/colorMix.ts` |
 | 64+ | `src/library/core/contracts/suite.ts` |
 | 64+ | `src/types/ponder.ts` |
 | 64+ | `src/utils/appPlaybackGuards.ts` |
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/ponder/surfaces/ponderSurfaceGeometry.ts` |
-| 32+ | `src/components/visualizer/colorMix.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
 | 32+ | `src/components/wall/wallSlots.ts` |
 | 32+ | `src/i18n/config.ts` |
@@ -61,6 +61,7 @@
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
 | 32+ | `src/types/localLibrary.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
+| 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
 | 32+ | `src/utils/lyrics/renderHints.ts` |
 | 32+ | `test/component/fixtures.ts` |
@@ -116,6 +117,7 @@
 - `dev/probes/themePark.probe.tsx`
 - `dev/probes/trackTitleNavigator.probe.tsx`
 - `dev/probes/visualizerMemory.probe.tsx`
+- `dev/probes/wallToolsIsland.probe.tsx`
 - `dev/probes/wallpaperEntryConfirm.probe.tsx`
 
 ### `src/components/ponder/ponderRegistry.ts`

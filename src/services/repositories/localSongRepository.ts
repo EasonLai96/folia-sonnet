@@ -38,11 +38,14 @@ const yieldToMainThread = (): Promise<void> => (
   new Promise(resolve => setTimeout(resolve, 0))
 );
 
-export const readLocalSongs = async (): Promise<LocalSong[]> => {
-  const storedSongs = await appDatabase.local_music.toArray();
-  // 让 IndexedDB 的 onsuccess 回调先收尾：曲库一大，这里的逐条归一化会把那个回调本身
-  // 变成长任务，本地页（以及启动时的播放恢复）就此卡住 —— 表现就是「本地打不开」。
-  await yieldToMainThread();
+// 读时归一化（清掉遗留封面）+ 歌词 render hint 迁移，改动的记录在后台写回。
+// 全程按块切片并让出主线程：曲库一大，逐条归一化会把 IndexedDB 的 onsuccess 回调本身
+// 变成长任务，本地页（以及启动时的播放恢复）就此卡住 —— 表现就是「本地打不开」。
+const migrateStoredLocalSongs = async (storedSongs: LocalSong[]): Promise<LocalSong[]> => {
+  // 让 IndexedDB 的 onsuccess 回调先收尾；单条读取没有这个负担，不必凭空多跳一次宏任务。
+  if (storedSongs.length > LOCAL_SONG_MAINTENANCE_CHUNK) {
+    await yieldToMainThread();
+  }
 
   const normalizedSongs: LocalSong[] = [];
   const sanitizedSongs: LocalSong[] = [];
@@ -79,6 +82,16 @@ export const readLocalSongs = async (): Promise<LocalSong[]> => {
     });
   }
   return migratedSongs;
+};
+
+export const readLocalSongs = async (): Promise<LocalSong[]> => (
+  migrateStoredLocalSongs(await appDatabase.local_music.toArray())
+);
+
+// 按主键读一条记录，读时迁移与 readLocalSongs 一致；播放和匹配路径只关心一首歌时用它，不读整张表。
+export const readLocalSong = async (id: string): Promise<LocalSong | undefined> => {
+  const storedSong = await appDatabase.local_music.get(id);
+  return storedSong ? (await migrateStoredLocalSongs([storedSong]))[0] : undefined;
 };
 
 export const removeLocalSong = async (id: string): Promise<void> => {

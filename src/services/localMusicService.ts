@@ -93,6 +93,9 @@ interface ImportDiffPlan {
 // In-memory storage for hot-path access. Persistent recovery uses directory handles from IndexedDB.
 const fileHandleMap = new Map<string, FileSystemFileHandle>();
 const localCoverAssetRequestMap = new Map<string, Promise<LocalSong>>();
+// 解析过、确认没有内嵌封面的文件：歌曲 id → 当时文件的「大小:修改时间」。没封面时没有可落库的东西，
+// 不记下来的话每次播放都要在出声前把文件重新解析一遍。文件被替换后大小或修改时间变了，就会重新解析。
+const songsWithoutEmbeddedCover = new Map<string, string>();
 const BROWSER_AUDIO_EXTENSIONS = /\.(mp3|flac|m4a|wav|ogg|opus|aac)$/i;
 const ELECTRON_FALLBACK_AUDIO_EXTENSIONS = /\.(alac|ape|wv|tta|wma|aif|aiff|caf)$/i;
 const KNOWN_AUDIO_EXTENSIONS = /\.(mp3|flac|m4a|wav|ogg|opus|aac|alac|ape|wv|tta|wma|aif|aiff|caf)$/i;
@@ -1822,10 +1825,19 @@ async function extractAndPersistSongCover(
     fileHandle: FileSystemFileHandle | null,
     file?: File,
 ): Promise<LocalSong> {
+    // 安卓没有 File System Access 句柄，字节只能从原生回环服务那份 File 里来；桌面走句柄。
     const source = file ?? await fileHandle?.getFile();
     if (!source) return song;
+    // 抽不出封面的文件按「内容修订」记一笔：同一首歌反复进屏时不再重复解一遍整段元数据。
+    // 安卓那条路只取头部 1MB，截断文件的修订与整份不同，所以整份路径仍会再试一次。
+    const fileRevision = `${source.size}:${source.lastModified}`;
+    if (songsWithoutEmbeddedCover.get(song.id) === fileRevision) return song;
     const metadata = await extractEmbeddedMetadata(source, true);
-    if (!metadata.cover || !metadata.coverAssetId) return song;
+    if (!metadata.cover || !metadata.coverAssetId) {
+        songsWithoutEmbeddedCover.set(song.id, fileRevision);
+        return song;
+    }
+    songsWithoutEmbeddedCover.delete(song.id);
     stageLocalCoverAsset(metadata.coverAssetId, metadata.cover);
 
     const updatedSong: LocalSong = {
@@ -1949,6 +1961,7 @@ export async function deleteSongsByIds(songIds: string[]): Promise<void> {
     uniqueSongIds.forEach(id => {
         fileHandleMap.delete(id);
         localCoverAssetRequestMap.delete(id);
+        songsWithoutEmbeddedCover.delete(id);
     });
     await Promise.all([
         dbDeleteLocalSongs(uniqueSongIds),
@@ -2069,6 +2082,7 @@ async function deleteFolderContents(folderName: string): Promise<void> {
     songIdsToDelete.forEach(id => {
         fileHandleMap.delete(id);
         localCoverAssetRequestMap.delete(id);
+        songsWithoutEmbeddedCover.delete(id);
     });
     await Promise.all([
         dbDeleteLocalSongs(songIdsToDelete),

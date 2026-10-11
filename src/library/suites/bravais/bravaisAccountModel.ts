@@ -82,7 +82,8 @@ export type BravaisLoginSelfCheck = {
 export type BravaisLoginFailureHelp = {
     tips: { title: string; items: readonly string[] };
     selfCheck: BravaisLoginSelfCheck | null;
-    escalation: { label: string; prompt: string };
+    /** elsewhere 非 null 时不给去 GitHub 反馈的按钮（网页版部署问题、非官方构建），prompt 已是这句。 */
+    escalation: { label: string; prompt: string; elsewhere: string | null };
 };
 
 export type BravaisLoginForm = {
@@ -157,7 +158,7 @@ export const projectBravaisFailureHelp = (view: LibraryLoginView, features: Brav
     return {
         tips: { title: failureTips.title, items: failureTips.items },
         selfCheck: projectBravaisSelfCheck(view.selfCheck),
-        escalation: { label: failureTips.escalation, prompt: diagnosticsPrompt },
+        escalation: { label: failureTips.escalation, prompt: diagnosticsPrompt, elsewhere: view.reportElsewhereNote },
     };
 };
 
