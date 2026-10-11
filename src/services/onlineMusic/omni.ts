@@ -19,6 +19,7 @@ import type {
     PersonalFmRequestOptions,
     ProviderCatalogEntityKind,
     LoginSelfCheckResult,
+    PasswordLoginCredentials,
     QrLoginMethod,
     QrLoginState,
 } from '../../types/onlineMusic';
@@ -221,6 +222,18 @@ export const omni = {
         const provider = requireOnlineMusicProvider(providerId);
         if (!provider.auth) return unsupported(providerId, 'auth');
         await provider.auth.logout();
+    },
+
+    /** 用户名密码登录（飞牛这类自建服务）。没有这个能力就抛 unsupported，界面不会走到这里。 */
+    async loginWithPassword(providerId: OmniProviderId, credentials: PasswordLoginCredentials): Promise<OmniUser | null> {
+        const auth = requireOnlineMusicProvider(providerId).auth;
+        if (!auth?.loginWithPassword) return unsupported(providerId, 'password-login');
+        return auth.loginWithPassword(credentials);
+    },
+
+    /** 密码登录表单的预填值（上次填过的服务器地址）；provider 不提供就是空对象。 */
+    getPasswordLoginDefaults(providerId: OmniProviderId): { serverUrl?: string } {
+        return requireOnlineMusicProvider(providerId).auth?.getPasswordLoginDefaults?.() ?? {};
     },
 
     // 没有这个能力就回空数组，UI 据此走单步流程；netease / kugou 完全不受影响。

@@ -50,6 +50,7 @@ const createSession = async () => {
             const key = await qqAuth.getQrKey!(methodId);
             return { key, imageUrl: await qqAuth.createQr!(key) };
         },
+        loginWithPassword: async () => null,
         checkQrLogin: (_providerId, key) => qqAuth.checkQr!(key),
         cancelQrLogin: (_providerId, key) => qqAuth.cancelQr!(key),
         getQrTtlMs: () => null,

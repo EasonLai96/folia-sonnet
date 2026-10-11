@@ -40,8 +40,10 @@ import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
@@ -909,9 +911,22 @@ public class FoliaNativePlugin extends Plugin {
             call.resolve(empty);
             return;
         }
+        // 自建服务（飞牛）的音频流要带 `Cookie: music-token=...`，而且地址是用户自己填的、
+        // 不在白名单里 —— 两者都只能由调用方显式声明。
+        Map<String, String> headers = new HashMap<>();
+        JSObject headerObject = call.getObject("headers");
+        if (headerObject != null) {
+            Iterator<String> headerNames = headerObject.keys();
+            while (headerNames.hasNext()) {
+                String headerName = headerNames.next();
+                Object headerValue = headerObject.opt(headerName);
+                if (headerValue != null) headers.put(headerName, String.valueOf(headerValue));
+            }
+        }
+        boolean allowAnyHost = Boolean.TRUE.equals(call.getBoolean("allowAnyHost", false));
         try {
             if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
-            String proxied = localAudioServer.registerRemoteAudio(url);
+            String proxied = localAudioServer.registerRemoteAudio(url, headers, allowAnyHost);
             JSObject result = new JSObject();
             result.put("url", proxied);
             result.put("proxied", true);

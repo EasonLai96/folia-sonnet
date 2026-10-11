@@ -7,6 +7,7 @@ import type {
     LibraryLoginSessionSnapshot,
     LibraryLogoutRejectReason,
     LibraryNeteaseBackendHealth,
+    LibraryPasswordLoginError,
     LibraryProviderUnavailableReason,
 } from '../contracts/account';
 import type { LibraryHomeMessage } from '../contracts/homeModel';
@@ -96,6 +97,7 @@ const LOGIN_COPY_BY_PROVIDER: Readonly<Record<string, { title: string; note: str
     kugou: { title: 'home.loginTitleKugou', note: 'home.loginNoteKugou' },
     qq: { title: 'home.loginTitleQq', note: 'home.loginNoteQq' },
     bodian: { title: 'home.loginTitleBodian', note: 'home.loginNoteBodian' },
+    feiniu: { title: 'home.loginTitleFeiniu', note: 'home.loginNoteFeiniu' },
 };
 const NETEASE_LOGIN_COPY = { title: 'home.loginTitle', note: 'home.loginNote' };
 
@@ -122,6 +124,38 @@ export const resolveLoginStatusMessage = (phase: LibraryLoginPhase): LibraryHome
     const key = LOGIN_STATUS_KEY_BY_PHASE[phase];
     return key ? { key } : null;
 };
+
+// ─── 密码登录（飞牛这类自建服务）─────────────────────────────────────────
+
+/** 密码登录表单的各项文案。 */
+export const PASSWORD_LOGIN_COPY: Readonly<{
+    serverLabel: LibraryHomeMessage;
+    serverPlaceholder: LibraryHomeMessage;
+    usernameLabel: LibraryHomeMessage;
+    passwordLabel: LibraryHomeMessage;
+    submitLabel: LibraryHomeMessage;
+    submittingLabel: LibraryHomeMessage;
+}> = {
+    serverLabel: { key: 'home.loginServerUrl' },
+    serverPlaceholder: { key: 'home.loginServerUrlPlaceholder' },
+    usernameLabel: { key: 'home.loginUsername' },
+    passwordLabel: { key: 'home.loginPassword' },
+    submitLabel: { key: 'home.loginSubmit' },
+    submittingLabel: { key: 'home.loggingIn' },
+};
+
+const PASSWORD_LOGIN_ERROR_KEYS: Readonly<Record<LibraryPasswordLoginError, string>> = {
+    'invalid-credentials': 'home.loginPasswordInvalidCredentials',
+    network: 'home.loginPasswordNetwork',
+    unavailable: 'home.loginPasswordUnavailable',
+    refresh: 'home.loginPasswordRefreshFailed',
+    unknown: 'home.loginPasswordFailed',
+};
+
+/** 提交失败的状态行：按原因给一句能照做的提示，而不是统一的「登录失败」。 */
+export const resolvePasswordLoginStatusMessage = (
+    error: LibraryPasswordLoginError | null,
+): LibraryHomeMessage | null => (error ? { key: PASSWORD_LOGIN_ERROR_KEYS[error] } : null);
 
 /** 多方式登录第一步的文案（键名带 qq 是历史原因，任何声明了多方式的 provider 都用它）。 */
 export const LOGIN_METHOD_STEP_COPY: Readonly<{ title: LibraryHomeMessage; hint: LibraryHomeMessage; pending: LibraryHomeMessage }> = {
@@ -280,11 +314,14 @@ const resolveLoginFailureStatus = (
  */
 export const resolveLoginSessionCopy = (
     session: Pick<LibraryLoginSessionSnapshot, 'providerId' | 'phase' | 'methods' | 'selectedMethodId'>
-        & Partial<Pick<LibraryLoginSessionSnapshot, 'failure' | 'retryCooldownSeconds'>>
+        & Partial<Pick<LibraryLoginSessionSnapshot, 'failure' | 'retryCooldownSeconds' | 'passwordForm'>>
         & { backend: Pick<LibraryLoginBackendState, 'failed'> },
 ): LibraryLoginCopy => ({
     ...resolveLoginCopy(session.providerId),
-    status: isAwaitingLoginMethod(session) || session.backend.failed
-        ? null
-        : resolveLoginFailureStatus(session),
+    // 密码登录没有二维码那一套状态：状态行专供表单的失败原因。
+    status: session.passwordForm
+        ? resolvePasswordLoginStatusMessage(session.passwordForm.error)
+        : isAwaitingLoginMethod(session) || session.backend.failed
+            ? null
+            : resolveLoginFailureStatus(session),
 });

@@ -43,6 +43,8 @@ const session = ({ backendHealth = HEALTHY, ...input }: SessionInput = {}): Libr
         failure: null,
         retryCooldownSeconds: null,
         ...input,
+        // 密码登录的表单：没有时给 null（快照里的形状）。
+        passwordForm: input.passwordForm ?? null,
         selfCheck: input.selfCheck ?? null,
         backend: resolveLoginBackendState(providerId, backendHealth),
     };

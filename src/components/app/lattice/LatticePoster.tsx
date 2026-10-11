@@ -201,7 +201,7 @@ function LatticePoster({
              */
             ? {
                 duration: 0.46,
-                ease: [0.22, 1, 0.36, 1],
+                ease: [0.22, 1, 0.36, 1] as const,
                 opacity: { duration: 0.34, ease: 'easeOut' as const },
                 scaleX: { duration: 0.36, ease: 'easeOut' as const },
                 scaleY: { duration: 0.36, ease: 'easeOut' as const },

@@ -106,6 +106,21 @@ const buildLoginModalProps = (
                 },
             })
             : undefined,
+        passwordForm: view.passwordForm
+            ? {
+                needsServerUrl: view.passwordForm.needsServerUrl,
+                serverLabel: view.passwordForm.serverLabel,
+                serverPlaceholder: view.passwordForm.serverPlaceholder,
+                usernameLabel: view.passwordForm.usernameLabel,
+                passwordLabel: view.passwordForm.passwordLabel,
+                submitLabel: view.passwordForm.submitLabel,
+                submittingLabel: view.passwordForm.submittingLabel,
+                initialServerUrl: view.passwordForm.serverUrl,
+                // 提交中：快照的 phase 借用了 loading（控制器注释里有说明）。
+                busy: session.phase === 'loading',
+                onSubmit: values => void account.submitPasswordLogin(values),
+            }
+            : undefined,
         onRetry: () => void account.retryLogin(),
         onClose: () => void account.closeLogin(),
     };

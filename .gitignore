@@ -107,3 +107,5 @@ android/.gradle-home*/
 .auth-state/
 # WorkBuddy 在本项目的工作数据（会话记忆、一次性脚本产物）。
 .workbuddy/
+# 仓库内的一次性校验脚本（悬空 import 检查等），只在本机跑，不必进仓库。
+.tools/

@@ -50,6 +50,13 @@ export interface ProviderCapabilities {
     userAlbums?: boolean;
     /** The provider accepts a listening report for a track the user actually played. */
     playbackReports?: boolean;
+    /** 支持用户名密码登录（飞牛 FNOS 这类自建服务只有这一种登录，没有二维码）。 */
+    passwordLogin?: boolean;
+    /**
+     * 密码登录的表单要额外填「服务器地址」。
+     * 自建服务的地址每家都不一样，写不进构建期配置，只能让用户自己填。
+     */
+    passwordLoginServerUrl?: boolean;
 }
 
 export interface ProviderAvailability {
@@ -225,7 +232,9 @@ export type ProviderErrorCode =
     | 'preview-only'
     | 'region-restricted'
     | 'network'
-    | 'invalid-response';
+    | 'invalid-response'
+    /** 账号或密码不对（飞牛登录）：不是「登录态过期」，界面要按填错了提示。 */
+    | 'invalid-credentials';
 
 export class OnlineProviderError extends Error {
     constructor(
@@ -348,9 +357,26 @@ export type LoginSelfCheckResult = {
     credentialStore?: { encryptionAvailable?: boolean; backend?: string | null; error?: string } | null;
 };
 
+/** 一次密码登录交给 provider 的东西。自建服务（飞牛）没有固定后端，地址由用户在表单里填。 */
+export interface PasswordLoginCredentials {
+    username: string;
+    password: string;
+    /** 只在 `capabilities.passwordLoginServerUrl` 为真时由界面填进来。 */
+    serverUrl?: string;
+}
+
 export interface OnlineAuthProvider {
     getLoginStatus(): Promise<ProviderUser | null>;
     logout(): Promise<void>;
+    /**
+     * 用户名密码登录。声明了 `capabilities.passwordLogin` 的 provider 必须实现它：
+     * 登录流程据此直接显示表单，不再走二维码那一套。
+     * 账号或密码不对时抛 `OnlineProviderError('invalid-credentials')`，界面据此提示重填，
+     * 而不是当成「登录态过期」把人踢回起点。
+     */
+    loginWithPassword?(credentials: PasswordLoginCredentials): Promise<ProviderUser | null>;
+    /** 密码登录表单的预填值（上次填过的服务器地址）；没有就返回空对象。 */
+    getPasswordLoginDefaults?(): { serverUrl?: string };
     getQrLoginMethods?(): QrLoginMethod[];
     // 需要远端能力发现的 provider 在这里等待结果；UI 用同一份返回值决定单步或多步流程。
     resolveQrLoginMethods?(): Promise<QrLoginMethod[]>;

@@ -31,6 +31,7 @@ const session = (providerId: string, failure: QrLoginFailureKind | null): Librar
         failure,
         retryCooldownSeconds: null,
         selfCheck: null,
+        passwordForm: null,
         backend: { failed: false, detail: null, restarting: false, canRestart: false },
     };
     return { ...base, copy: resolveLoginSessionCopy(base) };

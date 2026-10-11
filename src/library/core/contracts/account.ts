@@ -2,8 +2,10 @@ import type { Theme } from '../../../types';
 import type {
     LoginSelfCheckResult,
     OnlineProviderId,
+    PasswordLoginCredentials,
     ProviderAccountSummary,
     ProviderCapabilities,
+    ProviderUser,
     QrLoginFailureKind,
     QrLoginMethod,
     QrLoginState,
@@ -23,13 +25,27 @@ import type { LibraryHomeMessage } from './homeModel';
  * 登录会话的阶段（扫码状态机与原 useOnlineProviderQrLogin 的 QrUiState 一一对应，外加登录方式的两步）：
  * - resolving-methods：正在等 provider 的登录方式发现（`resolveQrLoginMethods`），界面还不显示（与现状一致）；
  * - choosing-method：provider 声明了多种方式、还没选，不向后端要码（QQ 两步式的第一步）；
- * - loading：正在要二维码；waiting / scanned / confirmed / expired / error：后端报的状态（`QrLoginState`）。
+ * - password：密码登录（飞牛这类自建服务没有二维码），等用户填表；提交中也是它，由表单自己显示转圈；
+ * - loading：正在要二维码（或正在提交密码）；waiting / scanned / confirmed / expired / error：后端报的状态。
  */
 export type LibraryLoginPhase =
     | 'resolving-methods'
     | 'choosing-method'
+    | 'password'
     | 'loading'
     | QrLoginState['state'];
+
+/** 密码登录提交失败的原因。界面按它给一句能照做的提示，而不是统一的「登录失败」。 */
+export type LibraryPasswordLoginError =
+    /** 账号或密码不对：让用户重填，不要当成登录态过期。 */
+    | 'invalid-credentials'
+    /** 连不上服务器（地址写错、NAS 没开、网络不通）。 */
+    | 'network'
+    /** 服务器回了，但不是能登录的状态（没这项能力、地址不对）。 */
+    | 'unavailable'
+    /** 登录成功了，可账户刷新没跟上。 */
+    | 'refresh'
+    | 'unknown';
 
 /**
  * 登录后端的健康（目前只有网易的本地后端会报，见 core/model/accountRules 的 resolveLoginBackendState）。
@@ -121,6 +137,18 @@ export type LibraryLoginSessionSnapshot = {
     retryCooldownSeconds: number | null;
     /** 失败后的自检；没有失败、在手机上取消或 provider 没有自检能力时为 null。 */
     selfCheck: LibraryLoginSelfCheck | null;
+    /**
+     * 密码登录的表单（飞牛这类自建服务）。只有 provider 声明了 `passwordLogin` 才非空，
+     * 界面据此画用户名 / 密码（可能还有服务器地址）而不是二维码。
+     */
+    passwordForm: {
+        /** 表单里还要填服务器地址：自建服务每家地址不同，写不进构建期配置。 */
+        needsServerUrl: boolean;
+        /** 上次填过的服务器地址（登出不清地址，重登时少填一项）。 */
+        serverUrl: string;
+        /** 上一次提交失败的原因；还没提交过或上次成功了为 null。 */
+        error: LibraryPasswordLoginError | null;
+    } | null;
     backend: LibraryLoginBackendState;
     copy: LibraryLoginCopy;
 };
@@ -199,9 +227,21 @@ export type LibrarySwitchCancelResult =
  * 之后的扫码进度（含要码失败 start-error）都在快照里。superseded：登录方式还没解析完就有更新的 startLogin。
  */
 export type LibraryStartLoginResult =
-    | { status: 'started'; providerId: OnlineProviderId; sessionId: number; step: 'choosing-method' | 'qr' }
+    | { status: 'started'; providerId: OnlineProviderId; sessionId: number; step: 'choosing-method' | 'qr' | 'password' }
     | { status: 'superseded'; providerId: OnlineProviderId }
     | { status: 'unavailable'; providerId: OnlineProviderId; reason: LibraryProviderUnavailableReason };
+
+/**
+ * 提交一次密码登录的结局。failed 时登录快照留在界面上（`passwordForm.error` 已写好），
+ * 用户改完再提交即可，不必重开一次登录。
+ */
+export type LibraryPasswordLoginResult =
+    | { status: 'ok'; providerId: OnlineProviderId; sessionId: number }
+    | { status: 'failed'; providerId: OnlineProviderId; sessionId: number; reason: LibraryPasswordLoginError }
+    /** 此刻没有在进行的密码登录（界面不会走到这里）。 */
+    | { status: 'no-session' }
+    /** 提交期间关了窗、换了登录或 controller 已销毁：这一轮作废。 */
+    | { status: 'superseded'; providerId: OnlineProviderId };
 
 /** selectProvider 走了哪一支（core/model/accountRules 的 resolveProviderSelection），以及那一支的结局。 */
 export type LibrarySelectProviderResult =
@@ -268,6 +308,8 @@ export interface LibraryAccountController {
     cancelSwitch(requestId: number): LibrarySwitchCancelResult;
     /** 解析登录方式（带竞态代次）；单方式直接要码，多方式停在 choosing-method。旧会话先 keyed 取消。 */
     startLogin(providerId: OnlineProviderId): Promise<LibraryStartLoginResult>;
+    /** 提交一次用户名密码登录（飞牛这类自建服务）。成功走与扫码确认同一条收尾：刷新账户 → 收起（必要时问激活）。 */
+    submitPasswordLogin(credentials: PasswordLoginCredentials): Promise<LibraryPasswordLoginResult>;
     selectLoginMethod(methodId: string): Promise<LibraryLoginRequestResult>;
     /** 保留已选的登录方式重新要码。 */
     retryLogin(): Promise<LibraryLoginRequestResult>;
@@ -303,7 +345,11 @@ export type LibraryAccountAuthPort = {
     canRunQrLoginSelfCheck(providerId: OnlineProviderId): boolean;
     /** 主动自检；没有可检查的对象时 resolve null，自检本身出错时 reject。 */
     runQrLoginSelfCheck(providerId: OnlineProviderId): Promise<LoginSelfCheckResult | null>;
-    getProviderCapabilities(providerId: OnlineProviderId): Pick<ProviderCapabilities, 'auth'>;
+    /** 用户名密码登录（飞牛这类自建服务）；provider 没有这个能力时由调用方先按能力判定拦住。 */
+    loginWithPassword(providerId: OnlineProviderId, credentials: PasswordLoginCredentials): Promise<ProviderUser | null>;
+    /** 密码登录表单的预填值（上次填过的服务器地址）；没有时为 null（而不是每次新建的空对象）。 */
+    getPasswordLoginDefaults?(providerId: OnlineProviderId): { serverUrl?: string } | null;
+    getProviderCapabilities(providerId: OnlineProviderId): Pick<ProviderCapabilities, 'auth' | 'passwordLogin' | 'passwordLoginServerUrl'>;
 };
 
 /**

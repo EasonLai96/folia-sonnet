@@ -201,6 +201,8 @@ beforeEach(() => {
         getQrLoginDiagnostics: vi.fn().mockResolvedValue(['runtime: test']),
         canRunQrLoginSelfCheck: vi.fn().mockReturnValue(false),
         runQrLoginSelfCheck: vi.fn().mockResolvedValue(null),
+        loginWithPassword: vi.fn().mockResolvedValue(null),
+        getPasswordLoginDefaults: vi.fn().mockReturnValue({}),
     };
     // 刷新成功即视为拿到了登录态（真实刷新器会把账户写进 store）。
     refresh = vi.fn<LibraryProviderAccountPort['refresh']>(async (providerId: OnlineProviderId) => {
@@ -633,7 +635,7 @@ describe('providerAccountController · login flow', () => {
     });
 
     it('swallows an unexpected rejection of the session start', async () => {
-        auth.getProviderCapabilities.mockImplementationOnce(() => { throw new Error('capabilities broke'); });
+        auth.getProviderCapabilities.mockImplementation(() => { throw new Error('capabilities broke'); });
         const controller = createController();
 
         await expect(controller.startLogin('gamma')).resolves.toMatchObject({ status: 'started' });
@@ -909,7 +911,7 @@ describe('providerAccountController · failures are logged in full for every pro
             auth.resolveQrLoginMethods.mockRejectedValueOnce(backendError());
             await controller.startLogin(providerId);
         } else if (step === 'start') {
-            auth.getProviderCapabilities.mockImplementationOnce(() => { throw backendError(); });
+            auth.getProviderCapabilities.mockImplementation(() => { throw backendError(); });
             await controller.startLogin(providerId);
             await manual.flush();
         } else if (step === 'refresh') {
@@ -970,5 +972,77 @@ describe('providerAccountController · failures are logged in full for every pro
         const text = report.status === 'ok' ? report.report : '';
         expect(text).toContain('message="QQMusicApi login_qr_key failed: HTTP 429 (QR login is temporarily backed off)"');
         expect(text).toContain('"failureReason":"local-backoff"');
+    });
+});
+
+describe('providerAccountController · password login', () => {
+    /** 让平台 fnos 声明密码登录（要填服务器地址）。 */
+    const usePasswordProvider = () => {
+        accounts = createAccounts('alpha', [summary('fnos')]);
+        auth.getProviderCapabilities.mockReturnValue({ auth: true, passwordLogin: true, passwordLoginServerUrl: true });
+        auth.getPasswordLoginDefaults?.mockReturnValue({ serverUrl: 'http://192.168.1.5:5666' });
+        return createController();
+    };
+
+    it('opens the form instead of asking the backend for a QR code', async () => {
+        const controller = usePasswordProvider();
+        const result = await controller.startLogin('fnos');
+        await manual.flush();
+
+        expect(result).toMatchObject({ status: 'started', providerId: 'fnos', step: 'password' });
+        // 没有二维码：要码与方式发现都不该发生。
+        expect(ops.filter(op => op[0] === 'resolve-methods' || op[0] === 'create')).toEqual([]);
+        expect(controller.getSnapshot().login).toMatchObject({
+            providerId: 'fnos',
+            phase: 'password',
+            passwordForm: { needsServerUrl: true, serverUrl: 'http://192.168.1.5:5666', error: null },
+        });
+        expect(isLoginDialogVisible(controller.getSnapshot().login)).toBe(true);
+    });
+
+    it('refreshes the account, closes the login and asks whether to activate', async () => {
+        const controller = usePasswordProvider();
+        await controller.startLogin('fnos');
+        await manual.flush();
+        auth.loginWithPassword.mockResolvedValueOnce({ id: 'fn-user', nickname: '飞牛用户' });
+
+        const result = await controller.submitPasswordLogin({ username: 'u', password: 'p', serverUrl: 'http://nas:5666' });
+        await manual.flush();
+
+        expect(result).toMatchObject({ status: 'ok', providerId: 'fnos' });
+        expect(auth.loginWithPassword).toHaveBeenCalledWith('fnos', { username: 'u', password: 'p', serverUrl: 'http://nas:5666' });
+        expect(ops).toContainEqual(['refresh', 'fnos']);
+        // 刷完就收起登录：切不切过去是另一次确认，不该卡住这次提交。
+        expect(controller.getSnapshot().login).toBeNull();
+        expect(controller.getSnapshot().pendingSwitch).toMatchObject({ to: 'fnos', reason: 'activate-after-login' });
+        // 拒绝激活：登录本身仍然是成功的。
+        controller.cancelSwitch(controller.getSnapshot().pendingSwitch!.id);
+        await manual.flush();
+        expect(controller.getSnapshot().lastLoginCompletion).toMatchObject({ providerId: 'fnos', outcome: 'activation-declined' });
+    });
+
+    it('keeps the form with a reason when the credentials are rejected', async () => {
+        const controller = usePasswordProvider();
+        await controller.startLogin('fnos');
+        await manual.flush();
+        auth.loginWithPassword.mockRejectedValueOnce(
+            new OnlineProviderError('invalid-credentials', 'FeiNiu rejected the username or password', 'feiniu'),
+        );
+
+        const result = await controller.submitPasswordLogin({ username: 'u', password: 'bad' });
+        await manual.flush();
+
+        expect(result).toMatchObject({ status: 'failed', reason: 'invalid-credentials' });
+        expect(ops.filter(op => op[0] === 'refresh')).toEqual([]);
+        // 表单留在原地：用户改一下再提交，不必重开一次登录。
+        expect(controller.getSnapshot().login).toMatchObject({
+            phase: 'password',
+            passwordForm: { error: 'invalid-credentials' },
+        });
+    });
+
+    it('reports a rejected submit that left no session as no-session', async () => {
+        const controller = usePasswordProvider();
+        expect(await controller.submitPasswordLogin({ username: 'u', password: 'p' })).toEqual({ status: 'no-session' });
     });
 });

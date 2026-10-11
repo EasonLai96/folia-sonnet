@@ -90,6 +90,7 @@ describe('providerLoginSession', () => {
             getQrLoginDiagnostics: vi.fn().mockResolvedValue(['runtime: test']),
             canRunQrLoginSelfCheck: vi.fn().mockReturnValue(false),
             runQrLoginSelfCheck: vi.fn().mockResolvedValue(null),
+            loginWithPassword: vi.fn().mockResolvedValue(null),
         };
     });
 
@@ -580,6 +581,7 @@ describe('providerLoginSession · failures, serial requests, cooldown and self-c
             getQrTtlMs: vi.fn().mockReturnValue(QR_TTL_MS),
             getQrLoginDiagnostics: vi.fn().mockResolvedValue(['runtime: test']),
             canRunQrLoginSelfCheck: vi.fn().mockReturnValue(false),
+            loginWithPassword: vi.fn().mockResolvedValue(null),
             runQrLoginSelfCheck: vi.fn().mockResolvedValue(null),
         };
     });

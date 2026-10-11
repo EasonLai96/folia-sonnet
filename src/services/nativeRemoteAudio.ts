@@ -19,7 +19,13 @@ type RegisterRemoteAudioResponse = {
 };
 
 type NativePlugin = {
-    registerRemoteAudio?: (options: { url: string }) => Promise<RegisterRemoteAudioResponse>;
+    registerRemoteAudio?: (options: {
+        url: string;
+        /** 转发时要附带的请求头（飞牛的 music-token 就走这里）；老版本插件没有这个参数。 */
+        headers?: Record<string, string>;
+        /** 允许白名单之外的主机：自建服务的地址是用户自己填的，进不了那份白名单。 */
+        allowAnyHost?: boolean;
+    }) => Promise<RegisterRemoteAudioResponse>;
 };
 
 const getPlugin = (): NativePlugin | null => (
@@ -29,7 +35,10 @@ const getPlugin = (): NativePlugin | null => (
 /** 已经是本机回环地址了，不用再套一层。 */
 const isLoopbackAudio = (url: string): boolean => url.includes('127.0.0.1') || url.includes('localhost');
 
-export const proxyNativeRemoteAudioUrl = async (url: string | null | undefined): Promise<string> => {
+export const proxyNativeRemoteAudioUrl = async (
+    url: string | null | undefined,
+    options: { headers?: Record<string, string>; allowAnyHost?: boolean } = {},
+): Promise<string> => {
     const value = String(url || '').trim();
     if (!value) return '';
     // 本地文件（blob / 回环服务自己发的）本来就同源，套代理纯属多此一举。
@@ -39,7 +48,11 @@ export const proxyNativeRemoteAudioUrl = async (url: string | null | undefined):
     if (!plugin?.registerRemoteAudio) return value;
 
     try {
-        const response = await plugin.registerRemoteAudio({ url: value });
+        const response = await plugin.registerRemoteAudio({
+            url: value,
+            ...(options.headers && Object.keys(options.headers).length > 0 ? { headers: options.headers } : {}),
+            ...(options.allowAnyHost ? { allowAnyHost: true } : {}),
+        });
         const proxied = typeof response?.url === 'string' && response.url ? response.url : value;
         if (response?.proxied !== true) return value;
         return proxied;

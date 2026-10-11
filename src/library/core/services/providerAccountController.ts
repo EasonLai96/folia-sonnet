@@ -1,4 +1,11 @@
-import type { OnlineProviderId, ProviderAccountSummary, QrLoginMethod } from '../../../types/onlineMusic';
+import type {
+    OnlineProviderId,
+    PasswordLoginCredentials,
+    ProviderAccountSummary,
+    ProviderCapabilities,
+    QrLoginMethod,
+} from '../../../types/onlineMusic';
+import { OnlineProviderError } from '../../../types/onlineMusic';
 import type {
     LibraryAccountController,
     LibraryAccountControllerDeps,
@@ -13,6 +20,8 @@ import type {
     LibraryLoginRequestResult,
     LibraryLoginSessionSnapshot,
     LibraryLogoutResult,
+    LibraryPasswordLoginError,
+    LibraryPasswordLoginResult,
     LibraryProviderSwitchReason,
     LibraryProviderSwitchRequest,
     LibrarySelectProviderResult,
@@ -64,7 +73,8 @@ const describeError = (error: unknown): string => (error instanceof Error ? erro
 /**
  * controller 内部的登录状态（快照里的 login 由它和会话快照派生）。
  * - resolving-methods / choosing-method：还没向后端要码，sessionId 为 null；
- * - session：已经 start 过登录会话，sessionId 是会话回执里的 id（用来认领会话快照与确认事件）。
+ * - password：密码登录（飞牛这类自建服务），等用户填表；sessionId 自带（收尾要认领）；
+ * - session：已经 start 过扫码会话，sessionId 是会话回执里的 id（用来认领会话快照与确认事件）。
  */
 type LoginState = {
     /** 快照里的会话代次：startLogin 与每次要码（选方式、重试、重启后续上）都换新。 */
@@ -72,8 +82,10 @@ type LoginState = {
     providerId: OnlineProviderId;
     methods: readonly QrLoginMethod[];
     selectedMethodId: string | null;
-    stage: 'resolving-methods' | 'choosing-method' | 'session';
+    stage: 'resolving-methods' | 'choosing-method' | 'password' | 'session';
     sessionId: number | null;
+    /** 只有 password 阶段有：表单要不要服务器地址、上次填的地址、提交中、上一次提交的结果。 */
+    password: { needsServerUrl: boolean; serverUrl: string; submitting: boolean; error: LibraryPasswordLoginError | null } | null;
 };
 
 type PendingSwitch = {
@@ -123,6 +135,8 @@ const sameLoginSnapshot = (a: LibraryLoginSessionSnapshot, b: LibraryLoginSessio
     && a.failure === b.failure
     && a.retryCooldownSeconds === b.retryCooldownSeconds
     && a.selfCheck === b.selfCheck
+    && a.passwordForm?.needsServerUrl === b.passwordForm?.needsServerUrl
+    && a.passwordForm?.error === b.passwordForm?.error
     && a.backend.failed === b.backend.failed
     && a.backend.detail === b.backend.detail
     && a.backend.restarting === b.backend.restarting
@@ -169,6 +183,9 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         let failure: LibraryLoginSessionSnapshot['failure'] = null;
         let retryCooldownSeconds: number | null = null;
         let selfCheck: LibraryLoginSessionSnapshot['selfCheck'] = null;
+        // 密码登录提交中的那一下借用 loading（界面转圈），其余时候停在 password ——
+        // 失败也不切到 error：表单要留在原地让人改，而 error 会让二维码那一套的「重试」出现。
+        if (login.stage === 'password') phase = login.password?.submitting ? 'loading' : 'password';
         if (login.stage === 'session') {
             const raw: ProviderLoginSessionSnapshot = session.getSnapshot();
             if (raw.sessionId === login.sessionId) {
@@ -190,6 +207,13 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             failure,
             retryCooldownSeconds,
             selfCheck,
+            passwordForm: login.password
+                ? {
+                    needsServerUrl: login.password.needsServerUrl,
+                    serverUrl: login.password.serverUrl,
+                    error: login.password.error,
+                }
+                : null,
             backend,
         };
         const next: LibraryLoginSessionSnapshot = { ...base, copy: resolveLoginSessionCopy(base) };
@@ -357,8 +381,37 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
                 selectedMethodId: null,
                 stage: 'resolving-methods',
                 sessionId: null,
+                password: null,
             };
         });
+        // 密码登录的 provider（飞牛这类自建服务）没有二维码：直接进表单，
+        // 不去解析扫码方式 —— 那一步会向后端要码，而这里根本不该发这个请求。
+        let capabilities: Pick<ProviderCapabilities, 'auth' | 'passwordLogin' | 'passwordLoginServerUrl'>;
+        try {
+            capabilities = auth.getProviderCapabilities(providerId);
+        } catch (error) {
+            // 能力判定本身出错不该把登录打断：按「不会密码登录」继续走扫码，
+            // 会话那一步还会再读一次，那时再出错才是真的登录失败。
+            log('warn', 'login:capabilities-error', { providerId, ...describeLoginError(error) });
+            capabilities = { auth: true };
+        }
+        if (capabilities.passwordLogin) {
+            if (attempt !== loginSeq || disposed || !login) return { status: 'superseded', providerId };
+            batch(() => {
+                login = {
+                    ...login!,
+                    stage: 'password',
+                    sessionId: attempt,
+                    password: {
+                        needsServerUrl: capabilities.passwordLoginServerUrl === true,
+                        serverUrl: String(auth.getPasswordLoginDefaults?.(providerId)?.serverUrl ?? ''),
+                        submitting: false,
+                        error: null,
+                    },
+                };
+            });
+            return { status: 'started', providerId, sessionId: attempt, step: 'password' };
+        }
         let methods: readonly QrLoginMethod[];
         try {
             methods = await auth.resolveQrLoginMethods(providerId);
@@ -377,6 +430,67 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         }
         beginSession(attempt, resolved, null);
         return { status: 'started', providerId, sessionId: attempt, step: 'qr' };
+    };
+
+    /** 把密码登录的失败归类：账号密码不对要单独说，连不上和「服务器不接受」也不是一回事。 */
+    const describePasswordLoginError = (error: unknown): LibraryPasswordLoginError => {
+        if (error instanceof OnlineProviderError) {
+            if (error.code === 'invalid-credentials') return 'invalid-credentials';
+            if (error.code === 'network') return 'network';
+            if (error.code === 'unavailable' || error.code === 'unsupported' || error.code === 'invalid-response') return 'unavailable';
+        }
+        return 'unknown';
+    };
+
+    const submitPasswordLogin = async (credentials: PasswordLoginCredentials): Promise<LibraryPasswordLoginResult> => {
+        if (disposed || !login || login.stage !== 'password' || !login.password) return { status: 'no-session' };
+        const providerId = login.providerId;
+        const sessionId = login.id;
+        const stillOwning = (): boolean => (
+            !disposed && login !== null && login.id === sessionId && login.stage === 'password' && login.password !== null
+        );
+        const setPassword = (patch: Partial<NonNullable<LoginState['password']>>): void => {
+            batch(() => {
+                if (!login?.password) return;
+                login = { ...login, password: { ...login.password, ...patch } };
+            });
+        };
+
+        setPassword({ submitting: true, error: null });
+        let user: { id: string | number } | null = null;
+        try {
+            user = await auth.loginWithPassword(providerId, credentials);
+        } catch (error) {
+            const reason = describePasswordLoginError(error);
+            log('warn', 'login:password-error', { providerId, reason, ...describeLoginError(error) });
+            if (!stillOwning()) return { status: 'superseded', providerId };
+            setPassword({ submitting: false, error: reason });
+            return { status: 'failed', providerId, sessionId, reason };
+        }
+        if (!stillOwning()) return { status: 'superseded', providerId };
+        // 后端认了这次登录却没给回用户信息：与填错一样让人重填，别当成功。
+        if (!user) {
+            setPassword({ submitting: false, error: 'invalid-credentials' });
+            return { status: 'failed', providerId, sessionId, reason: 'invalid-credentials' };
+        }
+        setPassword({ submitting: false });
+
+        // 与扫码确认同一条收尾：刷新账户，成功就收起登录（不是当前平台时再问要不要切过去）。
+        let refreshed: boolean;
+        try {
+            refreshed = await providerAccounts.refresh(providerId) !== false;
+        } catch (error) {
+            log('warn', 'login:password-refresh-error', { providerId, ...describeLoginError(error) });
+            refreshed = false;
+        }
+        // 登录本身过了、账户没刷出来：表单留在原地并说明，用户不必重填。
+        if (!refreshed) setPassword({ error: 'refresh' });
+        // 不 await：收尾里可能弹出「要不要切到这个平台」的确认，那要等用户答复，
+        // 而这次提交本身已经成功了（与扫码确认同一条收尾，那边也是即发即忘）。
+        void finishConfirmedLogin({ sessionId, providerId, methodId: null }, refreshed);
+        return refreshed
+            ? { status: 'ok', providerId, sessionId }
+            : { status: 'failed', providerId, sessionId, reason: 'refresh' };
     };
 
     const currentBackend = (current: LoginState) => resolveLoginBackendState(current.providerId, neteaseBackend.getHealth());
@@ -432,8 +546,11 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         return report === null ? { status: 'no-session' } : { status: 'ok', report };
     };
 
+    /** 会话 id 属于此刻这个登录（扫码会话与密码登录共用一套收尾）。 */
     const ownsSession = (sessionId: number): boolean => (
-        !disposed && login !== null && login.stage === 'session' && login.sessionId === sessionId
+        !disposed && login !== null
+        && (login.stage === 'session' || login.stage === 'password')
+        && login.sessionId === sessionId
     );
 
     /**
@@ -529,6 +646,7 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         confirmSwitch,
         cancelSwitch,
         startLogin,
+        submitPasswordLogin,
         selectLoginMethod,
         retryLogin,
         closeLogin,

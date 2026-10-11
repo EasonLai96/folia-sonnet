@@ -2,6 +2,7 @@ import neteaseIcon from './netease.png';
 import qqMusicIcon from './qqmusic.png';
 import kugouIcon from './kugou.png';
 import bodianIcon from './bodian.jpg';
+import feiniuIcon from './feiniu.svg';
 import foliaIcon from './folia.svg';
 
 // src/assets/providers/appIcons.ts
@@ -13,13 +14,14 @@ import foliaIcon from './folia.svg';
  * providerId → 图标模块。
  *
  * 本地音乐、Navidrome、以及将来任何没图的平台都回落到 Folia 自己的图标（见 getProviderAppIcon），
- * 所以表里只放确有本尊图的四家。
+ * 所以表里只放确有本尊图的几家。
  */
 export const PROVIDER_APP_ICONS: Record<string, string> = {
     netease: neteaseIcon,
     qq: qqMusicIcon,
     kugou: kugouIcon,
     bodian: bodianIcon,
+    feiniu: feiniuIcon,
 };
 
 /** 本地曲库等"自家人"来源统一用的图标 key。 */

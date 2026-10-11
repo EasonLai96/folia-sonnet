@@ -56,6 +56,7 @@ const quillLogin: LibraryLoginSessionSnapshot = {
     failure: 'expired-after-scan',
     retryCooldownSeconds: null,
     selfCheck: null,
+    passwordForm: null,
     backend: { failed: false, detail: null, restarting: false, canRestart: false },
     copy: { title: { key: 'home.loginTitle' }, note: { key: 'home.loginNote' }, status: { key: 'home.qrExpired' } },
 };

@@ -209,6 +209,7 @@ describe('login copy', () => {
         const expected: Record<LibraryLoginPhase, string | null> = {
             'resolving-methods': null,
             'choosing-method': null,
+            password: null,
             loading: 'home.loadingQr',
             waiting: 'home.scanQr',
             scanned: 'home.qrScanned',

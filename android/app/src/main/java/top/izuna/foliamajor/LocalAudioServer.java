@@ -71,6 +71,8 @@ final class LocalAudioServer {
         .followSslRedirects(true)
         .build();
     private final Map<String, String> remoteAudioUrls = new LinkedHashMap<>();
+    /** 转发时要额外带上的请求头（按 token 存）；没有时为 null，见 {@link #registerRemoteAudio}。 */
+    private final Map<String, Map<String, String>> remoteAudioHeaders = new LinkedHashMap<>();
     private ServerSocket serverSocket;
     private int port;
 
@@ -111,10 +113,22 @@ final class LocalAudioServer {
      * 本地服务回包带 ACAO: *，同源检查就过了；Range 也照样转发，拖进度条不受影响。
      */
     synchronized String registerRemoteAudio(String value) throws IOException {
+        return registerRemoteAudio(value, null, false);
+    }
+
+    /**
+     * 同 {@link #registerRemoteAudio(String)}，但多两个开关：转发时要附带的请求头，以及"允许任意主机"。
+     *
+     * 为什么要它们：飞牛（FNOS）这类自建服务的音频流只认 `Cookie: music-token=...`，
+     * 而 <audio> 加不了任何请求头；它的地址又是用户在登录时自己填的局域网地址，
+     * 不可能出现在 {@link #REMOTE_AUDIO_HOST_SUFFIXES} 那份白名单里。
+     * 两个开关都由调用方显式打开，白名单那一路（Kuwo / 网易）行为不变。
+     */
+    synchronized String registerRemoteAudio(String value, Map<String, String> headers, boolean allowAnyHost) throws IOException {
         URL url = new URL(value);
         String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
         if (!("http".equals(url.getProtocol()) || "https".equals(url.getProtocol()))
-            || !isRemoteAudioHostAllowed(host)) {
+            || !(allowAnyHost || isRemoteAudioHostAllowed(host))) {
             throw new IOException("Unsupported remote audio host");
         }
         int localPort = start();
@@ -125,9 +139,12 @@ final class LocalAudioServer {
         synchronized (remoteAudioUrls) {
             remoteAudioUrls.remove(token);
             remoteAudioUrls.put(token, value);
+            remoteAudioHeaders.remove(token);
+            if (headers != null && !headers.isEmpty()) remoteAudioHeaders.put(token, new HashMap<>(headers));
             while (remoteAudioUrls.size() > 128) {
                 String oldest = remoteAudioUrls.keySet().iterator().next();
                 remoteAudioUrls.remove(oldest);
+                remoteAudioHeaders.remove(oldest);
             }
         }
         return "http://127.0.0.1:" + localPort + REMOTE_AUDIO_PATH_PREFIX + token;
@@ -348,11 +365,21 @@ final class LocalAudioServer {
             return;
         }
 
+        Map<String, String> extraHeaders;
+        synchronized (remoteAudioUrls) {
+            extraHeaders = remoteAudioHeaders.get(token);
+        }
         Request.Builder request = new Request.Builder().url(target);
         // 有些 CDN 看 UA / Referer 决定给不给资源，不带的话会回一段 HTML 而不是音频
         // —— 那种回包喂进 <audio> 正是「Format error」的经典来源。
         request.header("User-Agent", REMOTE_AUDIO_USER_AGENT);
         request.header("Referer", remoteAudioReferer(target));
+        // 调用方带来的头（飞牛的 music-token）最后写：同名的以它为准。
+        if (extraHeaders != null) {
+            for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
+                request.header(entry.getKey(), entry.getValue());
+            }
+        }
         String range = headers.get("range");
         if (range != null && range.startsWith("bytes=")) request.header("Range", range);
 

@@ -1,10 +1,12 @@
-import { AlertTriangle, Check, Loader2, RotateCcw, ServerCog, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Loader2, LogIn, RotateCcw, ServerCog, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import QrLoginFailureHelp, { type QrLoginFailureHelpProps } from './QrLoginFailureHelp';
 
 // src/library/suites/grid/account/OnlineProviderLoginModal.tsx
-// 扫码登录弹窗。平时是窄的单栏：二维码、状态行、重试 / 重启；登录失败后变成两栏，失败帮助（简单办法、自检、
+// 登录弹窗。平时是窄的单栏：二维码、状态行、重试 / 重启；登录失败后变成两栏，失败帮助（简单办法、自检、
 // 收起的诊断与反馈）放在二维码旁边，窄窗口里再折回上下排列。
+// 密码登录的 provider（飞牛这类自建服务）没有二维码，那一栏换成用户名 / 密码表单。
 
 // 可选的登录方式选择（两步式）。provider 不声明就不传，弹窗完全维持原本的单步外观。
 // 所有文案都由调用方翻译好再传进来，与 title / statusText 的既有做法一致。
@@ -30,6 +32,124 @@ type BackendFailureProps = {
     onRestart?: () => void;
 };
 
+/**
+ * 密码登录的表单（飞牛这类自建服务）。
+ * 表单自己持有输入框的状态：提交失败时用户改过的东西必须还在，而登录快照一变就会重渲染整个弹窗。
+ */
+type PasswordFormProps = {
+    needsServerUrl: boolean;
+    serverLabel: string;
+    serverPlaceholder: string;
+    usernameLabel: string;
+    passwordLabel: string;
+    submitLabel: string;
+    submittingLabel: string;
+    /** 上一次填过的服务器地址（登出不清地址，重登时少填一项）。 */
+    initialServerUrl?: string;
+    /** 提交中：输入框锁住、按钮转圈。 */
+    busy: boolean;
+    onSubmit: (values: { serverUrl?: string; username: string; password: string }) => void;
+};
+
+const PasswordLoginForm = ({
+    needsServerUrl,
+    serverLabel,
+    serverPlaceholder,
+    usernameLabel,
+    passwordLabel,
+    submitLabel,
+    submittingLabel,
+    initialServerUrl = '',
+    busy,
+    onSubmit,
+}: PasswordFormProps) => {
+    const [serverUrl, setServerUrl] = useState(initialServerUrl);
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+    const usernameRef = useRef<HTMLInputElement | null>(null);
+    // 弹窗每次打开都是新的一次登录，焦点落在第一个要填的框上。
+    useEffect(() => { usernameRef.current?.focus(); }, []);
+
+    const canSubmit = !busy && username.trim().length > 0 && password.length > 0
+        && (!needsServerUrl || serverUrl.trim().length > 0);
+    const submit = () => {
+        if (!canSubmit) return;
+        onSubmit({
+            ...(needsServerUrl ? { serverUrl: serverUrl.trim() } : {}),
+            username: username.trim(),
+            password,
+        });
+    };
+
+    const fieldClass = 'w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none transition-colors placeholder:opacity-35 focus:border-white/25 disabled:opacity-50';
+    // 输入框不继承卡片外的文字色：白天 / 夜间两套主题差得远，写死一个值在另一套里必然看不清。
+    const fieldStyle = { color: 'var(--text-primary)' } as const;
+    return (
+        <form
+            className="flex w-56 flex-col gap-2.5"
+            onSubmit={event => { event.preventDefault(); submit(); }}
+        >
+            {needsServerUrl && (
+                <label className="flex flex-col gap-1 text-left">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                        {serverLabel}
+                    </span>
+                    <input
+                        type="text"
+                        value={serverUrl}
+                        disabled={busy}
+                        onChange={event => setServerUrl(event.target.value)}
+                        placeholder={serverPlaceholder}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className={fieldClass}
+                        style={fieldStyle}
+                    />
+                </label>
+            )}
+            <label className="flex flex-col gap-1 text-left">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                    {usernameLabel}
+                </span>
+                <input
+                    ref={usernameRef}
+                    type="text"
+                    value={username}
+                    disabled={busy}
+                    onChange={event => setUsername(event.target.value)}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className={fieldClass}
+                    style={fieldStyle}
+                />
+            </label>
+            <label className="flex flex-col gap-1 text-left">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                    {passwordLabel}
+                </span>
+                <input
+                    type="password"
+                    value={password}
+                    disabled={busy}
+                    onChange={event => setPassword(event.target.value)}
+                    className={fieldClass}
+                    style={fieldStyle}
+                />
+            </label>
+            <button
+                type="submit"
+                disabled={!canSubmit}
+                className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/15 disabled:opacity-40 disabled:cursor-default disabled:hover:bg-white/10"
+            >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <LogIn size={13} />}
+                {busy ? submittingLabel : submitLabel}
+            </button>
+        </form>
+    );
+};
+
 type OnlineProviderLoginModalProps = {
     title: string;
     /** 当前在登录哪个平台：传了就在标题上方摆该平台的应用图标，一眼看出在登谁。 */
@@ -37,13 +157,15 @@ type OnlineProviderLoginModalProps = {
     note: string;
     qrCodeImg: string;
     statusText: string;
-    state: 'idle' | 'loading' | 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'error';
+    state: 'idle' | 'loading' | 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'error' | 'password';
     retryLabel: string;
     closeLabel: string;
     /** 后端冷却中：重试按钮照常出现但不可点（状态行说明还要等多久），冷却结束后恢复。 */
     retryDisabled?: boolean;
     loginMethods?: LoginMethodsProps;
     backendFailure?: BackendFailureProps;
+    /** 密码登录（飞牛这类自建服务）：传了就用表单替掉二维码那一栏。 */
+    passwordForm?: PasswordFormProps;
     // 只在扫码登录失败时传入（含后端没拉起来），显示在二维码旁边。
     failureHelp?: QrLoginFailureHelpProps;
     onRetry: () => void;
@@ -62,6 +184,7 @@ const OnlineProviderLoginModal = ({
     retryDisabled = false,
     loginMethods,
     backendFailure,
+    passwordForm,
     failureHelp,
     onRetry,
     onClose,
@@ -143,8 +266,13 @@ const OnlineProviderLoginModal = ({
                     </div>
                 )}
                 <div className={twoColumns ? 'flex flex-col items-center gap-6 sm:flex-row sm:items-start' : 'flex flex-col items-center'}>
-                    {/* 左栏：二维码（或后端故障原因）、状态行、重启 / 重试。 */}
+                    {/* 左栏：密码表单，或二维码（或后端故障原因）、状态行、重启 / 重试。 */}
                     <div className={`flex flex-col items-center ${twoColumns ? 'w-full sm:w-48 sm:shrink-0' : ''}`}>
+                        {passwordForm ? (
+                            <div className="mb-4">
+                                <PasswordLoginForm {...passwordForm} />
+                            </div>
+                        ) : (
                         <div className="relative inline-block bg-white p-2 rounded-xl mb-4 shadow-inner">
                             {backendFailure ? (
                                 <div className="w-40 h-40 flex flex-col items-center justify-center gap-1.5 rounded-lg bg-red-50 px-3 text-center">
@@ -168,6 +296,7 @@ const OnlineProviderLoginModal = ({
                                 </div>
                             )}
                         </div>
+                        )}
                         {loginMethods && !awaitingMethod && (
                             <p className="text-[11px] font-medium opacity-45" style={{ color: 'var(--text-secondary)' }}>
                                 {loginMethods.currentText}
@@ -190,7 +319,8 @@ const OnlineProviderLoginModal = ({
                                 {backendFailure.restarting ? backendFailure.restartingLabel : backendFailure.restartLabel}
                             </button>
                         )}
-                        {canRetry && (
+                        {/* 密码登录没有「刷新二维码」这回事：失败就在表单上方改，重试按钮会把人带偏。 */}
+                        {canRetry && !passwordForm && (
                             <button type="button" onClick={onRetry} disabled={retryDisabled} className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-default disabled:hover:bg-white/10">
                                 <RotateCcw size={13} />
                                 {retryLabel}

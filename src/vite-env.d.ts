@@ -6,6 +6,8 @@ declare global {
   // 当前文件：Folia 构建常量、Vite 环境变量与宿主桥接类型声明。
   interface ImportMetaEnv {
     readonly VITE_FOLIA_API_BASE?: string;
+    /** 飞牛（FNOS）音乐服务的默认地址；为空时由用户在登录表单里填。 */
+    readonly VITE_FEINIU_API_BASE?: string;
   }
 
   interface ImportMeta {

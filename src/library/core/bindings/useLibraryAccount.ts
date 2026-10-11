@@ -16,7 +16,9 @@ import {
     isLoginDialogVisible,
     LOGIN_FAILURE_TIPS,
     LOGIN_METHOD_STEP_COPY,
+    PASSWORD_LOGIN_COPY,
     resolveLoginDiagnosticsPrompt,
+    resolvePasswordLoginStatusMessage,
     resolveProviderSwitchCopy,
 } from '../model/accountRules';
 import { translateHomeMessage } from '../model/homeSources';
@@ -101,6 +103,18 @@ export type LibraryLoginView = {
     failureTips: { title: string; items: string[]; escalation: string } | null;
     /** 后端故障界面的文案（只有 backend.failed 时非空）。 */
     backendFailure: { title: string; restartLabel: string; restartingLabel: string } | null;
+    /** 密码登录的表单（飞牛这类自建服务）；扫码流程为 null。文案已翻译，error 为 null 时不显示提示。 */
+    passwordForm: {
+        needsServerUrl: boolean;
+        serverUrl: string;
+        error: string | null;
+        serverLabel: string;
+        serverPlaceholder: string;
+        usernameLabel: string;
+        passwordLabel: string;
+        submitLabel: string;
+        submittingLabel: string;
+    } | null;
     /** 失败后的自检；没有时为 null。 */
     selfCheck: LibraryLoginSelfCheckView | null;
     retryLabel: string;
@@ -194,6 +208,21 @@ export const translateLoginSession = (
             }
             : null,
         selfCheck: translateLoginSelfCheck(t, session.selfCheck, providerLabel),
+        passwordForm: session.passwordForm
+            ? {
+                needsServerUrl: session.passwordForm.needsServerUrl,
+                serverUrl: session.passwordForm.serverUrl,
+                error: resolvePasswordLoginStatusMessage(session.passwordForm.error)
+                    ? translateHomeMessage(t, resolvePasswordLoginStatusMessage(session.passwordForm.error)!)
+                    : null,
+                serverLabel: translateHomeMessage(t, PASSWORD_LOGIN_COPY.serverLabel),
+                serverPlaceholder: translateHomeMessage(t, PASSWORD_LOGIN_COPY.serverPlaceholder),
+                usernameLabel: translateHomeMessage(t, PASSWORD_LOGIN_COPY.usernameLabel),
+                passwordLabel: translateHomeMessage(t, PASSWORD_LOGIN_COPY.passwordLabel),
+                submitLabel: translateHomeMessage(t, PASSWORD_LOGIN_COPY.submitLabel),
+                submittingLabel: translateHomeMessage(t, PASSWORD_LOGIN_COPY.submittingLabel),
+            }
+            : null,
         retryLabel: t('home.retryQr'),
         closeLabel: t('home.closeLogin'),
     };
