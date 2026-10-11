@@ -1,6 +1,6 @@
 import React from 'react';
 import { isCapacitorAndroid } from '../platform/runtime';
-import { clearLyricsWallpaper, publishLyricsWallpaper, setWallpaperAppearance } from '../platform/foliaWallpaper';
+import { clearLyricsWallpaper, publishLyricsWallpaper, setWallpaperAppearance, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
 import { flattenTuning, tuningFieldFor, withGlobalSettings } from '../platform/wallpaperVisualizerTuning';
 import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';
@@ -367,7 +367,7 @@ export const useLyricsWallpaperFeed = ({
             tuning,
             durationMs,
             timeline: lines.map((line) => {
-                const entry: { text: string; start: number; end: number; translation?: string } = {
+                const entry: FoliaWallpaperTimelineEntry = {
                     text: line.fullText,
                     start: Math.round(line.startTime * 1000),
                     end: Math.round(line.endTime * 1000),
@@ -376,6 +376,21 @@ export const useLyricsWallpaperFeed = ({
                 const translation = line.translation?.trim();
                 if (translation) {
                     entry.translation = translation;
+                }
+                /*
+                 * 逐字时间轴一起下发。
+                 *
+                 * 没有它，叠层只能把整行当成一个「词」渲染：歌词是整一段冒出来的，
+                 * 而 AI 主题的关键词着色会命中这唯一那个 token、把整行都染成高亮色
+                 * —— 两处都和播放页不一样。App 这份 words 即使对普通 LRC 也是有的
+                 * （解析器按字/词把行内时间均分出来的占位），播放页的逐字推进正是靠它。
+                 */
+                if (line.words && line.words.length > 1) {
+                    entry.words = line.words.map(word => ({
+                        text: word.text,
+                        start: Math.max(entry.start, Math.round(word.startTime * 1000)),
+                        end: Math.max(entry.start, Math.round(word.endTime * 1000)),
+                    }));
                 }
                 return entry;
             }),

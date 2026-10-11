@@ -62,15 +62,42 @@ public final class WallpaperLyricsState {
          */
         public final String translation;
 
+        /**
+         * 逐字（逐词）时间轴。**不落盘** —— 见 persist 那边的说明。
+         *
+         * 没有它，叠层只能把整行当成一个「词」来渲染，后果有两个：歌词是**整一段**
+         * 冒出来的（播放器里是一个字一个字推进的），以及 AI 主题的关键词着色会命中
+         * 这唯一那个 token、把整行都染成高亮色。
+         */
+        public final TimedWord[] words;
+
         public TimedLine(String text, long startMs, long endMs) {
-            this(text, startMs, endMs, null);
+            this(text, startMs, endMs, null, null);
         }
 
         public TimedLine(String text, long startMs, long endMs, String translation) {
+            this(text, startMs, endMs, translation, null);
+        }
+
+        public TimedLine(String text, long startMs, long endMs, String translation, TimedWord[] words) {
             this.text = text == null ? "" : text;
             this.startMs = startMs;
             this.endMs = endMs;
             this.translation = translation;
+            this.words = words == null || words.length == 0 ? null : words;
+        }
+    }
+
+    /** 一行里的一个片段（一个英文词，或中文的一个字）。 */
+    public static final class TimedWord {
+        public final String text;
+        public final long startMs;
+        public final long endMs;
+
+        public TimedWord(String text, long startMs, long endMs) {
+            this.text = text == null ? "" : text;
+            this.startMs = startMs;
+            this.endMs = endMs;
         }
     }
 
@@ -467,6 +494,12 @@ public final class WallpaperLyricsState {
     }
 
     private static void persist(Context context, Snapshot snapshot) {
+        // 注意：`words` **故意不落盘**。
+        // 原生那层 GLES 歌词（LyricsRenderer）只按整行的起止画，逐字轴对它没用；
+        // 把它写进 SharedPreferences 等于让每首歌的时间轴胖好几倍，纯属浪费。
+        // 逐字轴只活在内存里，转发给叠层页面 —— App 每次 publish 都会带过来。
+        // 代价是冷启动（App 还没 publish）时恢复出来的行没有逐字轴，
+        // 那一小会儿叠层退回「整行」的老样子，App 一起来就补上了。
         StringBuilder joined = new StringBuilder();
         for (int i = 0; i < snapshot.lines.length; i++) {
             if (i > 0) {

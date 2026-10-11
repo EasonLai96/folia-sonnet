@@ -2391,6 +2391,29 @@ public final class WallpaperOverlay {
                 if (line.translation != null) {
                     entry.put("translation", line.translation);
                 }
+                /*
+                 * 逐字（逐词）时间轴跟着一起下去。
+                 *
+                 * 叠层之前只拿到整行的起止，于是整行被当成一个「词」渲染：歌词是整一段
+                 * 冒出来的，而 AI 主题的关键词着色会命中这唯一那个 token、把整行都染成
+                 * 高亮色 —— 两处都和播放页不一样。App 那份 words 连普通 LRC 都有
+                 * （解析器按字/词把行内时间均分出来的占位），播放页的逐字推进正是靠它。
+                 *
+                 * 绝大多数行都带，这份 JSON 会明显变大；payload 只在签名变了（离散事件）
+                 * 时才构造，不在心跳的热路径上，所以代价是「换歌那一次多传几十 KB」。
+                 */
+                if (line.words != null) {
+                    JSONArray words = new JSONArray();
+                    for (int j = 0; j < line.words.length; j++) {
+                        WallpaperLyricsState.TimedWord word = line.words[j];
+                        JSONObject item = new JSONObject();
+                        item.put("text", word.text);
+                        item.put("start", word.startMs);
+                        item.put("end", word.endMs);
+                        words.put(item);
+                    }
+                    entry.put("words", words);
+                }
                 lines.put(entry);
             }
             out.put("lines", lines);

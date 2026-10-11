@@ -66,6 +66,13 @@ type WallpaperTimedLine = {
     /** 毫秒 */
     end: number;
     translation?: string;
+    /**
+     * 逐字（逐词）时间轴，毫秒。没有就是整行一个词（冷启动恢复出来的行就是这样）。
+     *
+     * 有了它，叠层才能按 App 那份 LRC 的时间逐字推进，而不是整一段冒出来；
+     * AI 主题的关键词着色也才有「一个词」这么大的粒度可以命中。
+     */
+    words?: { text: string; start: number; end: number }[];
 };
 
 export type WallpaperPayload = {
@@ -225,8 +232,12 @@ const CONTENT_DWELL_MS = 400;
 
 /**
  * 把原生推来的那几行转成渲染器认识的 Line。
- * 壁纸这边没有逐字时间轴（原生只存了整行起止），所以整行当成一个「词」，
- * 逐字高亮会退化成整行推进 —— 这是试点阶段的已知差别。
+ *
+ * 原生带了逐字轴就用逐字轴（播放器里的 Line.words 是同一份东西），
+ * 这时叠层的歌词会**一个字一个字推进**，AI 主题的关键词着色也能落在那几个字上。
+ *
+ * 拿不到逐字轴才退化成「整行一个词」（只有冷启动、App 还没推过逐字数据那几分钟），
+ * 那时候歌词会整段出现 —— 已知的、可以接受的退化。
  */
 const toLines = (payload: WallpaperPayload): Line[] => {
     const lines = payload.lines ?? [];
@@ -237,11 +248,15 @@ const toLines = (payload: WallpaperPayload): Line[] => {
         startTime: msToSec(line.start),
         endTime: msToSec(line.end),
         translation: line.translation,
-        words: [{
+        words: (line.words && line.words.length > 0 ? line.words : [{
             text: line.text,
-            startTime: msToSec(line.start),
-            endTime: msToSec(line.end),
-        }],
+            start: line.start,
+            end: line.end,
+        }]).map(word => ({
+            text: word.text,
+            startTime: msToSec(word.start),
+            endTime: msToSec(word.end),
+        })),
     }));
 };
 
@@ -321,19 +336,6 @@ const WallpaperSurface: React.FC = () => {
         return {
             ...base,
             name: 'wallpaper',
-            /*
-             * AI 主题那份「指定词高亮」在叠层里必须丢掉。
-             *
-             * 原生推下来的整行只有一个起止时间，这里的行被当成一个**整体词**
-             * （见 toLines），而 App 内是逐字的。关键词着色是按「token 与命中范围
-             * 有交集就染色」算的 —— token 就是整行，于是命中任何一个词，
-             * 整句都被染成那个高亮色：用户看到的就是「一整段全是高亮色」。
-             * App 内同一个主题是逐词的，所以只有那几个词变色，症状只在叠层出现。
-             *
-             * 叠层没有逐字时间轴，做不到「只染那几个字」，与其整块染错不如不用。
-             * 以后原生把逐字时间轴也推下来，这两行删掉即可恢复。
-             */
-            wordColors: [],
             backgroundColor: smoothBase || payload.backgroundColor || skeleton.backgroundColor,
             primaryColor: primary,
             accentColor: accent,

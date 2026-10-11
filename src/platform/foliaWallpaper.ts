@@ -3,6 +3,15 @@ import { registerPlugin } from '@capacitor/core';
 // src/platform/foliaWallpaper.ts
 // 歌词动态壁纸的 Web 侧入口。原生实现见 android/.../wallpaper/LyricsWallpaperService。
 
+export interface FoliaWallpaperTimelineWord {
+    /** 片段文本（一个词，或中文的一个字）。 */
+    text: string;
+    /** 起始毫秒。 */
+    start: number;
+    /** 结束毫秒。 */
+    end: number;
+}
+
 export interface FoliaWallpaperTimelineEntry {
     /** 歌词文本。 */
     text: string;
@@ -12,6 +21,19 @@ export interface FoliaWallpaperTimelineEntry {
     end: number;
     /** 翻译行。没有就整个字段不传 —— 传空串会让原生分不清「没翻译」和「翻译是空的」。 */
     translation?: string;
+    /**
+     * 逐字（逐词）时间轴。
+     *
+     * 叠层之前只有整行的起止，于是整行被当成一个「词」渲染 —— 后果有两个：
+     * 歌词是**整一段**冒出来的（播放器里是一个字一个字推进的），以及 AI 主题的
+     * 关键词着色会命中这唯一那个 token、**整行都染成高亮色**。播放器那里
+     * 用的就是同一份 `Line.words`，所以这里把它原样带下来即可。
+     *
+     * 只有 > 1 段时才下发：一段等于整行，传了跟没传一样。
+     * 这份数据体积不小（几百行×十几段），但 publish 只在换歌时走整条轴，
+     * 心跳只带 positionMs，所以不在热路径上。
+     */
+    words?: FoliaWallpaperTimelineWord[];
 }
 
 /**

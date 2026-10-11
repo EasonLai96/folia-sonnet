@@ -53,7 +53,8 @@ public class FoliaWallpaperPlugin extends Plugin {
                     long end = entry.optLong("end", 0L);
                     String text = entry.optString("text", "");
                     String translation = readTranslation(entry);
-                    timeline[i] = new WallpaperLyricsState.TimedLine(text, start, end, translation);
+                    timeline[i] = new WallpaperLyricsState.TimedLine(
+                            text, start, end, translation, readWords(entry, start));
                 } catch (JSONException error) {
                     // 单行解析失败不影响整条时间轴。
                 }
@@ -405,6 +406,35 @@ public class FoliaWallpaperPlugin extends Plugin {
             return null;
         }
         return value;
+    }
+
+    /**
+     * 一行的逐字时间轴。
+     *
+     * 段的时间必须**夹在行的 [start, end] 之内**：有些歌词格式里第一个片段会用行本身的
+     * 起止、个别还会越过行边界几个毫秒，而渐变进度是按 [start, end] 归一算的 ——
+     * 越界那部分就变成「最后一个片段永远点不亮」或「上一行还在显示它就开始亮了」。
+     * 桥上给的是毫秒整数，取一个上下界夹一下最省事。
+     *
+     * 只有多于一段才有意义 —— 一段等于整行，传下去和没传一样。
+     */
+    private static WallpaperLyricsState.TimedWord[] readWords(
+            org.json.JSONObject entry, long lineStartMs) {
+        org.json.JSONArray array = entry.optJSONArray("words");
+        if (array == null || array.length() <= 1) {
+            return null;
+        }
+        WallpaperLyricsState.TimedWord[] words = new WallpaperLyricsState.TimedWord[array.length()];
+        for (int i = 0; i < array.length(); i++) {
+            org.json.JSONObject item = array.optJSONObject(i);
+            if (item == null) {
+                return null;
+            }
+            long start = Math.max(lineStartMs, item.optLong("start", lineStartMs));
+            long end = Math.max(start, item.optLong("end", start));
+            words[i] = new WallpaperLyricsState.TimedWord(item.optString("text", ""), start, end);
+        }
+        return words;
     }
 
     /**

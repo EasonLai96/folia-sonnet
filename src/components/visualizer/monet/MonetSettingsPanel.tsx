@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { ImagePlus, Trash2 } from 'lucide-react';
 import { DEFAULT_MONET_TUNING, type MonetAudioStyle, type MonetPortraitSource } from '../../../types';
+import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { colorWithAlpha } from '../colorMix';
 import { type VisualizerSettingsPanelProps } from '../definition';
 
@@ -141,6 +142,17 @@ export const MonetSettingsPanel: React.FC<VisualizerSettingsPanelProps> = ({
 }) => {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [feedback, setFeedback] = useState<string | null>(null);
+    /*
+     * 桌面歌词叠层的封面显隐。
+     *
+     * 它不属于某一模式的 tuning —— 对任何把封面当构图的模式都应该生效，
+     * 所以放在「歌词动画」这个 store 里而不是 `monetTuning` 里。
+     * 和「图形」设置页里那一项是同一个值，两处都能改，改任意一处另一个跟着变
+     * （叠层那边靠 `settingsStamp` 重载页面拿到新值）。
+     */
+    const overlayHideCoverArt = useVisualizerSettingsStore(state => state.wallpaperOverlayHideCoverArt);
+    const toggleOverlayHideCoverArt = useVisualizerSettingsStore(
+        state => state.handleToggleWallpaperOverlayHideCoverArt);
     const resolvedTuning = {
         keywordColoringEnabled: monetTuning.keywordColoringEnabled ?? DEFAULT_MONET_TUNING.keywordColoringEnabled,
         showDescription: monetTuning.showDescription ?? DEFAULT_MONET_TUNING.showDescription,
@@ -183,6 +195,12 @@ export const MonetSettingsPanel: React.FC<VisualizerSettingsPanelProps> = ({
     const showPortraitDragHangerOptions = useMemo<PresetOption<boolean>[]>(() => ([
         { value: true, label: t('options.monetPortraitDragHangerShow') },
         { value: false, label: t('options.monetPortraitDragHangerHide') },
+    ]), [t]);
+    // 值是「要不要显示」而不是 store 里那个「要不要隐藏」：面板上按正向读更好懂，
+    // 存的时候再翻一次。
+    const overlayCoverArtOptions = useMemo<PresetOption<boolean>[]>(() => ([
+        { value: true, label: t('options.monetOverlayCoverArtShow') },
+        { value: false, label: t('options.monetOverlayCoverArtHide') },
     ]), [t]);
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -258,6 +276,18 @@ export const MonetSettingsPanel: React.FC<VisualizerSettingsPanelProps> = ({
             <div className="space-y-3.5 rounded-[18px] border border-white/5 p-3.5 bg-black/5 dark:bg-white/5">
                 <div className="text-xs font-semibold uppercase tracking-wider opacity-65" style={{ color: theme.accentColor }}>
                     {t('options.cappellaAvatarSource')}
+                </div>
+
+                <PresetGroup
+                    label={t('options.monetOverlayCoverArt')}
+                    value={!overlayHideCoverArt}
+                    options={overlayCoverArtOptions}
+                    onChange={(value) => toggleOverlayHideCoverArt(!value)}
+                    isDaylight={isDaylight}
+                    theme={theme}
+                />
+                <div className="-mt-1 text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                    {t('options.monetOverlayCoverArtHint')}
                 </div>
 
                 <PresetGroup
