@@ -14,10 +14,14 @@ import {
     type LocalHomeSectionKey,
 } from '../model/localHomeModel';
 import { getLocalCoverAssetUrl } from '../../../services/localCoverAssetUrl';
+import { backfillLocalCovers } from '../../../services/localCoverBackfill';
 
 // src/library/core/bindings/useLibraryHomeLocal.ts
 // 本地页签的模型：四组条目（core/model/localHomeModel，曲库实体用宿主那份 catalog）、四个 section 的文案与卡片、
 // 当前 section 与它的批量类型；以及本地文件夹树（首页宿主持有的 core/services/localDirectoryTrees，跟着曲库重读）。
+
+/** 一次补多少首歌的封面。开屏时不该对着一整屏卡片发几十个请求。 */
+const COVER_BACKFILL_LIMIT = 12;
 
 export type LibraryHomeLocalSection = {
     key: LocalHomeSectionKey;
@@ -71,6 +75,20 @@ export const useLibraryHomeLocal = ({
 
     const activeKey = localHomeSectionOfRow(activeRow).key;
     const activeSection = sections.find(section => section.key === activeKey) ?? sections[0];
+
+    /*
+     * 补封面：本地歌的内嵌封面原本只在导入和播放那一刻抽，从没打开过的歌单因此一直是空白
+     * 卡片 —— 点开一次才有。这里从当前分组里挑几首还没有封面的排进队列，抽到之后界面自己
+     * 会重建（见 services/localCoverBackfill）。只在首页本地页签做，别的地方不付这份 IO。
+     */
+    useEffect(() => {
+        const candidates = sections
+            .flatMap(section => section.groups)
+            .flatMap(group => group.songs.slice(0, 2))
+            .filter(song => !song.localCoverAssetId);
+        backfillLocalCovers(candidates, COVER_BACKFILL_LIMIT);
+    }, [sections]);
+
     return {
         sections,
         activeSection,

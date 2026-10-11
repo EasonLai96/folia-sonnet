@@ -1840,22 +1840,30 @@ async function extractAndPersistSongCover(
     return updatedSong;
 }
 
+/** 只取文件头部多少字节来找内嵌封面。 */
+const COVER_HEAD_BYTES = 1024 * 1024;
+
 /**
- * 安卓上把整首音频取回来当 File。
+ * 安卓上把音频取回来当 File。
  *
  * 本地歌在安卓走的是原生回环服务（`nativeAudioRef`），**没有 File System Access 句柄** ——
  * 而 ensureLocalSongCoverAsset 之前只认句柄，拿不到就直接放弃。
  * 结果是：安卓本地歌的封面**只有导入那一次**有机会抽出来（导入时解析内嵌元数据），
  * 那一趟一旦失败（比如副本那次 fetch 404），这首歌就永远没有封面 ——
  * 队列磁贴、播放页全是空白。这里让封面抽取也能从原生回环那份字节里拿。
+ *
+ * `headOnly` 只取前 1MB：内嵌封面（ID3 的 APIC、FLAC 的 picture 块）几乎都在文件头部，
+ * 而整首拉回来对一首 8 分钟的 FLAC 就是几十 MB —— 给一整屏卡片补封面时不该付这个代价。
+ * 取不到就返回 null，调用方（播放时那条路径）会再不带限制地试一次。
  */
-async function nativeAudioFile(song: LocalSong): Promise<File | null> {
+async function nativeAudioFile(song: LocalSong, headOnly = false): Promise<File | null> {
     if (!song.nativeAudioRef) return null;
     const url = await nativeAudioUrlForRef(song.nativeAudioRef);
     if (!url) return null;
     try {
-        const response = await fetch(url);
-        if (!response.ok) return null;
+        const response = await fetch(url, headOnly ? { headers: { Range: `bytes=0-${COVER_HEAD_BYTES - 1}` } } : undefined);
+        // 原生回环服务支持 Range，回了 206 也算成功。
+        if (!response.ok && response.status !== 206) return null;
         const blob = await response.blob();
         if (blob.size <= 0) return null;
         return new File([blob], song.fileName || 'audio', { type: song.mimeType || 'audio/*' });
@@ -1864,7 +1872,10 @@ async function nativeAudioFile(song: LocalSong): Promise<File | null> {
     }
 }
 
-export async function ensureLocalSongCoverAsset(song: LocalSong): Promise<LocalSong> {
+export async function ensureLocalSongCoverAsset(
+    song: LocalSong,
+    options?: { preferHeadBytes?: boolean },
+): Promise<LocalSong> {
     if (song.localCoverAssetId && await hasLocalCoverBinary(song.localCoverAssetId)) return song;
     if (song.localCoverSource === 'folder') return song;
 
@@ -1873,7 +1884,7 @@ export async function ensureLocalSongCoverAsset(song: LocalSong): Promise<LocalS
             const fileHandle = await getAccessibleFileHandle(song);
             if (!fileHandle) {
                 // 安卓没有句柄，但字节还能从原生回环服务取回来 —— 别就这么放弃。
-                const nativeFile = await nativeAudioFile(song);
+                const nativeFile = await nativeAudioFile(song, options?.preferHeadBytes === true);
                 if (!nativeFile) return song;
                 try {
                     return await extractAndPersistSongCover(song, null, nativeFile);
