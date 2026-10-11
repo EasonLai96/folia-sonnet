@@ -38,6 +38,8 @@ const CONTROL_LAYOUT_SPRING = {
 const HOVER_EXPAND_DELAY_MS = 20;
 const HOVER_COLLAPSE_DELAY_MS = 100;
 const HOVER_HITBOX_BOTTOM_BUFFER_PX = 32;
+/** 暂停时自动展开露出的时间：够看见并点到控件，之后自己缩回一条进度条。 */
+const AUTO_EXPAND_DURATION_MS = 4000;
 /*
  * 模组可以通过公开变量 --folium-player-bar-extra 加宽胶囊，补回进度条两侧按钮占掉的长度。
  * 外层 max-width 已经加了一份 extra；收起的胶囊是外层的 80% / 60%，所以只再补 (1 - 比例) 份，
@@ -135,6 +137,10 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     const [isTimelineOpen, setIsTimelineOpen] = useState(false);
     const expandTimeoutRef = useRef<number | null>(null);
     const collapseTimeoutRef = useRef<number | null>(null);
+    const [autoExpanded, setAutoExpanded] = useState(false);
+    const autoCollapseTimeoutRef = useRef<number | null>(null);
+    /** 命中区（含向下那块补丁）的整体：点它以外的地方算「点周围」。 */
+    const hitboxRef = useRef<HTMLDivElement | null>(null);
 
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
     const isPositioning = usePlayerBottomBarLayoutStore(state => state.isPositioning);
@@ -149,8 +155,49 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     ));
 
     const canAutoExpand = canTogglePlay && duration > 0;
+    /**
+     * 暂停（且不在首页）时把控件露出来给用户按，但只露一会儿：原先这里是常驻展开，
+     * 而触屏上根本不会有「指针移开」这件事，胶囊就一直停在展开态回不去。
+     */
+    const wantsAutoExpand = canAutoExpand && !isPositioning && playerState !== PlayerState.PLAYING && currentView !== 'home';
     // 定位模式强制展开：用户要看到的是最终形态的胶囊，而不是一条细进度条。
-    const showExpanded = isPositioning || isHovered || (canAutoExpand && playerState !== PlayerState.PLAYING && currentView !== 'home');
+    const showExpanded = isPositioning || isHovered || autoExpanded;
+
+    useEffect(() => {
+        if (!wantsAutoExpand) {
+            setAutoExpanded(false);
+            return;
+        }
+        setAutoExpanded(true);
+        if (autoCollapseTimeoutRef.current !== null) {
+            window.clearTimeout(autoCollapseTimeoutRef.current);
+        }
+        autoCollapseTimeoutRef.current = window.setTimeout(() => {
+            autoCollapseTimeoutRef.current = null;
+            setAutoExpanded(false);
+        }, AUTO_EXPAND_DURATION_MS);
+        return () => {
+            if (autoCollapseTimeoutRef.current !== null) {
+                window.clearTimeout(autoCollapseTimeoutRef.current);
+                autoCollapseTimeoutRef.current = null;
+            }
+        };
+    }, [wantsAutoExpand]);
+
+    // 点胶囊以外的任何地方：自动展开的那一下立刻收起，不必等定时器走完。
+    useEffect(() => {
+        if (!autoExpanded) {
+            return;
+        }
+        const dismiss = (event: Event) => {
+            const target = event.target;
+            if (hitboxRef.current && target instanceof Node && !hitboxRef.current.contains(target)) {
+                setAutoExpanded(false);
+            }
+        };
+        document.addEventListener('pointerdown', dismiss);
+        return () => document.removeEventListener('pointerdown', dismiss);
+    }, [autoExpanded]);
 
     // 上限依赖视口高度，窗口变矮时要跟着收，否则虚线框会画到屏幕外。
     useEffect(() => {
@@ -269,10 +316,20 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
             if (collapseTimeoutRef.current !== null) {
                 window.clearTimeout(collapseTimeoutRef.current);
             }
+            if (autoCollapseTimeoutRef.current !== null) {
+                window.clearTimeout(autoCollapseTimeoutRef.current);
+            }
         };
     }, []);
 
-    const handleMouseEnter = () => {
+    /**
+     * 只用真鼠标的悬停展开。触屏点一下也会合成 mouseenter，但之后不会有任何「指针移开」
+     * 的事件 —— 那样展开就永久卡住，而暂停时的展开另有定时器负责收回（见 wantsAutoExpand）。
+     */
+    const handlePointerEnter = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.pointerType !== 'mouse') {
+            return;
+        }
         if (collapseTimeoutRef.current !== null) {
             window.clearTimeout(collapseTimeoutRef.current);
             collapseTimeoutRef.current = null;
@@ -288,7 +345,10 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
         }, HOVER_EXPAND_DELAY_MS);
     };
 
-    const handleMouseLeave = () => {
+    const handlePointerLeave = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.pointerType !== 'mouse') {
+            return;
+        }
         if (expandTimeoutRef.current !== null) {
             window.clearTimeout(expandTimeoutRef.current);
             expandTimeoutRef.current = null;
@@ -348,9 +408,10 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                 onClick={(e) => e.stopPropagation()}
             >
                 <div
+                    ref={hitboxRef}
                     className="pointer-events-auto w-full flex justify-center"
-                    onMouseEnter={handleMouseEnter}
-                    onMouseLeave={handleMouseLeave}
+                    onPointerEnter={handlePointerEnter}
+                    onPointerLeave={handlePointerLeave}
                     style={{
                         // 这块向下的命中区补丁只在胶囊贴底时才有意义；抬高之后按当前偏移量收敛，
                         // 否则胶囊下方会留一条既不可点也挡不住东西的死区。
