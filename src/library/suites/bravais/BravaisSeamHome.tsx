@@ -12,6 +12,7 @@ import {
     Library,
     Maximize2,
     MicVocal,
+    Minimize2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { BravaisLayer, BravaisSeamTab } from './bravaisLayer';
@@ -300,11 +301,29 @@ const BravaisSeamHome: React.FC<{
     // 缩减级别变了（标题隐藏、页签缩成一个字、入口挪进 / 挪出菜单）：页头与切换位淡入新的样子，不硬切。
     useBravaisSeamFade(`${level}|${shortcutsInColumn}`, headRef, slotRef, jumpsRef);
     const expand = () => setLevel('full');
+    // fb12（用户实测：书脊上的「展开」之后缝里没有缩回去的按钮）：首页窄缝里加一颗「缩回书脊」，
+    // 与「折叠」并排在页签列上方那一行；书脊上的「展开」与它互为反操作（spine ↔ full）。
+    const collapseToSpine = () => setLevel('spine');
+    const shrinkButton = (
+        <button type="button" className="bravais-seam-icon" data-bravais-seam-action="shrink"
+            onClick={collapseToSpine}
+            aria-label={t('libraryBravais.seamSpine')} title={t('libraryBravais.seamSpine')}>
+            <Minimize2 aria-hidden />
+        </button>
+    );
     const foldButton = (
         <button type="button" className="bravais-seam-icon" data-bravais-seam-action="hide" onClick={() => setLevel('hidden')}
             aria-label={t('libraryBravais.seamFold')} title={t('libraryBravais.seamFold')}>
             <FoldHorizontal aria-hidden />
         </button>
+    );
+    // 书脊档已经在最窄了：缩回按钮只在首页窄缝里有，测量副本也按这个形状量。
+    const lead = <div className="bravais-seam-home-lead">{!compact && shrinkButton}{foldButton}</div>;
+    const leadMeasure = (
+        <div className="bravais-seam-home-lead">
+            {!compact && <span className="bravais-seam-icon" />}
+            <span className="bravais-seam-icon" />
+        </div>
     );
     return (
         <div className={`bravais-seam-home${compact ? ' is-compact' : ''}${short ? ' has-short-tabs' : ''}`} data-bravais-home-seam
@@ -313,7 +332,7 @@ const BravaisSeamHome: React.FC<{
                 <div className="bravais-seam-home-nav-content">
                     <div ref={headRef}>
                         <HomeSeamHead title={seam.title} hideTitle={level !== 'titled'} tabs={tabs} shorts={short ? shortLabels : null}
-                            lead={foldButton} onSelectTab={seam.onSelectTab} />
+                            lead={lead} onSelectTab={seam.onSelectTab} />
                     </div>
                     {/* fb3：中段在页头与工具格之间的剩余空间里竖直居中。 */}
                     <div ref={middleRef} className="bravais-seam-home-middle">
@@ -351,11 +370,11 @@ const BravaisSeamHome: React.FC<{
                 fb2 第二轮：两份——带标题的全名页头、不带标题的全名页头。fb3：再加一份全名二级切换（容器常在）。 */}
             <div ref={titledHeadRef} className="bravais-seam-home-measure" aria-hidden>
                 <HomeSeamHead title={seam.title} hideTitle={false} tabs={tabs} shorts={null} measure
-                    lead={<span className="bravais-seam-icon" />} />
+                    lead={leadMeasure} />
             </div>
             <div ref={bareHeadRef} className="bravais-seam-home-measure" aria-hidden>
                 <HomeSeamHead title={seam.title} hideTitle tabs={tabs} shorts={null} measure
-                    lead={<span className="bravais-seam-icon" />} />
+                    lead={leadMeasure} />
             </div>
             {/* 全名二级切换的测量副本；直达入口一列的测量副本（fb11：入口贴在中段底部，单独量）。 */}
             <div ref={fullSlotRef} className="bravais-seam-home-measure" aria-hidden>

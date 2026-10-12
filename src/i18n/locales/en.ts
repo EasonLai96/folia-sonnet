@@ -24,6 +24,7 @@ export default {
     "seamFoldStrip": "Fold the info strip",
     "seamFold": "Fold",
     "seamExpand": "Expand",
+    "seamSpine": "Shrink to the spine",
     "seamRestore": "Expand the info strip",
     "seamReopenHere": "Split here",
     "crumbMore": "Show every level",

@@ -24,6 +24,7 @@ export default {
     "seamFoldStrip": "折叠信息条",
     "seamFold": "折叠",
     "seamExpand": "展开",
+    "seamSpine": "缩回书脊",
     "seamRestore": "展开信息条",
     "seamReopenHere": "在这里裂开",
     "crumbMore": "显示全部层级",

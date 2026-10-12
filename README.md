@@ -1,6 +1,6 @@
 # Folia-Sonnet
 
-将 [Folia](https://github.com/chthollyphile/folia-major) 打包到 Android 平台的实验性项目。它不是官方 Android 客户端，也不代表 Folia 主项目的移动端计划；本仓库版本基于 **Folia-major 0.7.13** 正式版。
+将 [Folia](https://github.com/chthollyphile/folia-major) 打包到 Android 平台的实验性项目。它不是官方 Android 客户端，也不代表 Folia 主项目的移动端计划；本仓库版本基于 **Folia-major 0.7.18** 正式版。
 
 > [!IMPORTANT]
 > **装上去就能用，不需要自建后端。**

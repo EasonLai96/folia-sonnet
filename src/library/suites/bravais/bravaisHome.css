@@ -115,6 +115,9 @@
 /* 折叠按钮单独一行，在页签那一列上面（窄缝与书脊相同）。 */
 .bravais-seam-home-side { display: flex; flex: none; flex-direction: column; align-items: center; gap: 8px; }
 
+/* fb12：「缩回书脊」与「折叠」并排在这一行里（窄缝才有缩回；测量副本里是两个同尺寸占位）。 */
+.bravais-seam-home-lead { display: flex; align-items: center; justify-content: center; gap: 6px; }
+
 /* 全名页头的测量副本：与导航区同宽，绝对定位、看不见、不占位。 */
 .bravais-seam-home > .bravais-seam-home-measure {
     position: absolute;

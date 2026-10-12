@@ -24,6 +24,7 @@ export default {
     "seamFoldStrip": "Lipat strip info",
     "seamFold": "Lipat",
     "seamExpand": "Bentangkan",
+    "seamSpine": "Ciutkan ke punggung",
     "seamRestore": "Bentangkan strip info",
     "seamReopenHere": "Belah di sini",
     "crumbMore": "Tampilkan semua tingkat",
