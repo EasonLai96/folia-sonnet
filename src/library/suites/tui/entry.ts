@@ -43,7 +43,7 @@ const tui: LibrarySuiteManifest = {
                 // 首页（LibraryTuiHome）：命令面板筛选目录、Insert / Ctrl+A 批选、Ctrl+Enter 播放 / 入队选中的，
                 // 新建歌单（命令面板或行内输入）、从曲库删除选中的（行内确认），焦点在导入根 / 被忽略的文件夹上时
                 // 重扫根、移除根（行内确认）、恢复忽略目录，「管理隐藏」视图与焦点歌单的隐藏 / 取消隐藏；
-                // 本地的导入文件夹、刷新、导入歌单文件（隐藏的文件选择框）与 Navidrome 的刷新。
+                // 本地的导入文件夹、刷新、导入歌单文件（隐藏的文件选择框）、扫描设备音乐（安卓原生才有）与 Navidrome 的刷新。
                 // 在线账户的平台列表（选平台、登出）也在首页上，但它的动作声明在 account surface 里（见 TUI_ACCOUNT_ACTIONS）。
                 actions: [
                     'directory-filter',
@@ -60,6 +60,7 @@ const tui: LibrarySuiteManifest = {
                     'home-import-folder',
                     'home-refresh-folders',
                     'home-import-playlist',
+                    'home-scan-device-music',
                     'home-refresh-navidrome',
                 ],
             },

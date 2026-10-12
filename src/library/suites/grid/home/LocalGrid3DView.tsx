@@ -101,7 +101,7 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
     const [isManageOpen, setIsManageOpen] = useState(false);
     const directoryTrees = useLocalDirectoryTrees(directoryTreesResource, localSongs);
     const local = useLibraryHomeLocal({ localSongs, localPlaylists, catalog: localLibraryCatalog, activeRow });
-    const { snapshot: actionState, importBusy } = useLibraryHomeActions(homeActions);
+    const { snapshot: actionState } = useLibraryHomeActions(homeActions);
 
     const [localFolderIndex, setLocalFolderIndex] = useDebouncedFocusSync(focusedFolderIndex, setFocusedFolderIndex);
     const [localAlbumIndex, setLocalAlbumIndex] = useDebouncedFocusSync(focusedAlbumIndex, setFocusedAlbumIndex);
@@ -191,19 +191,33 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
     });
 
     if (isEmptyLibrary) {
-        const scanning = Boolean(actionState.scan?.active);
+        /*
+         * 空库那一屏把「导入文件夹」与「扫描本机音乐」一起摆出来。
+         *
+         * 以前这里只给「导入文件夹」，而别的入口（含安卓的「扫描本机音乐」）只挂在 Galgame/TUI 那排动作里，
+         * 那一排在空库早退之后才渲染 —— 于是安卓上必须先导入一个文件夹、脱离空态，才看得见扫歌按钮。
+         * 对一台刚装好、库里一首歌都没有的手机来说，这个顺序正好把最该点的那颗藏起来了。
+         */
+        const emptyActions = localActions.filter(
+            action => action.id === 'import-folder' || action.id === 'scan-device-music',
+        );
         return (
             <div className="w-full h-full flex flex-col items-center justify-center gap-4 opacity-60">
                 <Music size={64} />
                 <p className="text-lg">{t('localMusic.noLocalMusic')}</p>
-                <button
-                    onClick={() => void homeActions.importFolder()}
-                    disabled={importBusy}
-                    className="px-6 py-3 rounded-full transition-colors text-sm flex items-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {importBusy ? <Loader2 size={16} className="animate-spin" /> : <FolderOpen size={16} />}
-                    {scanning ? t('options.scanning') : actionState.importingFolder ? t('localMusic.importing') : t('localMusic.importFolder')}
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                    {emptyActions.map(action => (
+                        <button
+                            key={action.id}
+                            onClick={() => runAction(action.id)}
+                            disabled={action.disabled}
+                            className="px-6 py-3 rounded-full transition-colors text-sm flex items-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {action.pending ? <Loader2 size={16} className="animate-spin" /> : ACTION_ICONS[action.id]}
+                            {t(action.labelKey)}
+                        </button>
+                    ))}
+                </div>
             </div>
         );
     }

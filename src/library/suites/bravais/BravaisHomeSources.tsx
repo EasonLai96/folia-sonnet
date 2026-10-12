@@ -23,6 +23,7 @@ import { useLibraryHomeLocal, useLocalDirectoryTrees, useLocalHomeBatchConfig } 
 import { useLibraryHomeNavidrome } from '../../core/bindings/useLibraryHomeNavidrome';
 import { useLibraryHomeActions } from '../../core/bindings/useLibraryHomeActions';
 import { useLibraryHomeListRegistration } from '../../core/bindings/useLibraryHomeSurfaceRegistration';
+import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
 import type { BravaisHomeTool } from './bravaisHomeModels';
 import type { BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { BravaisHomeChrome } from './useBravaisHomeChrome';
@@ -53,6 +54,7 @@ const LOCAL_ACTION_IDS: Record<string, LibraryHomeActionId> = {
     'import-folder': 'home-import-folder',
     'refresh-folders': 'home-refresh-folders',
     'import-playlist': 'home-import-playlist',
+    'scan-device-music': 'home-scan-device-music',
 };
 
 export const BravaisHomeOnline: React.FC<BravaisHomeSourceCommonProps & {
@@ -134,12 +136,19 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
         reloadAllTrees: directoryTrees.reloadAll,
     });
     const activeSection = local.activeSection;
-    const localActions = resolveLocalHomeActions(actionState)
+    /*
+     * 「扫描设备音乐」要不要摆在菜单里：core 不做平台判定，由这里按运行时告诉它。
+     *
+     * 这一条原本只有 grid（LocalGrid3DView）给 —— 于是同一份本地曲换到 Bravais 墙上就少了一个入口：
+     * 系统文件管理器挑不出「设备里已经收录的所有音乐」，安卓上只剩这条能一次性收进来。
+     */
+    const localActions = resolveLocalHomeActions(actionState, { deviceScan: isAndroidNativeRuntime() })
         .filter(action => common.declaredActions.actions.includes(LOCAL_ACTION_IDS[action.id]));
     const runAction = (id: string) => {
         if (id === 'import-folder') void homeActions.importFolder();
         else if (id === 'refresh-folders') void homeActions.refreshFolders();
         else if (id === 'import-playlist') playlistFileInputRef.current?.click();
+        else if (id === 'scan-device-music') void homeActions.scanDeviceMusic();
     };
     const runActionRef = useRef(runAction);
     runActionRef.current = runAction;
