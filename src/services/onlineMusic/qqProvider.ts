@@ -678,11 +678,19 @@ const getUserPlaylists = async (
     const nextOffset = offset + items.length;
     const total = Number(response?.total ?? response?.data?.total);
     if (offset === 0) {
+        // 收藏的歌单在回包里是 `subscribed: 1`；自建的是 0。一个数就能分开「后端没给收藏」
+        // 和「我们没解析出来」。
+        const collectedCount = playlists.filter((item: unknown) => {
+            const value = ((item ?? {}) as Record<string, unknown>).subscribed;
+            return value === true || Number(value) > 0;
+        }).length;
         // `more` reports an upstream continuation this endpoint cannot request, so it is only observable here.
         console.info('[QQProvider] playlists:loaded', {
             count: playlists.length,
             ...(Number.isFinite(total) ? { total } : {}),
             more: Boolean(response?.more),
+            ownedCount: playlists.length - collectedCount,
+            collectedCount,
             // 回包到底长什么样只在这里记一次：只拿到「我喜欢的音乐」时，
             // 一眼就能看出后端是把收藏放在了另一个字段里，还是压根没给。
             rootKeys: Object.keys((response ?? {}) as Record<string, unknown>),
@@ -691,6 +699,21 @@ const getUserPlaylists = async (
                 ? Object.keys((playlists[0] ?? {}) as Record<string, unknown>)
                 : [],
         });
+        /*
+         * 一个收藏都没有 —— 这多半不是解析问题。
+         *
+         * @yakult-green-tea/qq-music-api（3.1.x）的 `getPlaylists` 是两趟：先
+         * `GetPlaylistByUin` 拿自建歌单，再 `CgiGetPlaylistFavInfo` 拿收藏的 ——
+         * 而第二趟外面套了一层 `if (credential.encryptUin)`。凭据里没有这个字段时，
+         * 收藏那一整段被跳过，回包里就只剩自建的「我喜欢」。
+         * 微信扫码登录拿到的凭据常常就没有它：重新登录（或换 QQ 扫码）才能补齐。
+         */
+        if (playlists.length > 0 && collectedCount === 0) {
+            console.warn('[QQProvider] playlists:no-collected', {
+                count: playlists.length,
+                hint: 'Backend skips favourite playlists when the login credential has no encryptUin — re-login (QQ QR rather than WeChat) usually fixes it.',
+            });
+        }
     }
 
     return {
