@@ -60,6 +60,17 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
      * 「已经在本机曲库里了」。这里是这道闸。
      */
     const settledRef = useRef(false);
+    /**
+     * 用户已经点头了。
+     *
+     * 「是否导入」那一页的关闭（点叉、点背景、返回键）是要把拷好的副本删掉的；可用户一旦
+     * 按了「导入」，那一页还要 await 一次歌单列表才翻页 —— 这中间它仍然是打开的，手指碰
+     * 到背景就会走关闭分支，把待会儿要读的副本删了：歌照样进库、照样加进歌单，却一首都
+     * 放不出来。点了头之后关闭就只是关掉，不再删文件。
+     */
+    const confirmedRef = useRef(false);
+    /** 翻页那一瞬间有 await：先把关闭按钮与背景点掉，别让人手滑把流程打断。 */
+    const [isStepping, setIsStepping] = useState(false);
 
     const mergePending = useCallback((incoming: ExternalAudioPayload['tracks']) => {
         if (incoming.length === 0) return;
@@ -70,6 +81,7 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
         });
         // 新的一批进来：上一批的「已处理」标记作废（已经处理完的那一份不会再来一遍）。
         settledRef.current = false;
+        confirmedRef.current = false;
         setIsConfirmOpen(true);
     }, []);
 
@@ -88,11 +100,12 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
         setIsCreateOpen(false);
     }, []);
 
-    /** 用户摇头：连已经在私有目录里的副本一起收回。 */
+    /** 用户摇头：连已经在私有目录里的副本一起收回（点过头之后就不收了，见 confirmedRef）。 */
     const handleDecline = useCallback(async () => {
         const tracks = pending;
+        const shouldDiscard = !confirmedRef.current;
         reset();
-        if (tracks.length > 0) await discardExternalAudioTracks(tracks);
+        if (shouldDiscard && tracks.length > 0) await discardExternalAudioTracks(tracks);
     }, [pending, reset]);
 
     const finishImport = useCallback(async (playlistId: string | null, playlistName?: string) => {
@@ -153,12 +166,16 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
 
     /** 选歌单那一页的数据：每次打开都重新读，别让用户刚新建好的歌单不出现。 */
     const openPlaylistStep = useCallback(async () => {
+        confirmedRef.current = true;
+        setIsStepping(true);
         let existing: LocalPlaylist[] = [];
         try {
             existing = await getLocalPlaylists();
         } catch (error) {
             // 歌单读不出来也要让人能把歌导进去：空列表走「新建歌单」那条路照样成立。
             console.warn('[ExternalAudioImport] Failed to load local playlists', error);
+        } finally {
+            setIsStepping(false);
         }
         setPlaylists(existing);
         setIsConfirmOpen(false);
@@ -187,6 +204,7 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
                 onClose={() => void handleDecline()}
                 onConfirm={() => void openPlaylistStep()}
                 isDaylight={isDaylight}
+                closeDisabled={isStepping}
                 title={t('localMusic.externalOpenTitle')}
                 description={(
                     <>

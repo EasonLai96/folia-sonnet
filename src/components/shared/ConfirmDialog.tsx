@@ -14,6 +14,8 @@ export interface ConfirmDialogProps {
     isDaylight?: boolean;
     onConfirm: () => void;
     onClose: () => void;
+    /** 中途有活儿在跑（比如翻页前要读一次歌单）时挂上：关掉会留下半套状态。 */
+    closeDisabled?: boolean;
 }
 
 // 渲染应用内统一样式的确认弹窗
@@ -27,6 +29,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     isDaylight = false,
     onConfirm,
     onClose,
+    closeDisabled = false,
 }) => {
     const { t } = useTranslation();
 
@@ -50,6 +53,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             isDaylight={isDaylight}
             title={title}
             description={typeof description === 'string' ? description : undefined}
+            closeDisabled={closeDisabled}
             footer={(
                 <>
                     <button
