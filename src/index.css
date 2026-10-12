@@ -388,3 +388,33 @@ html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'] 
     -webkit-background-clip: border-box !important;
     -webkit-text-fill-color: var(--text-primary, currentColor) !important;
 }
+
+/* ③ 扁平档里歌词本体也只有一个颜色：底色淡、扫光层实。
+
+   逐字推进是「同一行文字叠两层」画出来的：下层是整行的底色，上层是渐变字的实心版本，
+   用 mask 按进度揭开。上面那条把上层的渐变抹掉之后，如果只盯着上层，
+   下层未唱部分仍然是渲染器算的 `entry.tone.baseColor` —— 那常常就是主题的主文本色，
+   于是「已唱 / 未唱」之间没有明度差，看着就是「逐字高亮被去掉了」。
+
+   所以这里把歌词层里所有文字的 `color` 一并压成主文本色的淡打底：
+   ① 整套歌词只剩一个色相（扁平的本意）；
+   ② 唱过的那段由上面那条 `-webkit-text-fill-color` 铺实色（它的优先级高于 `color`），
+      「已唱实、未唱淡」这个对比还在 —— 也就是逐字扫光还在，只是不再带渐变；
+   ③ 唱完的行不会再跳回 AI 主题那套词色：渲染器在行状态变成 passed 之后会把底色
+      换成 wordColors 里的提亮色（不扁平时是对的），扁平档不受这套状态影响。
+
+   只能用 alpha 混透明来变淡，不能用 opacity —— opacity 会往下继承，
+   上面那条铺的实色会被一起压淡，对比又没了。
+
+   作用域这里刻意多要一层：**两个受益者都写得出 --text-primary**（主窗口由 AppShell 的
+   appStyle 写、壁纸叠层由 wallpaperSurface 自己补），遥控窗口那一层是组件自己按 flatLyrics
+   渲染纯色的（见 RemoteLyricOverlay：它连 background-clip 都不写，就是为了躲开这些覆盖），
+   这里的 `!important` 会把它的颜色压成淡版本 —— 所以遥控窗口不在下面两条里。 */
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *,
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *::before,
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *::after,
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *,
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *::before,
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *::after {
+    color: color-mix(in srgb, var(--text-primary, currentColor) 42%, transparent) !important;
+}

@@ -618,6 +618,16 @@ const WallpaperSurface: React.FC = () => {
          */
         <div
             id="wallpaper-stage"
+            data-folia-lyric-surface="wallpaper"
+            /*
+             * 「歌词改为纯色扁平」在这个页面上要有两个立足点，缺一个就失效：
+             * ① 标记 —— index.css 那段规则是 `html[data-lyric-flat] [data-folia-lyric-surface]`，
+             *    这里没有这个标记的话，规则在这个 document 里一条都命中不了；
+             * ② 变量 —— 规则填的是 `var(--text-primary)`，而那份值是主窗口 App 写在
+             *    AppShell 根上的（见 App.tsx 的 appStyle）。叠层是**另一个 document**，
+             *    拿不到主窗口那份，也没有第二处在写 —— 不在这里补，填充色会落到 initial
+             *    （黑），歌词扁成一团看不清。这里用 App 推下来的同一份主题色补上。
+             */
             style={{
                 position: 'absolute',
                 left: 0,
@@ -626,6 +636,8 @@ const WallpaperSurface: React.FC = () => {
                 height: stageSize.height,
                 minHeight: stageSize.height,
                 overflow: 'hidden',
+                ['--text-primary' as string]: theme.primaryColor,
+                ['--text-secondary' as string]: theme.secondaryColor,
                 /*
                  * 内容自己也淡进来一次，不完全依赖原生那一层窗口透明度。
                  *
