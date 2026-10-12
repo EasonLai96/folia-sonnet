@@ -811,7 +811,11 @@ describe('localMusicService', () => {
         await removeImportedRoot('EmptyRoot');
 
         expect(deleteDirHandle).toHaveBeenCalledWith('EmptyRoot');
-        expect(deleteLocalLibrarySnapshot).toHaveBeenCalledWith('EmptyRoot');
+        // 留墓碑而不是删快照：刷新（安卓上是整库重扫）得知道这个根被删过，否则歌会原样回来。
+        expect(saveLocalLibrarySnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            rootFolderName: 'EmptyRoot',
+            rootRemoved: true,
+        }));
         expect(deleteLocalSongs).not.toHaveBeenCalled();
     });
 
@@ -822,7 +826,24 @@ describe('localMusicService', () => {
         });
         await deleteFolderSongs('Music');
         expect(deleteDirHandle).toHaveBeenCalledWith('Music');
-        expect(deleteLocalLibrarySnapshot).toHaveBeenCalledWith('Music');
-        expect(saveLocalLibrarySnapshot).not.toHaveBeenCalled();
+        // 忽略列表与目录树都清零（和以前删掉整份快照一样，重新导入从零开始），只留下墓碑。
+        expect(saveLocalLibrarySnapshot).toHaveBeenCalledWith(expect.objectContaining({
+            rootFolderName: 'Music',
+            ignoredFolderPaths: [],
+            rootRemoved: true,
+        }));
+    });
+
+    it('matches android songs against the folder card name, not the fake file path root', async () => {
+        // 安卓上 filePath 是 `Android/MediaStore/<id>`，按它推出来的根是 "Android"，
+        // 而目录卡片上的名字是 folderName —— 只看 filePath 会一首歌都匹配不上。
+        vi.mocked(getLocalSongs).mockResolvedValue([
+            createSong({ id: 'media-1', folderName: 'Android 本地音乐', filePath: 'Android/MediaStore/1' }),
+            createSong({ id: 'other-1', folderName: 'Android 文件导入', filePath: 'Android/Imported/9' }),
+        ]);
+
+        await deleteFolderSongs('Android 本地音乐');
+
+        expect(deleteLocalSongs).toHaveBeenCalledWith(['media-1']);
     });
 });

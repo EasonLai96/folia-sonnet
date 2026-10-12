@@ -1361,6 +1361,14 @@ export interface LocalLibrarySnapshotNode {
 
 export interface LocalLibrarySnapshot {
   rootFolderName: string;
+  /**
+   * 「删除文件夹」留下的墓碑。
+   *
+   * 删根目录只删掉了库里的歌，而**刷新**在安卓上等于整库重扫一次（resyncAllFolders →
+   * scanAndroidDeviceMusic），歌会被原样扫回来 —— 于是「删了、一刷新又回来了」。
+   * 所以删根时留一条记录：刷新那条路照它跳过，只有用户**显式**点「扫描设备音乐」才清掉。
+   */
+  rootRemoved?: boolean;
   ignoredFolderPaths?: string[];
   lyricFormatOrder?: import('./utils/lyrics/localLyricFormatOrder').LocalLyricFileFormat[]; // Sidecar lyric format order this scan used; undefined = default order
   scannedAt: number;

@@ -29,7 +29,15 @@ import { getLocalLibraryAvailability } from './localLibraryAvailability';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { getLocalLyricFilePriority, isSameLocalLyricFormatOrder, normalizeLocalLyricFormatOrder, type LocalLyricFileFormat } from '../utils/lyrics/localLyricFormatOrder';
 import { readLyricFile } from '../utils/lyrics/lyricFileDecoding';
-import { isLocalFolderIgnored, normalizeLocalFolderPath, runLocalFolderMutation, setLocalFolderIgnored } from './localLibraryFolderIgnore';
+import {
+    clearLocalRootRemoved,
+    isLocalFolderIgnored,
+    isLocalRootRemoved,
+    markLocalRootRemoved,
+    normalizeLocalFolderPath,
+    runLocalFolderMutation,
+    setLocalFolderIgnored,
+} from './localLibraryFolderIgnore';
 import {
     copyAndroidLocalAudio,
     deleteAndroidImportedAudio,
@@ -1206,6 +1214,9 @@ async function importFolderContents(dirHandle: FileSystemDirectoryHandle, expect
             }
         }
 
+        // 用户把这个目录重新导进来了（之前删过）：墓碑撤掉，之后的刷新才不会把它又跳过去。
+        await clearLocalRootRemoved(rootFolderName);
+
         const traversalStartedAt = performance.now();
         const allSongs = await getLocalSongs();
         const existingRootSongs = allSongs.filter(song =>
@@ -1626,10 +1637,7 @@ async function getAccessibleFileHandle(song: LocalSong): Promise<FileSystemFileH
 async function cleanupDirHandleIfUnused(rootFolderName: string): Promise<void> {
     if ((await getLocalLibrarySnapshot(rootFolderName))?.ignoredFolderPaths?.length) return;
     const allSongs = await getLocalSongs();
-    const stillUsed = allSongs.some(song => {
-        const songRoot = getRootFolderName(song);
-        return songRoot === rootFolderName;
-    });
+    const stillUsed = allSongs.some(song => songBelongsToRootFolder(song, rootFolderName));
 
     if (!stillUsed) {
         await deleteDirHandle(rootFolderName);
@@ -2007,7 +2015,7 @@ async function removeImportedRootContents(rootFolderName: string): Promise<void>
 
     const allSongs = await getLocalSongs();
     const songIds = allSongs
-        .filter(song => getRootFolderName(song) === normalizedRoot)
+        .filter(song => songBelongsToRootFolder(song, normalizedRoot))
         .map(song => song.id);
 
     if (songIds.length > 0) {
@@ -2015,9 +2023,28 @@ async function removeImportedRootContents(rootFolderName: string): Promise<void>
     }
     await Promise.all([
         deleteDirHandle(normalizedRoot),
-        deleteLocalLibrarySnapshot(normalizedRoot),
+        // 原来是 deleteLocalLibrarySnapshot：那样只把快照抹掉，而安卓上「刷新」等于整库重扫，
+        // 歌一首不少地回来 —— 删了跟没删一样。改成留一条墓碑，刷新那条路照它跳过。
+        markLocalRootRemoved(normalizedRoot),
     ]);
     notifyLocalMusicUpdated();
+}
+
+/**
+ * 这首歌属不属于这个根目录。
+ *
+ * 不能只按 `getRootFolderName` 判：那个函数先看 `filePath`，而安卓上 filePath 是
+ * `Android/MediaStore/<id>` 这种伪路径 —— 推出来的根是 "Android"，可目录卡片上的名字
+ * 是 "Android 本地音乐"。一头一尾对不上，于是「删除文件夹」一首歌都没匹配到：
+ * 点了删除，目录原封不动，用户看到的就是「删不掉」。
+ *
+ * 所以两个来源都认：逻辑目录 folderName（一定带根目录名）命中，或者 filePath 推出来的
+ * 根命中。
+ */
+function songBelongsToRootFolder(song: LocalSong, rootFolderName: string): boolean {
+    if (song.folderName === rootFolderName) return true;
+    if (song.folderName?.startsWith(`${rootFolderName}/`)) return true;
+    return getLocalSongRootFolderName(song) === rootFolderName;
 }
 
 // Resync folder: refresh an imported folder in place using the persisted root handle
@@ -2065,6 +2092,8 @@ export async function resyncAllFolders(): Promise<LocalSong[] | null> {
 
     const importedSongs: LocalSong[] = [];
     for (const rootFolderName of rootFolderNames) {
+        // 删掉的根目录不该被刷新收回来（墓碑由「删除文件夹」写下，重新导入时撤掉）。
+        if (await isLocalRootRemoved(rootFolderName)) continue;
         const rootSongs = await importFolder(rootFolderName);
         importedSongs.push(...rootSongs);
     }

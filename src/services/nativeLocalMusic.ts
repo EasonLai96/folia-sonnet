@@ -1,6 +1,7 @@
 import type { LocalSong } from '../types';
 import { getLocalSongs, saveLocalSongs } from './db';
 import { stageLocalCoverAsset } from './localCoverAssetService';
+import { clearLocalRootRemoved, isLocalRootRemoved } from './localLibraryFolderIgnore';
 import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
 import { parseEmbeddedMetadataAsync } from '../utils/localMetadataWorkerClient';
 import { noteLibraryStep } from '../nativeBridge/api/libraryTrace.js';
@@ -194,11 +195,28 @@ export const requestAndroidAllFilesAccess = async (): Promise<boolean> => {
  * 情况下置 needsAllFilesAccess —— 这里带用户去开一次，然后重扫（这次原生
  * 会按目录走文件系统兜底）；用户拒绝就按空结果收场，不再反复打扰。
  */
-export const scanAndroidDeviceMusic = async (): Promise<LocalSong[]> => {
+/**
+ * @param includeRemovedRoots 把删掉的根目录也要回来。
+ *
+ * 「刷新」在安卓上走的就是这一条路（resyncAllFolders → 这里），所以默认**尊重**删除：
+ * 用户删掉的目录不因为刷新就原样回来 —— 那正是「删不掉、一刷新又回来了」的来源。
+ * 只有用户**显式**点「扫描设备音乐」才传 true，并且顺手把墓碑撤掉，之后刷新也留着。
+ */
+export const scanAndroidDeviceMusic = async (
+    options: { includeRemovedRoots?: boolean } = {},
+): Promise<LocalSong[]> => {
     const plugin = getPlugin();
     if (!plugin?.scanLocalAudio) {
         noteLibraryStep('local', 'scan:no-plugin');
         throw new Error('Android media scan is unavailable');
+    }
+
+    if (options.includeRemovedRoots) {
+        await clearLocalRootRemoved(ANDROID_MEDIA_FOLDER_NAME);
+    } else if (await isLocalRootRemoved(ANDROID_MEDIA_FOLDER_NAME)) {
+        // 整个设备音乐库都被删掉了：刷新不该把它捞回来。
+        noteLibraryStep('local', 'scan:root-removed');
+        return [];
     }
 
     noteLibraryStep('local', 'scan:start');
