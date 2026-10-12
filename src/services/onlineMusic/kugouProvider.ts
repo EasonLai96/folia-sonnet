@@ -163,22 +163,91 @@ const catalogRef = (
         : undefined
 );
 
-const normalizeArtists = (raw: any) => {
-    const singers = valueOf(raw, 'Singers', 'singers', 'singerinfo', 'authors', 'artists');
-    const usesSingerInfo = singers === raw?.singerinfo;
-    if (Array.isArray(singers)) {
-        return singers.map((artist: any, index: number) => {
-            const base = artist?.base ?? artist;
-            const authorId = valueOf(base, 'author_id', 'authorId')
-                ?? (usesSingerInfo ? valueOf(base, 'id') : undefined);
-            return {
-                id: authorId ?? `kugou-artist-${index}`,
-                name: String(valueOf(base, 'name', 'author_name', 'singername') || ''),
-                ...(catalogRef('artist', authorId) ? { catalogRef: catalogRef('artist', authorId) } : {}),
-            };
-        }).filter(artist => artist.name);
+// 歌手字段各家接口写法不一：数组里的元素可能是字符串、对象，还可能再被包一层（base / singer）。
+// 取名字时逐键试到有**真值**为止 —— 只判「非 undefined」的话，一个空字符串就会把后面的键挡住。
+const KUGOU_ARTIST_ARRAY_KEYS = [
+    'authors', 'artists', 'singerinfo', 'SingerList', 'singer_list',
+    'Singers', 'singers', 'artist_list', 'author_list', 'artistList',
+] as const;
+
+const KUGOU_ARTIST_NAME_KEYS = [
+    'author_name', 'authorName', 'singername', 'singerName', 'singer_name', 'name', 'nickname',
+] as const;
+
+const KUGOU_ARTIST_ID_KEYS = ['author_id', 'authorId', 'singerid', 'singer_id', 'id'] as const;
+
+const kugouArtistBaseOf = (entry: any): any => {
+    if (!entry || typeof entry !== 'object') return null;
+    if (entry.base && typeof entry.base === 'object') return entry.base;
+    if (entry.singer && typeof entry.singer === 'object') return entry.singer;
+    return entry;
+};
+
+const kugouArtistNameOf = (entry: any): string => {
+    if (typeof entry === 'string') return entry.trim();
+    const base = kugouArtistBaseOf(entry);
+    if (!base) return '';
+    for (const key of KUGOU_ARTIST_NAME_KEYS) {
+        const text = base[key];
+        if (typeof text === 'string' && text.trim()) return text.trim();
     }
-    const names = String(valueOf(raw, 'SingerName', 'singername', 'author_name', 'Singer') || '')
+    return '';
+};
+
+/**
+ * 歌手 id。
+ *
+ * `allowGenericId` 只对 `singerinfo` 为真：那一类的 `id` 就是作者 id；
+ * 而 `Singers` 里的 `id` 语义不同，老实现刻意不用它，这里保持一致（否则会把歌手的
+ * 内部序号当成作者 id，挂上一条指错的 catalogRef）。
+ */
+const kugouArtistIdOf = (entry: any, allowGenericId: boolean): MediaId | undefined => {
+    const base = kugouArtistBaseOf(entry);
+    if (!base) return undefined;
+    for (const key of KUGOU_ARTIST_ID_KEYS) {
+        if (key === 'id' && !allowGenericId) continue;
+        const value = base[key];
+        if (value !== undefined && value !== null && value !== '') return value as MediaId;
+    }
+    return undefined;
+};
+
+/** 顶层那个「单个歌手」字段，同样是逐键试真值。 */
+const kugouArtistStringOf = (raw: any): string => {
+    for (const key of [
+        'SingerName', 'singername', 'singerName', 'singer_name', 'author_name', 'authorName',
+        'Singer', 'singer', 'artist_name', 'artistName', 'artist', 'album_artist', 'AlbumArtist',
+    ]) {
+        const text = raw?.[key];
+        if (typeof text === 'string' && text.trim()) return text.trim();
+    }
+    return '';
+};
+
+const normalizeArtists = (raw: any) => {
+    // 逐个候选试到有结果为止，而不是取第一个**非空**值：空数组（`authors: []`）同样是
+    // 「非空值」，会把后面真正带着歌手的字段整个挡住 —— 「别的歌单都有作者、只有这一路
+    // 全显示未知」就是这一类成因。
+    for (const key of KUGOU_ARTIST_ARRAY_KEYS) {
+        const value = raw?.[key];
+        if (value === undefined || value === null) continue;
+        const list = Array.isArray(value) ? value : [value];
+        const allowGenericId = key === 'singerinfo';
+        const artists = list
+            .map((entry, index) => {
+                const authorId = kugouArtistIdOf(entry, allowGenericId);
+                // 索引取的是过滤前的下标，和「歌手一 / 歌手二」的兜底 id 对得上。
+                const ref = catalogRef('artist', authorId);
+                return {
+                    id: authorId ?? `kugou-artist-${index}`,
+                    name: kugouArtistNameOf(entry),
+                    ...(ref ? { catalogRef: ref } : {}),
+                };
+            })
+            .filter(artist => artist.name);
+        if (artists.length > 0) return artists;
+    }
+    const names = kugouArtistStringOf(raw)
         .split(/[、,&/]/).map(name => name.trim()).filter(Boolean);
     return names.map((name, index) => ({ id: `kugou-artist-${index}-${name}`, name }));
 };

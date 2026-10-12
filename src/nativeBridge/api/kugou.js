@@ -1408,6 +1408,84 @@ function stripKGHighlightHtml(value) {
     .trim();
 }
 
+/** 只认字符串。数字当名字会把歌手 id 显示成歌手名，宁可不认。 */
+const kgText = (value) => (typeof value === 'string' ? stripKGHighlightHtml(value) : '');
+
+// 各家接口对同一个「歌手」的写法：大小写、下划线、单复数的组合，挨个试。
+const KG_AUTHOR_NAME_KEYS = [
+  'author_name', 'authorName', 'singername', 'singerName', 'singer_name',
+  'name', 'nickname', 'AuthorName', 'SingerName',
+];
+const KG_AUTHOR_ID_KEYS = [
+  'author_id', 'authorId', 'singerid', 'singer_id', 'singerId', 'id', 'SingerId',
+];
+
+/** 一个歌手条目：可能是字符串，也可能是对象，还可能再被包一层（{base:{...}} / {singer:{...}}）。 */
+function kgAuthorEntry(entry) {
+  if (typeof entry === 'string') {
+    const name = kgText(entry);
+    return name ? { name, id: '' } : null;
+  }
+  if (!entry || typeof entry !== 'object') return null;
+  const inner = entry.base && typeof entry.base === 'object' ? entry.base
+    : entry.singer && typeof entry.singer === 'object' ? entry.singer
+      : entry;
+  const name = KG_AUTHOR_NAME_KEYS.map((key) => kgText(inner[key])).find(Boolean) || '';
+  if (!name) return null;
+  const rawId = KG_AUTHOR_ID_KEYS
+    .map((key) => inner[key])
+    .find((value) => value !== undefined && value !== null && value !== '');
+  return { name, id: rawId === undefined ? '' : String(rawId).trim() };
+}
+
+/**
+ * 从候选值里挑出第一个像歌手名的字符串。
+ *
+ * 单独写一份是因为有些接口把单个歌手也放进对象里（`singer: {name: '...'}`），
+ * 直接当字符串取会得到空；这里顺手把这种形态也拆开。
+ */
+function kgFirstArtistText(values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const author = kgAuthorEntry(value);
+      if (author) return author.name;
+      continue;
+    }
+    const text = kgText(value);
+    if (text) return text;
+  }
+  return '';
+}
+
+/**
+ * 歌手名字与 id。
+ *
+ * 要点是**按顺序逐个候选试到有结果为止**，而不是取第一个「非空」的字段值 ——
+ * 空数组（`authors: []`）和空对象同样是「非空值」，会把后面真正带着歌手的字段整个挡住。
+ * 「别的歌单都有作者、只有这一路全显示未知」就是这一类成因，所以这里不能只看第一个。
+ */
+function collectKGAuthors(item) {
+  const sources = [
+    item.authors, item.artists, item.singerinfo, item.SingerList, item.singer_list,
+    item.Singers, item.singers, item.artist_list, item.author_list, item.artistList,
+  ];
+  for (const source of sources) {
+    if (source === undefined || source === null) continue;
+    const list = Array.isArray(source) ? source : [source];
+    const names = [];
+    const ids = [];
+    for (const entry of list) {
+      const author = kgAuthorEntry(entry);
+      if (!author) continue;
+      names.push(author.name);
+      if (author.id && !ids.includes(author.id)) ids.push(author.id);
+    }
+    if (names.length) return { names, ids };
+  }
+  return { names: [], ids: [] };
+}
+
 function extractKGFee(item) {
   item = item || {};
   const payType = Number(item.PayType ?? item.pay_type ?? 0);
@@ -1459,18 +1537,22 @@ function mapKGSong(item, fromSearch) {
     || item.ID || '',
   ).trim();
   const fee = extractKGFee(item);
-  const authors = item.authors || item.singerinfo || item.SingerList || item.singers || [];
-  const authorNames = Array.isArray(authors)
-    ? authors.map((a) => stripKGHighlightHtml(a && (a.author_name || a.singername || a.name || a.AuthorName || ''))).filter(Boolean)
-    : [];
-  const authorIds = Array.isArray(authors)
-    ? authors.map((a) => String((a && (a.author_id || a.singerid || a.singer_id || a.id)) || '').trim()).filter(Boolean)
-    : [];
+  const authors = collectKGAuthors(item);
+  const authorNames = authors.names;
+  const authorIds = authors.ids;
   let rawName = stripKGHighlightHtml(item.SongName || item.songname || item.song_name || '');
   let name = stripKGAudioExt(rawName);
-  let artist = stripKGHighlightHtml(
-    item.SingerName || item.singername || item.author_name || item.singer || authorNames.join(' / ') || '',
-  );
+  // 歌手字段的写法各家接口不一（大小写、下划线、单复数、单数对象、藏在 audio_info 里），
+  // 挨个试到有为止；一条都没有时才退回上面那份数组拼出来的名字。
+  let artist = kgFirstArtistText([
+    item.SingerName, item.singername, item.singerName, item.singer_name,
+    item.author_name, item.authorName, item.author,
+    item.artist_name, item.artistName, item.artist,
+    item.singer, item.Singer, item.album_artist, item.AlbumArtist,
+    audio.SingerName, audio.singername, audio.singerName, audio.singer_name,
+    audio.author_name, audio.authorName,
+    nested.SingerName, nested.singername, nested.author_name,
+  ]) || authorNames.join(' / ');
   const filename = stripKGAudioExt(stripKGHighlightHtml(item.filename || item.FileName || item.name || item.file_name || ''));
   // Cloudlist rows often put "歌手 - 歌名.mp3" into name/filename only.
   if ((!name || name === filename) && filename) {
@@ -4635,4 +4717,6 @@ export {
   kgPostAndroidSigned,
   getKGMid,
   signatureKGWebParams,
+  // 只给单测用：歌手字段的兼容逻辑（collectKGAuthors）藏在行映射里，不导出来测不到。
+  mapKGSong,
 };
