@@ -23,7 +23,13 @@ export const useCapacitorSystemBars = (isDaylight: boolean): void => {
     if (!isCapacitorAndroid()) return;
 
     document.documentElement.dataset.runtime = 'capacitor-android';
-    void StatusBar.setStyle({ style: isDaylight ? Style.Dark : Style.Light });
+    // 必须接住：插件没注册（或某个 ROM 上不认）时这里会 reject，`void` 掉就变成一条
+    // 未处理的 Promise 拒绝 —— 日志里那一串
+    // `Unhandled rejection: "StatusBar" plugin is not implemented on android` 就是它。
+    // 图标明暗不是关键功能，失败了不该把整条启动日志污染掉。
+    StatusBar.setStyle({ style: isDaylight ? Style.Dark : Style.Light }).catch((error: unknown) => {
+      console.warn('[SystemBars] StatusBar.setStyle failed', error);
+    });
 
     return () => {
       delete document.documentElement.dataset.runtime;

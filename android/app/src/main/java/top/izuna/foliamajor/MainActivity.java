@@ -22,6 +22,17 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
+// Capacitor 官方插件。
+//
+// 这三个都是 Gradle 里已经带进来的模块（见 app/capacitor.build.gradle），但**不会自动注册**：
+// 自动注册靠 assets/capacitor.plugins.json，而这个仓库里没有那份文件（capacitor sync
+// 才会生成，我们只跑 gradle）。不注册的结果就是 JS 侧一调用就抛
+// `"StatusBar" plugin is not implemented on android` —— 那条未处理的 Promise 拒绝就是这么来的，
+// 状态栏图标的明暗也跟着一直是默认的。
+import com.capacitorjs.plugins.browser.BrowserPlugin;
+import com.capacitorjs.plugins.splashscreen.SplashScreenPlugin;
+import com.capacitorjs.plugins.statusbar.StatusBarPlugin;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -70,6 +81,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(top.izuna.foliamajor.lyricon.FoliaLyriconPlugin.class);
         // 本地登录（内置接口代码 + Cookie/OkHttp）与返回键都在这个插件上。
         registerPlugin(FoliaNativePlugin.class);
+        registerPlugin(StatusBarPlugin.class);
+        registerPlugin(SplashScreenPlugin.class);
+        registerPlugin(BrowserPlugin.class);
 
         super.onCreate(savedInstanceState);
 
