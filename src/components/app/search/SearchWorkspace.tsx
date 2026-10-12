@@ -171,7 +171,8 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                         backdropFilter: 'blur(24px)',
                     }}
                 >
-                    <header className="mx-auto flex w-full max-w-5xl shrink-0 flex-col gap-3">
+                    {/* 安全区：安卓的 env() 不可信（见 androidPhoneFit.css ⑥），搜索框由 CSS 整体下移。 */}
+                    <header data-folia-safe-top="shift" className="mx-auto flex w-full max-w-5xl shrink-0 flex-col gap-3">
                         <div className="flex items-center gap-3">
                             <form
                                 className={`relative flex-1 rounded-2xl border ${

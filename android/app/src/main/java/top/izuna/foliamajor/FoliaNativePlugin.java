@@ -95,6 +95,17 @@ public class FoliaNativePlugin extends Plugin {
     /** 更新包下载进度事件名。 */
     private static final String UPDATE_PROGRESS_EVENT = "updateDownloadProgress";
 
+    /**
+     * 安全区变化事件名。
+     *
+     * 网页那边的 env(safe-area-inset-*) 在安卓上不可信（只报挖孔、不报系统栏，无刘海全 0），
+     * 真实数值由原生算出来（见 PhoneFitCutout.resolveInsets）发过去。
+     */
+    private static final String PHONE_INSETS_EVENT = "phoneInsets";
+
+    /** 最近一次算出来的安全区；Web 层首屏用 getPhoneInsets 拉，之后靠事件推。 */
+    private static volatile JSObject lastPhoneInsets = null;
+
     /** 更新包落在缓存目录下的这一层。 */
     private static final String UPDATE_DIRECTORY = "updates";
 
@@ -132,6 +143,43 @@ public class FoliaNativePlugin extends Plugin {
     protected void handleOnDestroy() {
         if (instance == this) instance = null;
         super.handleOnDestroy();
+    }
+
+    /**
+     * 把当前安全区（CSS px）发给网页。
+     *
+     * 从 PhoneFitCutout 的铺满流程与 inset 监听里调用，所以启动、转屏、系统栏临时划出
+     * 都会重算一遍。没有实例或没有监听者时只更新缓存 —— 网页首屏会用 getPhoneInsets 拉。
+     */
+    static void publishPhoneInsets(Activity activity) {
+        if (activity == null) return;
+        JSONObject resolved = PhoneFitCutout.resolveInsets(activity);
+        JSObject payload = new JSObject();
+        try {
+            payload.put("top", resolved.optInt("top", 0));
+            payload.put("right", resolved.optInt("right", 0));
+            payload.put("bottom", resolved.optInt("bottom", 0));
+            payload.put("left", resolved.optInt("left", 0));
+        } catch (Exception error) {
+            Log.w(TAG, "Failed to build phone insets payload", error);
+            return;
+        }
+        lastPhoneInsets = payload;
+        FoliaNativePlugin plugin = instance;
+        if (plugin == null || !plugin.hasListeners(PHONE_INSETS_EVENT)) return;
+        final FoliaNativePlugin target = plugin;
+        activity.runOnUiThread(() -> target.notifyListeners(PHONE_INSETS_EVENT, payload));
+    }
+
+    /** 网页首屏拉取安全区：事件只能覆盖「变了之后」，第一次的值得靠这一下。 */
+    @PluginMethod
+    public void getPhoneInsets(PluginCall call) {
+        Activity activity = getActivity();
+        if (lastPhoneInsets == null && activity != null) {
+            publishPhoneInsets(activity);
+        }
+        JSObject payload = lastPhoneInsets;
+        call.resolve(payload == null ? new JSObject() : payload);
     }
 
     /**

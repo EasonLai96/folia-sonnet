@@ -4,6 +4,12 @@ import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
 import { readMediaDiagnostics, type MediaDiagnosticsSnapshot } from '../../../utils/mediaDiagnostics';
 import {
+    getPhoneInsets,
+    getPhoneInsetsSource,
+    subscribePhoneInsets,
+    type PhoneInsets,
+} from '../../../services/phoneInsets';
+import {
     getConsoleLogEntries,
     isConsoleCaptureEnabled,
     setConsoleCaptureEnabled,
@@ -201,6 +207,68 @@ const AudioBufferReadout: React.FC<{ isDaylight: boolean; cardClass: string }> =
                     </div>
                 </dl>
             )}
+        </div>
+    );
+};
+
+/**
+ * 安全区读数。
+ *
+ * 放这儿是因为「顶部控件没让开」在现场有两种完全不同的原因，光看界面分不出来：
+ * 原生压根没算出 inset（全是 0）与算出来了但 CSS 没吃上，修法不一样。所以把四个数和
+ * 数值来源一起摆出来 —— 安卓上必须是 `native`，四边里至少 top 不是 0；
+ * 要是显示 `unavailable`，那是插件桥没接上，改 CSS 没用。
+ */
+const SafeAreaReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({ isDaylight, cardClass }) => {
+    const { t } = useTranslation();
+    const [insets, setInsets] = useState<PhoneInsets>(() => getPhoneInsets());
+    const [source, setSource] = useState(() => getPhoneInsetsSource());
+
+    useEffect(() => subscribePhoneInsets((next) => {
+        setInsets(next);
+        setSource(getPhoneInsetsSource());
+    }), []);
+
+    const rowClass = 'flex items-baseline justify-between gap-2';
+    const sides: Array<keyof PhoneInsets> = ['top', 'right', 'bottom', 'left'];
+
+    return (
+        <div className={`rounded-2xl border p-4 space-y-3 ${cardClass}`}>
+            <div className="flex min-w-0 items-start gap-3">
+                <div className="p-2 rounded-lg opacity-60 shrink-0">
+                    <Gauge size={14} />
+                </div>
+                <div className="min-w-0 space-y-1">
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {t('options.safeArea') || 'Safe area'}
+                    </span>
+                    <div className="text-xs opacity-50" style={{ color: 'var(--text-secondary)' }}>
+                        {t('options.safeAreaDesc')
+                            || 'Insets the native side measured. Android WebView never reports system bars through env(), so these come from the plugin instead.'}
+                    </div>
+                </div>
+            </div>
+
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                {sides.map(side => (
+                    <div className={rowClass} key={side}>
+                        <dt className="opacity-60">{side}</dt>
+                        <dd>{insets[side]}px</dd>
+                    </div>
+                ))}
+                <div className={rowClass}>
+                    <dt className="opacity-60">source</dt>
+                    <dd>{source}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">device</dt>
+                    <dd>
+                        {typeof document === 'undefined'
+                            ? '—'
+                            : (document.documentElement.getAttribute('data-folia-device-resolved') ?? '—')}
+                    </dd>
+                </div>
+            </dl>
         </div>
     );
 };
@@ -405,6 +473,8 @@ const DeveloperSettingsSubview: React.FC<DeveloperSettingsSubviewProps> = ({
             {/* 音频缓冲读数：手机上没有调试浮层可看（那个只有桌面端的 Alt+Shift+D 能开），
                 而判断「CPU 一满就撕裂」需要的两个数在这里就能读到，也不用开采样。 */}
             <AudioBufferReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
+
+            <SafeAreaReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
 
             <div className="text-[11px] leading-relaxed opacity-45" style={{ color: 'var(--text-secondary)' }}>
                 {t('options.consoleLogConvention')

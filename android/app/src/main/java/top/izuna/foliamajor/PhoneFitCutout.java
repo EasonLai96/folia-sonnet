@@ -86,7 +86,9 @@ final class PhoneFitCutout {
                 // 部分 ROM 会把 inset 写进 decor 的 padding，清掉它窗口才真的铺到顶。
                 decor.setPadding(0, 0, 0, 0);
             }
-            applyEdgeToEdge(decor, window);
+            applyEdgeToEdge(activity, decor, window);
+            // 铺满策略一变（启动、转屏、回前台），安全区就得重新发给网页。
+            FoliaNativePlugin.publishPhoneInsets(activity);
             return true;
         } catch (Throwable error) {
             Log.w(TAG, "apply cutout mode failed", error);
@@ -102,7 +104,7 @@ final class PhoneFitCutout {
      * 真的延伸到顶部。监听器常驻，重新布局或系统栏临时划出后再回来也不会反弹。
      */
     @SuppressWarnings("deprecation")
-    private static void applyEdgeToEdge(View decor, Window window) {
+    private static void applyEdgeToEdge(Activity activity, View decor, Window window) {
         if (decor == null) {
             return;
         }
@@ -111,7 +113,7 @@ final class PhoneFitCutout {
         clearDecorPadding(decor);
         installDecorPaddingGuard(decor);
         // ② 同步改写 decor 收到的 insets：把 systemBars 归零，系统就不会再按 inset 垫 padding。
-        installDecorInsetListener(decor);
+        installDecorInsetListener(activity, decor);
         View root = decor;
         if (decor instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) decor;
@@ -202,11 +204,13 @@ final class PhoneFitCutout {
      * 垫 padding。两者一起用，兼容那些不走 setOnApplyWindowInsetsListener 的 ROM。
      */
     @SuppressWarnings("deprecation")
-    private static void installDecorInsetListener(final View decor) {
+    private static void installDecorInsetListener(final Activity activity, final View decor) {
         if (decor == null) {
             return;
         }
         ViewCompat.setOnApplyWindowInsetsListener(decor, (view, insets) -> {
+            // inset 变了（转屏、系统栏临时划出、挖孔变化）：安全区要重新发给网页。
+            FoliaNativePlugin.publishPhoneInsets(activity);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 return new WindowInsetsCompat.Builder(insets)
                     .setInsets(
@@ -218,6 +222,97 @@ final class PhoneFitCutout {
             return insets;
         });
         ViewCompat.requestApplyInsets(decor);
+    }
+
+    /**
+     * 真实安全区（CSS px）：系统栏尺寸与挖孔 safeInset，每边取大者。
+     *
+     * 为什么不能靠网页那边的 `env(safe-area-inset-*)`：
+     * · Android WebView 只报告**屏幕缺口（cutout）**，从不报告**系统栏** ——
+     *   没有刘海的机器上四项全是 0px，有刘海的也只给刘海高度、不给状态栏高度；
+     * · targetSdk 35+（我们是 36）强制边到边，内容确实画到了系统栏下面，
+     *   可网页拿到的避让量是 0，于是顶部被状态栏压住、底部被手势条压住；
+     * · 国产 ROM 的 WebView 内核常常干脆不透传 env()，旧 Chromium（<140）还会报 0px。
+     *
+     * 所以这里按 Android 自己那份算出来交给网页：用 `getInsetsIgnoringVisibility`
+     * 而不是可见 inset —— 系统栏虽然被隐藏了，用户从边缘一划它就会压回来，
+     * 要按「它会占多少」算，不是「现在占了没」。
+     */
+    static JSONObject resolveInsets(Activity activity) {
+        JSONObject result = new JSONObject();
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
+        int left = 0;
+        try {
+            View decor = activity == null || activity.getWindow() == null
+                ? null
+                : activity.getWindow().getDecorView();
+            WindowInsetsCompat insets = decor == null ? null : ViewCompat.getRootWindowInsets(decor);
+            if (insets != null) {
+                androidx.core.graphics.Insets bars = insets.getInsetsIgnoringVisibility(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
+                );
+                top = Math.max(top, bars.top);
+                right = Math.max(right, bars.right);
+                bottom = Math.max(bottom, bars.bottom);
+                left = Math.max(left, bars.left);
+                androidx.core.view.DisplayCutoutCompat cutout = insets.getDisplayCutout();
+                if (cutout != null) {
+                    top = Math.max(top, cutout.getSafeInsetTop());
+                    right = Math.max(right, cutout.getSafeInsetRight());
+                    bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                    left = Math.max(left, cutout.getSafeInsetLeft());
+                }
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "resolve insets failed", error);
+        }
+        // 兜底：上面拿不到（见 resolveStatusBarHeightPx 的说明）时至少把状态栏让出来 ——
+        // 顶部那几个控件（LOGO / 搜索框 / 返回）被压住就是这么来的。
+        if (top <= 0) {
+            top = resolveStatusBarHeightPx(activity);
+        }
+        float density = 1f;
+        if (activity != null) {
+            float raw = activity.getResources().getDisplayMetrics().density;
+            if (raw > 0f) density = raw;
+        }
+        try {
+            result.put("top", Math.round(top / density));
+            result.put("right", Math.round(right / density));
+            result.put("bottom", Math.round(bottom / density));
+            result.put("left", Math.round(left / density));
+        } catch (Throwable error) {
+            Log.w(TAG, "describe insets failed", error);
+        }
+        return result;
+    }
+
+    /**
+     * 状态栏高度的兜底（物理 px）。
+     *
+     * 什么时候会走到这里：窗口带了 FLAG_LAYOUT_NO_LIMITS 又处在强制边到边（targetSdk 36），
+     * 部分 ROM 直接把 systemBars 的 inset 报成 0，而状态栏其实还在那儿。这时候没有任何
+     * inset 可用，只能按系统自己那份 dimen 算。
+     *
+     * 底部不这么兜：`navigation_bar_height` 是三键导航栏的高度，手势导航的条比它矮得多，
+     * 照它让会把底部凭空垫出一大条（就是早先那条「底部白条」的样子）。
+     */
+    private static int resolveStatusBarHeightPx(Activity activity) {
+        if (activity == null) {
+            return 0;
+        }
+        try {
+            int id = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (id <= 0) {
+                return 0;
+            }
+            return activity.getResources().getDimensionPixelSize(id);
+        } catch (Throwable error) {
+            Log.w(TAG, "resolve status bar height failed", error);
+            return 0;
+        }
     }
 
     /** 挖孔现场，供诊断报告导出。字段固定为英文。 */

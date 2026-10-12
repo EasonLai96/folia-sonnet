@@ -28,6 +28,8 @@ const AppDialogs: React.FC<AppDialogsProps> = ({ model }) => {
                         <motion.div
                             key={statusToast.toastKey}
                             data-folia-status-toast="true"
+                            /* 安全区：fixed top-0 的提示条，CSS 用 margin-top 往下让（见 androidPhoneFit.css ⑥）。 */
+                            data-folia-safe-top="shift"
                             initial={{ opacity: 0, y: -20, x: '-50%' }}
                             animate={{ opacity: 1, y: 30, x: '-50%' }}
                             exit={{ opacity: 0, y: -20, x: '-50%' }}

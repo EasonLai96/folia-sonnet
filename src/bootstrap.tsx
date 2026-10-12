@@ -19,6 +19,9 @@ import { installFoliumCommandPaletteSync } from './mods/folium/commandPaletteSyn
 import { installFoliumHostEvents } from './mods/folium/hostEvents';
 import { installLibrarySuiteChromeCommands } from './library/app/installLibrarySuiteChromeCommands';
 import { installNativeDragGuard } from './utils/nativeDragGuard';
+// 安卓的安全区必须在画第一帧之前就落进 CSS 变量：env(safe-area-inset-*) 在安卓 WebView 上
+// 不可信（只报挖孔不报系统栏，无刘海全 0），顶部控件会被状态栏压住。
+import { installPhoneInsets } from './services/phoneInsets';
 import { bootNavidromeServerPreset } from './services/navidromeServerPreset';
 import { isNavidromeEnabled } from './services/navidromeService';
 import { setNavidromeEnabledState } from './stores/useLibraryStore';
@@ -45,6 +48,7 @@ import './stores/useGlassSurfaceSettingsStore';
 // here, for every surface this bundle mounts, rather than inside App so the remote-control and OBS
 // roots are covered too and App.tsx does not grow. See utils/nativeDragGuard.ts.
 installNativeDragGuard();
+installPhoneInsets();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

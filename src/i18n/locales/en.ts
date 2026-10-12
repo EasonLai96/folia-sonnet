@@ -1972,6 +1972,8 @@ export default {
     "audioBufferDesc": "Which latency class the playback AudioContext asked for, and what it actually got.",
     "audioBufferIdle": "Start a track first — the AudioContext is built on the first playback.",
     "audioBufferRefresh": "Refresh",
+    "safeArea": "Safe area",
+    "safeAreaDesc": "Insets measured on the native side. Android WebView never reports system bars through env(), so these come from the plugin instead.",
     "memoryMonitor": "Memory monitor",
     "memoryMonitorDesc": "Sample every process and record the curve.",
     "memoryMonitorInterval": "Interval",

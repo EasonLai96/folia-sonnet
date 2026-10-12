@@ -1964,6 +1964,8 @@ export default {
     "audioBufferDesc": "Kelas latensi yang diminta AudioContext pemutaran, dan yang benar-benar didapat.",
     "audioBufferIdle": "Putar lagu dulu — AudioContext dibuat saat pemutaran pertama.",
     "audioBufferRefresh": "Muat ulang",
+    "safeArea": "Area aman",
+    "safeAreaDesc": "Inset yang diukur di sisi native. WebView Android tidak pernah melaporkan system bar lewat env(), jadi nilainya datang dari plugin.",
     "memoryMonitor": "Pemantau memori",
     "memoryMonitorDesc": "Ambil sampel tiap proses dan rekam kurvanya.",
     "memoryMonitorInterval": "Interval",

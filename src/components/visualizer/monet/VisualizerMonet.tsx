@@ -205,7 +205,9 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 >
                     {showText && (
                         <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center px-5 py-5 sm:px-8 sm:py-6 lg:px-14 lg:py-8 2xl:px-20">
-                            <div className="mb-3 space-y-1.5" style={{ maxWidth: headerMaxWidth }}>
+                            {/* 安全区：曲目信息（歌手 / 曲名 / 专辑）。这一列是 justify-center，
+                                加内外边距只挪一半，所以用 nudge（relative; top）—— 见 androidPhoneFit.css ⑥。 */}
+                            <div data-folia-safe-top="nudge" className="mb-3 space-y-1.5" style={{ maxWidth: headerMaxWidth }}>
                                 <motion.div
                                     key={`artist-${introKey}`}
                                     initial={{ opacity: 0, x: -30, y: -10 }}

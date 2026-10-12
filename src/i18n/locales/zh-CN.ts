@@ -1971,6 +1971,8 @@ export default {
     "audioBufferDesc": "播放用的 AudioContext 要了哪一档缓冲，以及实际拿到多少。",
     "audioBufferIdle": "先播一首 —— AudioContext 是首次播放时才建的。",
     "audioBufferRefresh": "刷新",
+    "safeArea": "安全区",
+    "safeAreaDesc": "原生侧量出来的四边避让量。安卓 WebView 从不通过 env() 报告系统栏，所以这份数值由插件给。",
     "memoryMonitor": "内存监控",
     "memoryMonitorDesc": "定时记录各进程的内存与 CPU 占用。",
     "memoryMonitorInterval": "采样间隔",

@@ -175,6 +175,8 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
                         event.stopPropagation();
                         resolvedOnBack();
                     }}
+                    /* 安全区：`absolute top-6` 的浮层，CSS 用 margin-top 往下让（见 androidPhoneFit.css ⑥）。 */
+                    data-folia-safe-top="shift"
                     className="absolute top-6 left-6 z-30 h-10 w-10 rounded-full flex items-center justify-center transition-colors backdrop-blur-md bg-black/20 hover:bg-white/10 text-white/60 pointer-events-auto"
                     style={{ pointerEvents: isBackButtonVisible ? 'auto' : 'none' }}
                 >
