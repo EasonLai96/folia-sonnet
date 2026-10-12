@@ -1,7 +1,8 @@
-import React, { useSyncExternalStore } from 'react';
-import { Activity, FolderOpen, Gauge, ScrollText } from 'lucide-react';
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { Activity, FolderOpen, Gauge, RefreshCw, ScrollText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
+import { readMediaDiagnostics, type MediaDiagnosticsSnapshot } from '../../../utils/mediaDiagnostics';
 import {
     getConsoleLogEntries,
     isConsoleCaptureEnabled,
@@ -113,6 +114,93 @@ const FileRow: React.FC<{
                 <FolderOpen size={10} className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{path || (t('options.debugLogsUnavailable') || 'Desktop app only')}</span>
             </button>
+        </div>
+    );
+};
+
+/**
+ * 音频缓冲读数。
+ *
+ * 调试浮层只有桌面端那个 Alt+Shift+D 能开，安卓上根本没有入口 —— 于是「性能采样」采到的
+ * 东西在手机上一处都看不到。而判断「CPU 一满就撕裂」修好没有，只需要 AudioContext 的档位
+ * 与输出延迟两个数，就在这里直接摆出来：不用开采样，也不用浮层。
+ *
+ * 没播过歌时是 unknown：AudioContext 是首次播放时才建的。
+ */
+const AudioBufferReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({ isDaylight, cardClass }) => {
+    const { t } = useTranslation();
+    const [snapshot, setSnapshot] = useState<MediaDiagnosticsSnapshot | null>(null);
+    const refresh = useCallback(() => setSnapshot(readMediaDiagnostics()), []);
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
+    const hint = snapshot?.audioContextLatencyHint ?? 'unknown';
+    const idle = hint === 'unknown';
+    const ms = (value: number | null): string => (
+        typeof value === 'number' && Number.isFinite(value)
+            ? `${Math.round(value * 1000)}ms`
+            : '—'
+    );
+    const rowClass = 'flex items-baseline justify-between gap-2';
+
+    return (
+        <div className={`rounded-2xl border p-4 space-y-3 ${cardClass}`}>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                    <div className="p-2 rounded-lg opacity-60 shrink-0">
+                        <Activity size={14} />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                            {t('options.audioBuffer') || 'Audio buffer'}
+                        </span>
+                        <div className="text-xs opacity-50" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.audioBufferDesc')
+                                || 'Which latency class the playback AudioContext asked for, and what it actually got.'}
+                        </div>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    onClick={refresh}
+                    title={t('options.audioBufferRefresh') || 'Refresh'}
+                    aria-label={t('options.audioBufferRefresh') || 'Refresh'}
+                    className={`shrink-0 rounded-full border p-2 transition-colors ${isDaylight ? 'border-black/10 hover:bg-black/[0.05]' : 'border-white/10 hover:bg-white/[0.07]'}`}
+                    style={{ color: 'var(--text-secondary)' }}
+                >
+                    <RefreshCw size={12} />
+                </button>
+            </div>
+
+            {idle ? (
+                <div className="text-[11px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                    {t('options.audioBufferIdle') || 'Start a track first — the AudioContext is built on the first playback.'}
+                </div>
+            ) : (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                    <div className={rowClass}>
+                        <dt className="opacity-60">latencyHint</dt>
+                        <dd>{hint}</dd>
+                    </div>
+                    <div className={rowClass}>
+                        <dt className="opacity-60">state</dt>
+                        <dd>{snapshot?.audioContextState ?? '—'}</dd>
+                    </div>
+                    <div className={rowClass}>
+                        <dt className="opacity-60">sampleRate</dt>
+                        <dd>{snapshot?.audioContextSampleRate ? `${snapshot.audioContextSampleRate}Hz` : '—'}</dd>
+                    </div>
+                    <div className={rowClass}>
+                        <dt className="opacity-60">baseLatency</dt>
+                        <dd>{ms(snapshot?.audioContextBaseLatencySec ?? null)}</dd>
+                    </div>
+                    <div className={rowClass}>
+                        <dt className="opacity-60">outputLatency</dt>
+                        <dd>{ms(snapshot?.audioContextOutputLatencySec ?? null)}</dd>
+                    </div>
+                </dl>
+            )}
         </div>
     );
 };
@@ -310,9 +398,13 @@ const DeveloperSettingsSubview: React.FC<DeveloperSettingsSubviewProps> = ({
                 </div>
                 <div className="text-[11px] leading-relaxed opacity-45" style={{ color: 'var(--text-secondary)' }}>
                     {t('options.perfDiagnosticsHint')
-                        || 'Read the numbers in the debug overlay: Perf tab (frame timing) and Audio Continuity (stalls).'}
+                        || 'Read them in the debug overlay: Perf tab (frame timing) and Audio Continuity (stalls).'}
                 </div>
             </div>
+
+            {/* 音频缓冲读数：手机上没有调试浮层可看（那个只有桌面端的 Alt+Shift+D 能开），
+                而判断「CPU 一满就撕裂」需要的两个数在这里就能读到，也不用开采样。 */}
+            <AudioBufferReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
 
             <div className="text-[11px] leading-relaxed opacity-45" style={{ color: 'var(--text-secondary)' }}>
                 {t('options.consoleLogConvention')
