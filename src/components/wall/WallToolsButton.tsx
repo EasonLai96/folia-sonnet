@@ -242,6 +242,7 @@ export function WallToolsSurface({ idPrefix, label, isDaylight, locate, destinat
                 isDaylight={isDaylight}
                 accentColor="var(--text-accent)"
                 accentForeground="var(--text-on-accent, #ffffff)"
+                touchPeek={false}
             />
         </motion.div>
     );

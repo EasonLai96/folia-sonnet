@@ -29,6 +29,12 @@ export interface SlideActionButtonProps {
     /** 拖满时按钮变成强调色底，上面图标的颜色（缺省白色；强调色可能本身就很浅，例如墙面工具按钮读 --text-on-accent）。 */
     accentForeground?: string;
     disabled?: boolean;
+    /**
+     * 触屏上要不要保留「探出半截」的姿态（缺省要）：没有 hover 的设备上按钮恒定 translate-x-1/2 + 60% 透明，
+     * 靠宿主自己的右内边距补回这 24px（GridListSearchButton 的 pr-4 就是干这个的）。宿主没有这份内边距时
+     * （墙面工具是 right: 16/12px），这半截就真的伸出屏幕外面了 —— 传 false 收回来，与桌面姿态一致。
+     */
+    touchPeek?: boolean;
 }
 
 export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
@@ -42,6 +48,7 @@ export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
     accentColor,
     accentForeground = '#ffffff',
     disabled = false,
+    touchPeek = true,
 }) => {
     const [showGuideLine, setShowGuideLine] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -55,7 +62,9 @@ export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
         ? 'translate-x-0 opacity-100'
         : supportsHover
             ? 'translate-x-1/2 opacity-60 group-hover:translate-x-0 group-hover:opacity-100 md:translate-x-0 md:opacity-100 md:hover:scale-105'
-            : 'translate-x-1/2 opacity-60';
+            : touchPeek
+                ? 'translate-x-1/2 opacity-60'
+                : 'translate-x-0 opacity-100';
 
     const setDestinationFeedback = (progress: number) => {
         const icon = trackEndIconRef.current;
