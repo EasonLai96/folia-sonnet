@@ -7,6 +7,15 @@ import { measureMonetGraphemeOffsets, resolveClampFontPx } from './monet/monetLy
 import { colorWithAlpha } from './colorMix';
 import { resolveWordColor } from './wordColoring';
 import {
+    HarmonyOverlayRenderer,
+    resolveHarmonyCanvasHeight,
+} from './harmonyOverlayWebgl';
+import {
+    buildHarmonyColorRuns,
+    layoutHarmonyText,
+    resolveHarmonySweepWidth,
+} from './harmonyOverlaySweep';
+import {
     getLyricsBackgroundVocals,
     resolveHarmonyAlternateText,
     resolveHarmonySnapshotFromVocals,
@@ -70,6 +79,141 @@ const createHarmonyLine = (vocal: LyricBackgroundVocal): Line => ({
     words: vocal.words,
 });
 
+/**
+ * GPU 版的一行和声。
+ *
+ * 每帧做的事：`currentTime` 推出「唱到第几像素」，写进 uniform，画一个四边形 —— 一次 draw call，
+ * 不动任何 DOM 样式。原来的 DOM 版要每帧重建一条 `mask-image` 渐变，那正好是它在安卓 WebView
+ * 上掉帧的原因。
+ *
+ * 拿不到 webgl2（或渲染器初始化失败）时整块退回 DOM 版：GPU 这边只是更快，不是唯一画法。
+ */
+const HarmonyGlText: React.FC<{
+    vocal: LyricBackgroundVocal;
+    currentTime: MotionValue<number>;
+    theme: Theme;
+    subtitleFontScale: number;
+}> = ({ vocal, currentTime, theme, subtitleFontScale }) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const [fallback, setFallback] = useState(false);
+    /**
+     * 画布尺寸由 ResizeObserver 喂进来。
+     *
+     * 不能在每帧的 rAF 里读 clientWidth/clientHeight：那会强制浏览器同步布局，正好是我们想甩掉
+     * 的那类开销。转屏、面板收起这些才会变化尺寸，交给 observer 就好。
+     */
+    const sizeRef = useRef({ width: 0, height: 0 });
+    const fontPx = resolveClampFontPx(0.95, 1.8, 1.3) * subtitleFontScale;
+    const fontSpec = `${resolveThemeFontWeight(theme, 500)} ${fontPx}px ${resolveThemeFontStack(theme)}`;
+    const graphemeTimings = useMemo(() => buildLineGraphemeTimeline(createHarmonyLine(vocal)), [vocal]);
+    const graphemeOffsets = useMemo(
+        () => measureMonetGraphemeOffsets(vocal.text, fontPx, fontSpec),
+        [fontPx, fontSpec, vocal.text],
+    );
+    const runs = useMemo(() => buildHarmonyColorRuns(vocal, theme), [theme, vocal]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || typeof ResizeObserver === 'undefined') return undefined;
+        const observer = new ResizeObserver(entries => {
+            const entry = entries[0];
+            if (!entry) return;
+            sizeRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
+        });
+        observer.observe(canvas);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return undefined;
+        let renderer: HarmonyOverlayRenderer;
+        try {
+            renderer = new HarmonyOverlayRenderer(canvas);
+        } catch (error) {
+            console.warn('[harmony] WebGL2 unavailable, keeping the DOM path', error);
+            setFallback(true);
+            return undefined;
+        }
+        if (!renderer.isReady) {
+            renderer.release();
+            setFallback(true);
+            return undefined;
+        }
+
+        let frame = 0;
+        let cancelled = false;
+        const softness = fontPx * 0.45;
+        // 布局必须按宽度缓存：渲染器靠「layout 是不是同一个对象」判断要不要重烘纹理，
+        // 每帧新建一个对象就等于每帧上传一次字形纹理 —— 那就比 DOM 版还慢了。
+            const layoutCache = new Map<number, ReturnType<typeof layoutHarmonyText>>();
+        const render = () => {
+            if (cancelled) return;
+            frame = window.requestAnimationFrame(render);
+            const { width: cssWidth, height: cssHeight } = sizeRef.current;
+            // observer 还没喂尺寸就先等一帧：布局要跟着真实宽度排。
+            if (cssWidth <= 0 || cssHeight <= 0) return;
+            const widthKey = Math.round(cssWidth);
+            let layout = layoutCache.get(widthKey);
+            if (!layout) {
+                layout = layoutHarmonyText(vocal.text, runs, fontPx, fontSpec, cssWidth);
+                layoutCache.set(widthKey, layout);
+            }
+            // 画布自己撑到该有的高度：行数变了才重写这个样式，不是每帧都写。
+            const canvasHeight = resolveHarmonyCanvasHeight(layout);
+            // 写样式不会强制同步布局（读才会），而且只有行数变了才写。
+            if (canvasHeight > 0 && Math.round(cssHeight) !== Math.round(canvasHeight)) {
+                canvas.style.height = `${canvasHeight}px`;
+                sizeRef.current = { width: cssWidth, height: canvasHeight };
+            }
+            try {
+                renderer.draw({
+                    cssWidth,
+                    cssHeight,
+                    dpr: Math.min(window.devicePixelRatio || 1, 2.5),
+                    progressPx: resolveHarmonySweepWidth(vocal, graphemeTimings, graphemeOffsets, currentTime.get()),
+                    softnessPx: softness,
+                    opacity: 1,
+                    layout,
+                    fontSpec,
+                    idleAlpha: 0.56,
+                    // 衬底那圈柔光继续由外层 DOM 那一个元素负责：它是整块一个椭圆，不是每行
+                    // 一个，而且是静态的，不参与每帧。
+                    drawBackground: false,
+                    backgroundColor: theme.backgroundColor,
+                });
+            } catch (error) {
+                // 画坏了也不能让歌词消失：交给 DOM 版重画。
+                console.warn('[harmony] draw failed, falling back to DOM', error);
+                cancelled = true;
+                window.cancelAnimationFrame(frame);
+                renderer.release();
+                setFallback(true);
+            }
+        };
+        frame = window.requestAnimationFrame(render);
+
+        return () => {
+            cancelled = true;
+            window.cancelAnimationFrame(frame);
+            layoutCache.clear();
+            renderer.release();
+        };
+    }, [currentTime, fontPx, fontSpec, graphemeOffsets, graphemeTimings, runs, theme, vocal]);
+
+    if (fallback) {
+        return <HarmonyGlowText vocal={vocal} currentTime={currentTime} theme={theme} subtitleFontScale={subtitleFontScale} />;
+    }
+
+    return (
+        <canvas
+            ref={canvasRef}
+            aria-hidden="true"
+            className="pointer-events-none block w-full"
+        />
+    );
+};
+
 const HarmonyGlowText: React.FC<{
     vocal: LyricBackgroundVocal;
     currentTime: MotionValue<number>;
@@ -86,28 +230,11 @@ const HarmonyGlowText: React.FC<{
         () => measureMonetGraphemeOffsets(vocal.text, fontPx, fontSpec),
         [fontPx, fontSpec, vocal.text],
     );
-    const fillWidth = useTransform(currentTime, latest => {
-        const fullWidth = graphemeOffsets[graphemeOffsets.length - 1] ?? 0;
-        if (latest <= vocal.startTime) return 0;
-        if (latest >= vocal.endTime) return fullWidth;
-
-        const timingCount = Math.min(graphemeTimings.length, graphemeOffsets.length - 1);
-        for (let index = 0; index < timingCount; index += 1) {
-            const timing = graphemeTimings[index];
-            const start = Math.max(vocal.startTime, timing.startTime);
-            const end = Math.max(start, timing.endTime);
-            const startWidth = graphemeOffsets[index] ?? 0;
-            const endWidth = graphemeOffsets[index + 1] ?? startWidth;
-
-            if (latest < start) return startWidth;
-            if (latest <= end) {
-                return startWidth + (endWidth - startWidth)
-                    * ((latest - start) / Math.max(0.001, end - start));
-            }
-        }
-
-        return fullWidth;
-    });
+    // 与 GPU 版共用同一个推进算法：切到 GPU 那条路时字的位置必须一模一样，不然会看到跳一下。
+    const fillWidth = useTransform(
+        currentTime,
+        latest => resolveHarmonySweepWidth(vocal, graphemeTimings, graphemeOffsets, latest),
+    );
     const glowPaddingPx = Math.round(Math.max(fontPx * 0.85, 16));
     const paddedMaskImage = useTransform(fillWidth, latest => {
         const softness = Math.max(Math.min(fontPx * 1.35, 36), 18);
@@ -251,7 +378,12 @@ const VisualizerHarmonyOverlay: React.FC<VisualizerHarmonyOverlayProps> = ({
                             exit={{ opacity: 0, scale: 0.97 }}
                             className="relative z-10 max-w-4xl overflow-visible whitespace-pre-wrap break-words"
                         >
-                            <HarmonyGlowText vocal={entry.vocal} currentTime={currentTime} theme={subtitleTheme ?? theme} subtitleFontScale={subtitleFontScale} />
+                            <HarmonyGlText
+                                vocal={entry.vocal}
+                                currentTime={currentTime}
+                                theme={subtitleTheme ?? theme}
+                                subtitleFontScale={subtitleFontScale}
+                            />
                             {alternateText && (
                                 <motion.div
                                     initial={{ opacity: 0, y: -4 }}
