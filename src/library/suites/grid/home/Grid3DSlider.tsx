@@ -5,6 +5,7 @@ import { formatGridMapFolderTitle } from '../../../../utils/gridMapFolderPath';
 import { getSizedCoverUrl } from '../../../../utils/coverUrl';
 import { useHomeLayoutSettingsStore } from '../../../../stores/useHomeLayoutSettingsStore';
 import { useReducedMotionFor } from '../../../../hooks/useReducedMotionFor';
+import { useCompactUiScale } from '../../../../hooks/useCompactUiScale';
 
 // src/library/suites/grid/home/Grid3DSlider.tsx
 // Controlled desktop Grid3D slider shared by Netease, local music, and Navidrome overview surfaces.
@@ -77,6 +78,23 @@ export const getGrid3DSliderSummaryText = (
 const DISCRETE_WHEEL_PIXEL_THRESHOLD = 40;
 const DISCRETE_WHEEL_DISTANCE_MULTIPLIER = 3;
 const GRID3D_CARD_GAP = 48;
+
+/**
+ * 手机横屏（紧凑档）的纵向预算 —— 这几个数必须与 styles/androidPhoneFit.css 里同名的样式对上，
+ * 少一个卡片就会被滚动容器裁掉：
+ *   `[data-grid3d-slider]` 的上下内边距、`[data-grid3d-caption]` 的高度。
+ * 卡片本身在这一档是 1:1（相纸卡的素材文字被隐藏），所以比例常数是 1。
+ *
+ * 放大倍数也要降：`scale()` 只改绘制不改布局，卡片会以自己为中心溢出「宽 ×(倍数−1)/2」，
+ * 再叠上聚焦卡那 6px 上移，同样由滚动容器的内边距兜着 —— 桌面档封面几百像素、内边距 96px
+ * 兜得住，紧凑档内边距只剩 20px，倍数不降的话封面一大就又把内边距吃穿、重新被裁。
+ */
+const GRID3D_COMPACT_SCROLLER_PAD_PX = 20;
+const GRID3D_COMPACT_CAPTION_PX = 36;
+const GRID3D_COMPACT_CARD_RATIO = 1;
+const GRID3D_COMPACT_PEAK_SCALE = 1.12;
+const GRID3D_COMPACT_MIN_COVER_PX = 64;
+
 export const GRID3D_WINDOW_RADIUS = 18;
 export const GRID3D_LEAP_CARDS = 4;
 const PROGRAMMATIC_SCROLL_SETTLE_PX = 3;
@@ -297,6 +315,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
     const isNarrowLayout = containerSize.width > 0 && containerSize.width < 768;
     const isShortLayout = containerSize.height > 0 && containerSize.height < (hasFloatingPlayer ? 420 : 380);
     const useCompactMetrics = isNarrowLayout || isShortLayout;
+    const isCompactUi = useCompactUiScale();
     const isLargeDesktop = !useCompactMetrics
         && isDesktopWidth
         && containerSize.width >= 1440
@@ -306,9 +325,37 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
         && containerSize.width >= 2000
         && containerSize.height >= (hasFloatingPlayer ? 780 : 720);
 
-    const coverSize = useCompactMetrics
-        ? (isDesktopWidth ? 208 : 192)
-        : (isDesktopWidth ? (isUltraDesktop ? 360 : isLargeDesktop ? 312 : 218) : 224);
+    // 放大倍数提到这里：卡片尺寸要按它反算（见下），两边必须是同一个值。
+    // 紧凑档降一档 —— 那档的内边距只有 20px，兜不住桌面档那么大的放大溢出。
+    const peakScale = isCompactUi
+        ? GRID3D_COMPACT_PEAK_SCALE
+        : (grid3dCardStyle === 'image' ? 1.25 : 1.2);
+    const compactCoverCeiling = isDesktopWidth ? 208 : 192;
+
+    /*
+     * 手机横屏（紧凑档）下纵向空间是唯一的硬约束：滚动容器按内容撑高、再把超出的部分裁掉，
+     * 所以卡片一高就被上下各切一刀 —— 滑到中间放大时切得最狠，最底那截还会伸到悬浮播放条上
+     * （播放按钮就在那儿）。
+     *
+     * 与其靠裁剪兜底，不如按容器高度反推封面尺寸：容器高 − 滚动容器的上下内边距 − 底部标题块，
+     * 再除以放大倍数，就是「放大之后刚好整个装得下」的宽度。相纸卡在这一档退化成方形
+     * （素材区的三行文字被隐藏，见 androidPhoneFit.css），所以两种样式的比例都是 1。
+     *
+     * 只在紧凑档生效：竖屏手机、桌面、平板走的还是原来那套按宽度的档位表。
+     * 量不到容器高度时（首帧）退回那一档的上限，下一帧就会纠正。
+     */
+    const compactFitCover = containerSize.height > 0
+        ? Math.floor(
+            (containerSize.height - GRID3D_COMPACT_SCROLLER_PAD_PX * 2 - GRID3D_COMPACT_CAPTION_PX)
+            / GRID3D_COMPACT_CARD_RATIO / peakScale,
+        )
+        : compactCoverCeiling;
+
+    const coverSize = isCompactUi
+        ? Math.max(GRID3D_COMPACT_MIN_COVER_PX, Math.min(compactCoverCeiling, compactFitCover))
+        : useCompactMetrics
+            ? (isDesktopWidth ? 208 : 192)
+            : (isDesktopWidth ? (isUltraDesktop ? 360 : isLargeDesktop ? 312 : 218) : 224);
     const edgePadding = Math.max(0, (containerSize.width - coverSize) / 2);
 
     const safeFocusedIndex = clampFocusedIndex(focusedIndex, items.length);
@@ -335,8 +382,6 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
         const container = scrollContainerRef.current;
         if (!container) return undefined;
         const maxDist = 600;
-        const isImage = grid3dCardStyle === 'image';
-        const peakScale = isImage ? 1.25 : 1.2;
         const minScale = 0.5;
         const cards = container.querySelectorAll<HTMLElement>('[data-grid3d-index]');
         const viewportWidth = container.clientWidth;
@@ -363,7 +408,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
         }
 
         return closestIndex;
-    }, [cardPitch, coverSize, edgePadding, grid3dCardStyle, items.length]);
+    }, [cardPitch, coverSize, edgePadding, items.length, peakScale]);
 
     const reportFocusedIndex = useCallback((index: number) => {
         const nextIndex = clampFocusedIndex(index, items.length);
@@ -756,7 +801,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
     const focusedSecondaryText = focusedItem ? getGrid3DSliderSecondaryText(focusedItem) : '';
 
     return (
-        <div ref={containerRef} className="w-full flex-1 flex flex-col justify-center relative min-h-0 select-none">
+        <div ref={containerRef} data-grid3d-slider-root className="w-full flex-1 flex flex-col justify-center relative min-h-0 select-none">
             <div
                 ref={scrollContainerRef}
                 data-grid3d-slider
@@ -776,16 +821,18 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                             <div key={`skeleton-${index}`} className="shrink-0 pointer-events-none select-none">
                                 {grid3dCardStyle === 'image' ? (
                                     <div
+                                        data-grid3d-card="image"
                                         className="aspect-square rounded-2xl animate-pulse bg-zinc-200/20 dark:bg-zinc-800/20 border border-white/5 shadow-inner"
                                         style={{ width: coverSize, height: coverSize }}
                                     />
                                 ) : (
                                     <div
+                                        data-grid3d-card="polaroid"
                                         className="rounded-xl border border-white/5 p-4 flex flex-col items-center backdrop-blur-md shadow-lg"
                                         style={{ width: coverSize }}
                                     >
-                                        <div className="w-full aspect-square rounded-lg animate-pulse bg-zinc-200/20 dark:bg-zinc-800/20 mb-4" />
-                                        <div className="w-full text-left pt-2 space-y-2">
+                                        <div data-grid3d-card-cover className="w-full aspect-square rounded-lg animate-pulse bg-zinc-200/20 dark:bg-zinc-800/20 mb-4" />
+                                        <div data-grid3d-card-text className="w-full text-left pt-2 space-y-2">
                                             <div className="h-4 w-3/4 animate-pulse bg-zinc-200/20 dark:bg-zinc-800/20 rounded-md" />
                                             <div className="h-3 w-1/2 animate-pulse bg-zinc-200/20 dark:bg-zinc-800/20 rounded-md" />
                                         </div>
@@ -827,6 +874,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                                 	>
                                     {grid3dCardStyle === 'image' ? (
                                         <div
+                                            data-grid3d-card="image"
                                             className={`aspect-square rounded-2xl overflow-hidden shadow-2xl relative border border-white/10 ${
                                                 isFocused ? 'ring-2 ring-white/30' : ''
                                             }`}
@@ -843,10 +891,11 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                                         </div>
                                     ) : (
                                         <div
+                                            data-grid3d-card="polaroid"
                                             className="rounded-xl border p-4 flex flex-col items-center backdrop-blur-md shadow-lg hover:shadow-2xl theme-polaroid-card"
                                             style={{ width: coverSize }}
                                         >
-                                            <div className="w-full aspect-square rounded-lg overflow-hidden bg-zinc-800/20 relative shadow-inner mb-4 flex items-center justify-center">
+                                            <div data-grid3d-card-cover className="w-full aspect-square rounded-lg overflow-hidden bg-zinc-800/20 relative shadow-inner mb-4 flex items-center justify-center">
                                                 {item.coverUrl && loadedIndices.has(index) ? (
                                                     <img src={getSizedCoverUrl(item.coverUrl, coverSize)} alt={typeof displayName === 'string' ? displayName : ''} loading="lazy" decoding="async" className="w-full h-full object-cover pointer-events-none select-none" />
                                                 ) : (
@@ -854,7 +903,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                                                 )}
                                             </div>
 
-                                            <div className="w-full text-left pt-2 min-w-0">
+                                            <div data-grid3d-card-text className="w-full text-left pt-2 min-w-0">
                                                 <h3 className="font-bold text-sm truncate max-w-full tracking-tight">
                                                     {displayName}
                                                 </h3>
@@ -887,6 +936,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
 
             {!isLoading && focusedItem && (
                 <div
+                    data-grid3d-caption
                     className={`relative shrink-0 text-center z-10 px-8 pointer-events-none ${
                         hasFloatingPlayer ? 'pt-6 md:pt-8 pb-0 -mb-4 md:-mb-6' : 'pt-5 md:pt-6 pb-4'
                     }`}

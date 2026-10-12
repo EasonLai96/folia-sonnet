@@ -737,3 +737,57 @@ html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox='true'] > * {
 html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox-host='true'] [data-ponder='player-bar'] {
   pointer-events: auto;
 }
+
+/* ⑤ 首页网格的左右滑动选卡（Grid3DSlider）：横屏下「高度」是唯一的硬约束。
+ *
+ * 滚动容器（[data-grid3d-slider]）上下各写了 `py-24` = 6rem，横屏紧凑档下是 82.5px × 2。
+ * 它是个 flex 子项、min-height 又被 overflow 归零，于是容器高度全被内边距吃掉：
+ * 内容盒压成 0，卡片（比容器还高）从上下两头溢出，再被 overflow-y-hidden 各裁一刀 ——
+ * 滑到中间放大时看得最明显：上下各切掉五六十像素。
+ * 而「放大后的卡片」还往下探时，最底那截正好压在悬浮播放条上（播放按钮就在那儿）。
+ *
+ * 所以紧凑档下：
+ *   ① 把滚动容器的纵向内边距压到 20px —— 只留够「放大溢出 + 聚焦卡上移 6px」的那一点点，
+ *      不再靠裁剪兜底。放大倍数同一档也压到 1.12（见 Grid3DSlider 的
+ *      GRID3D_COMPACT_PEAK_SCALE）：溢出量是「封面宽 ×(倍数−1)/2」，倍数不降的话，
+ *      封面一大（上限 208）就又把内边距吃穿；
+ *   ② 底部标题块收细（名字一行 + 曲目数一行），别把卡片往下挤；
+ *   ③ 相纸卡在横屏退化成「带白边的方形封面卡」：素材区的三行文字在这么矮的屏上根本读不了，
+ *      却固定占掉 90px，卡片最小也装不下 —— 歌单名本来就在下面的标题块里，不必重复。
+ *      （封面尺寸由 Grid3DSlider 按容器高度反算，见 useCompactUiScale / GRID3D_COMPACT_*。）
+ *
+ * 判据：卡片放大后要整个看得见、上下都不被裁，且下缘留在播放条之上。 */
+html[data-folia-ui-scale='compact'] [data-grid3d-slider] {
+  padding-block: 20px;
+}
+
+html[data-folia-ui-scale='compact'] [data-grid3d-caption='true'] {
+  padding-top: 6px !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-grid3d-caption='true'] h3 {
+  font-size: 0.9rem !important;
+  line-height: 1.25 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-grid3d-caption='true'] p {
+  font-size: 9px !important;
+  line-height: 1.3 !important;
+  margin-top: 1px !important;
+}
+
+/* 相纸卡：只留封面。p-4 换成 6px 的窄白边、封面不再留底距 —— 卡片高度正好等于宽度，
+ * 和方形卡一样是 1:1，Grid3DSlider 那边才好按高度反算。 */
+html[data-folia-ui-scale='compact'] [data-grid3d-card='polaroid'] {
+  padding: 6px !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-grid3d-card='polaroid'] [data-grid3d-card-cover='true'] {
+  margin-bottom: 0 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-grid3d-card-text='true'] {
+  display: none !important;
+}
