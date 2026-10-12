@@ -104,6 +104,15 @@ const TRANSLATION_LYRIC_EXTENSIONS = /\.t\.(lrc|vtt)$/i;
 const IMPORT_CONCURRENCY = 6;
 export const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 export const LOCAL_MUSIC_SCAN_PROGRESS_EVENT = 'folia-local-music-scan-progress';
+/**
+ * 某一首本地歌的封面**这一刻才抽出来**（detail: `{ songId, assetId }`）。
+ *
+ * 队列（磁贴墙就是按它铺的）里的条目是**建队列那一刻**把封面烤进 `album.coverUrl` 的
+ * （`buildLocalQueue` 按当时的 `localCoverAssetId` 算），而内嵌封面常常是后来才有的：
+ * 播放这一首时、预热相邻几首时、列表回填时。没有这一下通知，那些条目就一直带着
+ * 「没有封面」的那份快照 —— 于是播放页有封面、磁贴墙一片空白。
+ */
+export const LOCAL_COVER_READY_EVENT = 'folia-local-cover-ready';
 const HYDRATION_BATCH_SIZE = 25;
 const HYDRATION_REFRESH_EVERY = 100;
 const SNAPSHOT_HASH_SEED = 2166136261;
@@ -127,6 +136,11 @@ function formatImportDuration(ms: number): string {
 
 function notifyLocalMusicUpdated() {
     window.dispatchEvent(new CustomEvent(LOCAL_MUSIC_UPDATED_EVENT));
+}
+
+function notifyLocalCoverReady(songId: string, assetId: string) {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(LOCAL_COVER_READY_EVENT, { detail: { songId, assetId } }));
 }
 
 async function removeDeletedSongIdsFromPlaylists(songIds: string[]): Promise<void> {
@@ -1840,6 +1854,7 @@ async function extractAndPersistSongCover(
     songsWithoutEmbeddedCover.delete(song.id);
     stageLocalCoverAsset(metadata.coverAssetId, metadata.cover);
 
+    const previousAssetId = song.localCoverAssetId;
     const updatedSong: LocalSong = {
         ...song,
         localCoverAssetId: metadata.coverAssetId,
@@ -1849,6 +1864,13 @@ async function extractAndPersistSongCover(
     };
     Object.assign(song, updatedSong);
     await saveLocalSong(updatedSong);
+    /*
+     * 封面是**现在**才有的。曲库列表直接按记录的 `localCoverAssetId` 现算，管不到；
+     * 队列（磁贴墙）烤的是建队那一刻的快照，只有靠这个事件去补。
+     */
+    if (previousAssetId !== updatedSong.localCoverAssetId) {
+        notifyLocalCoverReady(updatedSong.id, metadata.coverAssetId);
+    }
     return updatedSong;
 }
 

@@ -105,6 +105,7 @@ import { usePlaybackInteractionBridge } from './hooks/usePlaybackInteractionBrid
 import { usePersonalFmModeController } from './hooks/usePersonalFmModeController';
 import { PERSONAL_FM_MODE_COMMAND_ID } from './components/command-palette/commands/fmModeCommand';
 import { usePlaybackUiEffects } from './hooks/usePlaybackUiEffects';
+import { useLocalCoverQueueSync } from './hooks/useLocalCoverQueueSync';
 import { useLibraryPlaybackController } from './hooks/useLibraryPlaybackController';
 import { useNavidromeScrobbleReporter } from './hooks/useNavidromeScrobbleReporter';
 import { useNeteaseScrobbleReporter } from './hooks/useNeteaseScrobbleReporter';
@@ -1131,6 +1132,10 @@ export default function App() {
         volumePreviewFrameRef,
         onClearPendingUnavailableSkip: clearPendingUnavailableSkip,
     });
+
+    // 本地歌的封面常常是「后来才有」的（播放时 / 预热时 / 列表回填时抽出来的），
+    // 而磁贴墙铺的是建队列那一刻烤进去的快照 —— 这个订阅把新抽到的封面补回队列条目。
+    useLocalCoverQueueSync({ playQueue, setPlayQueue, currentSong, setCurrentSong });
 
     // Bridges the automix hook (built here) to the media-cache writer (built a little further down in
     // usePlaybackAudioBridge). A ref rather than a prop because the writer does not exist yet at this

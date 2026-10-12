@@ -1,0 +1,93 @@
+import { useEffect } from 'react';
+import type React from 'react';
+import type { SongResult, UnifiedSong } from '../types';
+import { getLocalCoverAssetUrl } from '../services/localCoverAssetUrl';
+import { LOCAL_COVER_READY_EVENT } from '../services/localMusicService';
+
+// src/hooks/useLocalCoverQueueSync.ts
+// 把「后来才抽出来的本地封面」同步进播放队列。
+//
+// 磁贴墙（Lattice / PosterWall）不读歌曲记录，它铺的是**播放队列**：`buildLatticeTiles` 取
+// 每个条目的 `album.coverUrl`，而这个字段是建队列那一刻由 `buildLocalQueue` 按当时的
+// `localCoverAssetId` 烤进去的。内嵌封面却常常在那之后才有 —— 播到这一首时、预热相邻几首时、
+// 列表回填时 —— 于是队列里的其它条目永远停在「没有封面」那一份快照上：播放页有封面，磁贴墙空白。
+//
+// 这里就补这一件事：`localMusicService` 抽到新封面会广播 `LOCAL_COVER_READY_EVENT`，
+// 收到后把队列里**同一首**且**当前没有封面**的条目补上封面 URL（已经有封面的一律不动 ——
+// 那多半是在线匹配来的，不该被内嵌图盖掉）。
+
+type LocalCoverReadyDetail = { songId?: string; assetId?: string };
+
+/** 这一条是不是「这一首本地歌」：本地条目带 localRef，兜一条 sourceRef（还原播放那份也有）。 */
+const localSongIdOf = (song: SongResult): string | undefined => {
+    const unified = song as UnifiedSong;
+    if (unified.localRef?.songId) return unified.localRef.songId;
+    return unified.sourceRef?.kind === 'local' ? unified.sourceRef.mediaId : undefined;
+};
+
+/** 给这一条补封面；不需要补（不是同一首 / 已经有封面）时返回 null。 */
+export const patchLocalSongCover = (
+    song: SongResult,
+    songId: string,
+    coverUrl: string,
+): SongResult | null => {
+    if (localSongIdOf(song) !== songId) return null;
+    if (song.album?.coverUrl) return null;
+    return {
+        ...song,
+        album: {
+            id: song.album?.id ?? 0,
+            name: song.album?.name ?? '',
+            coverUrl,
+        },
+    };
+};
+
+/** 整条队列里同一首歌的记录一起补；`changed` 为 false 时调用方不必写状态。 */
+export const patchQueueWithLocalCover = (
+    queue: SongResult[],
+    songId: string,
+    coverUrl: string,
+): { queue: SongResult[]; changed: boolean } => {
+    let changed = false;
+    const nextQueue = queue.map(song => {
+        const patched = patchLocalSongCover(song, songId, coverUrl);
+        if (!patched) return song;
+        changed = true;
+        return patched;
+    });
+    // 一首都没补上就把原数组还回去：调用方不写状态，整条队列不必重渲染。
+    return changed ? { queue: nextQueue, changed: true } : { queue, changed: false };
+};
+
+export const useLocalCoverQueueSync = ({
+    playQueue,
+    setPlayQueue,
+    currentSong,
+    setCurrentSong,
+}: {
+    playQueue: SongResult[];
+    setPlayQueue: React.Dispatch<React.SetStateAction<SongResult[]>>;
+    currentSong: SongResult | null;
+    setCurrentSong: React.Dispatch<React.SetStateAction<SongResult | null>>;
+}): void => {
+    useEffect(() => {
+        const handleCoverReady = (event: Event) => {
+            const detail = (event as CustomEvent<LocalCoverReadyDetail>).detail;
+            const songId = detail?.songId;
+            const coverUrl = getLocalCoverAssetUrl(detail?.assetId, 1024);
+            if (!songId || !coverUrl) return;
+
+            const next = patchQueueWithLocalCover(playQueue, songId, coverUrl);
+            if (next.changed) setPlayQueue(next.queue);
+
+            if (currentSong) {
+                const patchedCurrent = patchLocalSongCover(currentSong, songId, coverUrl);
+                if (patchedCurrent) setCurrentSong(patchedCurrent);
+            }
+        };
+
+        window.addEventListener(LOCAL_COVER_READY_EVENT, handleCoverReady);
+        return () => window.removeEventListener(LOCAL_COVER_READY_EVENT, handleCoverReady);
+    }, [currentSong, playQueue, setCurrentSong, setPlayQueue]);
+};
