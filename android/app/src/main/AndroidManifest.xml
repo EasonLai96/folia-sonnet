@@ -18,6 +18,27 @@
         <meta-data android:name="lyricon_module_description" android:value="Folia 音乐播放器：当前歌曲与逐行歌词" />
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
 
+        <!--
+            厂商「全屏显示 / 刘海」适配（注册给 ROM 看的部分）。
+
+            有用户反馈屏幕顶部有黑边：框架侧的缺省行为是把内容顶到挖孔下方，而部分厂商
+            （MIUI / EMUI / ColorOS 一类）在设置里给每个应用留了一个「允许应用全屏显示」开关，
+            按下面这些 meta-data 判断这个应用支不支持铺满。没声明的应用会被当成「不支持」，
+            于是被 letterbox 成一条黑边 —— 缺的就是这份「注册」。
+
+            运行时那一份（PhoneFitCutout.apply 设 layoutInDisplayCutoutMode + 清 inset padding）
+            管的是窗口创建之后的铺开，这里管的是 ROM 的白名单与开屏那一帧，两边都要有。
+
+            注：不要给 activity 加 android:maxAspectRatio。那是「最大」长宽比，声明得比屏幕
+            小时反而会被系统加黑边（例如折叠屏 / 21:9）；targetSdk 26+ 不声明就是铺满。
+        -->
+        <!-- 通用：本应用支持的最大屏幕长宽比（> 常见 18:9=2.0），各 ROM 的识别依据。 -->
+        <meta-data android:name="android.max_aspect" android:value="2.4" />
+        <!-- MIUI / HyperOS：刘海区域的显示配置（竖屏与横屏都铺到刘海两侧）。 -->
+        <meta-data android:name="notch.config" android:value="portrait|landscape" />
+        <!-- EMUI / HarmonyOS：声明本应用已做刘海适配，不再强制下移内容。 -->
+        <meta-data android:name="android.notch_support" android:value="true" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
