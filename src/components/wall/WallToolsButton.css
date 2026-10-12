@@ -513,8 +513,55 @@ button.lattice-tools-slider-icon[aria-pressed="true"] { color: var(--text-accent
     }
 
     /* 面板「可压缩 + 内部滚动」已经进了基线（见文件开头 .lattice-tools-panel），这里不再重复。
-       这条档只负责把尺寸与预算压下来：上面的 --wall-tools-* 一变，面板那条 max-height 跟着变。
-       队列浮岛的 min-height 仍归它自己（见 .lattice-tools-stack.has-queue-island 那条）。 */
+       这条档只负责把尺寸与预算压下来：上面的 --wall-tools-* 一变，面板那条 max-height 跟着变。 */
+
+    /*
+     * —— 面板与浮岛怎么分这点高度 ——
+     *
+     * 两块玻璃都是 `flex: 0 1 auto`，收缩量按 flex-basis 分摊，于是**内容更长的那块让得更多**：
+     * 面板内容 ~238px，浮岛最多 2 + 36 + 8×40 = 358px。浮岛一路缩到自己那条 112px 下限就顶住
+     * 不动，剩下的缺口全由面板吞 —— 面板顶上那排快捷格（最常用的那一排，最右就是「播放器」）
+     * 于是被自己的 `overflow-y: auto` 裁掉，`elementFromPoint` 打不到，看到的就是
+     * 「面板里的按钮全没了 / 把播放按钮删了」。浮岛只在**队列非空且偏好展开**时出现 ——
+     * 正好对上「选了歌单之后」。
+     *
+     * 无头 Edge 实测（紧凑档、底距 24、顶部让位 20、浮岛满 8 行；可见性按**内容盒**算，
+     * 因为裁的就是那里 —— 判据是元素中心点还能不能被 elementFromPoint 打中）：
+     *   736x248  stack 预算 152 —— 浮岛被 112 钉住，面板只剩 32px / 内容盒 10px：
+     *            快捷排六格 vis=25%、中心点 MISS（点不到）。
+     *   776x268  stack 预算 172 —— 面板 52px / 内容盒 30px：vis=75%，中心点还能打中。
+     * 改后同两档分别变成 66px / 内容盒 44px（六格 100% 可点）与 75px / 53px。
+     *
+     * 改法：不动面板（它本来就该按剩余高度缩），只把**浮岛的下限放松到「头部 + 一行」**——
+     * 浮岛自己有滚动区，矮一点不影响用，腾出来的高度正好够面板放下快捷排。面板那条下限
+     * 是兜底，只在窗口矮到连 60px 都分不出来时才生效。
+     *
+     * 数值来源：ISLAND_BORDER_HEIGHT 2 + ISLAND_HEADER_HEIGHT 36 + QUEUE_ISLAND_ROW_HEIGHT 40 = 78
+     * （WallToolsQueueIsland.tsx / queueDragGeometry.ts）；
+     * 面板 60 = 内边距 10×2 + 边框 1×2 + 快捷格 36 + 间距 2。
+     */
+    .lattice-tools-panel {
+        min-height: 60px;
+    }
+
+    .lattice-tools-stack.has-queue-island .lattice-tools-island {
+        min-height: 78px;
+    }
+
+    /* 快捷排也收一档：它是面板里最该一直看得见的那一排（洗牌 / 主题 / 队列 / 播放器都在这里）。 */
+    .lattice-tools-quick {
+        margin-bottom: 2px;
+    }
+
+    .lattice-tools-quick-action {
+        height: 36px;
+        border-radius: 10px;
+    }
+
+    .lattice-tools-quick-action svg {
+        width: 16px;
+        height: 16px;
+    }
 
     .lattice-tools-action {
         min-height: 30px;
