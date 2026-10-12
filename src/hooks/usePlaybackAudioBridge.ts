@@ -17,6 +17,7 @@ import { setPlayerState } from '../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { useAppViewStore } from '../stores/useAppViewStore';
+import { noteAudioContext } from '../utils/mediaDiagnostics';
 
 // src/hooks/usePlaybackAudioBridge.ts
 
@@ -137,8 +138,16 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            const ctx = new AudioContextClass();
+            /*
+             * 放音乐要的是稳，不是浏览器那一小格交互缓冲。
+             *
+             * 默认的 `interactive` 只给几十毫秒，安卓 WebView 上 CPU 一被别的东西占满（可视化、
+             * 封面解码、整墙重渲染）音频线程就交不上样本 —— 缓冲空了一次就是一声撕裂/爆音，
+             * 一直占满就一直响。`playback` 让它按「放音乐」配缓冲，代价只是起播与切歌多几十毫秒。
+             */
+            const ctx = new AudioContextClass({ latencyHint: 'playback' });
             audioContextRef.current = ctx;
+            noteAudioContext(ctx, 'playback');
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;

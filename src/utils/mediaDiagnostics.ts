@@ -36,6 +36,14 @@ export type MediaDiagnosticsSnapshot = {
     lastEventAt: string | null;
     /** 正在等待（waiting 已开始、还没等到 canplay/playing）时为 true。 */
     waitingNow: boolean;
+    /** AudioContext 建出来时要求的那一档缓冲（见 noteAudioContext）。 */
+    audioContextLatencyHint: string | null;
+    audioContextSampleRate: number | null;
+    /** 图本身的处理延迟（秒），不含输出那一段。 */
+    audioContextBaseLatencySec: number | null;
+    /** 从图尾到声卡的延迟（秒）—— CPU 吃紧时它会变，缓冲够不够看它。 */
+    audioContextOutputLatencySec: number | null;
+    audioContextState: string | null;
 };
 
 import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
@@ -61,6 +69,47 @@ const nowMs = (): number => (
 
 /** 最近一次读到过状态的那个音频元素，缓冲量与网络状态从它身上读。 */
 let trackedElement: HTMLAudioElement | null = null;
+
+/**
+ * 建出来的 AudioContext 是什么样。
+ *
+ * 缓冲档位（latencyHint）决定音频线程一次要交多少样本：默认那档（`interactive`）只给几十
+ * 毫秒，CPU 一被别的东西占满就交不上，听感就是连续的撕裂/爆音（underrun）。想知道改完到底
+ * 生效没有，看 `audioContextOutputLatencySec` 与 `audioContextBaseLatencySec` 就行。
+ */
+let audioContextDiagnostics: {
+    latencyHint: string;
+    sampleRate: number | null;
+    baseLatencySec: number | null;
+    outputLatencySec: number | null;
+    state: string | null;
+} = {
+    latencyHint: 'unknown',
+    sampleRate: null,
+    baseLatencySec: null,
+    outputLatencySec: null,
+    state: null,
+};
+
+const readAudioContextDiagnostics = (context: AudioContext): void => {
+    audioContextDiagnostics.sampleRate = Number.isFinite(context.sampleRate) ? context.sampleRate : null;
+    audioContextDiagnostics.baseLatencySec = Number.isFinite(context.baseLatency) ? context.baseLatency : null;
+    audioContextDiagnostics.outputLatencySec = Number.isFinite(context.outputLatency) ? context.outputLatency : null;
+    audioContextDiagnostics.state = context.state || null;
+};
+
+/** 记住这个 AudioContext 用的哪一档缓冲，之后一路跟着它更新延迟读数。 */
+export const noteAudioContext = (
+    context: AudioContext | null | undefined,
+    latencyHint?: AudioContextLatencyCategory | 'unknown',
+): void => {
+    if (!context) return;
+    audioContextDiagnostics.latencyHint = latencyHint || 'unknown';
+    readAudioContextDiagnostics(context);
+    context.addEventListener('statechange', () => {
+        readAudioContextDiagnostics(context);
+    });
+};
 
 const settleWaiting = (): void => {
     if (waitingSinceMs === null) return;
@@ -147,6 +196,11 @@ export const readMediaDiagnostics = (): MediaDiagnosticsSnapshot => {
         lastEvent,
         lastEventAt,
         waitingNow: waitingSinceMs !== null,
+        audioContextLatencyHint: audioContextDiagnostics.latencyHint,
+        audioContextSampleRate: audioContextDiagnostics.sampleRate,
+        audioContextBaseLatencySec: audioContextDiagnostics.baseLatencySec,
+        audioContextOutputLatencySec: audioContextDiagnostics.outputLatencySec,
+        audioContextState: audioContextDiagnostics.state,
     };
 };
 
