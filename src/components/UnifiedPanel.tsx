@@ -316,11 +316,14 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
     const tabSwitcherBg = isDaylight ? 'bg-black/5' : 'bg-white/5';
     const canSlideOpenCommandPalette = !isOpen && Boolean(onOpenCommandPalette);
     const isGuideLineVisible = canSlideOpenCommandPalette && (showGuideLine || isPanelGuideHotspotActive);
+    // 没有 hover（触屏）时静止姿态一律与桌面同一条：完整在屏内、不透明。
+    // 探出半截（translate-x-1/2）要靠宿主的右内边距补回按钮宽度的一半，而宿主只有 pr-4（16px），
+    // 手机上是真的把按钮挤到屏幕外面去 —— 见 SlideActionButton 里同一处说明。
     const toggleButtonMotionClass = (isOpen || isGuideLineVisible || isDragging)
         ? 'translate-x-0 opacity-100'
         : supportsHover
             ? 'translate-x-1/2 opacity-60 group-hover:translate-x-0 group-hover:opacity-100 md:translate-x-0 md:opacity-100 md:hover:scale-105'
-            : 'translate-x-1/2 opacity-60';
+            : 'translate-x-0 opacity-100';
     const setCommandDestinationFeedback = (progress: number) => {
         const iconContainer = trackEndIconRef.current;
         if (!iconContainer) {

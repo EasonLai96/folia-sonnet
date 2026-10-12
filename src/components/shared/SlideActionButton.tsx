@@ -29,12 +29,6 @@ export interface SlideActionButtonProps {
     /** 拖满时按钮变成强调色底，上面图标的颜色（缺省白色；强调色可能本身就很浅，例如墙面工具按钮读 --text-on-accent）。 */
     accentForeground?: string;
     disabled?: boolean;
-    /**
-     * 触屏上要不要保留「探出半截」的姿态（缺省要）：没有 hover 的设备上按钮恒定 translate-x-1/2 + 60% 透明，
-     * 靠宿主自己的右内边距补回这 24px（GridListSearchButton 的 pr-4 就是干这个的）。宿主没有这份内边距时
-     * （墙面工具是 right: 16/12px），这半截就真的伸出屏幕外面了 —— 传 false 收回来，与桌面姿态一致。
-     */
-    touchPeek?: boolean;
 }
 
 export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
@@ -48,7 +42,6 @@ export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
     accentColor,
     accentForeground = '#ffffff',
     disabled = false,
-    touchPeek = true,
 }) => {
     const [showGuideLine, setShowGuideLine] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -58,13 +51,17 @@ export const SlideActionButton: React.FC<SlideActionButtonProps> = ({
     const trackEndIconRef = useRef<HTMLDivElement>(null);
     const trackFillRef = useRef<HTMLDivElement>(null);
     const supportsHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    // 没有 hover（触屏）的设备没有「悬停探出」这一说，静止姿态一律与桌面同一条：完整在屏内、不透明。
+    //
+    // 早先这里给触屏留了 `translate-x-1/2 opacity-60`（半截探出还半透明），那是照抄 GridListSearchButton 的
+    // 宿主换算出来的结果 —— 探出的半截要靠宿主的右内边距补回（pr-4 = 16px，探出是按钮宽度一半 24px，本来就差 8px），
+    // 到了只有 right: 16/12px 的墙面工具上，这 24px 就真的全部伸到屏幕外面去了。
+    // 桌面那套 hover 姿态不动（narrow 窗口静止时仍然探出半截）。
     const motionClass = showGuideLine || isDragging
         ? 'translate-x-0 opacity-100'
         : supportsHover
             ? 'translate-x-1/2 opacity-60 group-hover:translate-x-0 group-hover:opacity-100 md:translate-x-0 md:opacity-100 md:hover:scale-105'
-            : touchPeek
-                ? 'translate-x-1/2 opacity-60'
-                : 'translate-x-0 opacity-100';
+            : 'translate-x-0 opacity-100';
 
     const setDestinationFeedback = (progress: number) => {
         const icon = trackEndIconRef.current;
