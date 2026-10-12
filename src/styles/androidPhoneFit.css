@@ -654,6 +654,41 @@ html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] button sv
   height: 12px;
 }
 
+/* ①b 歌单网格「批量选择」面板（GridMapBatchPanel，挂在同一个侧切入面板里）的标题块。
+ *
+ * 它比另外三块多一行摘要（「已选 N 首 · 共 M 首」），而矮屏上那点高度只够**一**排按钮 ——
+ * 按钮区顶端的位置只由它上面那坨决定（实测：标题块 + 其上边距 + 列表容器 + 按钮区上边距）。
+ * 摘要单独占一行就等于把「播放 N 首」往下推 21px，正好推出可视区。
+ *
+ * 所以紧凑档把摘要并到标题行里（baseline 对齐、不换行），标题本身也收一档；
+ * 标题块之后的两层（列表容器、按钮区）上边距各压到 6px。
+ *
+ * 实测 676x228（更矮的一档，面板内容盒只有 78px）：改前「播放 N 首」在 y=109、完全在盒外
+ * （vis=0%、中心点 MISS）；改后落到 y=65..91，完整可见可点。 */
+html[data-folia-ui-scale='compact'] [data-folia-grid-batch-head='true'] {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-grid-batch-head='true'] h3 {
+  font-size: 1rem !important;
+  line-height: 1.3 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-grid-batch-head='true'] p {
+  flex: 0 0 auto;
+  margin-top: 0 !important;
+  font-size: 10px !important;
+  white-space: nowrap;
+}
+
+/* 标题块之后的兄弟（曲目列表容器 mt-4、按钮区 mt-3）一起收。 */
+html[data-folia-ui-scale='compact'] [data-folia-grid-batch-head='true'] ~ * {
+  margin-top: 6px !important;
+}
+
 /* ② 歌单选择弹窗：面板定高、标题钉住，只有内容区滚。 */
 html[data-folia-ui-scale='compact'] [data-folia-themed-dialog-kind='playlist-selection'] {
   display: flex;

@@ -231,7 +231,7 @@ export const GridMapBatchPanel = ({
 
     return (
         <>
-            <div className="min-w-0">
+            <div className="min-w-0" data-folia-grid-batch-head="true">
                 <h3 className="line-clamp-2 text-xl font-bold leading-snug">{title}</h3>
                 <p className="mt-1.5 text-[11px] opacity-50">
                     {t(`home.gridBatchSelectionSummary.${config.selectionType}`, {
@@ -326,7 +326,14 @@ export const GridMapBatchPanel = ({
                 </div>
             </div>
 
-            <div className="mt-3 space-y-2 border-t pt-4" style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}>
+            {/* 和另外三块侧切入面板（GridView / GridMap / ArtistGrid）同一套：这排是主操作，
+                「播放 N 首」必须在矮屏上不滚动就看得见 —— 紧凑档的压缩规则挂在 data-folia-cut-in-actions 上，
+                这块面板以前漏了标记，于是它的按钮从来没被压过（见 androidPhoneFit.css ①）。 */}
+            <div
+                data-folia-cut-in-actions="true"
+                className="mt-3 space-y-2 border-t pt-4"
+                style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}
+            >
                 <button
                     type="button"
                     disabled={!canUseTracks}
