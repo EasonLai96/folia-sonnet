@@ -150,6 +150,8 @@ interface FoliaWallpaperPlugin {
         attempts: number;
         error?: string;
     }>;
+    /** 叠层最近做了什么（新的在前）。见 WallpaperOverlay.noteOverlayEvent。 */
+    getOverlayEventLog(): Promise<{ events: string[] }>;
 }
 
 /** 音乐锁屏页的自诊断结果。见 WallpaperOverlay.LockScreenStatus。 */
@@ -320,6 +322,21 @@ export const getWallpaperLockScreenStatus =
             return null;
         }
     };
+
+/**
+ * 叠层最近做了什么（新的在前）。
+ *
+ * 「叠层放着放着突然消失、然后又淡入」四条来路（窗口淡出 / 整页重载 / 息屏摘窗口 /
+ * 被系统摘窗口）在画面上完全一样，而真机上 logcat 又取不到 —— 只能把它读出来给用户看。
+ */
+export const getWallpaperOverlayEventLog = async (): Promise<string[]> => {
+    try {
+        const result = await FoliaWallpaper.getOverlayEventLog();
+        return Array.isArray(result?.events) ? result.events : [];
+    } catch {
+        return [];
+    }
+};
 
 export const isLyricsWallpaperActive = async (): Promise<boolean> => {
     try {

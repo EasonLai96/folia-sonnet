@@ -20,6 +20,7 @@ import {
     clearWallpaperFont,
     clearWallpaperVideo as removeWallpaperVideo,
     getWallpaperLockScreenStatus,
+    getWallpaperOverlayEventLog,
     hasWallpaperFont as queryWallpaperFont,
     hasWallpaperOverlayPermission,
     hasWallpaperVideo as queryWallpaperVideo,
@@ -158,6 +159,34 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
             window.clearInterval(timer);
         };
     }, [lockScreenActive]);
+
+    /*
+     * 叠层最近做了什么（新的在前）。
+     *
+     * 「叠层放着放着突然消失、然后又淡入」在代码里至少有四条完全不同的来路 ——
+     * 窗口淡出、整页重载（设置变了 / 自愈觉得页面坏了）、息屏摘窗口、被系统悄悄摘窗口 ——
+     * 画面上四条一模一样，而真机上的 logcat 基本取不到（很多 ROM 根本不给读）。
+     * 所以让原生把「动作 + 当时为什么」记成一串短行，这里读出来直接摆给用户看，
+     * 不用再靠描述现象猜。只在叠层开着时轮询。
+     */
+    const [overlayEventLog, setOverlayEventLog] = React.useState<string[]>([]);
+    React.useEffect(() => {
+        if (!wallpaperOverlayEnabled || !isCapacitorAndroid()) {
+            setOverlayEventLog([]);
+            return;
+        }
+        let cancelled = false;
+        const load = async () => {
+            const events = await getWallpaperOverlayEventLog();
+            if (!cancelled) setOverlayEventLog(events);
+        };
+        void load();
+        const timer = window.setInterval(() => void load(), 3000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [wallpaperOverlayEnabled]);
 
     const handleWallpaperImagePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -561,6 +590,27 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                             >
                                 {t('options.wallpaperOverlayLockScreenLastExit')}{lockScreenStatus.lastExit}
                             </p>
+                        )}
+                        {/* 叠层的动作流水：只给「为什么突然消失」这类问题用，所以折叠起来，
+                            平时不占地方。新的在前，最多 40 条（原生那边是个环形缓冲）。 */}
+                        {overlayEventLog.length > 0 && (
+                            <details className="px-4 pb-3">
+                                <summary
+                                    className="cursor-pointer text-xs leading-relaxed opacity-70"
+                                    style={{ color: 'var(--text-secondary)' }}
+                                >
+                                    {t('options.wallpaperOverlayEventLog', { count: overlayEventLog.length })}
+                                </summary>
+                                <pre
+                                    className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap break-all rounded-lg px-2 py-1.5 font-mono text-[10px] leading-relaxed"
+                                    style={{
+                                        color: 'var(--text-secondary)',
+                                        backgroundColor: 'color-mix(in srgb, var(--text-primary) 6%, transparent)',
+                                    }}
+                                >
+                                    {overlayEventLog.join('\n')}
+                                </pre>
+                            </details>
                         )}
                         {/* 跟随 + 叠层时，原生那层的歌词/进度条要不要让位。 */}
                         <SettingsRow

@@ -1906,6 +1906,7 @@ export default {
     "wallpaperOverlayLockScreenWaiting": "还没到时机：在播放中熄屏，下一次亮屏时它就会出现在锁屏上。",
     "wallpaperOverlayLockScreenReady": "锁屏页已就绪：亮屏后的锁屏界面上会显示这一层。",
     "wallpaperOverlayLockScreenLastExit": "上次退场原因：",
+    "wallpaperOverlayEventLog": "叠层动作流水（最近 {{count}} 条，新的在前）",
     "wallpaperOverlayLockScreenOnly": "仅在锁屏上显示",
     "wallpaperOverlayLockScreenOnlyDesc": "打开后叠层只在锁屏界面上出现，桌面和其它应用里都不再显示（会顺带打开「音乐锁屏」）。",
     "wallpaperOverlayAllApps": "在所有应用上叠加",

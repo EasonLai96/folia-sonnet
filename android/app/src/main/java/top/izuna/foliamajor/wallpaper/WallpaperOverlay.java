@@ -207,9 +207,46 @@ public final class WallpaperOverlay {
                 && SystemClock.elapsedRealtime() - lockScreenUnlockedAtMs < UNLOCK_GRACE_MS;
     }
 
+    /*
+     * 最近几次「叠层做了什么」的流水，新的在前。
+     *
+     * 为什么要有它：用户报的「叠层放着放着突然消失、然后又淡入出现」在代码里至少有四条
+     * 完全不同的来路 ——
+     *   · 窗口淡出（`shouldShow()` 给了 false，具体是哪一条见 describeHideReason）
+     *   · 整页重载（tuning 变了 / 自愈判定页面坏了）—— 观感是页面内那 640ms 淡入
+     *   · 息屏 / 切桌面把窗口摘掉
+     *   · 被系统悄悄摘了窗口（detachedStreak）
+     * 四条的观感一模一样，光看画面分不出来；而真机上 `adb logcat` 常常取不到
+     * （厂商把日志级别调高）。所以这里把「动作 + 当时为什么」记成一串短行，
+     * 设置页 / 桥那边读一眼就能定性，不必再猜。
+     */
+    private static final int OVERLAY_EVENT_LIMIT = 40;
+    private final java.util.ArrayDeque<String> overlayEvents = new java.util.ArrayDeque<>();
+
+    private void noteOverlayEvent(String what) {
+        long seconds = SystemClock.elapsedRealtime() / 1000L;
+        String line = "[" + (seconds / 60L) + ":"
+                + String.format(java.util.Locale.US, "%02d", seconds % 60L) + "] " + what;
+        Log.w(TAG, "overlay " + line);
+        synchronized (overlayEvents) {
+            overlayEvents.addFirst(line);
+            while (overlayEvents.size() > OVERLAY_EVENT_LIMIT) {
+                overlayEvents.removeLast();
+            }
+        }
+    }
+
+    /** 最近的事件流水（新的在前）。给设置页的诊断区 / 桥用。 */
+    public String[] overlayEventLog() {
+        synchronized (overlayEvents) {
+            return overlayEvents.toArray(new String[0]);
+        }
+    }
+
     /** 见 lockScreenDismissed。由 LockScreenMusicActivity 在主动退场时调用。 */
     public void noteLockScreenDismissedByUser() {
         lockScreenDismissed = true;
+        noteOverlayEvent("用户在锁屏上主动关掉了叠层（上滑 / 退出按钮）");
         /*
          * 用户亲手关掉：稳定结论**立刻**钉成 false，并且当场起步淡出。
          *
@@ -260,9 +297,10 @@ public final class WallpaperOverlay {
                 // 记下"这一层是什么时候露面的"，见 LOCK_SCREEN_MIN_VISIBLE_MS。
                 lockScreenShownAtMs = SystemClock.elapsedRealtime();
             }
+            noteOverlayEvent("锁屏宿主交接 → " + (activity == null ? "null（回桌面 / 悬浮窗）" : "锁屏页"));
             lockScreenHost = activity;
             if (added) {
-                detach();
+                detach("宿主交接（锁屏页" + (activity == null ? "退场" : "起来") + "，窗口类型要换）");
             }
             // 宿主交接是显式动作（锁屏页起来了 / 退场了），立刻对齐，别等迟滞。
             alignWantShowNow();
@@ -282,7 +320,13 @@ public final class WallpaperOverlay {
     private void settleHidden() {
         wantShow = false;
         flipSinceMs = 0L;
+        // 流水里那个镜像跟着一起翻，免得下一轮巡检凭空多记一条「结论翻成不该显示」
+        // （收起的动作本身在别处已经记过原因了）。
+        lastWantStable = false;
     }
+
+    /** 见 watchTask 里那条结论流水：上一次巡检拍下来的稳定结论，只用来判断"翻了没有"。 */
+    private boolean lastWantStable = false;
 
     /**
      * 该显示就确保它在显示：没挂就挂上；正休眠着就在**原页面**上淡回来。
@@ -303,6 +347,7 @@ public final class WallpaperOverlay {
 
     /** 从休眠里醒过来：淡入的是原来那份页面，不走「销毁 → 重建 → 等首帧」。 */
     private void wakeFromDormant() {
+        noteOverlayEvent("从休眠里醒过来（原页面直接淡回，不重建）");
         dormantSinceMs = 0L;
         // 休眠期间巡检是停推的，先把当前歌词整份补推一次再淡入，
         // 免得淡入的是休眠前那一帧的旧内容。
@@ -369,6 +414,7 @@ public final class WallpaperOverlay {
         // 没在播就别占着锁屏：那只会得到一个空的可视化页面。
         if (!snapshot.playing) return;
         lockScreenAttempts += 1;
+        noteOverlayEvent("起锁屏页（第 " + lockScreenAttempts + " 次）");
         startLockScreenActivity();
         scheduleLockScreenProbe();
     }
@@ -574,6 +620,7 @@ public final class WallpaperOverlay {
     private void finishLockScreen(boolean contentDone) {
         lockScreenLastExit = describeHideReason();
         Log.w(TAG, "Lock screen page going away: " + lockScreenLastExit);
+        noteOverlayEvent("锁屏页请求退场（" + lockScreenLastExit + "，contentDone=" + contentDone + "）");
         if (contentDone) {
             lockScreenContentDone = true;
         }
@@ -662,7 +709,7 @@ public final class WallpaperOverlay {
                     maybeStartLockScreen();
                     // 息屏看不见动画，直接摘掉（走淡出没有意义，还会让 WebView 多活一秒）。
                     if (added) {
-                        detach();
+                        detach("息屏广播");
                     }
                     scheduleWatch();
                 } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
@@ -899,13 +946,25 @@ public final class WallpaperOverlay {
              * watchTask —— 于是迟滞形同虚设。现在两条路共用同一个迟滞后的结论。
              */
             final boolean want = wantShowStable();
+            if (want != lastWantStable) {
+                /*
+                 * 「该不该显示」这个结论**只在迟滞通过之后才翻**，所以它是最值得记的一笔：
+                 * 用户报的「放着放着突然消失」如果真是这条，流水里就会紧跟一条
+                 * fadeOut（因为 …），而 describeHideReason 会指名到底卡在哪一条。
+                 * want 一直不变的那些轮次一个字都不记 —— 250ms 一轮，记满就什么都看不出来了。
+                 */
+                lastWantStable = want;
+                noteOverlayEvent(want
+                        ? "结论翻成「该显示」"
+                        : "结论翻成「不该显示」—— " + describeHideReason());
+            }
             if (dormantSinceMs > 0L) {
                 // 休眠中（窗口还挂着，只是透明）：又能显示了就在**原页面**上淡回来，
                 // 不再走「销毁 → 重建 → 等首帧」那一整套。
                 if (want) {
                     wakeFromDormant();
                 } else if (SystemClock.elapsedRealtime() - dormantSinceMs >= DORMANT_MAX_MS) {
-                    detach();
+                    detach("休眠 " + DORMANT_MAX_MS / 1000L + "s 内一直没该显示");
                 }
             } else if (want) {
                 // 又要显示了：如果正在淡出，立刻改往回收（从当前的不透明度接上，不闪）。
@@ -925,7 +984,7 @@ public final class WallpaperOverlay {
             }
             // 息屏这一路不走淡出：屏幕本来就是黑的，动画没人看得见，直接摘掉省电。
             if (added && !screenOn) {
-                detach();
+                detach("巡检发现屏幕黑着");
             }
             /*
              * 锁屏页还挂着、但现在已经不该显示了（暂停了 / 歌词唱完了 / 开关关了）：
@@ -959,9 +1018,10 @@ public final class WallpaperOverlay {
                     && SystemClock.elapsedRealtime() - attachAtMs > 5000L
                     && !webView.isAttachedToWindow()) {
                 detachedStreak += 1;
+                noteOverlayEvent("巡检发现 WebView 不在窗口上（第 " + detachedStreak + " 次）");
                 if (detachedStreak >= 2) {
                     detachedStreak = 0;
-                    detach();
+                    detach("窗口被系统悄悄摘掉（连续两轮 isAttachedToWindow=false）");
                 }
             } else {
                 detachedStreak = 0;
@@ -1106,6 +1166,7 @@ public final class WallpaperOverlay {
         fadeInDeadlineMs = 0L;
         fadingIn = true;
         fadingOut = false;
+        noteOverlayEvent("fadeIn（从 alpha=" + Math.round(currentAlphaOrDefault() * 100f) / 100f + "）");
         fadeFromAlpha = currentAlphaOrDefault();
         fadeToAlpha = overlayOpacity();
         fadeStartMs = SystemClock.elapsedRealtime();
@@ -1130,6 +1191,8 @@ public final class WallpaperOverlay {
         fadeInPending = false;
         fadeInDeadlineMs = 0L;
         fadingOut = true;
+        noteOverlayEvent("fadeOut（从 alpha=" + Math.round(currentAlphaOrDefault() * 100f) / 100f
+                + "，因为 " + describeHideReason() + "）");
         fadeStartMs = SystemClock.elapsedRealtime();
         fadeFromAlpha = currentAlphaOrDefault();
         stepFade();
@@ -1156,6 +1219,7 @@ public final class WallpaperOverlay {
      * 已经不在挂载状态时就直接把巡检续上，等条件再满足时重新挂。
      */
     private void requestHide() {
+        noteOverlayEvent("requestHide（理由：" + describeHideReason() + "）");
         // 已经在休眠就别再起一次淡出：窗口此刻就是 alpha=0，再淡一次只是空转，
         // 而 startFadeOut 会把 fadingOut 置回 true、干扰 watchTask 对休眠的判断。
         if (added && !fadingOut && dormantSinceMs == 0L) {
@@ -1286,6 +1350,8 @@ public final class WallpaperOverlay {
             relayout();
             // 淡到底先休眠，不立刻销毁（见 DORMANT_MAX_MS）。
             dormantSinceMs = SystemClock.elapsedRealtime();
+            noteOverlayEvent("淡出到底 → 进入休眠（窗口留着，透明；" + DORMANT_MAX_MS / 1000L
+                    + "s 内还没该显示就摘掉）");
             // 已经收起来了：稳定结论跟着归 false，回来要重新挣（见 settleHidden）。
             settleHidden();
             return;
@@ -1440,11 +1506,13 @@ public final class WallpaperOverlay {
         fadeFromAlpha = 0f;
         fadeToAlpha = overlayOpacity();
 
-        loadPage(screenWidth, screenHeight);
+        loadPage(screenWidth, screenHeight, "挂载新窗口");
         try {
             windowManager.addView(webView, params);
             added = true;
             attachAtMs = SystemClock.elapsedRealtime();
+            noteOverlayEvent("attach（" + (hosted ? "宿主=音乐锁屏页" : "系统悬浮窗") + "，"
+                    + screenWidth + "x" + screenHeight + "）");
             // 见 windowAttachedListener：让锁屏面板有机会重新排到这一层之上。
             Runnable listener = windowAttachedListener;
             if (listener != null) {
@@ -1457,12 +1525,25 @@ public final class WallpaperOverlay {
             schedulePush();
         } catch (Throwable error) {
             // 部分 ROM 即使给了权限也会拒绝 TYPE_APPLICATION_OVERLAY，静默退回原生渲染。
+            noteOverlayEvent("attach 失败（" + error.getClass().getSimpleName()
+                    + "），叠层不挂了");
             webView = null;
         }
     }
 
     /** 桌面切走/息屏时整层摘掉：留着的话 WebView 还在后台跑 rAF，很费电。 */
     void detach() {
+        detach("未标注");
+    }
+
+    /**
+     * 同上，但记一笔「为什么摘」。
+     *
+     * 摘窗口是**看得见的动作**（整层瞬间没了，再出来要重建一份页面 + 等首帧 + 900ms 淡入），
+     * 而摘的来路有五条：息屏、休眠超时、被系统悄悄摘掉、宿主交接、开关关掉。
+     * 它们在新页面里长得一模一样，所以必须把原因带进流水里，否则事后无从区分。
+     */
+    void detach(String why) {
         handler.removeCallbacks(pushTask);
         cancelPaintPoll();
         pushScheduled = false;
@@ -1496,6 +1577,9 @@ public final class WallpaperOverlay {
         if (!added || webView == null) {
             return;
         }
+        long livedFor = attachAtMs > 0L ? SystemClock.elapsedRealtime() - attachAtMs : -1L;
+        noteOverlayEvent("detach（" + why + "）"
+                + (livedFor >= 0L ? "，这一份只活了 " + livedFor + "ms" : ""));
         WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         try {
             manager.removeView(webView);
@@ -1950,17 +2034,51 @@ public final class WallpaperOverlay {
      */
     private String lastTuningHash = null;
 
+    /** 上一次生效的那份 tuning 本体（见 describeTuningDiff）。 */
+    private java.util.Map<String, Float> lastTuningSnapshot = java.util.Collections.emptyMap();
+
+    /**
+     * 这次 tuning 跟上次比，到底哪几个字段变了。
+     *
+     * 只有一句「tuning 变了」是查不出东西的 —— 一百来个键里任何一个动一下都会触发整页重载，
+     * 而用户报的正是「放着放着突然消失再淡入」。把变化的键名列出来，
+     * 一眼就能看出是用户真的改了设置，还是某个字段在自己抖（那才是 bug）。
+     */
+    private String describeTuningDiff(java.util.Map<String, Float> current) {
+        java.util.Map<String, Float> previous = lastTuningSnapshot;
+        java.util.List<String> changed = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Float> entry : current.entrySet()) {
+            Float before = previous.get(entry.getKey());
+            if (!entry.getValue().equals(before)) {
+                changed.add(entry.getKey() + " " + before + "→" + entry.getValue());
+            }
+        }
+        for (String key : previous.keySet()) {
+            if (!current.containsKey(key)) {
+                changed.add(key + " 被移除");
+            }
+        }
+        if (changed.isEmpty()) {
+            return "（键值全一样，只是顺序变了 —— 说明 tuning 表的构造方式不稳定）";
+        }
+        int limit = Math.min(changed.size(), 8);
+        String joined = String.join("、", changed.subList(0, limit));
+        return changed.size() > limit ? joined + " 等 " + changed.size() + " 项" : joined;
+    }
+
     private void reloadOnTuningChange() {
         if (webView == null) {
             return;
         }
-        String hash = WallpaperLyricsState.tuning().toString();
+        java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
+        String hash = tuning.toString();
         if (hash.equals(lastTuningHash)) {
             return;
         }
         boolean first = lastTuningHash == null;
         if (first) {
             lastTuningHash = hash;
+            lastTuningSnapshot = new java.util.HashMap<>(tuning);
             return;
         }
         /*
@@ -1973,9 +2091,13 @@ public final class WallpaperOverlay {
          * 让 hash 一直"欠着"，下一个窗口就补上。
          */
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < TUNING_RELOAD_INTERVAL_MS) {
+            noteOverlayEvent("tuning 变了但被 3s 节流挡住，欠着下次补 —— 变化的字段："
+                    + describeTuningDiff(tuning));
             return;
         }
         lastTuningHash = hash;
+        noteOverlayEvent("tuning 变了 → 整页重载。变化的字段：" + describeTuningDiff(tuning));
+        lastTuningSnapshot = new java.util.HashMap<>(tuning);
         /*
          * 设置变化不用自愈那条 30 秒的节流：那是给"页面可能自己坏了"准备的
          * （抖起来会连着重载），而这一条是用户刚刚亲手改的，几秒内就应该看到。
@@ -1989,7 +2111,7 @@ public final class WallpaperOverlay {
          * loadPage 会把 alpha 压回 0、等新页面真的画出第一帧再淡入 ——
          * 和首次出现是同一条路径，观感一致。
          */
-        loadPage(lastScreenWidth, lastScreenHeight);
+        loadPage(lastScreenWidth, lastScreenHeight, "设置（tuning）变了");
         // 页面重载会丢推送状态，签名清掉，下一轮把当前歌词重新推一遍。
         lastSignature = null;
     }
@@ -2016,10 +2138,11 @@ public final class WallpaperOverlay {
         if (lastLoadAtMs > 0L && elapsed < MIN_RELOAD_INTERVAL_MS) {
             Log.w(TAG, "Skipping overlay reload (" + reason + "): last load was "
                     + elapsed + "ms ago");
+            noteOverlayEvent("自愈重载被 30s 节流挡掉（" + reason + "，上一次加载在 " + elapsed + "ms 前）");
             return;
         }
         Log.w(TAG, "Reloading overlay page (" + reason + ")");
-        loadPage(lastScreenWidth, lastScreenHeight);
+        loadPage(lastScreenWidth, lastScreenHeight, "自愈：" + reason);
     }
 
     /**
@@ -2030,9 +2153,22 @@ public final class WallpaperOverlay {
      * 尺寸从原生给，才是确定的。
      */
     private void loadPage(int screenWidth, int screenHeight) {
+        loadPage(screenWidth, screenHeight, "未标注");
+    }
+
+    /**
+     * 同上，但记一笔「为什么重载」。
+     *
+     * 重载是**唯一一条不需要窗口消失就能让画面空一段的路径**：alpha 被压回 0，
+     * 新页面加载、等首帧，然后才淡入 —— 观感就是「内容突然没了，然后又淡入出现」，
+     * 和窗口淡出、和摘窗口在新页面里长得一模一样。所以原因必须落到流水上。
+     */
+    private void loadPage(int screenWidth, int screenHeight, String reason) {
         if (webView == null) {
             return;
         }
+        noteOverlayEvent("loadPage（" + reason + "）"
+                + (added ? "，窗口留着，alpha 会先压回 0" : "，窗口还没挂"));
         // 每次（重新）加载都从"未就绪"算起，等 onPageFinished 再置回 true。
         pageReady = false;
         lastLoadAtMs = SystemClock.elapsedRealtime();
@@ -2115,7 +2251,7 @@ public final class WallpaperOverlay {
         } catch (Throwable ignored) {
             // 窗口已经没了。
         }
-        loadPage(size[0], size[1]);
+        loadPage(size[0], size[1], "屏幕尺寸变了（" + lastScreenWidth + "x" + lastScreenHeight + "）");
         // 页面重载会丢推送状态，签名清掉，下一轮把当前歌词重新推一遍。
         lastSignature = null;
     }
@@ -2190,6 +2326,7 @@ public final class WallpaperOverlay {
                 || SystemClock.elapsedRealtime() - lastLoadAtMs < PAGE_STALL_RECOVER_MS) {
             return;
         }
+        noteOverlayEvent("页面挂着但一直没确认收到数据 → 重载（这是「歌词不更新」的出口）");
         reloadForRecovery("page-stalled");
         lastSignature = null;
     }
@@ -2232,6 +2369,9 @@ public final class WallpaperOverlay {
                     raw = raw.substring(1, raw.length() - 1);
                 }
                 boolean mismatch = false;
+                // 对不上的**具体一条**（写进流水）。只说「对不上」是查不出东西的：
+                // 三条判据的成因完全不同，位置漂移这条还可能是页面被系统按下去之后的必然结果。
+                String mismatchWhy = null;
                 try {
                     org.json.JSONObject page = new org.json.JSONObject(raw);
                     String pageTitle = page.optString("t", "");                    int pageLineCount = page.optInt("n", -1);
@@ -2239,6 +2379,7 @@ public final class WallpaperOverlay {
                     long pagePositionMs = page.optLong("p", -1L);
                     if (!pageTitle.equals(expectedTitle)) {
                         mismatch = true;
+                        mismatchWhy = "歌名对不上（页面「" + pageTitle + "」≠ 原生「" + expectedTitle + "」）";
                     } else if (expectedLineCount > 0
                             && (pageLineCount != expectedLineCount
                             || !pageFirstLine.equals(expectedFirstLine))) {
@@ -2252,14 +2393,21 @@ public final class WallpaperOverlay {
                          * 拿它当 mismatch 的话，每换一次歌就要重载一份页面。
                          */
                         mismatch = true;
+                        mismatchWhy = "时间轴对不上（页面 " + pageLineCount + " 行 /「"
+                                + pageFirstLine + "」，原生 " + expectedLineCount + " 行 /「"
+                                + expectedFirstLine + "」）";
                     } else if (pagePositionMs >= 0L
                             && Math.abs(pagePositionMs - expectedPositionMs) > POSITION_DRIFT_TOLERANCE_MS) {
                         // 歌词和时间轴都对，但两边各推各的、差出好几秒（页面锚点过期）。
                         mismatch = true;
+                        mismatchWhy = "位置漂移 " + (pagePositionMs - expectedPositionMs) + "ms（容差 "
+                                + POSITION_DRIFT_TOLERANCE_MS + "ms；页面 " + pagePositionMs
+                                + " / 原生 " + expectedPositionMs + "）";
                     }
                 } catch (Throwable parseError) {
                     // 页面表达式返回了意料外的东西：当作对不上，补推一次最安全。
                     mismatch = true;
+                    mismatchWhy = "页面状态读不出来（" + parseError.getClass().getSimpleName() + "）";
                 }
                 if (!mismatch) {
                     contentMismatchStreak = 0;
@@ -2274,6 +2422,7 @@ public final class WallpaperOverlay {
                  * 连续 4 次（约 12 秒）都对不上，判定这一份页面已经没救，重载一份。
                  */
                 contentMismatchStreak += 1;
+                noteOverlayEvent("核对对不上（第 " + contentMismatchStreak + "/4 次）：" + mismatchWhy);
                 if (contentMismatchStreak >= 4) {
                     contentMismatchStreak = 0;
                     reloadForRecovery("content-mismatch");

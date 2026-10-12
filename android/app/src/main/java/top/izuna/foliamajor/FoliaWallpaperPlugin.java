@@ -153,6 +153,25 @@ public class FoliaWallpaperPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * 叠层最近做了什么（新的在前），给设置页的诊断区看。
+     *
+     * 和上面那条同源：真机上 logcat 常常取不到，而「叠层放着放着突然消失、然后又淡入」
+     * 在代码里至少有四条完全不同的来路（窗口淡出 / 整页重载 / 息屏摘窗口 / 被系统摘窗口），
+     * 观感一模一样。把动作连同当时的原因记成一串短行读出来，就不必再靠猜。
+     */
+    @PluginMethod
+    public void getOverlayEventLog(PluginCall call) {
+        String[] lines = WallpaperOverlay.shared(getContext()).overlayEventLog();
+        JSArray array = new JSArray();
+        for (String line : lines) {
+            array.put(line);
+        }
+        JSObject result = new JSObject();
+        result.put("events", array);
+        call.resolve(result);
+    }
+
     /** 只改外观（背景模式 / 自选背景图 / 可视化风格），不动时间轴。 */
     @PluginMethod
     public void setAppearance(PluginCall call) {

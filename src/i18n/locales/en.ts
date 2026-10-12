@@ -1907,6 +1907,7 @@ export default {
     "wallpaperOverlayLockScreenWaiting": "Not yet: turn the screen off while music is playing, and it will be on the keyguard the next time you wake the device.",
     "wallpaperOverlayLockScreenReady": "Ready: the overlay will be on the keyguard the next time you wake the screen.",
     "wallpaperOverlayLockScreenLastExit": "Last exit reason: ",
+    "wallpaperOverlayEventLog": "Overlay activity log (last {{count}}, newest first)",
     "wallpaperOverlayLockScreenOnly": "On the lock screen only",
     "wallpaperOverlayLockScreenOnlyDesc": "Show the overlay only on the keyguard. It stays hidden on the home screen and over other apps (turning this on also enables the music lock screen).",
     "wallpaperOverlayAllApps": "Show over all apps",

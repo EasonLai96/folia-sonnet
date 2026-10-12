@@ -1899,6 +1899,7 @@ export default {
     "wallpaperOverlayLockScreenWaiting": "Belum saatnya: matikan layar saat musik diputar, dan lapisan ini akan muncul di kunci layar saat layar dinyalakan kembali.",
     "wallpaperOverlayLockScreenReady": "Siap: lapisan ini akan tampil di kunci layar saat layar dinyalakan.",
     "wallpaperOverlayLockScreenLastExit": "Alasan keluar terakhir: ",
+    "wallpaperOverlayEventLog": "Log aktivitas overlay ({{count}} terakhir, terbaru di atas)",
     "wallpaperOverlayLockScreenOnly": "Hanya di layar kunci",
     "wallpaperOverlayLockScreenOnlyDesc": "Lapisan hanya muncul di layar kunci, dan disembunyikan di beranda serta di atas aplikasi lain (mengaktifkan ini juga mengaktifkan layar kunci musik).",
     "wallpaperOverlayAllApps": "Tampil di semua aplikasi",
