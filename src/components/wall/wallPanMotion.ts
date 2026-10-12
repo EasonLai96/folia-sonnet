@@ -4,6 +4,8 @@
 // - 鼠标滚轮：一格一格的离散大步长，累加进「待走的位移」，相机每帧按同一类指数曲线追上去（时间常数更短，一格在
 //   约 0.25s 内基本走完）；连续滚动时位移叠加，速度与剩余距离成正比，所以不会越积越慢。
 // - 触控板：自带连续的小增量与系统惯性，每个增量照旧当帧直接写进相机（再平滑一次只会发飘、拖后）。
+// - 缩放：双指捏合（两根手指）与 Ctrl / ⌘ + 滚轮（触控板的捏合在浏览器里就是这个），都锚在手势中心：
+//   按下那一刻中心压住的世界点，在整个手势里始终跟着手指走。倍率是相对墙面基准档位的。
 
 /** 拖动松手后的惯性（framer `inertia`）。速度上限、投射系数与时间常数。 */
 export const WALL_PAN_INERTIA = {
@@ -34,6 +36,19 @@ export const WALL_WHEEL_SMOOTHING = {
     minNotchPx: 50,
     /** 两个滚轮事件间隔超过它（ms）算新的一次手势，重新判别。触控板（含系统惯性）事件间隔约一帧。 */
     gestureGapMs: 120,
+} as const;
+
+/** 缩放的运动参数。倍率是相对基准档位的（与 useLatticeSettingsStore 的 wallZoom 同一个量）。 */
+export const WALL_ZOOM_MOTION = {
+    /** Ctrl / ⌘ + 滚轮：倍率按 exp(-deltaY * wheelFactor) 变，deltaY 正负分别是缩小与放大。 */
+    wheelFactor: 0.0024,
+    /** 单次手势里倍率的最小 / 最大（相对基准档位）。 */
+    minFactor: 0.45,
+    maxFactor: 2.6,
+    /** 两根手指的距离小于它（px）不捏合：太近时距离的相对误差大，倍率会抖。 */
+    minPinchDistancePx: 24,
+    /** 滚轮缩放停下来多久（ms）之后才把倍率交回宿主持久化。 */
+    settleMs: 180,
 } as const;
 
 export type WallWheelSource = 'wheel' | 'trackpad';

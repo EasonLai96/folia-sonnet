@@ -114,7 +114,9 @@ const BravaisStage: React.FC<LibrarySuiteStageProps> = ({
     const frameRefs = useMemo(() => ({ left: leftRef, right: rightRef, seam: seamRef, seamContent: seamContentRef, tab: tabRef }), []);
     const { stateRef: frameRef, renderFrame } = useBravaisFrame(frameRefs);
     const { wallLook, seamLook } = useBravaisWallLook(reportPlayerOcclusion, reportPlayerBackdrop);
-    const view = useBravaisViewport(rootRef);
+    // 墙面的缩放倍率（双指捏合 / Ctrl+滚轮，与 Lattice 共用一份）：档位 × 倍率才是这一刻的 scale。
+    const wallZoom = useLatticeSettingsStore(state => state.wallZoom);
+    const view = useBravaisViewport(rootRef, wallZoom);
     const reducedMotion = useReducedMotionFor('lattice');
     // B11：换层的翻牌 / 波次按「降低动态效果」降级成淡入淡出（lattice 或 collectionMorph，见 bravaisMotion）。
     const reducedTransitions = useBravaisReducedTransitions();

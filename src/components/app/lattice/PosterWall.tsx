@@ -25,7 +25,7 @@ import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { useDevicePixelRatio } from '../../../hooks/useMediaQuery';
 import { useReducedMotionFor } from '../../../hooks/useReducedMotionFor';
 import { EXPANSION_SPAN } from '../../wall/blockTemplates';
-import { useLatticeSettingsStore } from '../../../stores/useLatticeSettingsStore';
+import { useLatticeSettingsStore, WALL_ZOOM_MAX, WALL_ZOOM_MIN } from '../../../stores/useLatticeSettingsStore';
 import { resolveWallHandoffRole, useWallHandoffStore } from '../../../stores/useWallHandoffStore';
 import { useLatticeWallHandoff } from './useLatticeWallHandoff';
 
@@ -61,7 +61,12 @@ const METRICS: WallMetrics = { cellSize: CELL_SIZE, gap: GAP };
 const EXPANDED_SIZE = EXPANSION_SPAN.cols * (CELL_SIZE + GAP) - GAP;
 
 
-const getScale = (width: number) => width < 640 ? 0.52 : width < 1100 ? 0.64 : 0.76;
+/**
+ * 墙面的基准缩放档位（按视口宽度）。2026-10-12 整档调小约 15%：原来手机上卡片偏大，一屏放不下几张。
+ * 用户还能用双指捏合 / Ctrl+滚轮在这个档位上下改（倍率存在 useLatticeSettingsStore 的 wallZoom）。
+ * bravais 资料库墙用的是同一组数（bravaisConstants.getBravaisScale），改这里时一并改。
+ */
+const getScale = (width: number) => width < 640 ? 0.44 : width < 1100 ? 0.54 : 0.65;
 
 const getWorldBounds = (camera: LatticeCamera, viewport: { width: number; height: number }): Bounds => ({
     left: -camera.x / camera.scale,
@@ -82,7 +87,11 @@ export default function PosterWall({
     countRender('PosterWall');
     const containerRef = useRef<HTMLDivElement>(null);
     const worldRef = useRef<HTMLDivElement>(null);
-    const cameraRef = useRef<LatticeCamera>({ x: 34, y: 80, scale: 0.76 });
+    // 缩放倍率（捏合 / Ctrl+滚轮改它，落定时写回 store；基准档位仍按宽度断点走）。
+    const wallZoom = useLatticeSettingsStore(state => state.wallZoom);
+    const setWallZoom = useLatticeSettingsStore(state => state.handleSetWallZoom);
+    const zoomRef = useRef(wallZoom);
+    const cameraRef = useRef<LatticeCamera>({ x: 34, y: 80, scale: 0.65 * wallZoom });
     const viewportRef = useRef({ width: 1280, height: 720 });
     const frameRef = useRef<number | null>(null);
     const trackedCurrentPosterRef = useRef<{
@@ -97,6 +106,8 @@ export default function PosterWall({
     const [entranceDone, setEntranceDone] = useState(false);
     // Camera scale, mirrored into state only so posters can size their artwork. It follows the
     // width breakpoints, so this settles after the first measure and then only moves on a resize.
+    // 基准档位（不含用户的缩放倍率）：捏合的上下限以它为基准，转屏 / 改窗口大小时跟着走。
+    const baseScaleRef = useRef(0.65);
     const [cameraScale, setCameraScale] = useState(() => cameraRef.current.scale);
     const reducedMotion = useReducedMotionFor('lattice');
     // 从资料库墙翻牌交接进来（或淡入交叉）：入场由交接代替，不跑抬起落下的波次。
@@ -157,7 +168,10 @@ export default function PosterWall({
         if (!container) return;
         const observer = new ResizeObserver(([entry]) => {
             viewportRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
-            const scale = getScale(entry.contentRect.width);
+            // 倍率不跟着尺寸重置：转屏、改窗口大小之后还是用户捏出来的那一档。
+            const base = getScale(entry.contentRect.width);
+            baseScaleRef.current = base;
+            const scale = base * zoomRef.current;
             applyCamera({ ...cameraRef.current, scale }, true);
             setCameraScale(previous => previous === scale ? previous : scale);
             setMeasured(true);
@@ -169,6 +183,16 @@ export default function PosterWall({
             frameRef.current = null;
         };
     }, [applyCamera]);
+
+    // 缩放倍率变了（捏合落定、设置里重置）：按新的倍率重写相机，并把倍率同步给海报取图。
+    // 手势途中不经过这里 —— 那时只写 cameraRef，倍率落定才交回来，所以整面墙不会按帧重渲染。
+    useEffect(() => {
+        zoomRef.current = wallZoom;
+        const scale = baseScaleRef.current * wallZoom;
+        if (Math.abs(cameraRef.current.scale - scale) < 0.0005) return;
+        applyCamera({ ...cameraRef.current, scale }, true);
+        setCameraScale(previous => previous === scale ? previous : scale);
+    }, [applyCamera, wallZoom]);
 
     // Widens the culled region to cover a pan's destination the moment it starts. Held arrow
     // keys interrupt each pan before it settles, so bounds cannot wait for the animation to end.
@@ -297,6 +321,12 @@ export default function PosterWall({
         cameraRef,
         getWorldBounds,
         viewportRef,
+        zoom: {
+            baseScale: () => baseScaleRef.current,
+            minFactor: WALL_ZOOM_MIN,
+            maxFactor: WALL_ZOOM_MAX,
+            onZoomEnd: factor => setWallZoom(factor),
+        },
     });
 
     // Only the block holding the open card is re-geared; every other poster keeps its base rect.

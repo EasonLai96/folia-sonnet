@@ -21,9 +21,12 @@ export const BRAVAIS_OVERSCAN = 420;
 /** 离已渲染范围的边缘还剩这么多（世界单位）时重新裁剪。 */
 export const BRAVAIS_CULL_EDGE_MARGIN = 160;
 
-/** 相机缩放档位，与 Lattice 的 PosterWall 相同（<640: .52，<1100: .64，否则 .76）。 */
+/**
+ * 相机缩放档位，与 Lattice 的 PosterWall 同一组数（改这里时一并改）。2026-10-12 整档调小约 15%。
+ * 用户还能用双指捏合 / Ctrl+滚轮在这个档位上下改（倍率存在 useLatticeSettingsStore 的 wallZoom）。
+ */
 export const getBravaisScale = (viewportWidth: number) => (
-    viewportWidth < 640 ? 0.52 : viewportWidth < 1100 ? 0.64 : 0.76
+    viewportWidth < 640 ? 0.44 : viewportWidth < 1100 ? 0.54 : 0.65
 );
 
 /** 缝开合与相机让位的补间时长（秒）。 */

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getStoredBoolean, getStoredString, setStoredBoolean } from './storagePrimitives';
+import { getStoredBoolean, getStoredString, setStoredBoolean, setStoredString } from './storagePrimitives';
 
 // src/stores/useLatticeSettingsStore.ts
 // Persistent queue-collage preferences. Deliberately separate from useLatticeControlsStore: that
@@ -14,9 +14,21 @@ const LATTICE_POSTER_TINT_USE_CUSTOM_COLOR_KEY = 'lattice_poster_tint_use_custom
 const LATTICE_POSTER_TINT_COLOR_KEY = 'lattice_poster_tint_color';
 const LATTICE_POSTER_TINT_INTENSITY_KEY = 'lattice_poster_tint_intensity';
 const WALL_TOOLS_QUEUE_ISLAND_OPEN_KEY = 'wall_tools_queue_island_open';
+const WALL_ZOOM_KEY = 'wall_zoom';
 const DEFAULT_POSTER_TINT_COLOR = '#161419';
 
 const clampPosterTintIntensity = (value: number) => Math.max(0, Math.min(1, value));
+/**
+ * 墙面缩放倍率：1 = 尺寸断点算出来的那一档（getScale / getBravaisScale）。双指捏合与 Ctrl+滚轮改它。
+ * 上下限与 WALL_ZOOM 一致，只在这里再夹一道，免得旧值 / 手改的值把墙推到看不见。
+ */
+export const WALL_ZOOM_MIN = 0.45;
+export const WALL_ZOOM_MAX = 2.6;
+export const clampWallZoom = (value: number) => (
+    Number.isFinite(value) ? Math.max(WALL_ZOOM_MIN, Math.min(WALL_ZOOM_MAX, value)) : 1
+);
+
+const getStoredWallZoom = () => clampWallZoom(Number(getStoredString(WALL_ZOOM_KEY, '1')));
 const normalizePosterTintColor = (value: string) => (
     /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim().toLowerCase() : DEFAULT_POSTER_TINT_COLOR
 );
@@ -40,6 +52,11 @@ export type LatticeSettingsState = {
     latticePosterTintUseCustomColor: boolean;
     latticePosterTintColor: string;
     latticePosterTintIntensity: number;
+    /**
+     * 墙面的缩放倍率（Lattice 队列拼贴与 bravais 资料库墙共用一份）：双指捏合 / Ctrl+滚轮改它，
+     * 落定时写进这里，下次进墙还是这个倍率。基准档位仍按视口宽度断点走，所以换设备不会失真。
+     */
+    wallZoom: number;
     handleToggleLatticePerformanceMode: (enabled: boolean) => void;
     /**
      * 墙面工具面板（bravais 与 Lattice 共用）上方的队列浮岛上次是否展开着：下次打开面板时照旧。
@@ -54,6 +71,7 @@ export type LatticeSettingsState = {
     handleToggleLatticePosterTintCustomColor: (enabled: boolean) => void;
     handleSetLatticePosterTintColor: (color: string) => void;
     handleSetLatticePosterTintIntensity: (intensity: number) => void;
+    handleSetWallZoom: (zoom: number) => void;
     setWallToolsQueueIslandOpen: (open: boolean) => void;
 };
 
@@ -66,6 +84,7 @@ export const useLatticeSettingsStore = create<LatticeSettingsState>(set => ({
     latticePosterTintUseCustomColor: getStoredBoolean(LATTICE_POSTER_TINT_USE_CUSTOM_COLOR_KEY, false),
     latticePosterTintColor: normalizePosterTintColor(getStoredString(LATTICE_POSTER_TINT_COLOR_KEY, DEFAULT_POSTER_TINT_COLOR)),
     latticePosterTintIntensity: getStoredPosterTintIntensity(),
+    wallZoom: getStoredWallZoom(),
     handleToggleLatticePerformanceMode: (enabled) => {
         set({ latticePerformanceMode: enabled });
         setStoredBoolean(LATTICE_PERFORMANCE_MODE_KEY, enabled);
@@ -100,6 +119,11 @@ export const useLatticeSettingsStore = create<LatticeSettingsState>(set => ({
         const normalized = clampPosterTintIntensity(intensity);
         set({ latticePosterTintIntensity: normalized });
         if (typeof window !== 'undefined') localStorage.setItem(LATTICE_POSTER_TINT_INTENSITY_KEY, String(normalized));
+    },
+    handleSetWallZoom: (zoom) => {
+        const normalized = clampWallZoom(zoom);
+        set({ wallZoom: normalized });
+        setStoredString(WALL_ZOOM_KEY, String(normalized));
     },
     setWallToolsQueueIslandOpen: (open) => {
         set({ wallToolsQueueIslandOpen: open });
