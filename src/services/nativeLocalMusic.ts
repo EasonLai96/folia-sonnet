@@ -1,5 +1,5 @@
 import type { LocalSong } from '../types';
-import { saveLocalSongs } from './db';
+import { getLocalSongs, saveLocalSongs } from './db';
 import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
 import { parseEmbeddedMetadataAsync } from '../utils/localMetadataWorkerClient';
 import { noteLibraryStep } from '../nativeBridge/api/libraryTrace.js';
@@ -239,17 +239,74 @@ export const scanAndroidDeviceMusic = async (): Promise<LocalSong[]> => {
             };
         });
 
-        if (songs.length > 0) {
-            await saveLocalSongs(songs);
+        // 与挑文件那条路同一道兜底：同一份音频库里已经有了就不再加一条。
+        // 先导入过、再扫设备音乐库（或反过来）拿到的是同一个文件，两条记录的 ref 不同，
+        // 不去重就是「一首歌在库里有两份」。
+        const existingSongs = songs.length > 0 ? await getLocalSongs() : [];
+        const existingRefs = new Set(existingSongs.map(song => song.nativeAudioRef).filter(Boolean));
+        const existingContent = new Set(
+            existingSongs
+                .map(song => pickedContentKey(song.fileName, song.fileSize))
+                .filter((key): key is string => key !== null),
+        );
+        const freshSongs = songs.filter(song => {
+            if (song.nativeAudioRef && existingRefs.has(song.nativeAudioRef)) return false;
+            const contentKey = pickedContentKey(song.fileName, song.fileSize);
+            return !(contentKey && existingContent.has(contentKey));
+        });
+
+        if (freshSongs.length > 0) {
+            await saveLocalSongs(freshSongs);
         }
-        noteLibraryStep('local', 'scan:done', { songs: songs.length });
-        return songs;
+        noteLibraryStep('local', 'scan:done', {
+            songs: freshSongs.length,
+            alreadyInLibrary: songs.length - freshSongs.length,
+        });
+        return freshSongs;
     } catch (error) {
         noteLibraryStep('local', 'scan:error', {
             message: error instanceof Error ? error.message : String(error),
         });
         throw error;
     }
+};
+
+/**
+ * 「同一份音频」的判别键：文件名 + 字节数。
+ *
+ * 大小读不出来（部分 provider 不给 `OpenableColumns.SIZE`）时返回 null —— 那时候不敢按内容判，
+ * 两个同名的不同文件会被并成一首。
+ */
+const pickedContentKey = (fileName: string | undefined, fileSize: number | undefined): string | null => {
+    const size = Number(fileSize) || 0;
+    if (size <= 0) return null;
+    return `${(fileName || '').toLowerCase()}|${size}`;
+};
+
+/**
+ * 挑中的音频去重（同一批里只留一份）。
+ *
+ * 「挑单个音频文件」这条路在部分系统上会把同一个文件给两遍（ClipData 里一份、`getData()` 里一份，
+ * 或者 provider 同时给了文档 uri 与媒体 uri 两种形式）；原生那边 ref 是按「文件名 + 大小」算的，
+ * 只要那一趟大小没读出来，同一个文件就会算出两个 ref —— 落库就是**两份一模一样的歌**。
+ * 这里两层收口：ref 完全相同、或者文件名与大小都相同。
+ */
+export const dedupePickedTracks = (tracks: NativeAudioTrack[]): NativeAudioTrack[] => {
+    const seenRefs = new Set<string>();
+    const seenContent = new Set<string>();
+    return tracks.filter(track => {
+        const ref = track.id;
+        if (ref) {
+            if (seenRefs.has(ref)) return false;
+            seenRefs.add(ref);
+        }
+        const contentKey = pickedContentKey(track.fileName, track.fileSize);
+        if (contentKey) {
+            if (seenContent.has(contentKey)) return false;
+            seenContent.add(contentKey);
+        }
+        return true;
+    });
 };
 
 /**
@@ -302,8 +359,16 @@ export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
 
     const now = Date.now();
     const songs: LocalSong[] = [];
+    // 同一个文件在系统上被给了两遍时只留一份（见 dedupePickedTracks）。
+    const tracks = dedupePickedTracks(response.tracks || []);
+    if (tracks.length !== (response.tracks || []).length) {
+        noteLibraryStep('local', 'pick:deduped', {
+            returned: (response.tracks || []).length,
+            kept: tracks.length,
+        });
+    }
 
-    for (const track of response.tracks || []) {
+    for (const track of tracks) {
         const fileName = track.fileName || `track-${track.id}`;
         const fallbackTitle = titleFromFileName(fileName);
         let metadata: Awaited<ReturnType<typeof parseEmbeddedMetadataAsync>> = null;
@@ -354,10 +419,42 @@ export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
         });
     }
 
+    /*
+     * 第二道兜底：库里已经有了的同一份音频不再加一条。
+     *
+     * 上面那道只管「同一批里重复」，而两次挑到同一个文件（或者一次挑文件、一次扫设备音乐库
+     * 拿到同一首）在原生侧是两个 ref —— 之前就直接落成了两条一模一样的记录。
+     * 判据还是「文件名 + 大小」，外加 ref 完全相同这种最省事的情况。
+     */
+    const existingSongs = songs.length > 0 ? await getLocalSongs() : [];
+    const existingRefs = new Set(existingSongs.map(song => song.nativeAudioRef).filter(Boolean));
+    const existingContent = new Set(
+        existingSongs
+            .map(song => pickedContentKey(song.fileName, song.fileSize))
+            .filter((key): key is string => key !== null),
+    );
+    const freshSongs = songs.filter(song => {
+        if (song.nativeAudioRef && existingRefs.has(song.nativeAudioRef)) return false;
+        const contentKey = pickedContentKey(song.fileName, song.fileSize);
+        return !(contentKey && existingContent.has(contentKey));
+    });
+    if (freshSongs.length !== songs.length) {
+        noteLibraryStep('local', 'pick:already-in-library', {
+            picked: songs.length,
+            fresh: freshSongs.length,
+        });
+    }
+
+    if (freshSongs.length > 0) {
+        await saveLocalSongs(freshSongs);
+        noteLibraryStep('local', 'pick:saved', { songs: freshSongs.length });
+        return freshSongs;
+    }
     if (songs.length > 0) {
-        await saveLocalSongs(songs);
-        noteLibraryStep('local', 'pick:saved', { songs: songs.length });
-    } else if (failures.length > 0) {
+        // 挑到了、但库里全都有：这不是失败，别去抛下面那个「一个都没进来」。
+        return [];
+    }
+    if (failures.length > 0) {
         // 选了文件却一个都没进来：把原生侧的原因抛出去，界面至少会报错，
         // 而不是像以前那样静默什么都不做。
         throw new Error(`Imported 0 of ${failures.length} picked file(s): ${failures[0]?.message || 'unknown error'}`);
