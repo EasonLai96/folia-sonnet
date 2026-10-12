@@ -85,9 +85,17 @@ public class FoliaNativePlugin extends Plugin {
     private static final String TAG = "FoliaNative";
     private static volatile FoliaNativePlugin instance;
 
+    /** 外部送进来的音频（externalAudio 事件名）。 */
+    private static final String EXTERNAL_AUDIO_EVENT = "externalAudio";
+
     /** 文件/文件夹选择器只用一份：连点两次会开两个系统界面，回来的回调就串了。 */
     private boolean isAudioPickerOpen = false;
     private LocalAudioServer localAudioServer;
+
+    /** 外部 intent 带来、还没开拷的 uri（冷启动时 Web 层可能比intent 晚一步）。 */
+    private static final List<String> pendingExternalUris = new ArrayList<>();
+    /** 拷完、但 Web 层还没领走的外部音频（没有监听者时就停在这里等它来取）。 */
+    private static final List<JSObject> pendingExternalTracks = new ArrayList<>();
 
     private final OkHttpClient client = new OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -98,6 +106,9 @@ public class FoliaNativePlugin extends Plugin {
     @Override
     public void load() {
         instance = this;
+        // 意图可能比 Web 层更早到（Activity.onCreate 交过来时 Bridge 还没建好），先攒在静态
+        // 列表里；插件上线后立即拿去拷。
+        startExternalAudioImport();
     }
 
     @Override
@@ -141,6 +152,90 @@ public class FoliaNativePlugin extends Plugin {
         JSObject payload = new JSObject();
         payload.put("background", background);
         activity.runOnUiThread(() -> plugin.notifyListeners("appBackground", payload));
+    }
+
+    /**
+     * 外部应用「用 Folia 打开 / 分享到 Folia」送来的音频。
+     *
+     * 这里**立刻就把文件拷进私有目录**，不等用户确认：intent 附带的 content:// 读授权只在
+     * 这次 Activity 存活期间有效，等用户看完「导入到哪个歌单」再回头读，部分 ROM 上已经作废
+     * （openInputStream 静默返回一个空流）。拷进私有目录后播放只认 App 自己的副本，
+     * 与 provider 和权限彻底脱钩 —— 和「挑文件导入」那条路完全同一套。
+     *
+     * 用户最终回答 import 与否之前，这些曲目先通过上述两个出口之一交给 Web 层：
+     * · App 已经在前台（有监听者）：拷完发 externalAudio 事件；
+     * · 冷启动：那时一个监听者都还没有，拷完停在 pendingExternalTracks，
+     *   由 Web 层起来后调 takeExternalAudioUris 取走。
+     */
+    static void noteExternalAudioUris(List<Uri> uris) {
+        if (uris == null || uris.isEmpty()) return;
+        synchronized (pendingExternalUris) {
+            for (Uri uri : uris) {
+                if (uri == null) continue;
+                String raw = uri.toString();
+                if (!pendingExternalUris.contains(raw)) pendingExternalUris.add(raw);
+            }
+        }
+        FoliaNativePlugin plugin = instance;
+        if (plugin != null) plugin.startExternalAudioImport();
+    }
+
+    /** 把待处理的外部音频拷进私有目录；拷完交给下面的 deliverExternalAudio。 */
+    private void startExternalAudioImport() {
+        final List<Uri> uris = new ArrayList<>();
+        synchronized (pendingExternalUris) {
+            for (String raw : pendingExternalUris) {
+                try {
+                    uris.add(Uri.parse(raw));
+                } catch (Exception ignored) {
+                    // 解析不了的 uri 直接放弃，别让它把整批拖住。
+                }
+            }
+            pendingExternalUris.clear();
+        }
+        if (uris.isEmpty()) return;
+
+        final Activity activity = getActivity();
+        importAudioFiles(uris, Activity.RESULT_OK, new AudioImportSink() {
+            @Override
+            public void complete(JSObject result) {
+                JSArray tracks = result.optJSONArray("tracks");
+                synchronized (pendingExternalTracks) {
+                    for (int index = 0; tracks != null && index < tracks.length(); index += 1) {
+                        JSObject track = tracks.optJSONObject(index);
+                        if (track != null) pendingExternalTracks.add(track);
+                    }
+                }
+                deliverExternalAudio(activity, result.optInt("port", 0));
+            }
+
+            @Override
+            public void fail(String message, Exception error) {
+                Log.w(TAG, "External audio import failed: " + message, error);
+            }
+        });
+    }
+
+    /**
+     * 把拷好的外部音频交给 Web 层。
+     *
+     * 有监听者就发事件（顺手把 pending 清掉，免得之后 take 又把它们取一遍就重复入库）；
+     * 没有就留在 pendingExternalTracks 里，等 Web 层起来自己来取。
+     */
+    private void deliverExternalAudio(Activity activity, int port) {
+        if (!hasListeners(EXTERNAL_AUDIO_EVENT)) return;
+        JSArray tracks = new JSArray();
+        synchronized (pendingExternalTracks) {
+            for (JSObject track : pendingExternalTracks) tracks.put(track);
+            pendingExternalTracks.clear();
+        }
+        if (tracks.length() == 0) return;
+        JSObject payload = new JSObject();
+        payload.put("tracks", tracks);
+        if (port > 0) payload.put("port", port);
+        Runnable emit = () -> notifyListeners(EXTERNAL_AUDIO_EVENT, payload);
+        if (activity != null) activity.runOnUiThread(emit);
+        else emit.run();
     }
 
     @PluginMethod
@@ -488,6 +583,33 @@ public class FoliaNativePlugin extends Plugin {
         startActivityForResult(call, intent, "handlePickedAudioFolder");
     }
 
+    /**
+     * 取走「外部应用送进来、 Web 层还没领」的音频（冷启动那一路）。
+     *
+     * 从别的应用打开文件时 App 常常是冷启动的：那时浏览器侧还没加载完、一个监听者都没有，
+     * 拷好的曲目只能先停在 pendingExternalTracks；页面起来后调一次这个方法把它们取走。
+     * 取完即清空 —— 下一步用户回答的是「是否导入」，不是「要不要再拷一次」。
+     */
+    @PluginMethod
+    public void takeExternalAudioUris(PluginCall call) {
+        JSArray tracks = new JSArray();
+        synchronized (pendingExternalTracks) {
+            for (JSObject track : pendingExternalTracks) tracks.put(track);
+            pendingExternalTracks.clear();
+        }
+        JSObject result = new JSObject();
+        result.put("tracks", tracks);
+        int port = 0;
+        try {
+            if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
+            port = localAudioServer.start();
+        } catch (Exception ignored) {
+            // 起不来时 Web 层会自己用 localAudioServerPort 再来一次；这里不给端口即可。
+        }
+        if (port > 0) result.put("port", port);
+        call.resolve(result);
+    }
+
     /** 供 WebView 重建导入音频的流地址（端口每次启动都可能不同，不能把 URL 存死）。 */
     @PluginMethod
     public void localAudioServerPort(PluginCall call) {
@@ -584,6 +706,15 @@ public class FoliaNativePlugin extends Plugin {
             || lower.endsWith(".opus") || lower.endsWith(".ape") || lower.endsWith(".wma");
     }
 
+    /**
+     * 拷完之后的出口：挑文件那条路要给 PluginCall，外部打开那条路要给 Web 层的事件，
+     * 中间这一份流水（复制 + 去重 + 记 failure）两边共用。
+     */
+    private interface AudioImportSink {
+        void complete(JSObject result);
+        void fail(String message, Exception error);
+    }
+
     private void completePickedAudioImport(PluginCall call, List<Uri> uris, int resultCode) {
         if (uris.isEmpty()) {
             JSObject result = new JSObject();
@@ -598,8 +729,31 @@ public class FoliaNativePlugin extends Plugin {
             return;
         }
 
+        final Activity activity = getActivity();
+        importAudioFiles(uris, resultCode, new AudioImportSink() {
+            @Override
+            public void complete(JSObject result) {
+                if (activity != null) activity.runOnUiThread(() -> call.resolve(result));
+                else call.resolve(result);
+            }
+
+            @Override
+            public void fail(String message, Exception error) {
+                if (activity != null) activity.runOnUiThread(() -> call.reject(message, error));
+                else call.reject(message, error);
+            }
+        });
+    }
+
+    /**
+     * 把一组 uri 拷进 App 私有目录：本地曲库所有能播的音频都得先从这里过一遍。
+     *
+     * 两条入口共用：系统文件管理器挑中的（completePickedAudioImport）与外部应用
+     * 「用 Folia 打开 / 分享过来」的（noteExternalAudioUris）。
+     */
+    private void importAudioFiles(List<Uri> uris, int resultCode, AudioImportSink sink) {
         // 拷贝是重活：一次导入几十上百个文件，放在调用线程上会把界面卡死，
-        // 所以整个搬进后台线程，完成后再回到 UI 线程 resolve。
+        // 所以整个搬进后台线程，完成后再回到 UI 线程交给出口。
         final Activity activity = getActivity();
         new Thread(() -> {
           try {
@@ -670,12 +824,12 @@ public class FoliaNativePlugin extends Plugin {
             result.put("copied", copied);
             result.put("failures", failures);
             result.put("resultCode", resultCode);
-            if (activity != null) activity.runOnUiThread(() -> call.resolve(result));
-            else call.resolve(result);
+            if (activity != null) activity.runOnUiThread(() -> sink.complete(result));
+            else sink.complete(result);
           } catch (Exception error) {
             String message = error.getMessage() == null ? error.toString() : error.getMessage();
-            if (activity != null) activity.runOnUiThread(() -> call.reject(message, error));
-            else call.reject(message, error);
+            if (activity != null) activity.runOnUiThread(() -> sink.fail(message, error));
+            else sink.fail(message, error);
           }
         }, "folia-audio-import").start();
     }

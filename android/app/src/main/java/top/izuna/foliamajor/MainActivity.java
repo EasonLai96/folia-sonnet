@@ -1,10 +1,14 @@
 package top.izuna.foliamajor;
 
+import android.content.ClipData;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.Manifest;
 import android.graphics.Color;
+import android.provider.OpenableColumns;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebSettings;
@@ -16,6 +20,10 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Folia 的主 Activity。
@@ -35,6 +43,15 @@ public class MainActivity extends BridgeActivity {
      * 原来的动态接收器只在 Activity 存活时有效，而用户点通知栏时应用通常在后台，
      * 指令全部丢失；且它与新接收器同时匹配 ACTION_WEB_COMMAND，会一次指令派发两遍。
      */
+
+    /**
+     * 「从别的应用打开 / 分享过来的音频」认哪些后缀：与 LocalAudioServer.isAudioFileName
+     * 同源，外加 App 也能播的那几个无损格式。清单里的 intent-filter 按同一份列表注册。
+     */
+    private static final String[] SUPPORTED_AUDIO_EXTENSIONS = {
+        ".mp3", ".flac", ".m4a", ".aac", ".alac", ".wav", ".ogg", ".opus",
+        ".ape", ".wv", ".tta", ".wma", ".aif", ".aiff", ".caf",
+    };
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -74,6 +91,9 @@ public class MainActivity extends BridgeActivity {
         // StatusBar 插件是在 Bridge 创建时（super 里）加载并应用配置的，
         // 可能在我们之后才动到 systemUiVisibility；多压几次确保沉浸态最终生效。
         scheduleImmersiveReapply();
+        // 这次启动是不是被「用 Folia 打开这个音频」叫起来的：是就把文件交给插件去拷，
+        // Web 层起来后取走再问用户要不要导入（ExternalAudioImportHost）。
+        handleIncomingAudioIntent(getIntent());
     }
 
     /**
@@ -192,6 +212,112 @@ public class MainActivity extends BridgeActivity {
         // 放在 onStop 而不是 onPause —— 下拉通知栏、切多任务只到 onPause，那时画面还
         // 露着一半，停了会看到动画僵在半途。
         FoliaNativePlugin.emitAppBackground(true);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // 应用已经在前台（singleTask）时又选中了一个音频文件：只会走 onNewIntent，
+        // 不接的话第二次分享进来什么都不会发生。
+        setIntent(intent);
+        handleIncomingAudioIntent(intent);
+    }
+
+    /**
+     * 外部送进来的音频（文件管理器「用 Folia 打开」、其它 App 分享）。
+     *
+     * 只负责把 uri 认出来交给插件，不在这里拷文件、也不在这里决定要不要入库：
+     * content:// 的读授权跟着 intent 的生命周期走，拖到用户看完「是否导入」再去读很可能已经
+     * 过期；而「要不要真的放进曲库」是 Web 层弹窗那一步的事。
+     *
+     * 重复的 uri（ClipData 里一份、getData() 里又一份；部分 provider 同时给两种形态）
+     * 由插件侧去重。
+     */
+    private void handleIncomingAudioIntent(Intent intent) {
+        List<Uri> uris = collectAudioUris(intent);
+        if (uris.isEmpty()) return;
+        FoliaNativePlugin.noteExternalAudioUris(uris);
+    }
+
+    private static boolean isSupportedAudioName(String name) {
+        String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        int dot = lower.lastIndexOf('.');
+        String extension = dot < 0 ? "" : lower.substring(dot);
+        for (String candidate : SUPPORTED_AUDIO_EXTENSIONS) {
+            if (candidate.equals(extension)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 认 uris：data、ClipData、ACTION_SEND(_MULTIPLE) 的 EXTRA_STREAM 三种形态都可能出现。
+     *
+     * mime 是 application/* 一类的值时，用文件名后缀兜底再认一次；后缀也不认识
+     * （比如用户分享了一个 pdf）就直接丢掉 —— 否则 App 会出现在各类文件的分享列表里，
+     * 然后把每一个 pdf 都「导」进本地音乐。
+     */
+    private List<Uri> collectAudioUris(Intent intent) {
+        List<Uri> uris = new ArrayList<>();
+        String action = intent.getAction();
+        boolean isSend = Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action);
+
+        Uri data = intent.getData();
+        if (!isSend && data != null) addCandidateUri(uris, data, intent);
+
+        ClipData clipData = intent.getClipData();
+        if (clipData != null) {
+            for (int index = 0; index < clipData.getItemCount(); index += 1) {
+                addCandidateUri(uris, clipData.getItemAt(index).getUri(), intent);
+            }
+        }
+
+        if (isSend) {
+            List<Uri> streams = new ArrayList<>();
+            if (Intent.ACTION_SEND.equals(action)) {
+                Uri stream = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                    ? intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class)
+                    : intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (stream != null) streams.add(stream);
+            } else if (intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM) != null) {
+                for (android.os.Parcelable parcelable : intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)) {
+                    if (parcelable instanceof Uri) streams.add((Uri) parcelable);
+                }
+            }
+            for (Uri stream : streams) addCandidateUri(uris, stream, intent);
+        }
+        // 视图意图也可能只有 data（没有 ClipData）：上面第一段已经收过了，这里不再重复。
+        return uris;
+    }
+
+    /** 单个候选：拿到读授权并按后缀 / mime 判定它是不是我们要的音频。 */
+    private void addCandidateUri(List<Uri> uris, Uri uri, Intent intent) {
+        if (uri == null) return;
+        try {
+            int grantFlags = intent.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+            if (grantFlags != 0) {
+                getContentResolver().takePersistableUriPermission(uri, grantFlags);
+            }
+        } catch (Exception ignored) {
+            // 大多数 provider 不给可持久化授权；intent 自带的这一次读授权通常仍够用。
+        }
+        String mime = getContentResolver().getType(uri);
+        if (mime != null && mime.startsWith("audio/")) {
+            uris.add(uri);
+            return;
+        }
+        // mime 不认识或 provider 给的是通用值时，按文件名后缀再认一次。
+        if (isSupportedAudioName(queryExternalDisplayName(uri))) uris.add(uri);
+    }
+
+    private String queryExternalDisplayName(Uri uri) {
+        if (uri == null) return null;
+        try (android.database.Cursor cursor = getContentResolver()
+                .query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
+        } catch (Exception ignored) {
+            // 读不到列名的 provider 就退回 path。
+        }
+        return uri.getLastPathSegment();
     }
 
     @Override

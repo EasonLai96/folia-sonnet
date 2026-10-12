@@ -6,6 +6,7 @@ import { loadCachedOrFetchCover } from './services/coverCache';
 import VisualizerRenderer from './components/visualizer/VisualizerRenderer';
 import CommandPalette from './components/command-palette/CommandPalette';
 import AddToPlaylistHost from './components/app/AddToPlaylistHost';
+import ExternalAudioImportHost from './components/app/ExternalAudioImportHost';
 import { useCommandPalette } from './components/command-palette/useCommandPalette';
 import { useCommandPaletteContext } from './hooks/useCommandPaletteContext';
 import { useReducedMotionFor } from './hooks/useReducedMotionFor';
@@ -2975,6 +2976,10 @@ export default function App() {
                 onAddCurrentSongToNavidromePlaylist={addCurrentSongToNavidromePlaylist}
                 onCreateCurrentNavidromePlaylist={createCurrentNavidromePlaylist}
             />
+
+            {/* 从别的应用「用 Folia 打开」音频：问「是否导入 / 导入到哪个歌单」。
+                非安卓或没有这个插件时它自己渲染成 null，桌面端与 Web 不受影响。 */}
+            <ExternalAudioImportHost isDaylight={isDaylight} />
 
             <CommandPalette
                 activeIndex={commandPalette.activeIndex}

@@ -50,6 +50,79 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                外部来的音频（用 Folia 打开 / 分享到 Folia）。
+
+                注册了这些过滤器，用户在任何文件管理器里点一个音频文件，"打开方式"里才会出现
+                Folia；没注册之前系统只在 Browse documents 那一类裁剪过的意图里考虑它。
+
+                三条路都得留：
+                · VIEW + content://audio/* —— 绝大多数文件管理器走这条；
+                · VIEW + content:// + 非标 mime —— 个别 ROM 把 flac/ogg 报成 application/*
+                  而不是 audio/*，只认 audio/* 就会出现「点了没反应」；
+                · VIEW + file:// + 后缀 —— 老的管理器只给文件路径（有时连 mime 都懒得给）。
+
+                后缀取樱 App 能真的播的那批（与 KNOWN_AUDIO_EXTENSIONS 同源）：
+                mp3 / flac / m4a / aac / alac / wav / ogg / opus / ape / wv / tta / wma / aif / aiff / caf。
+
+                收到之后不是直接入库：MainActivity.handleIncomingAudioIntent 把 uri 交给
+                FoliaNativePlugin 拷进 App 私有目录，再由 Web 层问「导入到哪个歌单」
+                （ExternalAudioImportHost，复制 Maxwell 用户自己确认这一步）。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="application/ogg" />
+                <data android:scheme="content" android:mimeType="application/x-flac" />
+                <data android:scheme="content" android:mimeType="application/flac" />
+                <data android:scheme="content" android:mimeType="application/x-ogg" />
+                <data android:scheme="content" android:mimeType="application/aac" />
+                <data android:scheme="content" android:mimeType="application/x-wav" />
+                <data android:scheme="content" android:mimeType="application/mp3" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.mp3" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.flac" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.m4a" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.aac" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.alac" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.wav" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.ogg" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.opus" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.ape" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.wv" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.tta" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.wma" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.aif" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.aiff" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.caf" />
+            </intent-filter>
+            <!-- 分享：从别的 App 把音频「分享」给 Folia，进来的是 EXTRA_STREAM。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/ogg" />
+                <data android:mimeType="application/x-flac" />
+                <data android:mimeType="application/flac" />
+            </intent-filter>
         </activity>
 
         <provider

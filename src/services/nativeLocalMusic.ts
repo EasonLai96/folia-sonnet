@@ -59,6 +59,8 @@ type NativePlugin = {
         failed?: string[];
     }>;
     localAudioServerPort?: () => Promise<{ port?: number }>;
+    /** 取走外部应用送进来、页面还没领过音频（冷启动那一路）。 */
+    takeExternalAudioUris?: () => Promise<NativePickResponse>;
     requestAllFilesAccess?: () => Promise<{ granted?: boolean }>;
     /**
      * 把一个 ref 指向的音频复制一份进 App 私有目录，返回新的 `imported-` ref。
@@ -318,55 +320,16 @@ export const dedupePickedTracks = (tracks: NativeAudioTrack[]): NativeAudioTrack
  * 选中的文件由原生侧复制进 App 私有目录，之后通过本机回环地址流式播放，
  * 所以不依赖 MediaStore 是否收录过这些文件，也不需要整盘存储权限。
  */
-export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
-    const plugin = getPlugin();
-    const source = plugin?.pickAudioFolder ? 'folder' : 'files';
-    const picker = plugin?.pickAudioFolder ?? plugin?.pickAudioFiles;
-    if (!picker) {
-        noteLibraryStep('local', 'pick:no-plugin', {
-            hasPlugin: Boolean(plugin),
-            methods: plugin ? Object.keys(plugin).join(',') : 'none',
-        });
-        throw new Error('Android audio picker is unavailable');
-    }
-
-    noteLibraryStep('local', 'pick:start', { source });
-    let response: NativePickResponse;
-    try {
-        response = await picker();
-    } catch (error) {
-        noteLibraryStep('local', 'pick:error', {
-            message: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-    }
-
-    const failures = Array.isArray(response.failures) ? response.failures : [];
-    noteLibraryStep('local', 'pick:result', {
-        cancelled: response.cancelled === true,
-        picked: response.picked ?? (response.tracks || []).length,
-        copied: response.copied ?? (response.tracks || []).length,
-        tracks: (response.tracks || []).length,
-        resultCode: response.resultCode,
-        error: response.error,
-        failures: failures.length,
-        firstFailure: failures[0]?.message,
-        port: response.port,
-    });
-
-    if (response.cancelled) return [];
-    noteAudioServerPort(response.port);
-
+/**
+ * 一批原生已经拷好的音频 → 本机曲库里的记录，并落库。
+ *
+ * 「挑文件导入」和外部打开（"用 Folia 打开" / 分享，见 takeExternalAudioTracks）共用：
+ * 两条路从原生拿到的都是同一套 { id, fileName, fileSize, mimeType, url }，
+ * 所以读内嵌元数据、与库里已有音频去重、写库这些后处理只写一份。
+ */
+const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<LocalSong[]> => {
     const now = Date.now();
     const songs: LocalSong[] = [];
-    // 同一个文件在系统上被给了两遍时只留一份（见 dedupePickedTracks）。
-    const tracks = dedupePickedTracks(response.tracks || []);
-    if (tracks.length !== (response.tracks || []).length) {
-        noteLibraryStep('local', 'pick:deduped', {
-            returned: (response.tracks || []).length,
-            kept: tracks.length,
-        });
-    }
 
     for (const track of tracks) {
         const fileName = track.fileName || `track-${track.id}`;
@@ -419,13 +382,7 @@ export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
         });
     }
 
-    /*
-     * 第二道兜底：库里已经有了的同一份音频不再加一条。
-     *
-     * 上面那道只管「同一批里重复」，而两次挑到同一个文件（或者一次挑文件、一次扫设备音乐库
-     * 拿到同一首）在原生侧是两个 ref —— 之前就直接落成了两条一模一样的记录。
-     * 判据还是「文件名 + 大小」，外加 ref 完全相同这种最省事的情况。
-     */
+    // 第二道兜底：库里已经有了的同一份音频不再加一条（见 pickedContentKey）。
     const existingSongs = songs.length > 0 ? await getLocalSongs() : [];
     const existingRefs = new Set(existingSongs.map(song => song.nativeAudioRef).filter(Boolean));
     const existingContent = new Set(
@@ -448,21 +405,167 @@ export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
     if (freshSongs.length > 0) {
         await saveLocalSongs(freshSongs);
         noteLibraryStep('local', 'pick:saved', { songs: freshSongs.length });
-        return freshSongs;
     }
-    if (songs.length > 0) {
+    return freshSongs;
+};
+
+export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
+    const plugin = getPlugin();
+    const source = plugin?.pickAudioFolder ? 'folder' : 'files';
+    const picker = plugin?.pickAudioFolder ?? plugin?.pickAudioFiles;
+    if (!picker) {
+        noteLibraryStep('local', 'pick:no-plugin', {
+            hasPlugin: Boolean(plugin),
+            methods: plugin ? Object.keys(plugin).join(',') : 'none',
+        });
+        throw new Error('Android audio picker is unavailable');
+    }
+
+    noteLibraryStep('local', 'pick:start', { source });
+    let response: NativePickResponse;
+    try {
+        response = await picker();
+    } catch (error) {
+        noteLibraryStep('local', 'pick:error', {
+            message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+    }
+
+    const failures = Array.isArray(response.failures) ? response.failures : [];
+    noteLibraryStep('local', 'pick:result', {
+        cancelled: response.cancelled === true,
+        picked: response.picked ?? (response.tracks || []).length,
+        copied: response.copied ?? (response.tracks || []).length,
+        tracks: (response.tracks || []).length,
+        resultCode: response.resultCode,
+        error: response.error,
+        failures: failures.length,
+        firstFailure: failures[0]?.message,
+        port: response.port,
+    });
+
+    if (response.cancelled) return [];
+    noteAudioServerPort(response.port);
+
+    // 同一个文件在系统上被给了两遍时只留一份（见 dedupePickedTracks）。
+    const rawTracks = response.tracks || [];
+    const tracks = dedupePickedTracks(rawTracks);
+    if (tracks.length !== rawTracks.length) {
+        noteLibraryStep('local', 'pick:deduped', {
+            returned: rawTracks.length,
+            kept: tracks.length,
+        });
+    }
+
+    const songs = await buildAndStoreImportedTracks(tracks);
+    if (tracks.length > 0 && songs.length === 0) {
         // 挑到了、但库里全都有：这不是失败，别去抛下面那个「一个都没进来」。
         return [];
     }
-    if (failures.length > 0) {
-        // 选了文件却一个都没进来：把原生侧的原因抛出去，界面至少会报错，
-        // 而不是像以前那样静默什么都不做。
-        throw new Error(`Imported 0 of ${failures.length} picked file(s): ${failures[0]?.message || 'unknown error'}`);
-    } else if (response.error) {
-        // RESULT_OK 却没给出任何可读的 uri：这是原生侧明确的异常，同样要报出来。
-        throw new Error(response.error);
+    if (tracks.length === 0) {
+        if (failures.length > 0) {
+            // 选了文件却一个都没进来：把原生侧的原因抛出去，界面至少会报错，
+            // 而不是像以前那样静默什么都不做。
+            throw new Error(`Imported 0 of ${failures.length} picked file(s): ${failures[0]?.message || 'unknown error'}`);
+        } else if (response.error) {
+            // RESULT_OK 却没给出任何可读的 uri：这是原生侧明确的异常，同样要报出来。
+            throw new Error(response.error);
+        }
     }
     return songs;
+};
+
+// ---- 外部打开 / 分享（文件管理器里「用 Folia 打开」）----
+
+export type ExternalAudioPayload = {
+    tracks: NativeAudioTrack[];
+    port?: number;
+};
+
+type EventListenerPlugin = NativePlugin & {
+    addListener?: (
+        eventName: string,
+        listener: (payload: { tracks?: NativeAudioTrack[]; port?: number }) => void,
+    ) => Promise<{ remove: () => Promise<void> }> | { remove: () => Promise<void> };
+};
+
+/**
+ * 取走「外部送进来、原生已经拷好但页面还没领过」的那批音频。
+ *
+ * 从别的应用打开文件时 App 通常是冷启动的：那时页面还没加载完，一个监听者都没有，
+ * 原生只能先把拷好的曲目攒着；页面起来后调一次这个方法把它们领走。
+ */
+export const takeExternalAudioTracks = async (): Promise<ExternalAudioPayload> => {
+    const plugin = getPlugin() as EventListenerPlugin | null;
+    if (!plugin?.takeExternalAudioUris) return { tracks: [] };
+    try {
+        const response = await plugin.takeExternalAudioUris();
+        const tracks = Array.isArray(response?.tracks) ? response.tracks : [];
+        noteAudioServerPort(response?.port);
+        noteLibraryStep('local', 'external:take', { tracks: tracks.length });
+        return { tracks, port: Number(response?.port) || undefined };
+    } catch (error) {
+        noteLibraryStep('local', 'external:take-error', {
+            message: error instanceof Error ? error.message : String(error),
+        });
+        return { tracks: [] };
+    }
+};
+
+/**
+ * 应用已经在前台时又从别的应用打开了音频：原生直接发事件过来，不必轮询。
+ * 返回值是取消订阅的函数。
+ */
+export const subscribeExternalAudio = (
+    listener: (payload: ExternalAudioPayload) => void,
+): (() => void) => {
+    const plugin = getPlugin() as EventListenerPlugin | null;
+    if (!plugin?.addListener) return () => undefined;
+    let handle: { remove: () => Promise<void> } | { remove: () => void } | null = null;
+    let disposed = false;
+    const registered = plugin.addListener('externalAudio', payload => {
+        if (disposed) return;
+        const tracks = Array.isArray(payload?.tracks) ? payload.tracks : [];
+        if (tracks.length === 0) return;
+        noteAudioServerPort(payload?.port);
+        noteLibraryStep('local', 'external:event', { tracks: tracks.length });
+        listener({ tracks, port: Number(payload?.port) || undefined });
+    });
+    Promise.resolve(registered)
+        .then(resolved => {
+            if (disposed) {
+                void resolved.remove();
+                return;
+            }
+            handle = resolved;
+        })
+        .catch(() => undefined);
+    return () => {
+        disposed = true;
+        if (handle) void handle.remove();
+    };
+};
+
+/** 用户点头之后：这批拷好的音频正式进本机曲库，返回新加进去的那些（库里已有的不再重复加）。 */
+export const importExternalAudioTracks = async (tracks: NativeAudioTrack[]): Promise<LocalSong[]> => {
+    const unique = dedupePickedTracks(tracks);
+    noteLibraryStep('local', 'external:import', { tracks: unique.length });
+    if (unique.length === 0) return [];
+    return await buildAndStoreImportedTracks(unique);
+};
+
+/**
+ * 用户摇头之后：把已经拷进私有目录的副本删掉。
+ *
+ * 文件是 intent 一进来就拷的（content:// 的读授权只在 intent 存活期间有效，等用户看完
+ * 「是否导入」再读很可能已经作废），所以拒绝这一步必须连副本一起收回，不能只在数据上不管它。
+ */
+export const discardExternalAudioTracks = async (tracks: NativeAudioTrack[]): Promise<void> => {
+    const refs = tracks.map(track => track.id).filter(Boolean);
+    if (refs.length === 0) return;
+    noteLibraryStep('local', 'external:discard', { refs: refs.length });
+    await deleteAndroidImportedAudio(refs);
 };
 
 /**
