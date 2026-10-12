@@ -343,17 +343,39 @@ html[data-folia-background='1'] * {
 /* 关掉毛玻璃（设置 → 常规里的开关，由 useGlassSurfaceSettingsStore 挂 data-glass）。
 
    全站一百多处 backdrop-blur 面板一次性覆盖掉，不去逐个组件加判断 —— 它们散在各处，
-   还有不少是第三方组件自带的，枚举必然漏。
+   还有不少是第三方组件自带的，枚举必然漏。伪元素一起管：有几处玻璃是 ::before 铺的。
 
    底色要一起压实：原来那层 40%~85% 的半透明是配着模糊用的，模糊一撤，身后的歌词和封面
-   会直接透上来糊成一团。这里换成主题背景色，面板重新变成一块实心的面。 */
-html[data-glass='off'] * {
+   会直接透上来糊成一团。这里换成主题背景色，面板重新变成一块实心的面。
+
+   **只撤模糊是不够的** —— 半透明底色留着，眼睛看到的还是一块玻璃（只是不再模糊）。
+   所以下面那一串要把「哪些元素是玻璃」点清楚，玻璃有三条来路，少一条就有一处关不掉：
+
+   ① Tailwind 的 backdrop-blur-* 类名（一百多处）：按类名子串挑，新增的自动进；
+   ② 组件里写成行内的 backdropFilter（搜索工作区、网格 / 地图面板）：行内样式没有类名可挑，
+      只能按 style 属性里的 backdrop-filter 子串挑；
+   ③ 自己写 CSS 的玻璃 —— Lattice 与 bravais 那一整面墙的面板不在 Tailwind 体系里，
+      类名里既没有 blur 也没有 glass，只能点名。这一串跟着 backdrop-filter 的声明走：
+      哪天新增了一个带模糊的类，这里就要补一行（2026-10-12：补上上游合并进来的
+      墙面工具面板 / 队列浮岛那两块新玻璃，以及墙上的返回按钮、bravais 的缝与聚焦菜单）。 */
+html[data-glass='off'] *,
+html[data-glass='off'] *::before,
+html[data-glass='off'] *::after {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
 
 html[data-glass='off'] [class*='backdrop-blur'],
-html[data-glass='off'] .theme-glass-panel {
+html[data-glass='off'] [style*='backdrop-filter'],
+html[data-glass='off'] .theme-glass-panel,
+html[data-glass='off'] .lattice-back,
+html[data-glass='off'] .lattice-tools-panel,
+html[data-glass='off'] .lattice-tools-island,
+html[data-glass='off'] .bravais-root.has-seam-blur .bravais-seam,
+html[data-glass='off'] .bravais-root.has-seam-blur .bravais-seam-tab,
+html[data-glass='off'] .bravais-focus-menu {
+    /* 只压实底色，不动 background-image：玻璃上的那层渐变是半透明的，压在实心底色之上照样不透，
+       而逼掉它会把本来就该有渐变的面板一起弄花（不少 backdrop-blur 的卡是渐变底）。 */
     background-color: var(--bg-color, #09090b) !important;
 }
 
