@@ -21,6 +21,15 @@
     </style>
 
     <!--
+        WebView 体检对话框（见 WebViewUpgrade）。
+
+        必须显式给主题：MainActivity 用的是启动主题 Theme.SplashScreen，对话框默认继承
+        Activity 的主题，直接跟着走会得到一块启动图背景，文字也看不清。
+        DayNight 跟随系统的深浅色，和 App 自己的主题保持一致。
+    -->
+    <style name="WebViewUpgradeDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert" />
+
+    <!--
         音乐锁屏页：完全透明、无入场动画、不显示启动预览。
 
         这一层自己不画东西（内容在 WallpaperOverlay 挂在它窗口上的子窗口里），

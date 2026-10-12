@@ -55,6 +55,7 @@ public class MainActivity extends BridgeActivity {
 
         super.onCreate(savedInstanceState);
 
+        checkWebViewSupport();
         applyImmersiveMode();
         applyWebViewPlaybackSettings();
         installBackPressedHandler();
@@ -73,6 +74,21 @@ public class MainActivity extends BridgeActivity {
         // StatusBar 插件是在 Bridge 创建时（super 里）加载并应用配置的，
         // 可能在我们之后才动到 systemUiVisibility；多压几次确保沉浸态最终生效。
         scheduleImmersiveReapply();
+    }
+
+    /**
+     * 系统 WebView 版本体检。
+     *
+     * 为什么放在这里：WebView 太旧时报错发生在 WebView 内部（SyntaxError / 缺 API），
+     * 原生侧收不到任何异常，崩溃处理器也抓不到，用户看到的就只是「开屏后一直白屏」。
+     * 只有原生能在页面加载之后读到引擎版本，也只有原生对话框能在页面已经废掉时弹出来。
+     *
+     * 用 decorView.post 而不是直接调：onCreate 阶段窗口还没真正挂上，这时 show 对话框
+     * 有概率撞 BadTokenException，拖到第一帧之后就稳了。
+     */
+    private void checkWebViewSupport() {
+        getWindow().getDecorView().post(() -> WebViewUpgrade.check(this,
+                getBridge() == null ? null : getBridge().getWebView()));
     }
 
     /**

@@ -91,7 +91,7 @@ public final class FoliaCrashHandler {
                     + ".log";
             File file = new File(dir, name);
             try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
-                writer.println(deviceInfo());
+                writer.println(deviceInfo(appContext));
                 writer.println(trace);
             }
             return file;
@@ -101,12 +101,15 @@ public final class FoliaCrashHandler {
         }
     }
 
-    private static String deviceInfo() {
+    private static String deviceInfo(Context context) {
         return "Folia crash report"
                 + "\n  time      : " + new Date()
                 + "\n  device    : " + Build.MANUFACTURER + " " + Build.MODEL
                 + "\n  android   : " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
                 + "\n  abi       : " + java.util.Arrays.toString(Build.SUPPORTED_ABIS)
+                // 白屏 / 脚本报错类问题几乎都跟引擎版本有关，写进报告里好横向对比设备。
+                // 这里没有 WebView 实例（可能崩在 Bridge 建起来之前），少一路 UA 兜底无所谓。
+                + "\n  webview   : " + WebViewUpgrade.describe(context, null)
                 + "\n";
     }
 
