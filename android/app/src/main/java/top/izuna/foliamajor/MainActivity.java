@@ -159,15 +159,17 @@ public class MainActivity extends BridgeActivity {
         getWindow().getDecorView().postDelayed(() -> PhoneFitCutout.apply(this), 120);
     }
 
+    // 必须是 public：BridgeActivity 里的这两个回调是 public，降成 protected 属于收窄
+    // 访问权限，javac 直接报「正在尝试分配更低的访问权限」。
     @Override
-    protected void onStart() {
+    public void onStart() {
         super.onStart();
         // 回前台：把渲染放回来。
         FoliaNativePlugin.emitAppBackground(false);
     }
 
     @Override
-    protected void onStop() {
+    public void onStop() {
         super.onStop();
         // 真的看不见了：让网页停掉整套渲染，把 CPU 让给音频解码。
         //
