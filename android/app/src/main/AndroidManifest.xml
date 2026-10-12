@@ -234,4 +234,11 @@
         属于「用户必须手动授权」的权限（设置 → 应用 → 显示在其他应用上层）。
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!--
+        应用内更新：下载完 APK 后拉起系统安装器需要 REQUEST_INSTALL_PACKAGES。
+        不声明的话 ACTION_VIEW 会被系统直接拦掉（部分 ROM 上表现为点了「安装」毫无反应）。
+        注意它只是**声明权限**，Android O+ 还要用户在「允许来自此来源的应用」里给过授权，
+        运行时检查见 FoliaNativePlugin.installUpdate。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

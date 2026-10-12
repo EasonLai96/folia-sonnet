@@ -9,6 +9,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
@@ -18,6 +19,7 @@ import android.util.Base64;
 import android.webkit.CookieManager;
 
 import androidx.activity.result.ActivityResult;
+import androidx.core.content.FileProvider;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -90,6 +92,15 @@ public class FoliaNativePlugin extends Plugin {
     /** 外部送进来的音频（externalAudio 事件名）。 */
     private static final String EXTERNAL_AUDIO_EVENT = "externalAudio";
 
+    /** 更新包下载进度事件名。 */
+    private static final String UPDATE_PROGRESS_EVENT = "updateDownloadProgress";
+
+    /** 更新包落在缓存目录下的这一层。 */
+    private static final String UPDATE_DIRECTORY = "updates";
+
+    /** 进度事件节流间隔。 */
+    private static final long UPDATE_PROGRESS_INTERVAL_MS = 100;
+
     /** 文件/文件夹选择器只用一份：连点两次会开两个系统界面，回来的回调就串了。 */
     private boolean isAudioPickerOpen = false;
     private LocalAudioServer localAudioServer;
@@ -98,6 +109,10 @@ public class FoliaNativePlugin extends Plugin {
     private static final List<String> pendingExternalUris = new ArrayList<>();
     /** 拷完、但 Web 层还没领走的外部音频（没有监听者时就停在这里等它来取）。 */
     private static final List<JSObject> pendingExternalTracks = new ArrayList<>();
+
+    /** 同一时刻只跑一个更新下载：连点两次会写出两个文件，后一次覆盖前一次。 */
+    private final Object updateDownloadLock = new Object();
+    private volatile boolean isUpdateDownloading = false;
 
     private final OkHttpClient client = new OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -533,6 +548,172 @@ public class FoliaNativePlugin extends Plugin {
         Activity activity = getActivity();
         call.resolve();
         if (activity != null) activity.runOnUiThread(activity::finish);
+    }
+
+    // ---- 应用内更新（下载到私有缓存目录，再交给系统安装器）----
+
+    /**
+     * 下载更新包，进度用 `updateDownloadProgress` 事件往外推。
+     *
+     * 走 OkHttp 流式写文件而不是把整个包读进内存：APK 动辄上百 MB，WebView 里攒 Blob
+     * 再转 base64 写过 Filesystem 插件，途中要同时持有字节数组和膨胀后的 base64 串，
+     * 低端机上直接 OOM。这里是边读边写，内存占用恒定在一个缓冲区。
+     */
+    @PluginMethod
+    public void downloadUpdate(PluginCall call) {
+        String url = call.getString("url", "");
+        String fileName = call.getString("fileName", "");
+        if (url == null || url.isEmpty()) {
+            call.reject("Missing update download url");
+            return;
+        }
+        String safeName = sanitizeUpdateFileName(fileName);
+
+        synchronized (updateDownloadLock) {
+            if (isUpdateDownloading) {
+                call.reject("An update download is already running");
+                return;
+            }
+            isUpdateDownloading = true;
+        }
+
+        long receivedBytes = 0;
+        File target = null;
+        try {
+            File directory = new File(getContext().getCacheDir(), UPDATE_DIRECTORY);
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw new IOException("Unable to create update directory");
+            }
+            target = new File(directory, safeName);
+            if (target.exists() && !target.delete()) {
+                throw new IOException("Unable to remove a stale update file");
+            }
+
+            Request request = new Request.Builder().url(url).build();
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    throw new IOException("Update download failed with HTTP " + response.code());
+                }
+                ResponseBody body = response.body();
+                if (body == null) {
+                    throw new IOException("Update download returned an empty body");
+                }
+                long totalBytes = body.contentLength();
+                long lastEmitAt = 0;
+                try (InputStream source = body.byteStream();
+                     OutputStream sink = new FileOutputStream(target)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = source.read(buffer)) != -1) {
+                        sink.write(buffer, 0, read);
+                        receivedBytes += read;
+                        // 每 100ms 推一次就够了：WebView 那边是拿它刷新进度条的，
+                        // 逐块转发会把桥打满，进度条反而卡。
+                        long now = SystemClock.elapsedRealtime();
+                        if (receivedBytes == totalBytes || now - lastEmitAt >= UPDATE_PROGRESS_INTERVAL_MS) {
+                            lastEmitAt = now;
+                            emitUpdateProgress(receivedBytes, totalBytes, false);
+                        }
+                    }
+                }
+                emitUpdateProgress(receivedBytes, totalBytes, true);
+            }
+
+            JSObject result = new JSObject();
+            result.put("path", target == null ? "" : target.getAbsolutePath());
+            result.put("bytes", receivedBytes);
+            call.resolve(result);
+        } catch (IOException | IllegalArgumentException error) {
+            call.reject(error.getMessage(), error);
+        } finally {
+            synchronized (updateDownloadLock) {
+                isUpdateDownloading = false;
+            }
+        }
+    }
+
+    /** 把下载好的包交给系统安装器。 */
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        String path = call.getString("path", "");
+        if (path == null || path.isEmpty()) {
+            call.reject("Missing update file path");
+            return;
+        }
+        File file = new File(path);
+        if (!file.exists()) {
+            call.reject("Update file is missing");
+            return;
+        }
+
+        // Android O 起「允许来自此来源的应用」是按包授权的运行时开关，没开就装不上 ——
+        // 直接跳系统那个页面，比装到一半失败再报错好。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getContext().getPackageManager().canRequestPackageInstalls()) {
+            Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                    .setData(Uri.parse("package:" + getContext().getPackageName()))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                getContext().startActivity(settingsIntent);
+            } catch (Exception error) {
+                call.reject("Unable to open the install permission settings", error);
+                return;
+            }
+            JSObject result = new JSObject();
+            result.put("status", "permission-required");
+            call.resolve(result);
+            return;
+        }
+
+        Uri apkUri;
+        try {
+            apkUri = FileProvider.getUriForFile(
+                    getContext(),
+                    getContext().getPackageName() + ".fileprovider",
+                    file
+            );
+        } catch (IllegalArgumentException error) {
+            // 路径没落在 file_paths.xml 声明的目录里就会走到这里，属于改错配置的编程错误。
+            call.reject("Update file is not shareable via FileProvider", error);
+            return;
+        }
+
+        Intent installIntent = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(apkUri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(installIntent);
+        } catch (Exception error) {
+            call.reject("No app can handle the installer intent", error);
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("status", "installing");
+        call.resolve(result);
+    }
+
+    /** 只允许 `名字.apk`，其余字符一律换成 `_`，避免文件名里带路径分隔符写到别处去。 */
+    private static String sanitizeUpdateFileName(String rawName) {
+        String trimmed = rawName == null ? "" : rawName.trim();
+        if (trimmed.isEmpty()) return "folia-update.apk";
+        String flattened = trimmed.replaceAll("[^A-Za-z0-9._-]", "_");
+        return flattened.endsWith(".apk") ? flattened : flattened + ".apk";
+    }
+
+    /** 进度事件：bytes 是可用的原始值，percent 是给 UI 直接用的 0-100（总量未知时为 -1）。 */
+    private void emitUpdateProgress(long receivedBytes, long totalBytes, boolean done) {
+        JSObject payload = new JSObject();
+        payload.put("receivedBytes", receivedBytes);
+        payload.put("totalBytes", totalBytes > 0 ? totalBytes : 0);
+        payload.put("percent", totalBytes > 0
+                ? Math.min(100, (int) Math.floor(receivedBytes * 100d / totalBytes))
+                : -1);
+        payload.put("done", done);
+        Activity activity = getActivity();
+        Runnable emit = () -> notifyListeners(UPDATE_PROGRESS_EVENT, payload);
+        if (activity != null) activity.runOnUiThread(emit);
+        else emit.run();
     }
 
     // ---- 本地音乐（安卓没有 File System Access API，曲库只能由原生侧给）----

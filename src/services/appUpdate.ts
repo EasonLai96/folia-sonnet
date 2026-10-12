@@ -1,41 +1,49 @@
 import { fetchJsonWithRetry } from '../utils/fetchWithTimeout';
+import {
+  downloadUpdate,
+  installUpdate,
+  watchUpdateDownloadProgress,
+  type UpdateDownloadProgress,
+} from '../platform/foliaNative';
 
 // src/services/appUpdate.ts
-// 应用内检查更新。
+// 应用内检查更新（Android）。
 //
-// 桌面端那套走的是 electron-updater（主进程里查、下载、重启安装），Android 这里没有
-// 对应能力 —— Capacitor 没装 @capacitor/app，拿不到 App.getInfo()，也**不允许**应用
-// 自己静默装更新（非 Play 分发要装别的包必须走系统安装器并要用户点确认）。
+// 版本清单是一份静态 json，形如：
+//   { "version": "0.7.19", "download_url": "https://.../folia-sonnet-0.7.19-release.apk" }
+// 出包时把最新版本号与安装包地址写进去即可 —— 不依赖 GitHub Release，也绕开 API 限流。
 //
-// 所以这条路只做两件事：查最新版本（对照 CI 挂在 GitHub Release 上的产物），
-// 以及把下载地址交给系统浏览器 —— 下载完由系统安装器接手。
+// 桌面端那套走 electron-updater（主进程里查、下载、重启安装），Android 这里没有对应能力：
+// 应用**不允许**自己静默装更新，非 Play 分发必须落到系统安装器并让用户点确认。所以这条
+// 链路是：拉清单 → 比版本号 → 原生下载（带进度）→ 下完弹「立即安装」。
 //
 // 版本号来源是编译期注入的 `__APP_VERSION__`（vite.config.ts 从 package.json 读），
-// 和 Release 的标签（CI 用同一个 package.json 版本打的 vX.Y.Z）天然对齐。
+// 和清单里的 version 直接对齐。
 
-/** 出包仓库。CI（.github/workflows/android-release.yml）把 APK/AAB 挂在这个仓库的 Release 上。 */
-export const APP_UPDATE_REPO = 'maimai993/folia-sonnet';
+/** 版本清单地址。 */
+export const APP_UPDATE_MANIFEST_URL = 'https://cdn.tangbot.xyz/update.json';
 
-/** 查不到更新时给用户兜底的手动入口。 */
-export const APP_UPDATE_RELEASES_PAGE = `https://github.com/${APP_UPDATE_REPO}/releases`;
-
-const LATEST_RELEASE_API = `https://api.github.com/repos/${APP_UPDATE_REPO}/releases/latest`;
+/** 打开发布页的兜底入口：清单里给了 page_url 就用清单的。 */
+export const APP_UPDATE_RELEASES_PAGE = `https://github.com/maimai993/folia-sonnet/releases`;
 
 /**
- * 请求超时。GitHub API 在直连不稳的网络下可能几十秒不回，检查更新这种事等不了那么久；
- * 超时后界面给的是「打开发布页」这条兜底路，而不是一直转圈。
+ * 请求超时。检查更新是个后台动作，网络对不上时不该让用户对着转圈等，
+ * 超时后界面给的是一条能看懂的失败原因 + 手动入口。
  */
 const REQUEST_TIMEOUT_MS = 12_000;
 
-/** GitHub releases/latest 里我们用到的字段。 */
-type GitHubReleasePayload = {
-  tag_name?: string;
-  name?: string;
-  html_url?: string;
-  body?: string;
+/** update.json 里我们用到的字段：只有 version 与 download_url 是必需的。 */
+type UpdateManifestPayload = {
+  version?: string;
+  download_url?: string;
+  /** Release 页面地址（可选）。 */
+  page_url?: string;
+  /** 更新日志（可选）。 */
+  notes?: string;
   published_at?: string;
-  prerelease?: boolean;
-  draft?: boolean;
+  /** 包体积（可选，用于显示下载大小）。 */
+  size?: number;
+  /** 多产物（可选）：给了就按后缀挑 apk / aab。 */
   assets?: Array<{
     name?: string;
     browser_download_url?: string;
@@ -190,26 +198,50 @@ export const pickReleaseAsset = (
   };
 };
 
-const toReleaseInfo = (payload: GitHubReleasePayload): AppReleaseInfo => {
-  const tag = payload.tag_name ?? '';
+/** 从下载地址里取文件名：`.../folia-sonnet-0.7.19-release.apk?x=1` → `folia-sonnet-0.7.19-release.apk`。 */
+const fileNameOf = (url: string): string => {
+  const withoutQuery = url.split(/[?#]/)[0];
+  const slash = withoutQuery.lastIndexOf('/');
+  const name = slash === -1 ? withoutQuery : withoutQuery.slice(slash + 1);
+  return name || 'folia-update.apk';
+};
+
+const nonEmptyString = (value: unknown): string | null => (
+  typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+);
+
+const toReleaseInfo = (payload: UpdateManifestPayload): AppReleaseInfo | null => {
+  const rawVersion = nonEmptyString(payload.version);
+  if (!rawVersion) return null;
+  const version = rawVersion.replace(/^v/i, '');
+
+  const downloadUrl = nonEmptyString(payload.download_url) ?? '';
+  const assets = Array.isArray(payload.assets) ? payload.assets : [];
+  // 清单给了 assets 就按后缀挑；否则把 download_url 当安装包，但只认 .apk ——
+  // .aab 装不上，宁可报「没有可用安装包」也别让人白下一遍。
+  const apk = pickReleaseAsset(assets, 'apk')
+    ?? (assetExtensionOf(downloadUrl) === 'apk'
+      ? { name: fileNameOf(downloadUrl), downloadUrl, sizeBytes: Number(payload.size) || 0 }
+      : null);
+
   return {
-    version: tag.replace(/^v/i, '') || tag,
-    tag,
-    name: payload.name ?? '',
-    pageUrl: payload.html_url ?? APP_UPDATE_RELEASES_PAGE,
-    notes: payload.body?.trim() ?? '',
-    publishedAt: payload.published_at ?? null,
-    apk: pickReleaseAsset(payload.assets, 'apk'),
-    aab: pickReleaseAsset(payload.assets, 'aab'),
+    version,
+    tag: rawVersion,
+    name: '',
+    pageUrl: nonEmptyString(payload.page_url) ?? APP_UPDATE_RELEASES_PAGE,
+    notes: nonEmptyString(payload.notes) ?? '',
+    publishedAt: nonEmptyString(payload.published_at),
+    apk,
+    aab: pickReleaseAsset(assets, 'aab'),
   };
 };
 
 /** 把失败原因翻成人话。「检查失败」这三个字本身不足以让人判断该不该重试。 */
 const describeFetchFailure = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
-  if (/HTTP 404/.test(message)) {
-    // releases/latest 404 = 还没发过正式版（或仓库改成了私有 / 改名）。
-    return 'no-release';
+  if (/HTTP 4(03|04)/.test(message)) {
+    // 403/404 = 清单地址变了或文件没传上去。
+    return 'manifest-missing';
   }
   if (/timed out|AbortError/i.test(message)) {
     return 'timeout';
@@ -220,28 +252,30 @@ const describeFetchFailure = (error: unknown): string => {
 /**
  * 检查更新。
  *
- * 走 `/releases/latest`：GitHub 会自己排除草稿与预发布，所以装了正式版的人不会被
- * beta 打扰（要发 beta 就发 pre-release，那条链是另外几个 workflow 管的）。
+ * 拉一次 update.json，比版本号。清单里少字段不报错（version 与 download_url 之外的都是
+ * 可选），但拿不到可装的 apk 会明确报出来 —— 静默不给下载按钮只会让人以为没更新。
+ *
  * 请求失败不抛异常 —— 界面要的是一条能展示的失败原因 + 手动入口，不是一次未捕获拒绝。
  */
 export const checkForAppUpdate = async (signal?: AbortSignal): Promise<AppUpdateCheckResult> => {
   const currentVersion = getCurrentAppVersion();
   try {
-    const payload = await fetchJsonWithRetry<GitHubReleasePayload>(
-      LATEST_RELEASE_API,
+    const payload = await fetchJsonWithRetry<UpdateManifestPayload>(
+      APP_UPDATE_MANIFEST_URL,
       {
         signal,
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
+        // CDN 上可能留着上一版清单，带 no-store 拿最新的；缓存由 CDN 自己在边缘管。
+        cache: 'no-store',
       },
       { timeoutMs: REQUEST_TIMEOUT_MS },
     );
 
     const release = toReleaseInfo(payload ?? {});
-    if (!release.version) {
-      return { status: 'failed', currentVersion, message: 'empty-release' };
+    if (!release) {
+      return { status: 'failed', currentVersion, message: 'empty-manifest' };
+    }
+    if (!release.apk) {
+      return { status: 'failed', currentVersion, message: 'no-apk' };
     }
 
     return compareAppVersions(release.version, currentVersion) > 0
@@ -253,4 +287,68 @@ export const checkForAppUpdate = async (signal?: AbortSignal): Promise<AppUpdate
     }
     return { status: 'failed', currentVersion, message: describeFetchFailure(error) };
   }
+};
+
+// ---- 下载安装包 ----
+
+/** 进度类型由原生桥那层定义（见 platform/foliaNative.ts），这里转出去，界面只认这一个入口。 */
+export type { UpdateDownloadProgress };
+
+export type UpdateDownloadOutcome = {
+  /** 下载好的 APK 绝对路径，交给 installUpdateApk。 */
+  path: string;
+  bytes: number;
+};
+
+/** 监听下载进度，返回用来摘掉监听的 handle。 */
+export const onUpdateDownloadProgress = (
+  listener: (progress: UpdateDownloadProgress) => void,
+): Promise<{ remove: () => Promise<void> }> => (
+  watchUpdateDownloadProgress(listener)
+);
+
+/** 下载某个版本的安装包。文件名里带版本号，避免多个版本互相覆盖。 */
+export const downloadUpdateApk = async (
+  downloadUrl: string,
+  version: string,
+): Promise<UpdateDownloadOutcome> => {
+  const fileName = `folia-sonnet-${version}.apk`;
+  try {
+    const result = await downloadUpdate({ url: downloadUrl, fileName });
+    const path = typeof result?.path === 'string' ? result.path : '';
+    if (!path) throw new Error('Update download returned no file path');
+    return { path, bytes: Number(result?.bytes) || 0 };
+  } catch (error) {
+    throw new Error(describeDownloadFailure(error));
+  }
+};
+
+/** 拉起系统安装器装下载好的包。 */
+export const installUpdateApk = async (path: string): Promise<UpdateInstallOutcome> => {
+  if (!path) throw new Error('no-file');
+  try {
+    const result = await installUpdate({ path });
+    return { status: result?.status === 'permission-required' ? 'permission-required' : 'installing' };
+  } catch (error) {
+    throw new Error(describeDownloadFailure(error));
+  }
+};
+
+export type UpdateInstallOutcome = {
+  /**
+   * `installing`：已经把包交给系统安装器，界面弹的是系统那张确认页。
+   * `permission-required`：Android O+ 上「允许来自此来源的应用」还没开，已经跳了设置页 ——
+   * 用户回来后再点一次「立即安装」即可，这点要在界面上说清楚。
+   */
+  status: 'installing' | 'permission-required';
+};
+
+/** 下载/安装失败的原因。和检查那边的错误码分开：成因不同，给用户的建议也不同。 */
+const describeDownloadFailure = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/timed out|AbortError/i.test(message)) return 'download-timeout';
+  if (/HTTP 4(03|04)/.test(message)) return 'download-http-error';
+  if (/ENOSPC|No space/i.test(message)) return 'download-no-space';
+  if (/not shareable|FileProvider/i.test(message)) return 'download-file-error';
+  return 'download-failed';
 };

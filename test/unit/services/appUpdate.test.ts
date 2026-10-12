@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  checkForAppUpdate,
   compareAppVersions,
   parseAppVersion,
   pickReleaseAsset,
@@ -103,4 +104,105 @@ describe('pickReleaseAsset', () => {
     const assets = [{ name: 'folia.apk' }, { name: undefined, browser_download_url: 'x' }, asset('real.apk')];
     expect(pickReleaseAsset(assets, 'apk')?.name).toBe('real.apk');
   });
+});
+
+describe('checkForAppUpdate（update.json 版本清单）', () => {
+    const stubManifest = (payload: unknown, status = 200): void => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: status >= 200 && status < 300,
+            status,
+            json: async () => payload,
+        })));
+    };
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('认 version + download_url 的最小清单', async () => {
+        stubManifest({
+            version: '0.7.19',
+            download_url: 'https://cdn.example.com/folia-sonnet-0.7.19-release.apk',
+        });
+
+        const result = await checkForAppUpdate();
+        expect(result.status).toBe('update-available');
+        // 单测里没有 __APP_VERSION__，当前版本按 0.0.0 算。
+        expect(result.currentVersion).toBe('0.0.0');
+        if (result.status !== 'update-available') return;
+        expect(result.release.version).toBe('0.7.19');
+        expect(result.release.apk?.downloadUrl)
+            .toBe('https://cdn.example.com/folia-sonnet-0.7.19-release.apk');
+    });
+
+    it('version 带 v 前缀时比较前先去掉', async () => {
+        stubManifest({ version: 'v0.7.19', download_url: 'https://cdn.example.com/a.apk' });
+
+        const result = await checkForAppUpdate();
+        if (result.status === 'failed') throw new Error(result.message);
+        expect(result.release.version).toBe('0.7.19');
+        expect(result.release.tag).toBe('v0.7.19');
+    });
+
+    it('清单版本不比当前新时是 up-to-date', async () => {
+        stubManifest({ version: '0.0.0', download_url: 'https://cdn.example.com/a.apk' });
+
+        expect((await checkForAppUpdate()).status).toBe('up-to-date');
+    });
+
+    it('download_url 不是 apk 时报 no-apk，不给下载入口', async () => {
+        stubManifest({ version: '0.7.19', download_url: 'https://cdn.example.com/a.aab' });
+
+        const result = await checkForAppUpdate();
+        expect(result.status).toBe('failed');
+        if (result.status === 'failed') expect(result.message).toBe('no-apk');
+    });
+
+    it('缺 version 时报 empty-manifest', async () => {
+        stubManifest({ download_url: 'https://cdn.example.com/a.apk' });
+
+        const result = await checkForAppUpdate();
+        expect(result.status).toBe('failed');
+        if (result.status === 'failed') expect(result.message).toBe('empty-manifest');
+    });
+
+    it('清单给了 assets 就按后缀挑 apk', async () => {
+        stubManifest({
+            version: '0.7.19',
+            download_url: 'https://cdn.example.com/ignore.apk',
+            assets: [
+                { name: 'folia-sonnet-0.7.19-release.aab', browser_download_url: 'https://cdn.example.com/x.aab', size: 10 },
+                { name: 'folia-sonnet-0.7.19-release.apk', browser_download_url: 'https://cdn.example.com/x.apk', size: 42 },
+            ],
+        });
+
+        const result = await checkForAppUpdate();
+        if (result.status === 'failed') throw new Error(result.message);
+        expect(result.release.apk?.downloadUrl).toBe('https://cdn.example.com/x.apk');
+        expect(result.release.apk?.sizeBytes).toBe(42);
+    });
+
+    it('notes / page_url / size 是可选字段，缺了不报错', async () => {
+        stubManifest({
+            version: '0.7.19',
+            download_url: 'https://cdn.example.com/a.apk',
+            page_url: 'https://example.com/releases',
+            notes: '修了个 bug',
+            size: 1234,
+        });
+
+        const result = await checkForAppUpdate();
+        if (result.status === 'failed') throw new Error(result.message);
+        expect(result.release.pageUrl).toBe('https://example.com/releases');
+        expect(result.release.notes).toBe('修了个 bug');
+        expect(result.release.apk?.sizeBytes).toBe(1234);
+    });
+
+    it('清单拿不到时报 manifest-missing', async () => {
+        stubManifest(null, 404);
+
+        const result = await checkForAppUpdate();
+        expect(result.status).toBe('failed');
+        if (result.status === 'failed') expect(result.message).toBe('manifest-missing');
+    });
 });
