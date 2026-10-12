@@ -17,6 +17,7 @@ import { parseLyricsByFormat } from '../../utils/lyrics/parserCore';
 import { isPureMusicLyricText } from '../../utils/lyrics/pureMusic';
 import { hasRenderableLyrics } from '../../utils/lyrics/validity';
 import { getPlaybackSongKey } from '../../utils/appPlaybackGuards';
+import { noteLibraryStep } from '../../nativeBridge/api/libraryTrace.js';
 import { decibelsToLinearPeak, toFiniteNumber } from '../../utils/replayGain';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
 import {
@@ -987,8 +988,20 @@ const getKugouPlaylistTrackSongs = async (
         );
     }
 
-    kugouLikedTrackCache.set(globalCollectionId, { fetchedAt: Date.now(), songs });
-    return songs;
+    // 酷狗的歌单/我喜欢接口给的是**倒着**的：与官方客户端里从上往下看到的顺序相反
+    // （照 RemnantCloudGodofWar/folia-android 的修法）。拼完页整体翻一次，翻完的那个数组
+    // 才进缓存 —— 不然第一次翻了、第二次从缓存拿的又是不翻的。
+    const clientOrderSongs = songs.length > 1 ? songs.slice().reverse() : songs;
+    if (songs.length > 1) {
+        noteLibraryStep('kugou', 'playlist:client-order', {
+            collection: globalCollectionId,
+            tracks: songs.length,
+            transform: 'reversed',
+            source: 'liked-or-mutation',
+        });
+    }
+    kugouLikedTrackCache.set(globalCollectionId, { fetchedAt: Date.now(), songs: clientOrderSongs });
+    return clientOrderSongs;
 };
 
 const removeKugouPlaylistTrackCacheEntry = (globalCollectionId: string, hash: string): void => {
@@ -1318,7 +1331,19 @@ export const kugouProvider: OnlineMusicProvider = {
 
             const requestLimit = Math.min(Math.max(1, limit), KUGOU_MAX_PAGE_SIZE);
             const response = await requestKugou('playlist_track_all', { id: String(id), pagesize: requestLimit, page: Math.floor(offset / requestLimit) + 1 });
-            return pageOf(listOf(response).map(normalizeKugouSong), response, requestLimit, offset);
+            const tracks = listOf(response).map(normalizeKugouSong);
+            // 普通歌单同样是倒着给的（同上，照 folia-android 的修法）：先留着原始响应把变换
+            // 记进诊断，再翻成官方客户端里从上往下看到的那一串。
+            if (tracks.length > 1) {
+                noteLibraryStep('kugou', 'playlist:client-order', {
+                    collection: String(id),
+                    tracks: tracks.length,
+                    transform: 'reversed',
+                    offset,
+                });
+                tracks.reverse();
+            }
+            return pageOf(tracks, response, requestLimit, offset);
         },
         async getCloudTracks(limit, offset) {
             const requestLimit = Math.min(Math.max(1, limit), KUGOU_MAX_PAGE_SIZE);

@@ -1182,7 +1182,8 @@ describe('kugouProvider', () => {
 
         const ids = await kugouProvider.library?.getLikedSongIds?.('user');
 
-        expect(ids).toEqual(['ABC123', 'DEF456']);
+        // 接口是倒着给的（最后收藏的排在最前），provider 翻回官方客户端的顺序。
+        expect(ids).toEqual(['DEF456', 'ABC123']);
         expect(requestMock).toHaveBeenNthCalledWith(1, 'user_playlist', {
             userid: 'user', page: 1, pagesize: 100,
         });
@@ -1218,7 +1219,8 @@ describe('kugouProvider', () => {
         const ids = await kugouProvider.library?.getLikedSongIds?.('user');
 
         expect(ids).toHaveLength(101);
-        expect(ids?.at(-1)).toBe('PAGED-LAST');
+        // 同上：翻回官方客户端的顺序之后，最后一页那首排在最前。
+        expect(ids?.[0]).toBe('PAGED-LAST');
         expect(requestMock).toHaveBeenNthCalledWith(2, 'playlist_track_all', {
             id: 'collection_3_liked_test_paged', page: 1, pagesize: 100,
         });
