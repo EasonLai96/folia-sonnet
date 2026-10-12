@@ -71,6 +71,21 @@ public class LockScreenMusicActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        /*
+         * 解锁之后才起来的，立刻退场。
+         *
+         * 起这一页是**跨进程**的，而亮屏和解锁（指纹）几乎同时发生 —— 有时宿主报到得
+         * 比"该退场了"那条消息还晚，那一笔 finish 就落在"还没登记宿主"的空档里
+         * （WallpaperOverlay.finishLockScreenNow 找不到宿主，只能什么都不做）。
+         * 于是这一页留在桌面上，而且它**吃触摸** —— 用户报的正是
+         * 「指纹解锁进桌面后，有概率直接进那个歌词界面，操作不了手机」。
+         * 这里在挂任何窗口之前先自检一次，退掉是零副作用的。
+         */
+        if (top.izuna.foliamajor.wallpaper.WallpaperOverlay
+                .shared(this).lockScreenRecentlyUnlocked()) {
+            finish();
+            return;
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             // API 33 起子窗口不会自动继承：不设这一条，挂在它上面的叠层窗口

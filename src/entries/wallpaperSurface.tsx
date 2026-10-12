@@ -58,6 +58,22 @@ import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';
 import { useThemeSettingsStore } from '../stores/useThemeSettingsStore';
 import type { AudioBands, Line, Theme, VisualizerMode } from '../types';
+import { syncLyricFlatAttribute, useLyricFlatSettingsStore } from '../stores/useLyricFlatSettingsStore';
+
+/*
+ * 挂「歌词改为纯色扁平」这个开关。
+ *
+ * 叠层页面是**另一个 WebView / document**：扁平化认的是**本页** <html> 上的
+ * `data-lyric-flat` —— CSS 那一段在 index.css 里（本页引了同一份样式表），
+ * canvas 侧（glowBlurQuantize / dioramaTextRaster 等）则读 `utils/lyricFlat` 的
+ * `isLyricFlat()`，两边都只看这个属性。
+ *
+ * 而属性原本只在 store 模块被加载时同步一次，这个入口的依赖树里又没人用到它 ——
+ * 于是「扁平歌词」只能在主界面生效，叠层照旧发光 + 渐变染色。
+ * 这里挂一份，并在开关变化时跟着更新（幂等，和 store 内部那次重复也没关系）。
+ */
+syncLyricFlatAttribute(useLyricFlatSettingsStore.getState().flatLyrics);
+useLyricFlatSettingsStore.subscribe(state => syncLyricFlatAttribute(state.flatLyrics));
 
 // src/entries/wallpaperSurface.tsx
 // 动态壁纸里那层 WebView 的页面 —— 挂的就是播放页同一个 VisualizerRenderer。

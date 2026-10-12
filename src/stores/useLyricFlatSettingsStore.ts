@@ -24,7 +24,16 @@ export const useLyricFlatSettingsStore = create<LyricFlatSettingsState>((set) =>
     },
 }));
 
-const syncLyricFlatAttribute = (enabled: boolean): void => {
+/**
+ * 把开关写到本 document 的 `<html data-lyric-flat>` 上。
+ *
+ * 导出出来是因为**每个 document 都要自己挂一次**：叠层页面（wallpaper.html）、
+ * 遥控窗口都是独立的 WebView / BrowserWindow，各自有一份 <html>，
+ * 而 CSS 认的是自己那一份。只依赖"模块顶层执行时同步"的话，
+ * 只要那个窗口的组件树里没人用到这个 store，模块就不会被加载 ——
+ * 属性永远挂不上，用户看到的就是「扁平开关对那个窗口无效」。
+ */
+export const syncLyricFlatAttribute = (enabled: boolean): void => {
     if (typeof document === 'undefined' || !document.documentElement) return;
     if (enabled) {
         document.documentElement.setAttribute('data-lyric-flat', '1');

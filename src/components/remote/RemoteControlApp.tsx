@@ -16,6 +16,10 @@ import {
 } from '../../types/videoExport';
 import type { VideoExportPresetValues, VideoExportStartMode } from '../../types/videoExport';
 import { useRemoteCoverArt } from './useRemoteCoverArt';
+import {
+    syncLyricFlatAttribute,
+    useLyricFlatSettingsStore,
+} from '../../stores/useLyricFlatSettingsStore';
 import { useRemoteTrackHandoff } from './useRemoteTrackHandoff';
 import { useTranslation } from 'react-i18next';
 import {
@@ -136,6 +140,18 @@ const RemoteControlApp: React.FC = () => {
     const [windowPresentation, setWindowPresentation] = useState<RemoteWindowPresentation>(DEFAULT_REMOTE_WINDOW_PRESENTATION);
     const [hoverNavSide, setHoverNavSide] = useState<'prev' | 'next' | null>(null);
     const [showLyricsOverlay, setShowLyricsOverlay] = useState(false);
+    /*
+     * 扁平歌词的开关。
+     *
+     * 遥控窗口是**另一个 document**（BrowserWindow），用户在主窗口里拨的那个开关
+     * 写的是主窗口的 localStorage，而扁平那条 CSS 认的是**本页** <html> 上的
+     * `data-lyric-flat` —— 这个窗口必须先加载那个 store，属性才会挂上。
+     * 而本窗口的组件树里本来没有任何地方用到它，模块也就从没被加载过，
+     * 所以必须在这里显式订阅一次（见下面那个 effect）。
+     * 只加载还不够：歌词容器那边还要有 `[data-folia-lyric-surface]` 标记，
+     * 两半缺一不可（见 RemoteLyricOverlay）。
+     */
+    const flatLyrics = useLyricFlatSettingsStore(state => state.flatLyrics);
     const isDraggingRef = useRef(false);
     const lastSeekTimeRef = useRef(0);
     const exportPresets = useMemo(() => createVideoExportPresets(presetValues), [presetValues]);
@@ -172,6 +188,11 @@ const RemoteControlApp: React.FC = () => {
         document.body.style.overflow = 'visible';
         document.title = REMOTE_CONTROL_DOCUMENT_TITLE;
     }, []);
+
+    // 把扁平开关挂到本页的 <html> 上（遥控窗口是独立 document，要自己挂一份）。
+    useEffect(() => {
+        syncLyricFlatAttribute(flatLyrics);
+    }, [flatLyrics]);
 
     useEffect(() => {
         let mounted = true;
@@ -320,6 +341,17 @@ const RemoteControlApp: React.FC = () => {
 
     const baseColor = isDaylight ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.35)';
     const activeColor = isDaylight ? '#1c1917' : '#ffffff';
+    /*
+     * 歌词里「正在唱的那一句」的填充色。
+     *
+     * 以前直接复用 activeColor（深色下就是纯白），于是逐字推进看起来就是一条
+     * **白色进度条**，而唱完之后那一句归到"已唱"、反而带上颜色 ——
+     * 用户报的正是「正在放的那一句渐变进度是纯白的，放完它后面的又变成有颜色的」。
+     * 高亮色要的是这首歌的配色，而不是"文字和背景的对比色"：
+     * 优先用封面主色（和主窗口背景取的是同一路配色来源），
+     * 拿不到封面取色时再退回原来的黑白。
+     */
+    const lyricAccentColor = activeCoverColors[0] || activeColor;
 
     // Ghost icon buttons: no resting chip, background only on hover. The filled
     // play button stays the single anchor so the row reads as one primary action
@@ -916,7 +948,7 @@ const RemoteControlApp: React.FC = () => {
                                                             hasTrack={snapshot.hasTrack}
                                                             visible={showLyricsOverlay && activePanel === 'playback'}
                                                             baseColor={baseColor}
-                                                            activeColor={activeColor}
+                                                            activeColor={lyricAccentColor}
                                                         />
                                                     )}
                                                 </AnimatePresence>

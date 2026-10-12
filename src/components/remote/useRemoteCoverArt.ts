@@ -61,7 +61,15 @@ export const useRemoteCoverArt = ({
 
     // 换歌时先看预读缓存：命中就直接铺色，背景不用等取色算完再跳一次色
     useEffect(() => {
-        if (backgroundMode !== 'cover' || !coverUrl) {
+        /*
+         * 取色不再只服务背景。
+         *
+         * 歌词里「正在唱的那一句」的填充色也要用它（见 RemoteControlApp 的
+         * lyricAccentColor）—— 那是这个窗口唯一自给自足的配色来源。
+         * 继续按 `backgroundMode !== 'cover'` 早退的话，用户把背景切成「默认 / 透明」时
+         * 歌词就退回纯白，正是那条「渐变进度是纯白的」投诉的成因之一。
+         */
+        if (!coverUrl) {
             return;
         }
 
@@ -84,7 +92,7 @@ export const useRemoteCoverArt = ({
         });
 
         return () => { mounted = false; };
-    }, [coverUrl, trackKey, backgroundMode, rememberCoverColors]);
+    }, [coverUrl, trackKey, rememberCoverColors]);
 
     useEffect(() => {
         const neighbors = [

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { PlayerState, type Line, type LyricData } from '../../types';
 import { findLatestActiveLineIndex } from '../../utils/appPlaybackHelpers';
+import { useLyricFlatSettingsStore } from '../../stores/useLyricFlatSettingsStore';
 
 // src/components/remote/RemoteLyricOverlay.tsx
 // Renders remote-window lyrics while keeping continuous playback progress out of React state.
@@ -83,6 +84,15 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
     activeColor,
 }) => {
     const { t } = useTranslation();
+    /*
+     * 「歌词改为纯色扁平」开关。
+     *
+     * 这里**自己**读、自己渲染纯色，而不是只指望 index.css 里那条全局覆盖：
+     * 那条覆盖是给主界面十几种可视化渲染器准备的，它把渐变压掉之后填的是
+     * `var(--text-primary, currentColor)` —— 而遥控窗口拿不到主窗口那份动态主题变量，
+     * 填出来的颜色不一定读得清（扁平之后反而更糊）。整句纯色这件事这里本来就能直接做到。
+     */
+    const flatLyrics = useLyricFlatSettingsStore(state => state.flatLyrics);
     const [display, setDisplay] = useState<RemoteLyricDisplay>(() => resolveDisplay(lyrics, currentTime));
     const syncRef = useRef({ snapshotTime: currentTime, localTime: performance.now() });
     const displayRef = useRef(display);
@@ -124,6 +134,10 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
     }, []);
 
     const updateLineProgress = useCallback((time: number) => {
+        // 扁平模式整句就是一个纯色，没有"唱到哪个字"这回事。
+        if (flatLyrics) {
+            return;
+        }
         const line = displayRef.current.currentLine;
         if (!line) {
             return;
@@ -150,9 +164,12 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
                 : (time >= line.startTime ? 100 : 0);
             singleLineRef.current.style.backgroundImage = buildGradient(activeColor, baseColor, progress);
         }
-    }, [activeColor, baseColor]);
+    }, [activeColor, baseColor, flatLyrics]);
 
     const completeCurrentLineProgress = useCallback(() => {
+        if (flatLyrics) {
+            return;
+        }
         const line = displayRef.current.currentLine;
         if (!line) {
             return;
@@ -171,7 +188,7 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
         if (singleLineRef.current) {
             singleLineRef.current.style.backgroundImage = buildGradient(activeColor, baseColor, 100);
         }
-    }, [activeColor, baseColor]);
+    }, [activeColor, baseColor, flatLyrics]);
 
     const animateScroll = useCallback(() => {
         const container = containerRef.current;
@@ -309,6 +326,26 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
         return () => cancelAnimationFrame(frameId);
     }, [duration, lyrics, playerState, updateDisplay, updateLineProgress, updateScroll, visible]);
 
+    /*
+     * 文字的画法只有一处不同：
+     *  · 正常：背景裁到文字上，逐字把 activeColor 刷过去（updateLineProgress 负责推进）；
+     *  · 扁平：整句一个纯色。
+     * 扁平时刻意**不写** background-clip —— index.css 里那条全局覆盖只挑"设了它的元素"，
+     * 不写就轮不到它来插一脚，颜色完全由这里说了算（那条规则还会把颜色填成
+     * 遥控窗口拿不到的 var(--text-primary)，不如自己给）。
+     */
+    const textPaintStyle = (extra?: React.CSSProperties): React.CSSProperties => (
+        flatLyrics
+            ? { color: activeColor, display: 'inline-block', ...extra }
+            : {
+                backgroundImage: buildGradient(activeColor, baseColor, 0),
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                display: 'inline-block',
+                ...extra,
+            }
+    );
+
     return (
         <motion.div
             key="lyrics-view"
@@ -317,14 +354,39 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
             exit={{ opacity: 0, y: -5 }}
             transition={{ duration: 0.10 }}
             className="absolute inset-0 flex flex-col justify-center min-w-0"
+            /*
+             * 扁平歌词的作用域锚点（见 index.css 的
+             * `html[data-lyric-flat='1'] [data-folia-lyric-surface]` 段）。
+             *
+             * 遥控窗口是**另一个 document**：那条规则认的是**本页** <html> 上的
+             * `data-lyric-flat`，而它原本只在 store 模块被加载时挂一次 ——
+             * 这个窗口的组件树里没人用到那个 store，于是属性从没挂上、规则从没命中，
+             * 用户看到的就是「扁平开关对这个窗口无效」。
+             * 属性那一半由 RemoteControlApp 的订阅负责（它同时也保证模块被加载）。
+             *
+             * 文字本身的纯色**不靠**这条 CSS —— 组件自己按 flatLyrics 渲染（见
+             * textPaintStyle）：那条全局覆盖填充的是遥控窗口拿不到的
+             * `var(--text-primary)`，颜色不一定读得清。标记留着是让"去发光"那一半
+             * 也能作用到这一层。
+             */
+            data-folia-lyric-surface="1"
         >
-            <AnimatePresence mode="wait">
+            {/*
+             * 换句**不能**走 AnimatePresence 的 `mode="wait"`。
+             *
+             * 它的语义是"旧句退场动画播完才挂新句"，于是每一句之间都有一段
+             * 两边都不在的空白（0.15s 淡出 + 0.15s 淡入）。一首歌几十句，
+             * 用户看到的就是「歌词放着放着突然消失，然后又淡入出现」，
+             * 而且频繁到像是"有个定时器在重载"。
+             *
+             * 现在直接换 key 让 React 就地替换：旧句在同一帧被卸载、新句立刻挂上，
+             * 不存在两边都空的那一帧；新句只做一次很轻的淡入当作过渡。
+             */}
                 <motion.div
                     key={`line-${lineKey}`}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0.35, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ opacity: { duration: 0.15, ease: 'easeOut' }, y: { duration: 0.15, ease: 'easeOut' } }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
                     className="min-w-0"
                 >
                     <div
@@ -341,13 +403,7 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
                                                 wordRefs.current[index] = node;
                                             }
                                         }}
-                                        style={{
-                                            backgroundImage: buildGradient(activeColor, baseColor, 0),
-                                            WebkitBackgroundClip: 'text',
-                                            WebkitTextFillColor: 'transparent',
-                                            display: 'inline-block',
-                                            marginRight: '0.25em',
-                                        }}
+                                        style={textPaintStyle({ marginRight: '0.25em' })}
                                     >
                                         {word.text}
                                     </span>
@@ -355,12 +411,7 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
                             ) : (
                                 <span
                                     ref={singleLineRef}
-                                    style={{
-                                        backgroundImage: buildGradient(activeColor, baseColor, 0),
-                                        WebkitBackgroundClip: 'text',
-                                        WebkitTextFillColor: 'transparent',
-                                        display: 'inline-block',
-                                    }}
+                                    style={textPaintStyle()}
                                 >
                                     {currentLine.fullText}
                                 </span>
@@ -372,23 +423,17 @@ const RemoteLyricOverlay: React.FC<RemoteLyricOverlayProps> = ({
                         )}
                     </div>
                 </motion.div>
-            </AnimatePresence>
-            <AnimatePresence mode="wait">
+            {/* 下一句同理：`mode="wait"` 会让它跟当前句一样在换句的瞬间整块消失。 */}
                 <motion.div
                     key={`next-${nextLine?.startTime ?? 'none'}-${nextLine?.fullText ?? ''}`}
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0.35, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ 
-                        opacity: { duration: 0.15, ease: 'easeOut', delay: 0.08 }, 
-                        y: { duration: 0.15, ease: 'easeOut', delay: 0.08 } 
-                    }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
                     className="truncate text-[11px] font-medium leading-none mt-1.5"
                     style={{ color: baseColor }}
                 >
                     {nextLine?.fullText ?? ''}
                 </motion.div>
-            </AnimatePresence>
         </motion.div>
     );
 };

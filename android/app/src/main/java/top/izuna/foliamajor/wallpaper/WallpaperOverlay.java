@@ -186,6 +186,27 @@ public final class WallpaperOverlay {
      */
     private volatile boolean lockScreenDismissed = false;
 
+    /**
+     * 用户刚刚解锁的墙钟（ACTION_USER_PRESENT 那一刻）。0 = 还没解锁过。
+     *
+     * 为什么需要它：起锁屏页那一趟是**跨进程**的，而亮屏与解锁几乎同时发生 ——
+     * 有时 Activity 报到得比"该退场了"这条消息还晚，那一笔 finish 就落在宿主还没登记的
+     * 空档里（`finishLockScreenNow` 找不到宿主，只能什么都不做）。结果这一页留在桌面上，
+     * 而它**吃触摸** —— 用户报的正是「指纹解锁进桌面后，有概率直接进那个歌词界面，
+     * 操作不了手机」。有了这个时间戳，Activity 自己起来时就能判出"我是解锁之后才起来的"，
+     * 立刻退场（见 lockScreenRecentlyUnlocked）。
+     */
+    private volatile long lockScreenUnlockedAtMs = 0L;
+
+    /** 「刚解锁」的有效窗口。起页那一趟跨进程 + 首帧，超出这个量的就不是同一个事件了。 */
+    private static final long UNLOCK_GRACE_MS = 5000L;
+
+    /** 见 lockScreenUnlockedAtMs。给 LockScreenMusicActivity 起来时自检用。 */
+    public boolean lockScreenRecentlyUnlocked() {
+        return lockScreenUnlockedAtMs > 0L
+                && SystemClock.elapsedRealtime() - lockScreenUnlockedAtMs < UNLOCK_GRACE_MS;
+    }
+
     /** 见 lockScreenDismissed。由 LockScreenMusicActivity 在主动退场时调用。 */
     public void noteLockScreenDismissedByUser() {
         lockScreenDismissed = true;
@@ -330,6 +351,12 @@ public final class WallpaperOverlay {
          */
         if (lockScreenDismissed) return;
         if (lockScreenContentDone) return;
+        /*
+         * 刚刚解锁：这一趟多半是"解锁那一刻还在路上"的那次启动。
+         * 起出来只会盖在桌面上（而且它吃触摸），不如不起 —— 见 lockScreenUnlockedAtMs。
+         * 放在这里而不是只放在调用方：亮屏探测、巡检、锁屏探测三条路都汇到本方法。
+         */
+        if (lockScreenRecentlyUnlocked()) return;
         WallpaperLyricsState.Snapshot snapshot = WallpaperLyricsState.get();
         /*
          * 壁纸样式是「精简」时**根本不该起**锁屏页。
@@ -569,6 +596,17 @@ public final class WallpaperOverlay {
             final boolean done = contentDone;
             handler.postDelayed(() -> {
                 lockScreenFinishPending = false;
+                /*
+                 * 到点必须**重新问一次**该不该退。
+                 *
+                 * 排这次退场用的是"刚露面那一刻"的判读，而这一秒里可能已经亮屏、
+                 * 也可能又开始播放了 —— 理由早就过期。不复查的话，退场会准点落在
+                 * 亮屏之后：锁屏页刚画出来就被自己 finish 掉，用户看到的正是
+                 * 「先进一遍、啥也写不出就退出来、再进一遍才有」。
+                 */
+                if (wantShowStable()) {
+                    return;
+                }
                 finishLockScreenNow(done);
             }, LOCK_SCREEN_MIN_VISIBLE_MS - shownFor);
             return;
@@ -681,6 +719,11 @@ public final class WallpaperOverlay {
                 } else if (Intent.ACTION_USER_PRESENT.equals(action)) {
                     keyguardLocked = false;
                     screenOn = true;
+                    /*
+                     * 记下"刚刚解锁"：锁屏页有时会在解锁**之后**才报到（见
+                     * lockScreenUnlockedAtMs），这一笔记号是它自检退场的依据。
+                     */
+                    lockScreenUnlockedAtMs = SystemClock.elapsedRealtime();
                     // 解锁了：下次锁屏是全新的一轮，"用户关过"不再算数。
                     lockScreenDismissed = false;
                     // 解锁了：锁屏页该退场（它的 onDestroy 会把叠层摘下来，
@@ -1475,8 +1518,18 @@ public final class WallpaperOverlay {
         if (!overlayMasterEnabled()) {
             return false;
         }
-        // 息屏：这时候挂着纯属白耗电（页面还在跑 rAF），而且屏幕本来就看不见。
-        if (!screenOn) {
+        /*
+         * 息屏：这时候挂着纯属白耗电（页面还在跑 rAF），而且屏幕本来就看不见。
+         *
+         * 例外：**锁屏页已经挂着**时不算"不该显示"。
+         * 那一页本来就是为"亮屏那一刻"准备的：息屏期间它空跑，但宿主必须活着 ——
+         * 按这条判 false 会连锁触发 watchTask 里的 finishLockScreen，把锁屏页在
+         * 息屏期间就杀掉；亮屏时只能重起一份，于是用户看到
+         * 「先进一遍（空的）→ 退出来 → 再进一遍才显示」。
+         * 真正的省电交给 watchTask 里那句 `if (added && !screenOn) detach()`（摘窗口），
+         * 不需要连宿主一起结束。
+         */
+        if (!screenOn && lockScreenHost == null) {
             return false;
         }
         WallpaperLyricsState.Snapshot snapshot = WallpaperLyricsState.get();
