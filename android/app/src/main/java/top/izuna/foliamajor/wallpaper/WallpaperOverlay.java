@@ -1348,7 +1348,20 @@ public final class WallpaperOverlay {
                         // 窗口外的事件一律交给后面的窗口，不参与"是否模态"的判定。
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        /*
+                         * 硬件加速：这一位必须**显式给**。
+                         *
+                         * Activity 的窗口默认就带硬件加速，但经 WindowManager.addView 挂上去的窗口
+                         * 不带 —— 不带就是软件合成，而这一层里是 WebView（整页可视化器 +
+                         * 逐字推进的歌词）。软件合成下 WebView 的 GPU 合成器用不了，
+                         * 每帧都要靠 CPU 光栅化再回读，着色器那条路还可能直接拿不到 webgl2
+                         * 上下文、退回每帧重写 mask-image 渐变的 DOM 版。
+                         *
+                         * 实测症状就是「CPU 占满、GPU 只动一点点」，尤其桌面上挂着叠层听歌的时候
+                         * （桌面停留时间远长于应用前台）。加上这一位之后合成走 GPU，CPU 立刻下来。
+                         */
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT);
         if (hosted) {
             params.token = lockScreenHost.getWindow().getDecorView().getWindowToken();

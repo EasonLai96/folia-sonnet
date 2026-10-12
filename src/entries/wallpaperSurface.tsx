@@ -16,6 +16,7 @@ import '../index.css';
 import VisualizerRenderer from '../components/visualizer/VisualizerRenderer';
 import { collectVisualizerTunings } from '../components/visualizer/tuningRegistry';
 import { NO_LYRIC_LINES } from '../utils/lyrics/noLyricLines';
+import { installGlobalVisualizerFrameRateLimiter } from '../utils/frameRateLimiter';
 
 /*
  * 把整页底色压回透明。
@@ -39,6 +40,19 @@ const forceTransparentBackdrop = () => {
 };
 
 forceTransparentBackdrop();
+
+/*
+ * 让「可视化器帧率」这个设置也管到壁纸/叠层这一页。
+ *
+ * 全局限帧装在 index.tsx 那个入口上，而壁纸页是另一个入口（wallpaper.html），不经过 index.tsx
+ * —— 于是桌面上那层叠层一直按屏幕刷新率画（60/90/120Hz），用户在设置里选的 60fps 对它完全无效。
+ * 桌面停留时间远长于前台，这一条省下来的正好是最大的一块。
+ *
+ * 只装限帧，**不装** backgroundRenderGate：那道闸门是「应用退到后台就一帧不画」，
+ * 而叠层恰恰要在应用后台时照常画（它画在桌面上，应用在前台还是后台和它无关）。
+ * 挂上去就会让桌面歌词在退到后台的瞬间冻住 —— 恰恰把它存在的意义取消了。
+ */
+installGlobalVisualizerFrameRateLimiter();
 import { buildBuiltinDualTheme } from '../hooks/themeControllerState';
 import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';
