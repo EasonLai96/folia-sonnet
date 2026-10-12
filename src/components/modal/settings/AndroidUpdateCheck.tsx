@@ -4,14 +4,9 @@ import { useTranslation } from 'react-i18next';
 import {
   APP_UPDATE_RELEASES_PAGE,
   checkForAppUpdate,
-  downloadUpdateApk,
-  installUpdateApk,
   type AppUpdateCheckResult,
 } from '../../../services/appUpdate';
-import {
-  watchUpdateDownloadProgress,
-  type FoliaNativeListenerHandle,
-} from '../../../platform/foliaNative';
+import { useUpdateDownloader } from '../../../hooks/useUpdateDownloader';
 import { openExternalUrl } from '../../../utils/openExternalUrl';
 
 // src/components/modal/settings/AndroidUpdateCheck.tsx
@@ -30,12 +25,8 @@ import { openExternalUrl } from '../../../utils/openExternalUrl';
 //
 // 挂载点：设置的帮助页底部版本区（桌面端的更新提示也在那里）。
 
-/** 下载阶段。idle 之外都是「这次检查出来的那个版本」的下载状态。 */
-type DownloadPhase =
-    | { kind: 'idle' }
-    | { kind: 'downloading'; receivedBytes: number; totalBytes: number; percent: number }
-    | { kind: 'downloaded'; path: string }
-    | { kind: 'failed'; message: string };
+// 下载状态机（idle → downloading → downloaded / failed）在 hooks/useUpdateDownloader.ts，
+// 启动时的自动提示也用它。
 
 /** 把字节数写成人话，安装包尺寸没必要精确到个位。 */
 const formatSize = (bytes: number): string => (
@@ -67,57 +58,20 @@ const AndroidUpdateCheck: React.FC = () => {
     const { t } = useTranslation();
     const [result, setResult] = useState<AppUpdateCheckResult | null>(null);
     const [isChecking, setIsChecking] = useState(false);
-    const [phase, setPhase] = useState<DownloadPhase>({ kind: 'idle' });
-    const [installNotice, setInstallNotice] = useState<'none' | 'permission-required'>('none');
+    const { state: phase, installNotice, startDownload, install, reset } = useUpdateDownloader();
     // 关掉面板时把在飞的请求掐掉：检查更新是个 12 秒超时的网络请求，
     // 组件已经卸载还往回 setState 会白跑一趟。
     const abortRef = useRef<AbortController | null>(null);
-    const progressListenerRef = useRef<FoliaNativeListenerHandle | null>(null);
 
     useEffect(() => () => abortRef.current?.abort(), []);
-
-    /**
-     * 进度监听挂在整个组件生命周期上，而不是只在下载那一段 —— 监听器是异步装好的，
-     * 点下下载之后再挂就漏掉了头几帧（进度条会从中间开始跳）。
-     *
-     * 只在 downloading 阶段收：下载完成之后原生那边可能还会再补一帧进度，
-     * 那帧带的是旧的字节数，会把「下载完成」冲掉。
-     */
-    useEffect(() => {
-        let disposed = false;
-        void watchUpdateDownloadProgress((progress) => {
-            if (disposed) return;
-            setPhase((current) => (
-                current.kind === 'downloading'
-                    ? {
-                        kind: 'downloading',
-                        receivedBytes: progress.receivedBytes,
-                        totalBytes: progress.totalBytes,
-                        percent: progress.percent,
-                    }
-                    : current
-            ));
-        }).then((listener) => {
-            if (disposed) {
-                void listener.remove();
-                return;
-            }
-            progressListenerRef.current = listener;
-        }).catch(() => {
-            // 桌面端 / 插件不可用：进度条退化成「下载中」，下载仍走系统浏览器兜底。
-        });
-        return () => {
-            disposed = true;
-            void progressListenerRef.current?.remove();
-            progressListenerRef.current = null;
-        };
-    }, []);
 
     const handleCheck = useCallback(async () => {
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
         setIsChecking(true);
+        // 重新检查就把上一次的下载结果清掉：版本已经变了，上次的"下载完成"不该继续指向旧包。
+        reset();
         try {
             const next = await checkForAppUpdate(controller.signal);
             if (!controller.signal.aborted) setResult(next);
@@ -126,7 +80,7 @@ const AndroidUpdateCheck: React.FC = () => {
         } finally {
             if (!controller.signal.aborted) setIsChecking(false);
         }
-    }, []);
+    }, [reset]);
 
     const handleOpen = useCallback((url: string) => {
         void openExternalUrl(url).catch(() => {
@@ -138,26 +92,12 @@ const AndroidUpdateCheck: React.FC = () => {
         const release = result && result.status !== 'failed' ? result.release : null;
         const apk = release?.apk;
         if (!apk || !release) return;
-        setInstallNotice('none');
-        setPhase({ kind: 'downloading', receivedBytes: 0, totalBytes: apk.sizeBytes, percent: 0 });
-        try {
-            const outcome = await downloadUpdateApk(apk.downloadUrl, release.version);
-            setPhase({ kind: 'downloaded', path: outcome.path });
-        } catch (error) {
-            setPhase({ kind: 'failed', message: error instanceof Error ? error.message : 'download-failed' });
-        }
-    }, [result]);
+        void startDownload({ downloadUrl: apk.downloadUrl, version: release.version, sizeBytes: apk.sizeBytes });
+    }, [result, startDownload]);
 
     const handleInstall = useCallback(async () => {
-        if (phase.kind !== 'downloaded') return;
-        try {
-            const outcome = await installUpdateApk(phase.path);
-            // 没授权时原生已经把设置页拉起来了，界面要把「授权后回来再点一次」说清楚。
-            setInstallNotice(outcome.status === 'permission-required' ? 'permission-required' : 'none');
-        } catch (error) {
-            setPhase({ kind: 'failed', message: error instanceof Error ? error.message : 'download-failed' });
-        }
-    }, [phase]);
+        void install();
+    }, [install]);
 
     const isAvailable = result?.status === 'update-available';
     const release = result && result.status !== 'failed' ? result.release : null;

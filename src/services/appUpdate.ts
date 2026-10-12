@@ -2,6 +2,8 @@ import { fetchJsonWithRetry } from '../utils/fetchWithTimeout';
 import {
   downloadUpdate,
   installUpdate,
+  isNativeHttpAvailable,
+  nativeGetText,
   watchUpdateDownloadProgress,
   type UpdateDownloadProgress,
 } from '../platform/foliaNative';
@@ -250,6 +252,33 @@ const describeFetchFailure = (error: unknown): string => {
 };
 
 /**
+ * 取一次版本清单。
+ *
+ * 安卓上优先走原生 OkHttp 桥：自建 CDN（cdn.tangbot.xyz）不回 `Access-Control-Allow-Origin`，
+ * WebView 里的 fetch 会被同源策略直接拦掉，表现就是「一直检查失败」。原生侧没有这个限制。
+ * 桥也没拿到时再退回全局 fetch，好让失败原因是真实的 HTTP 状态而不是一句「桥不可用」。
+ */
+const fetchUpdateManifest = async (signal?: AbortSignal): Promise<UpdateManifestPayload> => {
+  if (isNativeHttpAvailable()) {
+    try {
+      const text = await nativeGetText(APP_UPDATE_MANIFEST_URL, REQUEST_TIMEOUT_MS);
+      return JSON.parse(text) as UpdateManifestPayload;
+    } catch {
+      // 落到下面的 fetch。
+    }
+  }
+  return fetchJsonWithRetry<UpdateManifestPayload>(
+    APP_UPDATE_MANIFEST_URL,
+    {
+      signal,
+      // CDN 上可能留着上一版清单，带 no-store 拿最新的；缓存由 CDN 自己在边缘管。
+      cache: 'no-store',
+    },
+    { timeoutMs: REQUEST_TIMEOUT_MS },
+  );
+};
+
+/**
  * 检查更新。
  *
  * 拉一次 update.json，比版本号。清单里少字段不报错（version 与 download_url 之外的都是
@@ -260,15 +289,7 @@ const describeFetchFailure = (error: unknown): string => {
 export const checkForAppUpdate = async (signal?: AbortSignal): Promise<AppUpdateCheckResult> => {
   const currentVersion = getCurrentAppVersion();
   try {
-    const payload = await fetchJsonWithRetry<UpdateManifestPayload>(
-      APP_UPDATE_MANIFEST_URL,
-      {
-        signal,
-        // CDN 上可能留着上一版清单，带 no-store 拿最新的；缓存由 CDN 自己在边缘管。
-        cache: 'no-store',
-      },
-      { timeoutMs: REQUEST_TIMEOUT_MS },
-    );
+    const payload = await fetchUpdateManifest(signal);
 
     const release = toReleaseInfo(payload ?? {});
     if (!release) {
