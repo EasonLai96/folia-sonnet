@@ -320,6 +320,18 @@ export const dedupePickedTracks = (tracks: NativeAudioTrack[]): NativeAudioTrack
  * 选中的文件由原生侧复制进 App 私有目录，之后通过本机回环地址流式播放，
  * 所以不依赖 MediaStore 是否收录过这些文件，也不需要整盘存储权限。
  */
+export type ImportedTracksResult = {
+    /** 这次真的新写进本机曲库的（库里原本没有）。 */
+    fresh: LocalSong[];
+    /**
+     * 这批曲目在曲库里的最终记录：新增的就是新记录，库里已有的用**已有那条**。
+     *
+     * 外部打开那条路要拿它去加歌单 —— 用户再打开一次同一个文件时，曲库里已经有了，
+     * 可「加到歌单」这件事还得照做，否则表现就是「提示已经在曲库里了，但歌单里没有」。
+     */
+    resolved: LocalSong[];
+};
+
 /**
  * 一批原生已经拷好的音频 → 本机曲库里的记录，并落库。
  *
@@ -327,7 +339,7 @@ export const dedupePickedTracks = (tracks: NativeAudioTrack[]): NativeAudioTrack
  * 两条路从原生拿到的都是同一套 { id, fileName, fileSize, mimeType, url }，
  * 所以读内嵌元数据、与库里已有音频去重、写库这些后处理只写一份。
  */
-const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<LocalSong[]> => {
+const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<ImportedTracksResult> => {
     const now = Date.now();
     const songs: LocalSong[] = [];
 
@@ -383,18 +395,34 @@ const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<
     }
 
     // 第二道兜底：库里已经有了的同一份音频不再加一条（见 pickedContentKey）。
+    // 查重的同时把「库里已有的那条」也记下来：不重复加，但该加的歌单还得加。
     const existingSongs = songs.length > 0 ? await getLocalSongs() : [];
-    const existingRefs = new Set(existingSongs.map(song => song.nativeAudioRef).filter(Boolean));
-    const existingContent = new Set(
-        existingSongs
-            .map(song => pickedContentKey(song.fileName, song.fileSize))
-            .filter((key): key is string => key !== null),
-    );
-    const freshSongs = songs.filter(song => {
-        if (song.nativeAudioRef && existingRefs.has(song.nativeAudioRef)) return false;
+    const existingByRef = new Map<string, LocalSong>();
+    const existingByContent = new Map<string, LocalSong>();
+    existingSongs.forEach(song => {
+        if (song.nativeAudioRef && !existingByRef.has(song.nativeAudioRef)) {
+            existingByRef.set(song.nativeAudioRef, song);
+        }
         const contentKey = pickedContentKey(song.fileName, song.fileSize);
-        return !(contentKey && existingContent.has(contentKey));
+        if (contentKey && !existingByContent.has(contentKey)) {
+            existingByContent.set(contentKey, song);
+        }
     });
+
+    const freshSongs: LocalSong[] = [];
+    const resolvedSongs: LocalSong[] = [];
+    songs.forEach(song => {
+        const contentKey = pickedContentKey(song.fileName, song.fileSize);
+        const already = (song.nativeAudioRef ? existingByRef.get(song.nativeAudioRef) : undefined)
+            ?? (contentKey ? existingByContent.get(contentKey) : undefined);
+        if (already) {
+            resolvedSongs.push(already);
+            return;
+        }
+        freshSongs.push(song);
+        resolvedSongs.push(song);
+    });
+
     if (freshSongs.length !== songs.length) {
         noteLibraryStep('local', 'pick:already-in-library', {
             picked: songs.length,
@@ -406,7 +434,7 @@ const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<
         await saveLocalSongs(freshSongs);
         noteLibraryStep('local', 'pick:saved', { songs: freshSongs.length });
     }
-    return freshSongs;
+    return { fresh: freshSongs, resolved: resolvedSongs };
 };
 
 export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
@@ -458,7 +486,7 @@ export const pickAndroidLocalMusic = async (): Promise<LocalSong[]> => {
         });
     }
 
-    const songs = await buildAndStoreImportedTracks(tracks);
+    const { fresh: songs } = await buildAndStoreImportedTracks(tracks);
     if (tracks.length > 0 && songs.length === 0) {
         // 挑到了、但库里全都有：这不是失败，别去抛下面那个「一个都没进来」。
         return [];
@@ -547,11 +575,16 @@ export const subscribeExternalAudio = (
     };
 };
 
-/** 用户点头之后：这批拷好的音频正式进本机曲库，返回新加进去的那些（库里已有的不再重复加）。 */
-export const importExternalAudioTracks = async (tracks: NativeAudioTrack[]): Promise<LocalSong[]> => {
+/**
+ * 用户点头之后：这批拷好的音频正式进本机曲库。
+ *
+ * 返回 fresh（这次新写进去的）与 resolved（这批曲目在曲库里的记录，含原本就有的）。
+ * 加歌单要用 resolved：用户第二次打开同一个文件时 fresh 是空的，但「加进歌单」照样得做。
+ */
+export const importExternalAudioTracks = async (tracks: NativeAudioTrack[]): Promise<ImportedTracksResult> => {
     const unique = dedupePickedTracks(tracks);
     noteLibraryStep('local', 'external:import', { tracks: unique.length });
-    if (unique.length === 0) return [];
+    if (unique.length === 0) return { fresh: [], resolved: [] };
     return await buildAndStoreImportedTracks(unique);
 };
 

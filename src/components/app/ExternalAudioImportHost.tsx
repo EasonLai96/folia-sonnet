@@ -15,7 +15,7 @@ import {
     takeExternalAudioTracks,
     type ExternalAudioPayload,
 } from '../../services/nativeLocalMusic';
-import type { LocalPlaylist, LocalSong } from '../../types';
+import type { LocalPlaylist } from '../../types';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import PlaylistSelectionDialog from '../shared/PlaylistSelectionDialog';
 import TextInputDialog from '../shared/TextInputDialog';
@@ -100,9 +100,13 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
         busyRef.current = true;
         settledRef.current = true;
         try {
-            const imported: LocalSong[] = await importExternalAudioTracks(pending);
-            const added = imported.length;
-            if (added === 0) {
+            const result = await importExternalAudioTracks(pending);
+            // 加歌单要用 resolved，不是 fresh：同一个文件再打开一次时它已经在曲库里了
+            // （fresh 为空），可「加进这个歌单」这件事还得照做 —— 否则表现就是
+            // 「提示已经在曲库里了，歌单里却一首都没有」。
+            const imported = result.resolved;
+            const added = result.fresh.length;
+            if (imported.length === 0) {
                 setStatusMessage({
                     type: 'success',
                     text: t('localMusic.externalAlreadyInLibrary'),
@@ -125,8 +129,12 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
             setStatusMessage({
                 type: 'success',
                 text: targetName
-                    ? t('localMusic.externalImportedToPlaylist', { count: added, name: targetName })
-                    : t('localMusic.externalImported', { count: added }),
+                    ? (added > 0
+                        ? t('localMusic.externalImportedToPlaylist', { count: added, name: targetName })
+                        : t('localMusic.externalAlreadyAddedToPlaylist', { count: imported.length, name: targetName }))
+                    : (added > 0
+                        ? t('localMusic.externalImported', { count: added })
+                        : t('localMusic.externalAlreadyInLibrary')),
                 nonce: Date.now(),
             });
             reset();

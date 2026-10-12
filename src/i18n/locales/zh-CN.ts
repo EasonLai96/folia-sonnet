@@ -3476,6 +3476,7 @@ export default {
     "externalImported_one": "已导入 {{count}} 首",
     "externalImported_other": "已导入 {{count}} 首",
     "externalImportedToPlaylist": "已导入 {{count}} 首到「{{name}}」",
+    "externalAlreadyAddedToPlaylist": "这 {{count}} 首本来就在本机曲库里，已加到「{{name}}」",
     "externalImportFailed": "导入失败：{{message}}",
     "externalAlreadyInLibrary": "这些音频已经在本机曲库里了。",
     "editPlaylist": "编辑歌单",

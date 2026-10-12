@@ -3362,6 +3362,7 @@ export default {
     "externalImported_one": "{{count}} lagu diimpor",
     "externalImported_other": "{{count}} lagu diimpor",
     "externalImportedToPlaylist": "{{count}} lagu diimpor ke \"{{name}}\"",
+    "externalAlreadyAddedToPlaylist": "Sudah ada di pustaka — {{count}} lagu ditambahkan ke \"{{name}}\"",
     "externalImportFailed": "Impor gagal: {{message}}",
     "externalAlreadyInLibrary": "Lagu-lagu ini sudah ada di pustaka lokal.",
     "editPlaylist": "Edit Playlist",

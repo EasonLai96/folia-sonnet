@@ -3477,6 +3477,7 @@ export default {
     "externalImported_one": "Imported {{count}} track",
     "externalImported_other": "Imported {{count}} tracks",
     "externalImportedToPlaylist": "Imported {{count}} tracks into \"{{name}}\"",
+    "externalAlreadyAddedToPlaylist": "Already in your library — added {{count}} to \"{{name}}\"",
     "externalImportFailed": "Import failed: {{message}}",
     "externalAlreadyInLibrary": "These tracks are already in your local library.",
     "editPlaylist": "Edit Playlist",
