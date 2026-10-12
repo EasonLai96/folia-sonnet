@@ -30,15 +30,28 @@ export const usePlayerBottomBarBottomPx = (
 const SIDE_PANEL_BASE_BOTTOM_PX = { wide: 24, narrow: 112 } as const;
 
 /**
+ * 「能贴到 24px 那条线」的条件：又宽又高。
+ *
+ * 原来的判断只有 `min-width: 640px`，可 640 只说明横向够宽，不说明纵向够高。手机横过来正好
+ * 满足这一条 —— 屏矮、胶囊又几乎占满宽度、还居中，于是胶囊管到了左边这块面板的下缘：面板的
+ * 底部按钮被胶囊挡住，点击也落在那条全宽的命中区上。宽而高（桌面那种窗口）才不会撞，所以
+ * 条件里必须带上高度。
+ */
+const SIDE_PANEL_HUGS_BOTTOM_QUERY = '(min-width: 640px) and (min-height: 561px)';
+
+/**
  * 左右两侧切入面板共用的底距。
  *
  * GridView / GridMap / ArtistGrid / SidePanelList 原本各写一遍 `bottom-28 sm:bottom-6`，
  * 断点值散在四个文件里就会各自漂移，所以收在这里。
+ *
+ * 窄屏与矮屏一律抬到胶囊之上（112 = 基线 32 + 净空 80，和字幕/气泡同一条线）；只有又宽又高的
+ * 窗口才回到贴底那条线。仍然走 usePlayerBottomBarBottomPx，所以用户把基线抬高时它跟着一起走。
  */
 export const useSidePanelBottomPx = (): MotionValue<number> => {
-    const isWideLayout = useMediaQuery('(min-width: 640px)');
+    const canHugBottom = useMediaQuery(SIDE_PANEL_HUGS_BOTTOM_QUERY);
     return usePlayerBottomBarBottomPx(
-        isWideLayout ? SIDE_PANEL_BASE_BOTTOM_PX.wide : SIDE_PANEL_BASE_BOTTOM_PX.narrow,
+        canHugBottom ? SIDE_PANEL_BASE_BOTTOM_PX.wide : SIDE_PANEL_BASE_BOTTOM_PX.narrow,
     );
 };
 

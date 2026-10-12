@@ -1140,6 +1140,7 @@ export const GridMap: React.FC<GridMapProps> = ({
                                     <p className="mt-1.5 text-[10px] opacity-40">{t('home.playlists')}</p>
                                 </div>
                                 <div
+                                    data-folia-cut-in-actions="true"
                                     className="mt-auto space-y-2 border-t pt-4"
                                     style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}
                                 >

@@ -1798,6 +1798,8 @@ export const GridView: React.FC<GridViewProps> = ({
                                 // 这一排里有重扫、整理 tag 和删除，删除是不可逆的 ——
                                 // 思索把整块认成一个目标，指着哪一颗都讲得到。
                                 data-ponder={isLocalCollection ? 'local-folder-actions' : 'online-collection-actions'}
+                                // 手机横屏那档要把这排的间距/内边距/字号一起收一档（见 androidPhoneFit.css）。
+                                data-folia-cut-in-actions="true"
                                 className="space-y-2 mt-4 pt-4 border-t shrink-0"
                                 style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}
                             >

@@ -70,7 +70,11 @@ export const ArtistGridInfoCutInPanel = ({
                     </div>
 
                     {entityId && onEditEntity && (
-                        <div className="mt-4 border-t pt-4" style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}>
+                        <div
+                            data-folia-cut-in-actions="true"
+                            className="mt-4 border-t pt-4"
+                            style={{ borderTopColor: 'color-mix(in srgb, var(--text-primary) 12%, transparent)' }}
+                        >
                             <button
                                 type="button"
                                 onClick={() => onEditEntity(entityId)}

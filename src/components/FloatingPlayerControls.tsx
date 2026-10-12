@@ -449,9 +449,14 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                 transition={{ duration: 0.26, ease: 'easeOut' }}
                 style={{ pointerEvents: isHidden ? 'none' : 'auto' }}
                 onClick={(e) => e.stopPropagation()}
+                // 手机横屏那档要把这一层和下面那个全宽命中盒一起交回 pass-through：
+                // 悬停展开在触屏上没有意义，可铺满下缘的命中区会把别的贴底控件一起吃掉
+                // （侧切入面板的最低一排按钮就是这么点不到的）。
+                data-folia-player-bar-hitbox-host="true"
             >
                 <div
                     ref={hitboxRef}
+                    data-folia-player-bar-hitbox="true"
                     className="pointer-events-auto w-full flex justify-center"
                     onPointerEnter={handlePointerEnter}
                     onPointerLeave={handlePointerLeave}

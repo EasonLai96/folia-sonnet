@@ -576,28 +576,82 @@ html[data-folia-ui-scale='compact'] {
  * ② 歌单选择弹窗的列表写死 `max-h-[320px]`，同理把「新建歌单」顶出屏幕；弹窗本身也没有高度上限，
  *    内容一高就上下同时溢出视口。
  * ③ 右下角那排墙面工具（.lattice-tools）的 px 在 WallToolsButton.css 的 max-height 档里压过。
+ * ④ 面板底缘还整条压在播放条的命中区上：面板在 z-10 的首页层内、播放条在 z-60，
+ *    z-index 翻不过去。一边由底距让路（useSidePanelBottomPx 加了高度条件），
+ *    一边把那条只在鼠标下才有意义的全宽命中区在紧凑档交回 pass-through（见本段末 ④）。
  *
  * 只加 data 属性、不依赖 Tailwind 类名 —— 类名一改选择器就静默失效，这种 bug 最难查。
  * 每条都用 vh 起头再跟一行 dvh：老 WebView 不认 dvh 时前面那行仍然生效。 */
 
-/* ① 侧切入面板：把 top-24 那 96px 还给内容，封面从正方形压成一条 76px 的横幅。 */
+/* ① 侧切入面板：把 top-24 那 96px 还给内容，封面从正方形压成一条 64px 的横幅。
+ *
+ * 这里要同时解决两件事，少一件按钮就还是点不到：
+ *
+ *   a) 竖向空间不够 —— 面板内容（封面 + 信息 + 按钮排）本来就比矮屏高，里面那层
+ *      `flex-1 min-h-0 overflow-y-auto` 一被压就变成 0 高，内容区不滚、面板也不滚。
+ *      所以紧凑档下让**面板自己当唯一的滚动容器**：内容区交回正常流（flex: none + overflow: visible），
+ *      封面 → 标题 → 按钮按阅读顺序排，一次滚动到底。
+ *
+ *   b) 胶囊压在按钮上 —— 侧面板的底距原来只看宽度断点（`sm` 命中就贴 24px），而手机横屏既宽又矮：
+ *      胶囊几乎占满宽度、还居中，它下面那条补了 padding 的全宽命中区正好盖住面板下缘。
+ *      面板还压在 z-10 的首页层里，而播放条在 z-60，CSS 再怎么写都翻不过去 ——
+ *      只能由底距让路。这条已经在 useSidePanelBottomPx 里按高度收紧了，样式这边不必再管。
+ *
+ * 只加 data 属性、不依赖 Tailwind 类名 —— 类名一改选择器就静默失效，这种 bug 最难查。
+ * 每条都用 vh 起头再跟一行 dvh：老 WebView 不认 dvh 时前面那行仍然生效。 */
+
+/* ① 侧切入面板 */
 html[data-folia-ui-scale='compact'] [data-folia-cut-in-panel='true'] {
   top: 10px;
   left: 10px;
   width: min(320px, 46vw);
   padding: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 html[data-folia-ui-scale='compact'] [data-folia-cut-in-cover='true'] {
-  height: 76px;
+  height: 64px;
   aspect-ratio: auto;
   margin-bottom: 10px;
 }
 
-/* 封面压扁后内容区本来就该拿到剩下的高度，这里再兜一个下限：
-   真被别的固定高子项挤到 0，按钮还是点不到。 */
+/* 内容区不再自己滚，交回面板那一层。 */
 html[data-folia-ui-scale='compact'] [data-folia-cut-in-scroll='true'] {
-  min-height: 132px;
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* 按钮区：间距、内边距、字号各收一档，让「播放全部」这类主操作不用滚就露出来。
+ * `space-y-2` 与 `pt-4` 一律覆盖：靠工具类名选元素会在类名改动后静默失效。
+ * 上面的 margin-top 不动 —— GridMap 那块靠 `mt-auto` 顶到面板底部，覆盖掉就失去意义了。 */
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] {
+  flex: none;
+  padding-top: 8px;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] > * {
+  margin-top: 4px !important;
+  margin-bottom: 0 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] > *:first-child {
+  margin-top: 0 !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] button {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  gap: 5px;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-actions='true'] button svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* ② 歌单选择弹窗：面板定高、标题钉住，只有内容区滚。 */
@@ -659,4 +713,27 @@ html[data-folia-ui-scale='compact'] .lattice-tools {
   --wall-tools-panel-width: min(260px, calc(100vw - 24px));
   --wall-tools-top-reserve: 20px;
   --wall-tools-panel-chrome: 190px;
+}
+
+/* ④ 播放条那条「悬停展开」用的全宽命中区，在手机横屏下必须交回 pass-through。
+ *
+ * 它存在的意义是鼠标：指针落到屏幕下缘任意一点就把胶囊展开。为此它铺满整个定位层宽度
+ * （`w-full`），还往下补了 32px padding 一直贴到底边。触屏没有悬停，这条带走不了任何好处，
+ * 却把下缘整条变成了播放条的地盘 —— 侧切入面板、右下角工具面板贴在那里的按钮，
+ * 点击要么落在这块空盒子上（什么也不发生），要么落进胶囊自己的点击语义里。
+ *
+ * 面板本身在 z-10 的首页层里、播放条在 z-60，z-index 翻不过去，所以只能让命中区让路：
+ * 定位层与命中盒都设成 none，只有可见的胶囊（含它里面的按钮）收回 auto。
+ * 悬停展开不受影响 —— 指针进到胶囊里时，React 仍然会按事件路径给命中盒派发 enter。 */
+html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox-host='true'] {
+  pointer-events: none !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox='true'],
+html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox='true'] > * {
+  pointer-events: none;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox-host='true'] [data-ponder='player-bar'] {
+  pointer-events: auto;
 }
