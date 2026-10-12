@@ -132,8 +132,16 @@ export const resolveDeviceType = (deviceType: DeviceType | null): DeviceType => 
 );
 
 /**
- * 把设备类型与「要不要缩」写到 `<html>`：样式全在 androidPhoneFit.css 里读这两个属性，
+ * 把设备类型与「要不要缩」写到 `<html>`：样式全在 androidPhoneFit.css 里读这几个属性，
  * 组件不需要知道自己是跑在手机还是平板上。
+ *
+ * 两个属性是分开的，别合并：
+ * · `data-folia-device` 记的是**用户的选择** —— 没选过就是 `auto`；
+ * · `data-folia-device-resolved` 记的是**实际生效的类型** —— `auto` 会先推断再落到这里。
+ *
+ * 缩一档（92%）的样式挂在 resolved 上：这样没答过引导、但机器本来就是手机的人
+ * 竖屏也能缩 —— 他们恰恰是最需要它的一批。挂在 device 上的话，这批人竖屏不缩、
+ * 横屏却缩，同一个界面转一下屏尺度就跳一档。
  */
 export const applyDeviceProfile = (deviceType: DeviceType | null): void => {
     if (typeof document === 'undefined') return;
@@ -141,6 +149,7 @@ export const applyDeviceProfile = (deviceType: DeviceType | null): void => {
     // 没选过也照样生效：那批人恰恰是最需要它的（引导没答、或者答完又清了）。
     const resolved = resolveDeviceType(deviceType);
     root.setAttribute('data-folia-device', deviceType ?? 'auto');
+    root.setAttribute('data-folia-device-resolved', resolved);
     // 平板横屏本来就够宽，只有手机才需要让路。
     root.setAttribute('data-folia-ui-scale', resolved === 'phone' && isLandscapeNow() ? 'compact' : 'normal');
 };
