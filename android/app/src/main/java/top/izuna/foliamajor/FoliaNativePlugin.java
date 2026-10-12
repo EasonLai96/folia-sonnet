@@ -30,6 +30,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -199,11 +201,23 @@ public class FoliaNativePlugin extends Plugin {
         importAudioFiles(uris, Activity.RESULT_OK, new AudioImportSink() {
             @Override
             public void complete(JSObject result) {
-                JSArray tracks = result.optJSONArray("tracks");
+                // optJSONArray / optJSONObject 声明的返回类型是 org.json 的那两个（JSArray / JSObject
+                // 只是它们的子类），取出来只能按父类型接，再转回 Capacitor 这一对。
+                JSONArray tracks = result.optJSONArray("tracks");
                 synchronized (pendingExternalTracks) {
                     for (int index = 0; tracks != null && index < tracks.length(); index += 1) {
-                        JSObject track = tracks.optJSONObject(index);
-                        if (track != null) pendingExternalTracks.add(track);
+                        JSONObject track = tracks.optJSONObject(index);
+                        if (track == null) continue;
+                        if (track instanceof JSObject) {
+                            pendingExternalTracks.add((JSObject) track);
+                            continue;
+                        }
+                        // 兜一条：上游哪天给的是普通的 org.json 对象，复制成 Capacitor 的那一种。
+                        try {
+                            pendingExternalTracks.add(JSObject.fromJSONObject(track));
+                        } catch (JSONException ignored) {
+                            Log.w(TAG, "External audio track is not a JSON object");
+                        }
                     }
                 }
                 deliverExternalAudio(activity, result.optInt("port", 0));
@@ -775,13 +789,14 @@ public class FoliaNativePlugin extends Plugin {
                     boolean alreadyThere = target.isFile() && target.length() > 0
                         && (fileSize <= 0 || target.length() == fileSize);
                     if (!alreadyThere) {
+                        // 这里不能再叫 sink：外层方法的回调参数就叫 sink（AudioImportSink）。
                         try (InputStream source = resolver.openInputStream(uri);
-                             OutputStream sink = new FileOutputStream(target)) {
+                             OutputStream copyOut = new FileOutputStream(target)) {
                             if (source == null) continue;
                             byte[] buffer = new byte[128 * 1024];
                             int read;
                             while ((read = source.read(buffer)) != -1) {
-                                sink.write(buffer, 0, read);
+                                copyOut.write(buffer, 0, read);
                             }
                         }
                     }
