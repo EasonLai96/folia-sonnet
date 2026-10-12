@@ -1,7 +1,8 @@
 /* src/components/wall/WallToolsQueueIsland.css — 墙面工具面板上方的队列浮岛（WallToolsQueueIsland），Lattice 与 bravais 共用。
    与面板同一种玻璃（圆角 20px），宽度与面板相同（--wall-tools-panel-width），两块玻璃左右对齐。
-   高度由组件按行数给（上下边框 2px + 头部 36px + 最多 8 行 × 40px，至少 112px）；窗口矮时 .lattice-tools-stack 的 max-height
-   只压缩浮岛（flex-shrink），面板不变。日光档在 .lattice-tools.is-daylight 下覆盖。
+   高度由组件按行数给（上下边框 2px + 头部 36px + 最多 8 行 × 40px，至少 112px）；窗口矮时由 .lattice-tools-stack 的
+   max-height 一起压 —— 浮岛压到 112px 下限为止，面板同时可压缩 + 自己滚（见 WallToolsButton.css 开头那条），
+   所以两块玻璃合起来也不会顶出可视区。日光档在 .lattice-tools.is-daylight 下覆盖。
    次要文字用 opacity 而不是 color-mix(currentColor)：实测 Chromium 里继承色变了（切日光）之后 color-mix 不跟着重算，
    要等下一次布局才对。 */
 
