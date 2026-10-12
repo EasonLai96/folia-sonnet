@@ -4,7 +4,12 @@ name: Android Release
 #
 # 触发方式两种：
 #   1. 打 v* 标签（正式发布，默认发 GitHub Release）
-#   2. 手动 workflow_dispatch（临时出包，默认只传 artifact 不发 Release）
+#   2. 手动 workflow_dispatch：可以顺手涨版本号 + 打标签（见 bump 输入），
+#      等于「一键发版」—— 涨版本、CI 校验、出包、建 Release 全在这一个 job 里跑完。
+#
+# 为什么手动这条不靠「推标签去触发另一个 workflow」：用 GITHUB_TOKEN 推的提交/标签
+# 不会触发新的 workflow（GitHub 的递归限制），所以那条路必须自带出包步骤才走得通。
+# 反过来，用 PAT 推标签时本 workflow 会照旧被标签触发 —— 两条路互不干扰。
 #
 # 与 npm script 的关系：`npm run cap:sync:android` = `build:capacitor` + `cap sync android`，
 # 一条命令把「构建前端」和「同步进 android/app/src/main/assets/public」都做了 ——
@@ -16,6 +21,16 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      bump:
+        description: '涨版本号并打标签（none = 用当前 package.json 的版本号出包）'
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
       build_bundle:
         description: 'Also build the Play Store bundle (AAB)'
         required: false
@@ -71,6 +86,28 @@ jobs:
       - name: Install dependencies
         if: steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Bump version
+        id: bump
+        # 只在手动出包且明确选了 bump 时涨版本。标签触发那条路上 package.json 已经是目标版本，
+        # 再动一次就和标签对不上了。
+        #
+        # 必须在构建之前涨：vite 的 __APP_VERSION__、gradle 的 versionName / versionCode
+        # 都是从这个文件读的，涨晚了打出来的包还是旧版本号。
+        if: github.event_name == 'workflow_dispatch' && inputs.bump != 'none'
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          npm version "$BUMP" --no-git-tag-version
+          VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
+          echo "本次出包版本：v${VERSION}（versionCode 由它推出，见 android/app/build.gradle）"
+
+      - name: Run typecheck
+        # 出包前先过一遍类型检查：标签可以随手推，PR 的门禁不一定覆盖得到，
+        # 而 vite build 与 gradle 都不做类型检查 —— 那类错误要一路走到运行时才炸。
+        # 跑 1 分多钟，换掉一次「装机才发现」是值的。
+        run: npm run typecheck
 
       # Capacitor 7 的 android 库以 source/target 21 编译，JDK 17 会直接报
       # 「无效的源发行版：21」。必须是 21 或更高。
@@ -151,6 +188,13 @@ jobs:
           set -euo pipefail
           VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # 标签触发时以标签为准（package.json 有可能忘了改），手动出包时用刚算出来的版本。
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           mkdir -p dist-android
           cp android/app/build/outputs/apk/release/app-release.apk \
              "dist-android/folia-sonnet-${VERSION}-release.apk"
@@ -159,6 +203,30 @@ jobs:
                "dist-android/folia-sonnet-${VERSION}-release.aab"
           fi
           ls -la dist-android
+
+      - name: Commit version bump and push tag
+        # 包已经出好、验过才动 git：构建失败就不该留下标签和提交。
+        if: github.event_name == 'workflow_dispatch' && inputs.bump != 'none'
+        env:
+          TAG: ${{ steps.name.outputs.tag }}
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 只加版本相关这两个文件：cap sync 会往 android/ 里塞构建产物，
+          # 一记 git add -A 就会把它们一起提交进去。
+          git add package.json
+          # npm version 会顺手把版本写进 lock 文件，改了才一起提交。
+          if ! git diff --quiet -- package-lock.json; then
+            git add package-lock.json
+          fi
+          git commit -m "chore(release): ${TAG}"
+          git tag "${TAG}"
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          git push origin "refs/tags/${TAG}"
+          echo "已推送 ${TAG} —— 注意：GITHUB_TOKEN 推的标签不会再触发别的 workflow，"
+          echo "桌面端（electron-release.yml）需要自己去 Actions 里手动跑一次。"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -169,15 +237,16 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
-        # 只在打标签（或手动勾选）时发。手动出包默认不发 —— 临时验证用的包
-        # 不该出现在 Releases 里。
-        if: github.event_name == 'push' || inputs.publish_release
+        # 打标签（或手动勾了发布、或手动涨了版本）才发。纯粹只想拿个包验证时
+        # 选 bump=none + 不勾发布，Releases 页不会被污染。
+        if: github.event_name == 'push' || inputs.publish_release || inputs.bump != 'none'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.name.outputs.tag }}
+          VERSION: ${{ steps.name.outputs.version }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "$TAG" --generate-notes
+            gh release create "$TAG" --title "Folia ${VERSION}" --generate-notes
           fi
           gh release upload "$TAG" dist-android/* --clobber
