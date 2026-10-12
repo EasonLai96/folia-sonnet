@@ -363,11 +363,22 @@ html[data-glass='off'] .theme-glass-panel {
    background-clip: text）都是各自算好写成内联样式的 —— 逐个渲染器去读开关改不完，所以
    这里在可视化层那个作用域内统一覆盖：`!important` 压得住内联样式。
 
-   两条都做了限定，避免波及作用域外的界面文字：
-   发光那条圈在可视化层里；渐变那条只挑**真的设了 background-clip 内联样式**的元素，
-   没设的说明本来就是纯色字，不该被改成别的颜色。 */
-html[data-lyric-flat='1'] [data-folia-lyric-surface] * {
+   两条内容都做了限定：发光那条圈在可视化层里；渐变那条只挑**真的设了 background-clip 内联样式**的元素，
+   没设的说明本来就是纯色字，不该被改成别的颜色。
+
+   发光一共有三种画法，这里只能管到前两种（第三种 CSS 到不了画布内部）：
+   ① text-shadow（上一波已有）；
+   ② filter: drop-shadow() —— 另一批发光手感的组件用它，同样是内联样式，同样 !important 才压得住；
+   ③ canvas 上的 shadowBlur / 内联 drop-shadow —— 靠 utils/glowBlurQuantize 与 utils/lyricFlat 收口。
+
+   ② 那条排除了 canvas 元素：画布的光由 ③ 那条路负责，而且可视化背景（着色器外的画布层）不该
+   被歌词开关牵连。 */
+html[data-lyric-flat='1'] [data-folia-lyric-surface] *:not(canvas),
+html[data-lyric-flat='1'] [data-folia-lyric-surface] *:not(canvas)::before,
+html[data-lyric-flat='1'] [data-folia-lyric-surface] *:not(canvas)::after {
     text-shadow: none !important;
+    filter: none !important;
+    box-shadow: none !important;
 }
 
 html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'],

@@ -1,3 +1,5 @@
+import { isLyricFlat } from './lyricFlat';
+
 // src/utils/glowBlurQuantize.ts
 // Lab > "Fix lyric animation freeze on Linux": whether the visualizers avoid asking Chromium's glyph
 // cache for an unbounded set of glyph sizes and shadow radii. While it is on:
@@ -54,6 +56,9 @@ export const setGlowBlurQuantized = (enabled: boolean) => {
  */
 export const quantizeShadowBlur = (px: number) => {
     if (!Number.isFinite(px)) return 0;
+    // 扁平化开关开着就不该有任何模糊（这是歌词唯一的「无光」总闸，画布上画的 lyric ribbon、
+    // fume 的行都从这里过）。
+    if (isLyricFlat()) return 0;
     return glowBlurQuantized ? Math.max(0, Math.round(px)) : px;
 };
 
@@ -65,6 +70,14 @@ export const quantizeShadowBlur = (px: number) => {
  * cache. Undo with `clearCanvasTextGlow`, which also resets `context.filter`.
  */
 export const setCanvasTextGlow = (context: CanvasRenderingContext2D, blur: number, color: string) => {
+    // 扁平化：影子、drop-shadow 一律不留。这里是绝大多数 canvas 歌词的发光入口，
+    // CSS 到不了画布内部，只能在这一层收口。
+    if (isLyricFlat()) {
+        context.shadowBlur = 0;
+        context.shadowColor = 'transparent';
+        context.filter = 'none';
+        return;
+    }
     if (!glowBlurQuantized) {
         context.shadowBlur = blur;
         context.shadowColor = color;
@@ -78,7 +91,8 @@ export const setCanvasTextGlow = (context: CanvasRenderingContext2D, blur: numbe
 export const clearCanvasTextGlow = (context: CanvasRenderingContext2D) => {
     context.shadowBlur = 0;
     context.shadowColor = 'transparent';
-    if (glowBlurQuantized) context.filter = 'none';
+    // 扁平化时 set 那边写过 filter，这里同样要把状态清干净。
+    if (glowBlurQuantized || isLyricFlat()) context.filter = 'none';
 };
 
 const GLOW_FILTER_SIGMA = /^drop-shadow\(0 0 ([\d.]+)px /;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isLyricFlat } from '../../../utils/lyricFlat';
 
 // src/components/visualizer/diorama/dioramaTextRaster.ts
 // Canvas-rasterised lyric text for the diorama's 3D planes.
@@ -72,6 +73,9 @@ const makeTexture = (canvas: HTMLCanvasElement): THREE.CanvasTexture => {
 // large shadow offset - only its blurred shadow lands on the texture, at full source alpha - giving a
 // strong, crisp-fill-free halo that spreads purely outward from the strokes.
 const drawGlowGlyph = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number, blur: number) => {
+    // 扁平化时光晕纹理保持空白 —— 它是烘焙进贴图的，之后每帧只是把贴图贴上去，
+    // 所以只能在烘焙这一步断掉。
+    if (isLyricFlat()) return;
     const OFFSCREEN = 10000;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
