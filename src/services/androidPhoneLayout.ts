@@ -108,15 +108,41 @@ const isLandscapeNow = (): boolean => (
 );
 
 /**
+ * 手机短边的上限（CSS px）。手机横过来时短边就是高度，常见 360~480；平板再小也多在 600 以上。
+ * 这里只用来在「没选过」的时候兜个底，选过的一律以选择为准。
+ */
+const PHONE_SHORT_EDGE_MAX_PX = 520;
+
+/**
+ * 没选过设备类型时的自动判断。
+ *
+ * 引导没答、或者答完又清空的都走这条路 —— 否则这类用户横屏就完全不会出现压缩,而他们恰恰是
+ * 最需要它的人。Web / Electron 不在安卓 WebView 里，窗口多宽自己说了算，一律不缩。
+ */
+export const inferDeviceType = (): DeviceType => {
+    if (typeof window === 'undefined') return 'tablet';
+    if (typeof navigator === 'undefined' || !/Android/.test(navigator.userAgent)) return 'tablet';
+    const shortEdge = Math.min(window.innerWidth, window.innerHeight);
+    return shortEdge > 0 && shortEdge <= PHONE_SHORT_EDGE_MAX_PX ? 'phone' : 'tablet';
+};
+
+/** 选择优先，没选就自动判断。 */
+export const resolveDeviceType = (deviceType: DeviceType | null): DeviceType => (
+    deviceType ?? inferDeviceType()
+);
+
+/**
  * 把设备类型与「要不要缩」写到 `<html>`：样式全在 androidPhoneFit.css 里读这两个属性，
  * 组件不需要知道自己是跑在手机还是平板上。
  */
 export const applyDeviceProfile = (deviceType: DeviceType | null): void => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
-    root.setAttribute('data-folia-device', deviceType ?? 'unset');
+    // 没选过也照样生效：那批人恰恰是最需要它的（引导没答、或者答完又清了）。
+    const resolved = resolveDeviceType(deviceType);
+    root.setAttribute('data-folia-device', deviceType ?? 'auto');
     // 平板横屏本来就够宽，只有手机才需要让路。
-    root.setAttribute('data-folia-ui-scale', deviceType === 'phone' && isLandscapeNow() ? 'compact' : 'normal');
+    root.setAttribute('data-folia-ui-scale', resolved === 'phone' && isLandscapeNow() ? 'compact' : 'normal');
 };
 
 let deviceProfileListenerInstalled = false;
