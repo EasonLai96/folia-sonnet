@@ -733,12 +733,16 @@ export async function handleUserPlaylists(cookie, limit) {
 }
 
 /**
- * 歌单曲目按 trackIds 归位 —— 与 folia.js 里那份是同一个修法。
+ * 歌单曲目按 trackIds 归位 —— 与 folia.js 里那份是同一个修法，开关也共用同一个数：
+ * 改一处要改两处。
  *
- * /api/v6/playlist/detail 带回来的 playlist.tracks 是**倒着**的（最后加进去的排最前），
- * 而桌面端走 Node 版接口，按 trackIds 给，顺序是对的。手机上看同一个歌单就是反的。
- * trackIds 才是歌单真正的顺序。
+ * 桌面端的真源是 trackIds：Node 版 NeteaseCloudMusicApi 的 /playlist/track/all 就是拿
+ * playlist.trackIds 分批去调 /api/v3/song/detail，所以按 trackIds 归位之后手机与电脑必然同序。
+ *
+ * 真机报「还是反的」时先怀疑本地快照缓存（见 folia.js 里那段说明），不要直接翻开关。
  */
+const REVERSE_PLAYLIST_TRACK_ORDER = false;
+
 function orderPlaylistTracks(tracks, trackIds) {
   if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
   const byId = new Map();
@@ -756,7 +760,7 @@ function orderPlaylistTracks(tracks, trackIds) {
   });
   if (ordered.length === 0) return tracks;
   byId.forEach((track) => ordered.push(track));
-  return ordered;
+  return REVERSE_PLAYLIST_TRACK_ORDER ? ordered.reverse() : ordered;
 }
 
 export async function handlePlaylistTracks(id, cookie) {

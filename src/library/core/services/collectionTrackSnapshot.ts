@@ -3,7 +3,14 @@ import type { CollectionSyncPage } from './onlineCollectionSync';
 // src/library/core/services/collectionTrackSnapshot.ts
 // Preserve upstream pagination separately from the number of visible, deduplicated tracks.
 
-export const COLLECTION_TRACK_SNAPSHOT_SCHEMA_VERSION = 7;
+/**
+ * 7 → 8：在线歌单的曲目顺序修过一次（手机上按 trackIds 归位，与电脑同序），但整份曲目是
+ * 存在本地缓存里的，快照时间对得上就一直命中 —— 于是装了新版仍然是缓存里那份**旧顺序**，
+ * 看着就像「修了没生效 / 还是反的」。顶一版让所有旧快照作废，下次打开重新拉一次。
+ *
+ * 改动这个数会把所有在线集合的曲目缓存清空一次（只是重拉，不丢用户数据）。
+ */
+export const COLLECTION_TRACK_SNAPSHOT_SCHEMA_VERSION = 8;
 
 export type CollectionTrackSnapshot<T> = {
     schemaVersion: number;

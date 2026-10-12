@@ -411,14 +411,22 @@ async function handleUserPlaylists(url, cookie) {
  * 歌单曲目按 trackIds 归位。
  *
  * 安卓上歌单详情走的是 eapi 的 /api/v6/playlist/detail（见下面 handlePlaylistDetail），
- * 它带回来的 playlist.tracks 是**倒着**的 —— 最后加进歌单的那首排在最前面。桌面端走
- * Node 版 NeteaseCloudMusicApi，那边按 playlist.trackIds 给，顺序是对的；于是同一个歌单
- * 在电脑上看是正序、在手机上看是反的。
+ * 它带回来的 playlist.tracks 有可能与歌单真正的顺序不一致。桌面端的真源是**trackIds**：
+ * Node 版 NeteaseCloudMusicApi 的 /playlist/track/all 就是拿 playlist.trackIds 分批去调
+ * /api/v3/song/detail（见 node_modules/@neteasecloudmusicapienhanced/api/module/playlist_track_all.js），
+ * 所以按 trackIds 归位之后，手机与电脑必然同序。
  *
- * trackIds 才是歌单真正的顺序，用它把 tracks 排回去。两道保险：一个 id 都没对上说明
- * trackIds 这份数据不可信（接口换了形态），原样返回；对上了但 trackIds 里没有的（接口
- * 偶尔漏给）按原顺序接在后面 —— 排序的代价不能是丢歌。
+ * 两道保险：一个 id 都没对上说明 trackIds 这份数据不可信（接口换了形态），原样返回；
+ * 对上了但 trackIds 里没有的（接口偶尔漏给）按原顺序接在后面 —— 排序的代价不能是丢歌。
+ *
+ * 2026-10-12：真机报「歌单里的歌和电脑上反着排」，但把 eapi 与 weapi 对同一个歌单各拉一次
+ * 比对过，tracks / trackIds 两边是同一串 id。所以顺序没被这里算反 —— 真正的嫌疑是本地快照：
+ * onlineCollectionCache 把整份曲目存下来了，snapshotTime 对得上就一直命中，改完顺序也读不到
+ * 新数据（看着就像「还是反的」）。已经把 COLLECTION_TRACK_SNAPSHOT_SCHEMA_VERSION 顶了一版
+ * 强制重拉。**重拉之后如果仍然是反的**，把 REVERSE_PLAYLIST_TRACK_ORDER 翻成 true 就行。
  */
+const REVERSE_PLAYLIST_TRACK_ORDER = false;
+
 const orderPlaylistTracks = (tracks, trackIds) => {
   if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
   const byId = new Map();
@@ -437,7 +445,17 @@ const orderPlaylistTracks = (tracks, trackIds) => {
   });
   if (ordered.length === 0) return tracks;
   byId.forEach((track) => ordered.push(track));
-  return ordered;
+  noteLibraryStep('netease', 'playlist:order', {
+    tracks: tracks.length,
+    trackIds: trackIds.length,
+    first: [Number(tracks[0] && tracks[0].id) || 0, Number(ordered[0] && ordered[0].id) || 0],
+    last: [
+      Number(tracks[tracks.length - 1] && tracks[tracks.length - 1].id) || 0,
+      Number(ordered[ordered.length - 1] && ordered[ordered.length - 1].id) || 0,
+    ],
+    reversed: REVERSE_PLAYLIST_TRACK_ORDER,
+  });
+  return REVERSE_PLAYLIST_TRACK_ORDER ? ordered.reverse() : ordered;
 };
 
 async function handlePlaylistDetail(url, cookie) {
