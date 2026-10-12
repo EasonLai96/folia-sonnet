@@ -1,6 +1,6 @@
 # Folia-Sonnet
 
-将 [Folia](https://github.com/chthollyphile/folia-major) 打包到 Android 平台的实验性项目。它不是官方 Android 客户端，也不代表 Folia 主项目的移动端计划；本仓库版本基于 **Folia-major 0.7.18** 正式版。
+将 [Folia](https://github.com/maimai993/folia-sonnet) 打包到 Android 平台的实验性项目。它不是官方 Android 客户端，也不代表 Folia 主项目的移动端计划；本仓库版本基于 **Folia-major 0.7.18** 正式版。
 
 > [!IMPORTANT]
 > **装上去就能用，不需要自建后端。**
@@ -34,7 +34,7 @@ Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器�
 | 前台播放 | 前台服务 + 媒体通知，通知栏 / 锁屏 / 耳机按键的控制回到 App。 |
 | 播放时保持常亮 | 可选开关：只在播放中钉住屏幕，暂停 / 退到后台立刻交还给系统。 |
 
-上游 [folia-major](https://github.com/chthollyphile/folia-major) 本身的能力（本仓库跟随同步）：
+本仓库 [folia-sonnet](https://github.com/maimai993/folia-sonnet) 同步自上游 Folia，本身具备的能力：
 
 | 模块 | 说明 |
 | --- | --- |
@@ -128,7 +128,7 @@ Folia 提供了可选的官方同步服务端 `sync-server`，用于在多个设
 支持以下部署方式：
 
 - **Cloudflare Workers / D1**：免服务器运维的 Serverless 部署，推荐使用。
-  [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/chthollyphile/folia-major/tree/main/sync-server)
+  [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/maimai993/folia-sonnet/tree/main/sync-server)
 - **Docker**：镜像与 Compose 入口见 [Docker 部署目录](deploy/docker/README.md)。
 - **Node.js 自托管**：使用 SQLite，适合本地或不方便使用 Docker 的环境。
 

@@ -7,7 +7,7 @@
 
 ## 桌面端说明
 
-桌面版内置前后端运行环境，适合希望即装即用的用户。最新版本请前往 [Releases 页面](https://github.com/chthollyphile/folia-major/releases)。
+桌面版内置前后端运行环境，适合希望即装即用的用户。最新版本请前往 [Releases 页面](https://github.com/maimai993/folia-sonnet/releases)。
 
 ### 发布与更新通道
 
@@ -110,7 +110,7 @@ GET http://127.0.0.1:32109/v1/lyric
 
 如果你希望快速上线 Web 版本，可以直接通过下方入口创建 Vercel 项目：
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/chthollyphile/folia-major)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/maimai993/folia-sonnet)
 
 部署完成后，请在 Vercel 项目设置中补齐环境变量。
 

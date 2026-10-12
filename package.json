@@ -4,8 +4,8 @@
   "desktopName": "folia-major.desktop",
   "description": "Lyrics Reimagine",
   "author": {
-    "name": "chthollyphile",
-    "email": "chthollyphile@users.noreply.github.com"
+    "name": "maimai993",
+    "email": "hjm184563@gmail.com"
   },
   "private": true,
   "version": "0.7.18",
@@ -83,8 +83,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "chthollyphile",
-        "repo": "folia-major"
+        "owner": "maimai993",
+        "repo": "folia-sonnet"
       }
     ],
     "files": [

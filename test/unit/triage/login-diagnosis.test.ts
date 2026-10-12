@@ -219,7 +219,7 @@ describe('login diagnosis in issue triage', () => {
 
     it('keeps reports from official builds open', async () => {
         const official = formatQrLoginDiagnosticReport({
-            generatedAt: NOW, appVersion: '0.7.18', userAgent: 'Mozilla/5.0 Folia/0.7.18 Electron/43.7.5', build: 'official (chthollyphile/folia-major@abc1234)',
+            generatedAt: NOW, appVersion: '0.7.18', userAgent: 'Mozilla/5.0 Folia/0.7.18 Electron/43.7.5', build: 'official (maimai993/folia-sonnet@abc1234)',
             providerId: 'qq', methodId: 'qq', failure: 'check-error', timeline: [], providerLines: [],
         });
         const { plan } = await run({ title: '[QR login] qq login failed', body: official }).result;

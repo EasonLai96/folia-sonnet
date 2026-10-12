@@ -170,7 +170,7 @@ describe('amllDbProvider', () => {
     it('sends the Folia UA through the electron proxy', async () => {
         vi.stubGlobal('__APP_VERSION__', '0.7.16');
         vi.stubGlobal('__BUILD_COMMIT__', '537fa57');
-        vi.stubGlobal('__BUILD_REPO__', 'chthollyphile/folia-major');
+        vi.stubGlobal('__BUILD_REPO__', 'maimai993/folia-sonnet');
         const fetchLyricProxy = vi.fn().mockResolvedValue({
             ok: true, status: 200, statusText: 'OK', headers: {},
             bodyText: JSON.stringify({ status: 200, data: songItem({ lyrics: TTML }) }),
@@ -181,7 +181,7 @@ describe('amllDbProvider', () => {
         await expect(fetchAmllDbLyrics('ncm', 2048982668)).resolves.toBe(parsedLyrics);
         expect(fetchLyricProxy).toHaveBeenCalledWith(
             'https://api.amll.dev/v1/lyrics/get?ncmMusicId=2048982668',
-            { method: 'GET', headers: { 'User-Agent': 'Folia/0.7.16-537fa57 (chthollyphile/folia-major)' } },
+            { method: 'GET', headers: { 'User-Agent': 'Folia/0.7.16-537fa57 (maimai993/folia-sonnet)' } },
         );
     });
 

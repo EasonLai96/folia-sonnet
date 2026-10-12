@@ -3,7 +3,7 @@ pkgver=0.1.4
 pkgrel=1
 pkgdesc="Lyrics Reimagine desktop app packaged from prebuilt releases"
 arch=('x86_64')
-url="https://github.com/chthollyphile/folia-major"
+url="https://github.com/maimai993/folia-sonnet"
 license=('AGPL')
 depends=(
   'alsa-lib'

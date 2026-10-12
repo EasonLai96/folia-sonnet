@@ -9,7 +9,7 @@ const noOrigin = () => {
 
 describe('parseGitHubRepo', () => {
     it('parses ssh and https GitHub remotes', () => {
-        expect(parseGitHubRepo('git@github.com:chthollyphile/folia-major.git\n')).toBe('chthollyphile/folia-major');
+        expect(parseGitHubRepo('git@github.com:maimai993/folia-sonnet.git\n')).toBe('maimai993/folia-sonnet');
         expect(parseGitHubRepo('https://github.com/someone/folia-fork')).toBe('someone/folia-fork');
         expect(parseGitHubRepo('https://github.com/someone/folia-fork.git/')).toBe('someone/folia-fork');
     });
@@ -56,7 +56,7 @@ describe('normalizeBuildCommit', () => {
 });
 
 describe('resolveBuildKind', () => {
-    const upstreamCi = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'chthollyphile/folia-major' };
+    const upstreamCi = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'maimai993/folia-sonnet' };
 
     it('only treats GitHub Actions runs of the upstream repository as official', () => {
         expect(resolveBuildKind(upstreamCi)).toEqual({ kind: 'official', host: null });
@@ -72,8 +72,8 @@ describe('resolveBuildKind', () => {
 
     it('marks fork CI and local builds as unofficial', () => {
         expect(resolveBuildKind({ GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'someone/folia-major' }).kind).toBe('unofficial');
-        expect(resolveBuildKind({ GITHUB_REPOSITORY: 'chthollyphile/folia-major' }).kind).toBe('unofficial');
-        expect(resolveBuildKind({ FOLIA_BUILD_REPO: 'chthollyphile/folia-major' }).kind).toBe('unofficial');
+        expect(resolveBuildKind({ GITHUB_REPOSITORY: 'maimai993/folia-sonnet' }).kind).toBe('unofficial');
+        expect(resolveBuildKind({ FOLIA_BUILD_REPO: 'maimai993/folia-sonnet' }).kind).toBe('unofficial');
         expect(resolveBuildKind({}).kind).toBe('unofficial');
     });
 });

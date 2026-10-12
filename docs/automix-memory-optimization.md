@@ -114,12 +114,12 @@
 - **Phase 1④　beat_this 不动　✅已确认**：改动只碰 htdemucs 路径；beat_this 仍在 worker 内走 WebGPU，PROVIDERS 里只剩它一项，代码与调度未变。
 - **Phase 2　测试＋稳定**：① 整窗峰值 <1GB **✅已在独立脚本验（40s 满窗 986MB）**，Phase 2 复测＝在 app 内接线后复现；② sidecar 崩溃/超时/被重启/用完释放；③ 各态（弱机/无运行时/下载失败/网盘兜底）；④ beat 不迟到、换歌不掉帧。
 - **Phase 3　清理**：删诊断工装；整理 worker/manifest/UI 改动到「可交付」状态。
-- **交付（PR）＝仅凭用户明确下令**：全做完、测好、确认稳定后**停在此处等命令**；PR/推送到上游 `chthollyphile/folia-major` 由用户拍板才执行，绝不由计划自动触发、绝不自行发起。审计整条分支范围后再推（见记忆 no-claude-attribution）。
+- **交付（PR）＝仅凭用户明确下令**：全做完、测好、确认稳定后**停在此处等命令**；PR/推送到上游 `maimai993/folia-sonnet` 由用户拍板才执行，绝不由计划自动触发、绝不自行发起。审计整条分支范围后再推（见记忆 no-claude-attribution）。
 - **分叉**：Phase 2 整窗仍破 1GB 或 sidecar 稳不住 → 退 OpenVINO；重导出仅全不行才回。
 
 ## 8. 仓库归属
 
-- `origin` = `AZURE-HUAI/folia-major`（你的 fork）；`upstream` = `chthollyphile/folia-major`（维护者，原始仓库）。
+- `origin` = `maimai993/folia-sonnet`（你自己的仓库）；`upstream` = `chthollyphile/folia-major`（上游维护者，原始仓库）。
 - **完全我们做**（功能起于贡献者，长期责任自扛，维护者回归维护者）。
 - worker/manifest/UI 改动 → PR 回 upstream；重导出（§9）→ `StemSplit/demucs-onnx`（权重来自 `facebookresearch/demucs`）。
 

@@ -67,7 +67,7 @@ Vercel 适合希望快速上线 Web 版的用户。该方案支持微信扫码�
 
 ### 第 1 步：导入 Folia
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/chthollyphile/folia-major)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/maimai993/folia-sonnet)
 
 登录 Vercel，选择自己的 GitHub 账号，然后导入 Folia 仓库。
 
@@ -106,7 +106,7 @@ Cloudflare 默认与 Vercel 一样只提供微信扫码登录。需要增加 QQ 
 
 ### 方式 A：一键部署微信扫码登录
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/chthollyphile/folia-major)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/maimai993/folia-sonnet)
 
 部署完成后，在 Worker 的变量和密钥设置中添加：
 
@@ -122,8 +122,8 @@ QQ_SESSION_SECRET=<刚才生成的随机密钥>
 先克隆并安装依赖：
 
 ```bash
-git clone https://github.com/chthollyphile/folia-major.git
-cd folia-major
+git clone https://github.com/maimai993/folia-sonnet.git
+cd folia-sonnet
 npm install
 ```
 
