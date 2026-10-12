@@ -269,6 +269,8 @@ const HarmonyGlowText: React.FC<{
             {renderParts(false)}
             <motion.span
                 aria-hidden
+                // 逐字扫光的叠加层（CPU 回退版）：扁平档保留它自己的词色，见 index.css 的 [data-folia-lyric-sweep] 段。
+                data-folia-lyric-sweep="1"
                 className="pointer-events-none absolute block whitespace-pre-wrap"
                 style={{
                     left: -glowPaddingPx,

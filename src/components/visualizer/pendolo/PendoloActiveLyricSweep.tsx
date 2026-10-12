@@ -100,6 +100,8 @@ const PendoloSweepLine: React.FC<PendoloSweepLineProps> = ({
                 >
                     <motion.span
                         className="absolute inset-0 block whitespace-pre"
+                        // 逐字扫光的叠加层：扁平档要留着这里的颜色（见 index.css 的 [data-folia-lyric-sweep] 段）。
+                        data-folia-lyric-sweep="1"
                         style={{
                             boxSizing: 'border-box',
                             padding: `${glowPaddingPx}px`,

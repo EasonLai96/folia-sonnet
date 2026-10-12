@@ -363,8 +363,9 @@ html[data-glass='off'] .theme-glass-panel {
    background-clip: text）都是各自算好写成内联样式的 —— 逐个渲染器去读开关改不完，所以
    这里在可视化层那个作用域内统一覆盖：`!important` 压得住内联样式。
 
-   两条内容都做了限定：发光那条圈在可视化层里；渐变那条只挑**真的设了 background-clip 内联样式**的元素，
-   没设的说明本来就是纯色字，不该被改成别的颜色。
+   前两条做了限定：发光那条圈在可视化层里；渐变那条只挑**真的设了 background-clip 内联样式**的元素，
+   没设的说明本来就是纯色字，不该被改成别的颜色 —— 并且要让开各渲染器标了 `[data-folia-lyric-sweep]`
+   的逐字扫光层（见下面 ③ 那段注释）。
 
    发光一共有三种画法，这里只能管到前两种（第三种 CSS 到不了画布内部）：
    ① text-shadow（上一波已有）；
@@ -381,40 +382,46 @@ html[data-lyric-flat='1'] [data-folia-lyric-surface] *:not(canvas)::after {
     box-shadow: none !important;
 }
 
-html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'],
-html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip'] * {
+/*
+   下面两条都避开带 `[data-folia-lyric-sweep]` 的那一层（标记由各渲染器挂在自己的逐字扫光叠加层上）：
+
+   逐字推进是「同一行字叠两层」画出来的 —— 下层整行，上层按 `mask` 随进度揭开。
+   上层正是那个「唱到的地方被点亮」的地方，它的颜色多半是渲染器按 AI 词色算出来的渐变 / 实色；
+   如果连它一起压成主文本色，看到的就成了「正在唱的那一段没颜色，唱完了（换成本来的颜色）反而有色」。
+
+   所以扁平档的口径是：
+   ① 不发光（上一条，对包括扫光层在内的所有歌词元素生效）；
+   ② **没唱到**的部分统一用一个色，不要各渲染器自己的深色 / 提亮色；
+   ③ **正在扫过的那一段照旧上色** —— 那是逐字高亮本身，不是发光。
+*/
+html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip']:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *)),
+html[data-lyric-flat='1'] [data-folia-lyric-surface] [style*='background-clip']:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *)) * {
     background-image: none !important;
     background-clip: border-box !important;
     -webkit-background-clip: border-box !important;
     -webkit-text-fill-color: var(--text-primary, currentColor) !important;
 }
 
-/* ③ 扁平档里歌词本体也只有一个颜色：底色淡、扫光层实。
+/* ③ 扁平档里**没唱到**的字只剩一个颜色：统一下来当淡打底。
 
-   逐字推进是「同一行文字叠两层」画出来的：下层是整行的底色，上层是渐变字的实心版本，
-   用 mask 按进度揭开。上面那条把上层的渐变抹掉之后，如果只盯着上层，
-   下层未唱部分仍然是渲染器算的 `entry.tone.baseColor` —— 那常常就是主题的主文本色，
-   于是「已唱 / 未唱」之间没有明度差，看着就是「逐字高亮被去掉了」。
-
-   所以这里把歌词层里所有文字的 `color` 一并压成主文本色的淡打底：
-   ① 整套歌词只剩一个色相（扁平的本意）；
-   ② 唱过的那段由上面那条 `-webkit-text-fill-color` 铺实色（它的优先级高于 `color`），
-      「已唱实、未唱淡」这个对比还在 —— 也就是逐字扫光还在，只是不再带渐变；
+   上面那条已经接管了扫光层（[data-folia-lyric-sweep]，保留它自己的 AI 词色），这里管的就是剩下的：
+   ① 整套歌词的底色只剩一个色相（扁平的本意），色相差不再随渲染器变；
+   ② 「未唱淡、已唱（由扫光层揭开）实且有颜色」这个对比还在 —— 逐字高亮看得见；
    ③ 唱完的行不会再跳回 AI 主题那套词色：渲染器在行状态变成 passed 之后会把底色
       换成 wordColors 里的提亮色（不扁平时是对的），扁平档不受这套状态影响。
 
    只能用 alpha 混透明来变淡，不能用 opacity —— opacity 会往下继承，
-   上面那条铺的实色会被一起压淡，对比又没了。
+   铺好颜色的地方会被一起压淡，对比又没了。
 
    作用域这里刻意多要一层：**两个受益者都写得出 --text-primary**（主窗口由 AppShell 的
    appStyle 写、壁纸叠层由 wallpaperSurface 自己补），遥控窗口那一层是组件自己按 flatLyrics
    渲染纯色的（见 RemoteLyricOverlay：它连 background-clip 都不写，就是为了躲开这些覆盖），
    这里的 `!important` 会把它的颜色压成淡版本 —— 所以遥控窗口不在下面两条里。 */
-html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *,
-html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *::before,
-html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *::after,
-html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *,
-html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *::before,
-html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *::after {
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *)),
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::before,
+html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::after,
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *)),
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::before,
+html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::after {
     color: color-mix(in srgb, var(--text-primary, currentColor) 42%, transparent) !important;
 }

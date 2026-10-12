@@ -198,6 +198,9 @@ const MonetWordSweep: React.FC<{
                 {isLineActive ? (
                     <motion.span
                         aria-hidden
+                        // 逐字扫光的叠加层：index.css 的扁平档靠这个标记放行它的颜色
+                        // （挂标记而不是让 CSS 去猜内联样式，见 index.css 的 [data-folia-lyric-sweep] 段）。
+                        data-folia-lyric-sweep="1"
                         className="pointer-events-none absolute left-0 right-0 block whitespace-pre-wrap break-words"
                         style={{
                             top: -sweepOverflowPx,
