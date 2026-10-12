@@ -180,7 +180,21 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
         setPlaylists(existing);
         setIsConfirmOpen(false);
         setIsPlaylistOpen(true);
+        // 翻页这一段的保护到此为止：第二页上再点关闭就是真的取消，副本该收回。
+        confirmedRef.current = false;
     }, []);
+
+    /**
+     * 选歌单那一页的关闭 = 取消（不导入，副本收回）。
+     *
+     * 这一页以前「关闭就是只进曲库」，于是用户点取消/点叉/按返回键，歌照样进了本机曲库
+     * —— 现在「只进本机曲库」是列表最下面那个按钮，关闭才真的是什么都不要。
+     * 选完歌单时组件还会再调一次 onClose，那一趟由 settledRef / busyRef 挡掉。
+     */
+    const handlePlaylistCancel = useCallback(() => {
+        if (busyRef.current || settledRef.current) return;
+        void handleDecline();
+    }, [handleDecline]);
 
     const summary = useMemo(() => {
         const names = pending.map(track => track.fileName || track.id);
@@ -231,7 +245,7 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
 
             <PlaylistSelectionDialog
                 isOpen={isPlaylistOpen}
-                onClose={() => void finishImport(null)}
+                onClose={handlePlaylistCancel}
                 isDaylight={isDaylight}
                 title={t('localMusic.externalPickPlaylistTitle')}
                 description={t('localMusic.externalPickPlaylistHint')}
@@ -244,11 +258,21 @@ const ExternalAudioImportHost: React.FC<ExternalAudioImportHostProps> = ({ isDay
                     setIsCreateOpen(true);
                 }}
                 createLabel={t('localMusic.createPlaylist')}
+                secondaryAction={{
+                    label: t('localMusic.externalLibraryOnly'),
+                    onSelect: async () => {
+                        await finishImport(null);
+                    },
+                }}
             />
 
             <TextInputDialog
                 isOpen={isCreateOpen}
-                onClose={() => setIsCreateOpen(false)}
+                onClose={() => {
+                    // 从「新建歌单」退回来：回到选歌单那一页，别把流程默默掐断。
+                    setIsCreateOpen(false);
+                    setIsPlaylistOpen(true);
+                }}
                 isDaylight={isDaylight}
                 title={t('localMusic.createPlaylist')}
                 description={t('localMusic.enterPlaylistName')}

@@ -19,6 +19,13 @@ interface PlaylistSelectionDialogProps {
     onSelect: (playlistId: string | number) => Promise<void> | void;
     onCreate?: () => void;
     createLabel?: string;
+    /**
+     * 列表下面多一个「不进歌单，只要曲库里有」这类动作。
+     *
+     * 有它之后关掉这个弹窗（叉 / 背景 / 返回键）才等于真正的取消 —— 以前关闭就是
+     * 「只进曲库」，用户点取消结果歌曲照样进了库。
+     */
+    secondaryAction?: { label: string; onSelect: () => Promise<void> | void };
 }
 
 const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
@@ -31,14 +38,34 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
     onSelect,
     onCreate,
     createLabel,
+    secondaryAction,
 }) => {
     const { t } = useTranslation();
     const [submittingId, setSubmittingId] = React.useState<string | number | null>(null);
+    const [secondaryBusy, setSecondaryBusy] = React.useState(false);
     const panelClass = isDaylight ? 'bg-black/[0.04] border-black/5 hover:bg-black/[0.06]' : 'bg-white/[0.05] border-white/10 hover:bg-white/[0.08]';
+    const secondaryButton = secondaryAction ? (
+        <button
+            type="button"
+            onClick={async () => {
+                try {
+                    setSecondaryBusy(true);
+                    await secondaryAction.onSelect();
+                } finally {
+                    setSecondaryBusy(false);
+                }
+            }}
+            disabled={submittingId !== null || secondaryBusy}
+            className={`w-full rounded-2xl border px-5 py-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${panelClass}`}
+        >
+            {secondaryAction.label}
+        </button>
+    ) : null;
 
     React.useEffect(() => {
         if (!isOpen) {
             setSubmittingId(null);
+            setSecondaryBusy(false);
         }
     }, [isOpen]);
 
@@ -93,6 +120,7 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
                         </button>
                     ))}
                     </div>
+                    {secondaryButton}
                 </div>
             ) : (
                 <div data-folia-playlist-selection="true" className="space-y-3">
@@ -110,6 +138,7 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
                     <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm opacity-50">
                         {t('localMusic.noPlaylistsFound') || 'No playlists yet'}
                     </div>
+                    {secondaryButton}
                 </div>
             )}
         </ThemedDialog>
