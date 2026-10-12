@@ -91,7 +91,7 @@ public final class FoliaCrashHandler {
                     + ".log";
             File file = new File(dir, name);
             try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
-                writer.println(deviceInfo(appContext));
+                writer.println(deviceInfo(context));
                 writer.println(trace);
             }
             return file;
