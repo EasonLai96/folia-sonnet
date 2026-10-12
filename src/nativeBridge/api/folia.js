@@ -407,66 +407,14 @@ async function handleUserPlaylists(url, cookie) {
   };
 }
 
-/**
- * 歌单曲目按 trackIds 归位。
- *
- * 安卓上歌单详情走的是 eapi 的 /api/v6/playlist/detail（见下面 handlePlaylistDetail），
- * 它带回来的 playlist.tracks 有可能与歌单真正的顺序不一致。桌面端的真源是**trackIds**：
- * Node 版 NeteaseCloudMusicApi 的 /playlist/track/all 就是拿 playlist.trackIds 分批去调
- * /api/v3/song/detail（见 node_modules/@neteasecloudmusicapienhanced/api/module/playlist_track_all.js），
- * 所以按 trackIds 归位之后，手机与电脑必然同序。
- *
- * 两道保险：一个 id 都没对上说明 trackIds 这份数据不可信（接口换了形态），原样返回；
- * 对上了但 trackIds 里没有的（接口偶尔漏给）按原顺序接在后面 —— 排序的代价不能是丢歌。
- *
- * 2026-10-12：真机报「歌单里的歌和电脑上反着排」，但把 eapi 与 weapi 对同一个歌单各拉一次
- * 比对过，tracks / trackIds 两边是同一串 id。所以顺序没被这里算反 —— 真正的嫌疑是本地快照：
- * onlineCollectionCache 把整份曲目存下来了，snapshotTime 对得上就一直命中，改完顺序也读不到
- * 新数据（看着就像「还是反的」）。已经把 COLLECTION_TRACK_SNAPSHOT_SCHEMA_VERSION 顶了一版
- * 强制重拉。**重拉之后如果仍然是反的**，把 REVERSE_PLAYLIST_TRACK_ORDER 翻成 true 就行。
- */
-const REVERSE_PLAYLIST_TRACK_ORDER = false;
-
-const orderPlaylistTracks = (tracks, trackIds) => {
-  if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
-  const byId = new Map();
-  tracks.forEach((track) => {
-    const id = Number(track && track.id);
-    if (Number.isFinite(id) && id > 0 && !byId.has(id)) byId.set(id, track);
-  });
-  const ordered = [];
-  trackIds.forEach((entry) => {
-    // 新版接口的 trackIds 是 { id, v, at }，老版是纯数字。
-    const id = Number(entry && typeof entry === 'object' ? entry.id : entry);
-    const track = byId.get(id);
-    if (!track) return;
-    ordered.push(track);
-    byId.delete(id);
-  });
-  if (ordered.length === 0) return tracks;
-  byId.forEach((track) => ordered.push(track));
-  noteLibraryStep('netease', 'playlist:order', {
-    tracks: tracks.length,
-    trackIds: trackIds.length,
-    first: [Number(tracks[0] && tracks[0].id) || 0, Number(ordered[0] && ordered[0].id) || 0],
-    last: [
-      Number(tracks[tracks.length - 1] && tracks[tracks.length - 1].id) || 0,
-      Number(ordered[ordered.length - 1] && ordered[ordered.length - 1].id) || 0,
-    ],
-    reversed: REVERSE_PLAYLIST_TRACK_ORDER,
-  });
-  return REVERSE_PLAYLIST_TRACK_ORDER ? ordered.reverse() : ordered;
-};
+// 顺序一律按上游来：接口给什么顺序就往下传什么顺序，桥里不重排。
+// （2026-10-13 撤掉了之前那版「按 trackIds 归位」—— 排序方法恢复上游，只有酷狗按
+//  RemnantCloudGodofWar/folia-android 的修法单独处理。）
 
 async function handlePlaylistDetail(url, cookie) {
   const id = firstValue(url.searchParams.get('id'), url.searchParams.get('pid'));
   if (!id) return { code: 200, playlist: null };
   const body = await eapiJson('/api/v6/playlist/detail', { id, n: 1000, s: 8 }, cookie);
-  const playlist = body?.playlist;
-  // 顺手把顺序校正好：下游（handlePlaylistTrackAll 等）拿到的就是排好的 tracks。
-  if (playlist && Array.isArray(playlist.tracks) && Array.isArray(playlist.trackIds)) {
-    playlist.tracks = orderPlaylistTracks(playlist.tracks, playlist.trackIds);
-  }
   return { ...body, code: Number(body.code) || 200 };
 }
 

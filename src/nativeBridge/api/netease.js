@@ -732,36 +732,9 @@ export async function handleUserPlaylists(cookie, limit) {
   return { loggedIn: true, userId: info.userId, nickname: info.nickname || '', avatar: info.avatar || '', playlists: list };
 }
 
-/**
- * 歌单曲目按 trackIds 归位 —— 与 folia.js 里那份是同一个修法，开关也共用同一个数：
- * 改一处要改两处。
- *
- * 桌面端的真源是 trackIds：Node 版 NeteaseCloudMusicApi 的 /playlist/track/all 就是拿
- * playlist.trackIds 分批去调 /api/v3/song/detail，所以按 trackIds 归位之后手机与电脑必然同序。
- *
- * 真机报「还是反的」时先怀疑本地快照缓存（见 folia.js 里那段说明），不要直接翻开关。
- */
-const REVERSE_PLAYLIST_TRACK_ORDER = false;
-
-function orderPlaylistTracks(tracks, trackIds) {
-  if (!Array.isArray(tracks) || !Array.isArray(trackIds) || trackIds.length === 0) return tracks;
-  const byId = new Map();
-  tracks.forEach((track) => {
-    const id = Number(track && track.id);
-    if (Number.isFinite(id) && id > 0 && !byId.has(id)) byId.set(id, track);
-  });
-  const ordered = [];
-  trackIds.forEach((entry) => {
-    const id = Number(entry && typeof entry === 'object' ? entry.id : entry);
-    const track = byId.get(id);
-    if (!track) return;
-    ordered.push(track);
-    byId.delete(id);
-  });
-  if (ordered.length === 0) return tracks;
-  byId.forEach((track) => ordered.push(track));
-  return REVERSE_PLAYLIST_TRACK_ORDER ? ordered.reverse() : ordered;
-}
+// 顺序一律按上游来：接口给什么顺序就往下传什么顺序，这里不重排。
+// （2026-10-13 撤掉了之前那版「按 trackIds 归位」—— 排序方法恢复上游，只有酷狗按
+//  RemnantCloudGodofWar/folia-android 的修法单独处理。）
 
 export async function handlePlaylistTracks(id, cookie) {
   cookie = await ensureNeteaseCookieHeader(cookie);
@@ -780,7 +753,7 @@ export async function handlePlaylistTracks(id, cookie) {
       rawTracks = pl.tracks || all.tracks || (all.data && all.data.tracks) || rawTracks;
     } catch (_) {}
   }
-  const tracks = orderPlaylistTracks(Array.isArray(rawTracks) ? rawTracks : [], pl.trackIds)
+  const tracks = (Array.isArray(rawTracks) ? rawTracks : [])
     .map(mapSongRecord)
     .filter((s) => s.id);
   const meta = {
