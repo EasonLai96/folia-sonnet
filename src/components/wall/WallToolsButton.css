@@ -468,3 +468,73 @@ button.lattice-tools-slider-icon[aria-pressed="true"] { color: var(--text-accent
 @media (max-width: 640px) {
     .lattice-tools { right: 16px; bottom: 16px; }
 }
+
+/* 矮窗口（手机横屏就是这样：宽 800+、高只有 390 左右）单独一档。
+ *
+ * 上面那条只看宽度，而横屏手机的宽度比桌面还大 —— 于是什么都没压，面板连同按钮一起顶到屏幕外面。
+ * 这一档按高度走，把面板里那些写死的 px 整体缩一档：行高、快捷格、边距，以及顶上让出的高度。
+ * 面板高度预算（--wall-tools-panel-chrome）也要跟着改小，否则帮助列表会按桌面那套算出一大块，
+ * 把面板撑出视口。
+ *
+ * 最要紧的是让面板**能被压缩**：基线里它是 flex: none（见文件开头「面板不缩」那条），
+ * 而 stack 是 column-reverse + bottom 定位，内容比可用高度高时只会往屏幕上方溢出，
+ * 顶部那一截（也就是面板的标题和第一批按钮）就整块跑到屏幕外，怎么点都点不到。
+ * 这里改成可压缩 + 自己滚，上下都有界，才算真的收口。
+ *
+ * 每条 max-height 都用 vh 起头再跟一行 dvh：老 WebView 不认 dvh 时前面那行仍然生效。 */
+@media (max-height: 560px) {
+    .lattice-tools {
+        right: 12px;
+        bottom: 12px;
+        --wall-tools-panel-width: min(260px, calc(100vw - 24px));
+        --wall-tools-top-reserve: 20px;
+        --wall-tools-panel-chrome: 190px;
+    }
+
+    .lattice-tools-stack {
+        bottom: 52px;
+        max-height: calc(100vh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve));
+        max-height: calc(100dvh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve));
+    }
+
+    /* 可压缩 + 内部滚动：面板再高也只会在这条边界内滚，不会顶到屏幕外面去。
+       队列浮岛的 min-height 仍归它自己（见 .lattice-tools-stack.has-queue-island 那条）。 */
+    .lattice-tools-panel {
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .lattice-tools-action {
+        min-height: 30px;
+        gap: 7px;
+        padding: 0 9px;
+        font-size: 11.5px;
+    }
+
+    .lattice-tools-action svg {
+        width: 15px;
+        height: 15px;
+    }
+
+    /* 帮助列表的预算：桌面那条 max(150px, 100vh - 600px) 在 390px 高的屏上恒等于 150px，
+       比整块可用高度还大 —— 改成跟着剩余高度走，最少留两行。 */
+    .lattice-tools-panel.has-quick-actions .lattice-tools-help ul {
+        max-height: max(56px, calc(100vh - 360px));
+        max-height: max(56px, calc(100dvh - 360px));
+    }
+
+    .lattice-tools-stack.has-queue-island .lattice-tools-panel.has-quick-actions .lattice-tools-help ul {
+        max-height: max(
+            40px,
+            calc(100vh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve)
+                - var(--wall-tools-panel-chrome) - 8px - 112px)
+        );
+        max-height: max(
+            40px,
+            calc(100dvh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve)
+                - var(--wall-tools-panel-chrome) - 8px - 112px)
+        );
+    }
+}

@@ -537,18 +537,126 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
   }
 }
 
-/* 手机横屏：UI 的尺度缩一档。
+/* 手机上的 UI 尺度缩一档（等价于把这台机器的 dpi 调小：每一格元素变小，同一块屏反而放得下更多）。
  *
- * 手机上横过来时，桌面那套按宽屏排的布局会被压得互相遮挡 —— 说白了就是同一屏塞不下那么多东西。
- * 缩小「每一格 UI」等价于把这块屏的 dpi 调小：元素变小，同一块屏放得下的东西反而更多。
+ * 两档：
+ *   ① 在引导里明确选了「手机」→ 92%。竖屏也生效 —— 桌面那套按宽屏排的布局在这块屏上普遍偏大，
+ *      一行放不下几个字、一屏摆不了几个控件。
+ *   ② 手机横屏（compact）→ 86%，更紧一档：横过来之后元素互相遮挡得厉害。
+ *      两条同时命中时以 ② 为准（同样特异性，靠书写顺序，所以 ② 必须写在后面）。
  *
- * 这里缩的是根字号（rem 基准），不是整个文档。早先用的是 `html { zoom: 0.86 }`，实测下来是错的：
+ * 注意 ① 只认「明确选了手机」这个选择，`data-folia-device='auto'`（没选过的人）不缩竖屏 ——
+ * 没选过的人走的是自动推断，横屏那档照样生效。要让自动推断出来的手机也一起缩，把 ① 的选择器
+ * 再并上 `html[data-folia-device='auto']` 即可。
+ *
+ * 缩的是根字号（rem 基准），不是整个文档。早先用的是 `html { zoom: 0.86 }`，实测下来是错的：
  * zoom 只把元素画小，layout viewport 一点没变 —— 776px 的视口里，100vw 的元素算出来只有 667px，
  * 100dvh 同理，结果是内容缩到一角、四周留白，看起来就像「变小了但范围没变大」，壳体还铺不满。
  * 而且动态改 meta viewport 的 initial-scale 也完全不生效（innerWidth 没变），那条路也堵死。
  *
  * 改成动 rem 基准就干净了：Tailwind 的间距、字号、圆角几乎全是 rem，会按比例缩小；
  * % / flex / dvh 这类弹性布局原样保留，该铺满的继续铺满，fixed 弹层也不受影响。 */
+html[data-folia-device='phone'] {
+  font-size: 92%;
+}
+
 html[data-folia-ui-scale='compact'] {
   font-size: 86%;
+}
+
+/* 横屏（compact）下被打穿的三处 —— 都是「竖向空间按桌面那套 px 算」。
+ *
+ * 手机横屏的高度只有 360~400，比桌面矮得多，宽却比桌面还宽，所以按宽度的断点一个都不命中：
+ *
+ * ① 侧切入面板（GridView / GridMap / ArtistGrid）顶部固定 top-24 = 96px 起步，面板里第一块是
+ *    「宽度撑满的正方形封面」：w-80 减掉内边距还有 272px 高，比整块可用高度还高。它下面那层是
+ *    `flex-1 min-h-0`，于是被压成 0 高 —— 「添加到歌单」这类按钮就在那层里，等于完全点不到
+ *    （用户说的「被挡住」）。封面来自 Tailwind 的 aspect-square + w-full，rem 缩放也救不了它，
+ *    因为高度是跟着宽度算的。
+ * ② 歌单选择弹窗的列表写死 `max-h-[320px]`，同理把「新建歌单」顶出屏幕；弹窗本身也没有高度上限，
+ *    内容一高就上下同时溢出视口。
+ * ③ 右下角那排墙面工具（.lattice-tools）的 px 在 WallToolsButton.css 的 max-height 档里压过。
+ *
+ * 只加 data 属性、不依赖 Tailwind 类名 —— 类名一改选择器就静默失效，这种 bug 最难查。
+ * 每条都用 vh 起头再跟一行 dvh：老 WebView 不认 dvh 时前面那行仍然生效。 */
+
+/* ① 侧切入面板：把 top-24 那 96px 还给内容，封面从正方形压成一条 76px 的横幅。 */
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-panel='true'] {
+  top: 10px;
+  left: 10px;
+  width: min(320px, 46vw);
+  padding: 14px;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-cover='true'] {
+  height: 76px;
+  aspect-ratio: auto;
+  margin-bottom: 10px;
+}
+
+/* 封面压扁后内容区本来就该拿到剩下的高度，这里再兜一个下限：
+   真被别的固定高子项挤到 0，按钮还是点不到。 */
+html[data-folia-ui-scale='compact'] [data-folia-cut-in-scroll='true'] {
+  min-height: 132px;
+}
+
+/* ② 歌单选择弹窗：面板定高、标题钉住，只有内容区滚。 */
+html[data-folia-ui-scale='compact'] [data-folia-themed-dialog-kind='playlist-selection'] {
+  display: flex;
+  flex-direction: column;
+  width: min(64vw, 26rem) !important;
+  max-width: min(64vw, 26rem) !important;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
+  padding: 12px 14px !important;
+  overflow: hidden;
+}
+
+/* 第 1 个 div 是标题块、第 2 个是内容（关闭按钮是 button，不算在 div 里）。 */
+html[data-folia-ui-scale='compact'] [data-folia-themed-dialog-kind='playlist-selection'] > div:nth-of-type(1) {
+  flex: none;
+  margin-bottom: 10px !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-themed-dialog-kind='playlist-selection'] > div:nth-of-type(2) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-themed-dialog-kind='playlist-selection'] h2 {
+  font-size: 0.95rem !important;
+}
+
+/* 列表别再写死 320px，交给上面那层滚；行高与「新建歌单」也各收一档。 */
+html[data-folia-ui-scale='compact'] [data-folia-playlist-list='true'] {
+  max-height: none;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-playlist-option='true'] {
+  padding: 6px 10px !important;
+  gap: 8px !important;
+  border-radius: 10px !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-playlist-option='true'] div div:first-child {
+  font-size: 12px !important;
+}
+
+html[data-folia-ui-scale='compact'] [data-folia-playlist-selection='true'] > button {
+  flex: none;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+}
+
+/* ③ 右下角墙面工具：面板宽度与高度预算各收一档（面板本身能不能缩见 WallToolsButton.css）。 */
+html[data-folia-ui-scale='compact'] .lattice-tools {
+  right: 12px;
+  bottom: 12px;
+  --wall-tools-panel-width: min(260px, calc(100vw - 24px));
+  --wall-tools-top-reserve: 20px;
+  --wall-tools-panel-chrome: 190px;
 }
