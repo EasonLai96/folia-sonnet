@@ -13,6 +13,24 @@ if (hasReleaseKeystore) {
     keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
 }
 
+// versionCode 必须每一版都往上走：装了旧版之后再装新版，版本号不涨会直接
+// INSTALL_FAILED_VERSION_DOWNGRADE（必须先卸载）。原来硬编码 1，等于装过一次就再也
+// 升不上去了 —— 应用内那个「检查更新」也跟着白做。
+//
+// 由 package.json 的 version 推出来，每段留三位：major*1000000 + minor*1000 + patch
+// （0.7.18 → 7018）。预发布后缀（-beta.1）按 0 处理，同一 base version 的预发布共享
+// 一个 versionCode，正式版接上去时正好比它大。
+def versionCodeOf = { String name ->
+    def matched = (name =~ /^(\d+)\.(\d+)\.(\d+)/)
+    if (!matched.find()) {
+        return 1
+    }
+    int major = matched.group(1) as int
+    int minor = matched.group(2) as int
+    int patch = Math.min(matched.group(3) as int, 999)
+    return major * 1000000 + minor * 1000 + patch
+}
+
 android {
     namespace = "top.izuna.foliamajor"
     compileSdk {
@@ -24,7 +42,7 @@ android {
         applicationId "top.izuna.foliamajor"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode versionCodeOf(packageJson.version.toString())
         versionName packageJson.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
