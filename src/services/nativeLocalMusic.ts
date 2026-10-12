@@ -1,5 +1,6 @@
 import type { LocalSong } from '../types';
 import { getLocalSongs, saveLocalSongs } from './db';
+import { stageLocalCoverAsset } from './localCoverAssetService';
 import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
 import { parseEmbeddedMetadataAsync } from '../utils/localMetadataWorkerClient';
 import { noteLibraryStep } from '../nativeBridge/api/libraryTrace.js';
@@ -362,8 +363,21 @@ const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<
             fileName,
             fileSize: track.fileSize,
             metadata: metadata ? 'ok' : 'none',
+            cover: metadata?.coverAssetId ? 'ok' : 'none',
             metadataError,
         });
+
+        /*
+         * 内嵌封面在这一刻就落盘。
+         *
+         * 字节已经取回来了（上面解析元数据就是拿它解的），顺手抽出封面就行；不写的话
+         * 这首歌要等到「播到它」或「首页本地页签回填」那两趟才有封面 —— 磁贴墙铺的是
+         * 队列快照，那一刻没封面就一直空白。stage 之后的真正落盘在 saveLocalSongs →
+         * assignImportedSongs → prepareLocalSongsCoverAssets。
+         */
+        if (metadata?.cover && metadata.coverAssetId) {
+            stageLocalCoverAsset(metadata.coverAssetId, metadata.cover);
+        }
 
         const title = metadata?.title || fallbackTitle;
         songs.push({
@@ -389,6 +403,8 @@ const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<
                 fallbackAlbum: track.album || '',
             }),
             folderName: ANDROID_IMPORTED_FOLDER_NAME,
+            localCoverAssetId: metadata?.coverAssetId,
+            localCoverSource: metadata?.cover ? 'embedded' : undefined,
             hasManualLyricSelection: false,
             noAutoMatch: false,
         });

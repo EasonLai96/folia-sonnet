@@ -194,12 +194,35 @@ export function buildUnifiedLocalSong({
 export const QUEUE_COVER_SIZE = 1024;
 export const LIST_ROW_COVER_SIZE = 512;
 
+/**
+ * 建队/建列表这一刻，把还没有封面的本地歌排进抽取队列。
+ *
+ * 这一层的封面是**当场烤进 `album.coverUrl`** 的（下面按 `song.localCoverAssetId` 算），
+ * 而内嵌封面原本只有「导入时」和「播到它时」两个时机抽 —— 于是没播过、也没在首页本地
+ * 页签露过面的歌，在磁贴墙、歌单页、艺术家页全是空白卡片。抽到之后会广播
+ * `LOCAL_COVER_READY_EVENT`，队列条目由 useLocalCoverQueueSync 补上；曲库列表那边靠
+ * `folia-local-music-updated` 重读。
+ *
+ * 动态 import 是刻意的：localCoverBackfill → localMusicService → playbackAdapters 是一条环
+ * （localMusicService 要用这里的 resolveLocalSongMetadata），静态引进去会在模块初始化阶段
+ * 就系上。这里是「后台补一下」，晚一点加载无所谓。
+ */
+const COVER_BACKFILL_LIMIT = 16;
+const scheduleLocalCoverBackfill = (songs: LocalSong[]): void => {
+    if (typeof window === 'undefined') return;
+    if (!songs.some(song => !song.localCoverAssetId)) return;
+    void import('./localCoverBackfill')
+        .then(module => module.backfillLocalCovers(songs, COVER_BACKFILL_LIMIT))
+        .catch(() => undefined);
+};
+
 export function buildLocalQueue(
     queue: LocalSong[],
     currentSong?: UnifiedSong,
     catalog?: LocalLibraryDisplayCatalog,
     coverSize: number = QUEUE_COVER_SIZE,
 ): UnifiedSong[] {
+    scheduleLocalCoverBackfill(queue);
     const catalogIndex = catalog
         ? buildLocalLibraryIndex(catalog.entities, catalog.assignments)
         : undefined;
