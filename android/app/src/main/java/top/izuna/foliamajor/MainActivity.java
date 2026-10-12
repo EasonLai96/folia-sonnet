@@ -3,6 +3,7 @@ package top.izuna.foliamajor;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -361,6 +362,41 @@ public class MainActivity extends BridgeActivity {
         controller.setSystemBarsBehavior(
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         controller.hide(WindowInsetsCompat.Type.systemBars());
+
+        // 栏位变了之后 WebView 常常还按上一次的尺寸画着，顶部就留一条与内容无关的黑带。
+        // 这一步必须跟着 setDecorFitsSystemWindows 一起做（照 folia-android 的 AdaptiveLayout）。
+        requestWebViewRelayout();
+    }
+
+    /** 让 WebView 重新量一次：栏位 / 尺寸变化后它不会自己跟着变。 */
+    private void requestWebViewRelayout() {
+        try {
+            getWindow().getDecorView().post(() -> {
+                try {
+                    WebView webView = getBridge() == null ? null : getBridge().getWebView();
+                    if (webView != null) webView.requestLayout();
+                } catch (Throwable ignored) {
+                    // WebView 还没建好（Bridge 创建之前）就算了，下一拍还会再压。
+                }
+            });
+        } catch (Throwable ignored) {
+            // 窗口已经销毁：没有可重新测量的东西。
+        }
+    }
+
+    /**
+     * 转屏 / 分屏 / 折叠屏展开之后系统会把 inset 重新写回来，沉浸态与挖孔都得重压一次。
+     *
+     * 清单里声明了 configChanges，所以这些变化走的是这里而不是重建 Activity —— 少了这一下，
+     * 转完屏顶部就留着一条状态栏的黑条（WebView 也还按上一次的尺寸画着）。
+     */
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applyImmersiveMode();
+        PhoneFitCutout.apply(this);
+        getWindow().getDecorView().postDelayed(this::applyImmersiveMode, 200);
+        getWindow().getDecorView().postDelayed(() -> PhoneFitCutout.apply(this), 200);
     }
 
     /**
