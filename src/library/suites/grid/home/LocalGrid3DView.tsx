@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileUp, FolderOpen, Loader2, Music, ListMusic, User, Disc3, RefreshCw, Smartphone, ListChecks } from 'lucide-react';
 import DesktopGrid3DSurface, { DesktopGrid3DAction } from './DesktopGrid3DSurface';
-import LocalSongManagerDialog from './LocalSongManagerDialog';
+import LocalSongManagerDialog from '../../../shared/LocalSongManagerDialog';
 import { LocalPlaylist, LocalSong, Theme } from '../../../../types';
 import type { GridViewCollectionDescriptor } from '../../../../components/app/home/gridViewCollectionAdapters';
 import { useDebouncedFocusSync } from '../../../../hooks/useDebouncedFocusSync';
@@ -239,6 +239,7 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
                 focusMemoryScope={JSON.stringify(['local', activeSection.key])}
                 title={String(activeSection.label)}
                 mapButtonLabel={t('home.allAlbums')}
+                directoryButtonLabel={t('localMusic.directory')}
                 items={activeSection.cards}
                 focusedIndex={activeFocusedIndex}
                 onFocusedIndexChange={setActiveFocusedIndex}

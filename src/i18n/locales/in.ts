@@ -3305,6 +3305,7 @@ export default {
     "sortByAlbumTrack": "Nomor album",
     "sortAscending": "Menaik",
     "sortDescending": "Menurun",
+    "directory": "Direktori",
     "importFolder": "Impor Folder",
     "importing": "Mengimpor...",
     "scanDevice": "Pindai musik perangkat",

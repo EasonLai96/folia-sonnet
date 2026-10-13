@@ -3418,6 +3418,7 @@ export default {
     "sortByAlbumTrack": "Album number",
     "sortAscending": "Ascending",
     "sortDescending": "Descending",
+    "directory": "Directory",
     "importFolder": "Import Folder",
     "importing": "Importing...",
     "scanDevice": "Scan device music",

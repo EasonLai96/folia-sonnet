@@ -3417,6 +3417,7 @@ export default {
     "sortByAlbumTrack": "专辑号",
     "sortAscending": "升序",
     "sortDescending": "降序",
+    "directory": "目录",
     "importFolder": "导入文件夹",
     "importing": "导入中...",
     "scanDevice": "扫描设备音乐",
