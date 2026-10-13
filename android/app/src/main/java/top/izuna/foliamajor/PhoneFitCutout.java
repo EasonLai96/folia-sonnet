@@ -41,6 +41,7 @@ final class PhoneFitCutout {
     private static final String TAG = "FoliaPhoneFitCutout";
     private static final String INSET_LISTENER_TAG = "folia-cutout-inset-listener";
     private static final String DECOR_PADDING_GUARD_TAG = "folia-cutout-decor-padding-guard";
+    private static final String CONTENT_PADDING_GUARD_TAG = "folia-cutout-content-padding-guard";
 
     private PhoneFitCutout() {
     }
@@ -67,8 +68,16 @@ final class PhoneFitCutout {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 WindowManager.LayoutParams attributes = window.getAttributes();
+                // 用 ALWAYS，不用 SHORT_EDGES：
+                // · OPPO 官方 Android 15 兼容文档（open.oppomobile.com page/info?id=13047）明确
+                //   「非浮窗必须配置 ALWAYS，这是唯一允许的选项」，SHORT_EDGES 属于「未适配」，
+                //   部分 ColorOS 实现会按它把窗口排在挖孔/状态栏下方 —— 反馈里的「OPPO 顶部黑条」
+                //   正是这个画像（别的机型 SHORT_EDGES 照样铺满，所以只有 OPPO 挂）。
+                // · AOSP 15+（targetSdk 35+ 强制边到边）本来也会把 SHORT_EDGES 解释成 ALWAYS，
+                //   显式写 ALWAYS 只是把这个语义提前到 15 之前的机器上，不改变 15+ 的行为。
+                // 挖孔量得到的 inset（含横屏左右）照常进安全区变量，CSS 那套继续避让。
                 attributes.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
                 window.setAttributes(attributes);
             }
             // 不再为系统栏留位。
@@ -129,6 +138,7 @@ final class PhoneFitCutout {
             return;
         }
         contentRoot.setTag(INSET_LISTENER_TAG.hashCode(), Boolean.TRUE);
+        installContentPaddingGuard(contentRoot);
         ViewCompat.setOnApplyWindowInsetsListener(contentRoot, (view, insets) -> {
             // 清掉容器链上的 inset padding：黑边就是它垫出来的。
             clearInsetPadding(view, 3);
@@ -146,6 +156,31 @@ final class PhoneFitCutout {
         // 监听器只在 inset 变化时触发；挂上后再主动清一次，启动首帧就不会先闪一条。
         clearInsetPadding(contentRoot, 3);
         ViewCompat.requestApplyInsets(contentRoot);
+    }
+
+    /**
+     * 内容根（decor 第一个子节点，Capacitor/WebView 的宿主容器）的布局期 padding 守卫。
+     *
+     * decor 那层已有 {@link #installDecorPaddingGuard}，但内容根这层只在 inset 派发时清一次
+     * （inset 监听 + apply 时的 clearInsetPadding）。ColorOS 一类 ROM 会在**重新布局**时把
+     * 状态栏 inset 直接回填成内容根的 padding，而不重新派发 inset —— 监听器拦不住，apply 也
+     * 不是每次布局都跑，于是顶部就长期留一条（窗口其实已经铺满，垫出来的是 padding）。
+     * 挂布局守卫，每次布局发现非 0 就压回 0；只在确实有 padding 时才写，避免触发死循环。
+     */
+    private static void installContentPaddingGuard(final View contentRoot) {
+        if (contentRoot == null
+            || contentRoot.getTag(CONTENT_PADDING_GUARD_TAG.hashCode()) != null) {
+            return;
+        }
+        contentRoot.setTag(CONTENT_PADDING_GUARD_TAG.hashCode(), Boolean.TRUE);
+        contentRoot.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (contentRoot.getPaddingLeft() != 0
+                || contentRoot.getPaddingTop() != 0
+                || contentRoot.getPaddingRight() != 0
+                || contentRoot.getPaddingBottom() != 0) {
+                contentRoot.setPadding(0, 0, 0, 0);
+            }
+        });
     }
 
     /**
