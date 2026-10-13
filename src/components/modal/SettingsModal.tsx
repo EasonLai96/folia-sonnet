@@ -32,7 +32,7 @@ import SettingsHelpActions from './SettingsHelpActions';
 import { openPonderNavigation } from '../../services/ponder/pagePonderTarget';
 import ReleaseNotesDialog from './ReleaseNotesDialog';
 import { JoinCommunityButton } from '../shared/JoinCommunityButton';
-import AndroidUpdateCheck from './settings/AndroidUpdateCheck';
+import AndroidUpdatePanel from './settings/AndroidUpdatePanel';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { BUILD_KIND_TAGS, getBuildKind } from '../../utils/buildProvenance';
 import meowImageUrl from '../../../build/miao.png';
@@ -1575,6 +1575,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                             </p>
                                         )}
 
+                                        {/* 安卓端单独一条：上面那几块读的都是 electron-updater 的状态，
+                                            在 WebView 里恒为空。手机上没有静默安装这条路 —— 检查、
+                                            下载进度、下载 / 安装全在这张卡片里。 */}
+                                        {isCapacitorAndroid() && <AndroidUpdatePanel />}
+
                                         {/* 第二行：版本状态与安装操作 */}
                                         {updateStatus?.availableVersion && (
                                             <>
@@ -1683,11 +1688,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 )}
                                             </div>
                                         )}
-
-                                        {/* 安卓端单独一条：上面那几块读的都是 electron-updater 的状态，
-                                            在 WebView 里恒为空。手机上没有静默安装这条路，所以这里只负责
-                                            把「有没有新版本」和下载地址交出去。 */}
-                                        {isCapacitorAndroid() && <AndroidUpdateCheck />}
                                     </div>
                                 </div>
                             </motion.div>

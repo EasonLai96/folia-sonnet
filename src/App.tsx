@@ -29,7 +29,9 @@ import ReleaseNotesDialog from './components/modal/ReleaseNotesDialog';
 import FreeSoftwareNoticeModal from './components/modal/FreeSoftwareNoticeModal';
 import { PlaybackEntryViewPrompt } from './components/modal/playback-entry-view/PlaybackEntryViewPrompt';
 import { LatticeFmNotice } from './components/modal/playback-entry-view/LatticeFmNotice';
+import AppUpdatePromptDialog from './components/modal/AppUpdatePromptDialog';
 import { useStartupExperienceGate } from './hooks/useStartupExperienceGate';
+import { useStartupUpdatePrompt } from './hooks/useStartupUpdatePrompt';
 import { useAppDialogsModel } from './components/app/dialogs/useAppDialogsModel';
 import { useHomeModel } from './components/app/home/useHomeModel';
 import { createLyricFilterPatternSaver } from './components/app/home/createLyricFilterPatternSaver';
@@ -305,6 +307,8 @@ export default function App() {
     );
 
     const startupExperience = useStartupExperienceGate();
+    // 启动后自动查一次新版本，有新版本就弹提示（安卓才有；桌面端走 electron-updater）。
+    const updatePrompt = useStartupUpdatePrompt();
 
     useEffect(() => initializeSyncCoordinator(), []);
 
@@ -3031,6 +3035,12 @@ export default function App() {
                 onClose={startupExperience.closeReleaseNotes}
             />
             <UserGuideModal theme={theme} />
+            <AppUpdatePromptDialog
+                isOpen={updatePrompt.isPromptOpen}
+                isDaylight={isDaylight}
+                onClose={updatePrompt.closePrompt}
+                onIgnoreVersion={updatePrompt.ignoreVersion}
+            />
             <PlaybackEntryViewPrompt theme={theme} />
             <LatticeFmNotice />
         </AppShell>
