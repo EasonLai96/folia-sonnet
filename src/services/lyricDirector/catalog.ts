@@ -391,6 +391,11 @@ export const isKnownDirectorMode = (mode: unknown): mode is VisualizerMode => (
     typeof mode === 'string' && (BUILTIN_VISUALIZER_MODES as readonly string[]).includes(mode)
 );
 
+/** Whether the user has told the AI never to pick this mode. */
+export const isBlockedDirectorMode = (mode: string, blockedModes: readonly string[] | undefined): boolean => (
+    Array.isArray(blockedModes) && blockedModes.includes(mode)
+);
+
 /** The modes the AI may choose from, with the label to show for each. */
 export const listDirectorModes = (t?: (key: string) => string): DirectorModeInfo[] => (
     (BUILTIN_VISUALIZER_MODES as readonly string[]).map((id) => ({

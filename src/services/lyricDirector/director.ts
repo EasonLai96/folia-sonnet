@@ -10,6 +10,7 @@ import {
     formatParamValue,
     gateSatisfied,
     gatesFor,
+    isBlockedDirectorMode,
     isInertValue,
     isKnownDirectorMode,
     listDirectorModes,
@@ -223,10 +224,12 @@ const currentModeOf = (state: VisualizerState): string => (
     typeof state?.visualizerMode === 'string' ? state.visualizerMode : 'classic'
 );
 
-/** An id the registry does not know is a hallucination; it degrades to `fallback`. */
-const validatedMode = (mode: unknown, fallback: string): string => {
+/* An id the registry does not know is a hallucination; a mode the user blocked is
+ * one the AI was never shown, so an answer naming it is treated the same way —
+ * both degrade to the mode that is already playing. */
+const validatedMode = (mode: unknown, fallback: string, blockedModes: readonly string[] = []): string => {
     const candidate = typeof mode === 'string' ? mode.trim() : '';
-    if (isKnownDirectorMode(candidate)) return candidate;
+    if (isKnownDirectorMode(candidate) && !isBlockedDirectorMode(candidate, blockedModes)) return candidate;
     return fallback;
 };
 
@@ -235,10 +238,13 @@ interface ApplyResult {
     applied: string[];
 }
 
-const applyDecision = (decision: { mode?: unknown; params?: unknown }, options: { applyParams: boolean }): ApplyResult => {
+const applyDecision = (
+    decision: { mode?: unknown; params?: unknown },
+    options: { applyParams: boolean; blockedModes: readonly string[] },
+): ApplyResult => {
     const state = useVisualizerSettingsStore.getState();
     const previousMode = currentModeOf(state);
-    const mode = validatedMode(decision?.mode, previousMode);
+    const mode = validatedMode(decision?.mode, previousMode, options.blockedModes);
     const label = modeLabel(mode, translate);
     const applied: string[] = [];
 
@@ -366,7 +372,9 @@ const requestDecision = async (input: {
     const settings = readDirectorSettings();
     const key = input.targetSongKey ?? currentSongKey();
     const previous = key ? readDecision(key) : null;
-    const modes = listDirectorModes(translate);
+    // A blocked mode is simply absent from the list the AI is shown: it cannot
+    // pick what it never saw.
+    const modes = listDirectorModes(translate).filter((mode) => !isBlockedDirectorMode(mode.id, settings.blockedModes));
     const system = buildSystemPrompt(settings.userHint);
     const prompt = buildSourcePrompt({
         song: input.song,
@@ -375,6 +383,7 @@ const requestDecision = async (input: {
         currentMode: currentModeOf(useVisualizerSettingsStore.getState()),
         userHint: settings.userHint,
         recentModes: readRecentModes(),
+        blockedModes: settings.blockedModes,
         previousChoice: previous
             ? { mode: previous.mode, params: previous.params, reason: previous.reason, forced: input.force }
             : null,
@@ -421,12 +430,16 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
     const songKey = currentSongKey();
     if (!songKey || !songInfoOf(displaySong())) return { kind: 'no-song' };
 
-    // A stored decision is applied without asking the AI again.
+    // A stored decision is applied without asking the AI again — unless it names
+    // a mode the user has blocked since, in which case it is decided afresh.
     if (!force && settings.rememberPerSong) {
         const remembered = readDecision(songKey);
-        if (remembered && currentSongKey() === songKey) {
+        if (remembered && !isBlockedDirectorMode(remembered.mode, settings.blockedModes) && currentSongKey() === songKey) {
             snapshotSettings();
-            const result = applyDecision(remembered, { applyParams: settings.applyParams });
+            const result = applyDecision(remembered, {
+                applyParams: settings.applyParams,
+                blockedModes: settings.blockedModes,
+            });
             lastReason = remembered.reason;
             const changes = result.applied.length > 0 ? result.applied.join('，') : translate('aiDirector.nothingToChange');
             lastSummary = `${changes}${translate('aiDirector.fromMemory')}`;
@@ -467,7 +480,7 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
                 const candidate = typeof decision?.mode === 'string' ? decision.mode.trim() : '';
                 // The current mode is NOT a valid fallback here: it belongs to a
                 // different song, so an unknown id is dropped instead.
-                if (isKnownDirectorMode(candidate)) {
+                if (isKnownDirectorMode(candidate) && !isBlockedDirectorMode(candidate, settings.blockedModes)) {
                     writeDecision(inFlightSongKey, {
                         mode: candidate,
                         reason: decision.reason.slice(0, REASON_MAX_CHARS),
@@ -479,7 +492,10 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
         }
 
         snapshotSettings();
-        const result = applyDecision(decision, { applyParams: settings.applyParams });
+        const result = applyDecision(decision, {
+            applyParams: settings.applyParams,
+            blockedModes: settings.blockedModes,
+        });
         lastReason = typeof decision?.reason === 'string' ? decision.reason : '';
         lastSummary = result.applied.length > 0
             ? result.applied.join('，')
@@ -575,7 +591,8 @@ const prefetchNextSong = async (): Promise<void> => {
         });
         if (busy || songKeyOf(displaySong()) === key) return;
         const candidate = typeof decision?.mode === 'string' ? decision.mode.trim() : '';
-        if (!isKnownDirectorMode(candidate)) return;
+        const blockedNow = readDirectorSettings().blockedModes;
+        if (!isKnownDirectorMode(candidate) || isBlockedDirectorMode(candidate, blockedNow)) return;
         const existing = readDecision(key);
         if (existing && existing.at > 0) return; // a newer answer is already there
         if (readDirectorSettings().rememberPerSong) {

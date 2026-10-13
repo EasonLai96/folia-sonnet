@@ -12,6 +12,7 @@ import {
     subscribeDirectorState,
     updateDirectorSettings,
 } from '../../../services/lyricDirector/state';
+import { listDirectorModes } from '../../../services/lyricDirector/catalog';
 import {
     testConfiguredAiConnection,
     type AiConnectionTestResult,
@@ -89,6 +90,14 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
             </button>
         </div>
     );
+
+    const toggleBlockedMode = (mode: string) => {
+        const current = readDirectorSettings().blockedModes;
+        const next = current.includes(mode)
+            ? current.filter((entry) => entry !== mode)
+            : [...current, mode];
+        updateDirectorSettings({ blockedModes: next });
+    };
 
     const renderProviderOption = (id: AiProviderId, label: string) => {
         const selected = settings.provider === id;
@@ -259,6 +268,33 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                         directorSettings.applyParams,
                         (next) => updateDirectorSettings({ applyParams: next }),
                     )}
+                </div>
+
+                <div className="space-y-2 pt-1 text-left">
+                    <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {t('aiDirector.blockedModes')}
+                    </div>
+                    <div className="text-xs opacity-50 max-w-[380px]" style={{ color: 'var(--text-secondary)' }}>
+                        {t('aiDirector.blockedModesDesc')}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {listDirectorModes((key) => t(key)).map((mode) => {
+                            const blocked = directorSettings.blockedModes.includes(mode.id);
+                            return (
+                                <button
+                                    key={mode.id}
+                                    type="button"
+                                    aria-pressed={blocked}
+                                    onClick={() => toggleBlockedMode(mode.id)}
+                                    title={mode.hint}
+                                    className={`px-2.5 py-1 rounded-full border text-xs transition-opacity ${isDaylight ? 'border-black/15' : 'border-white/15'} ${blocked ? 'line-through opacity-55' : 'opacity-90'}`}
+                                    style={{ color: 'var(--text-primary)' }}
+                                >
+                                    {mode.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
         </div>

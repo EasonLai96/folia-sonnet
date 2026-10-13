@@ -15,6 +15,7 @@ import {
     subscribeDirectorState,
     updateDirectorSettings,
 } from '../../services/lyricDirector/state';
+import { modeLabel } from '../../services/lyricDirector/catalog';
 
 // src/components/panelTab/AiDirectorTab.tsx
 // The AI director's own tab in the player panel — the entry point this feature
@@ -123,6 +124,13 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
                     <div className={muted}>
                         {t('aiDirector.memoryCount', { count: runtime.rememberedSongCount })}
                     </div>
+                    {settings.blockedModes.length > 0 && (
+                        <div className={muted}>
+                            {t('aiDirector.blockedModesLine', {
+                                modes: settings.blockedModes.map((mode) => modeLabel(mode, (key) => t(key))).join('、'),
+                            })}
+                        </div>
+                    )}
                 </div>
                 <div className={`flex flex-wrap gap-2 px-3 py-2.5 border-t ${rowDivider}`}>
                     <button

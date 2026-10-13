@@ -42,6 +42,8 @@ export interface DirectorPromptInput {
     userHint?: string;
     recentModes?: string[];
     previousChoice?: DirectorPreviousChoice | null;
+    /** Modes the AI must not pick: left out of the list *and* of the parameter space. */
+    blockedModes?: readonly string[];
 }
 
 const SYSTEM_PROMPT = [
@@ -136,8 +138,11 @@ export const buildSourcePrompt = (input: DirectorPromptInput): string => {
         out.push(`- ${mode.id}（${mode.label}）${mode.hint ? `：${mode.hint}` : ''}`);
     });
     // Every mode's parameter space, so the model can tune whichever mode it picks
-    // (it chooses and tunes in one round trip).
-    const specEntries = Object.entries(buildParamSpec()).filter(([, value]) => Boolean(value));
+    // (it chooses and tunes in one round trip). A blocked mode is left out of it
+    // as well — its parameter keys would only invite an answer naming them.
+    const blocked = input.blockedModes ?? [];
+    const specEntries = Object.entries(buildParamSpec())
+        .filter(([modeId, value]) => Boolean(value) && !blocked.includes(modeId));
     if (specEntries.length > 0) {
         out.push('', '各模式可调参数（键(范围或取值)；未列出的键不要使用）：');
         specEntries.forEach(([modeId, value]) => out.push(`- ${modeId}: ${value}`));

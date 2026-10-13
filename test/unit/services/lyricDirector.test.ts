@@ -3,6 +3,7 @@ import {
     buildParamSpec,
     gatesFor,
     gateSatisfied,
+    isBlockedDirectorMode,
     isInertValue,
     isKnownDirectorMode,
     listDirectorModes,
@@ -19,6 +20,7 @@ import {
 import {
     clearAllDecisions,
     clearSnapshot,
+    DEFAULT_BLOCKED_DIRECTOR_MODES,
     forgetDecision,
     noteRecentMode,
     readDecision,
@@ -131,6 +133,24 @@ describe('lyric director prompt', () => {
         expect(extractJsonText('{"mode":"sonnet"}')).toBe('{"mode":"sonnet"}');
     });
 
+    it('leaves a blocked mode out of both the mode list and the parameter space', () => {
+        const blocked = ['lumiere', 'still'];
+        const modes = listDirectorModes().filter((mode) => !isBlockedDirectorMode(mode.id, blocked));
+        expect(modes.map((mode) => mode.id)).not.toContain('lumiere');
+        const prompt = buildSourcePrompt({
+            song: null,
+            lines: [],
+            modes,
+            currentMode: 'classic',
+            blockedModes: blocked,
+        });
+        expect(prompt).not.toContain('lumiere');
+        expect(prompt).not.toContain('still');
+        // The rest of the modes are still offered, parameters included.
+        expect(prompt).toContain('sonnet');
+        expect(prompt).toContain('各模式可调参数');
+    });
+
     it('shows the AI the mode list, the parameter space and this song', () => {
         const prompt = buildSourcePrompt({
             song: { title: '晴天', artist: '周杰伦', album: '叶惠美' },
@@ -178,6 +198,19 @@ describe('lyric director memory', () => {
         expect(readRecentModes().filter((mode) => mode === 'classic')).toHaveLength(1);
         for (let index = 0; index < 20; index += 1) noteRecentMode(`mode-${index}`);
         expect(readRecentModes().length).toBeLessThanOrEqual(8);
+    });
+
+    it('blocks the two modes that ship blocked by default', () => {
+        const settings = readDirectorSettings();
+        expect(settings.blockedModes).toEqual(expect.arrayContaining(['lumiere', 'still']));
+        settings.blockedModes.forEach((mode) => expect(isKnownDirectorMode(mode)).toBe(true));
+        expect(isBlockedDirectorMode('lumiere', settings.blockedModes)).toBe(true);
+        expect(isBlockedDirectorMode('sonnet', settings.blockedModes)).toBe(false);
+        expect(isBlockedDirectorMode('sonnet', undefined)).toBe(false);
+
+        updateDirectorSettings({ blockedModes: ['sonnet'] });
+        expect(readDirectorSettings().blockedModes).toEqual(['sonnet']);
+        updateDirectorSettings({ blockedModes: [...DEFAULT_BLOCKED_DIRECTOR_MODES] });
     });
 
     it('keeps the first snapshot and only the first', () => {

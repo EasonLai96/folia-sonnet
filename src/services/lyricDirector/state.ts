@@ -25,6 +25,15 @@ export interface LyricDirectorSettings {
     applyParams: boolean;
     /** Decide the next queued track ahead of time, into its memory only. */
     prefetchNext: boolean;
+    /**
+     * Modes the AI must never pick. They are left out of the list it is shown,
+     * and an answer naming one falls back to the mode that is playing.
+     *
+     * Two ship blocked by default: `lumiere` (a light field and a glow that
+     * swallows the whole screen) and `still` (no animation at all — if you want
+     * that, set it yourself).
+     */
+    blockedModes: string[];
     /** Optional preference handed to the AI ("calmer", "more transitions"). */
     userHint: string;
 }
@@ -51,6 +60,11 @@ interface PersistedState {
     recentModes: string[];
 }
 
+/* Modes the AI is not allowed to pick out of the box. `lumiere` is the glow one:
+ * its light field and blooming text bury the lyrics. `still` has no animation at
+ * all, which makes the whole feature look broken rather than calm. */
+export const DEFAULT_BLOCKED_DIRECTOR_MODES = ['lumiere', 'still'];
+
 export const DEFAULT_DIRECTOR_SETTINGS: LyricDirectorSettings = {
     autoOnSongChange: true,
     rememberPerSong: true,
@@ -58,6 +72,7 @@ export const DEFAULT_DIRECTOR_SETTINGS: LyricDirectorSettings = {
     // the mode follows the song, and the parameters go with it.
     applyParams: true,
     prefetchNext: true,
+    blockedModes: [...DEFAULT_BLOCKED_DIRECTOR_MODES],
     userHint: '',
 };
 
@@ -122,6 +137,11 @@ const load = (): PersistedState => {
             if (typeof candidate.rememberPerSong === 'boolean') settings.rememberPerSong = candidate.rememberPerSong;
             if (typeof candidate.applyParams === 'boolean') settings.applyParams = candidate.applyParams;
             if (typeof candidate.prefetchNext === 'boolean') settings.prefetchNext = candidate.prefetchNext;
+            if (Array.isArray(candidate.blockedModes)) {
+                settings.blockedModes = [...new Set(
+                    candidate.blockedModes.filter((mode): mode is string => typeof mode === 'string'),
+                )];
+            }
             if (typeof candidate.userHint === 'string') settings.userHint = candidate.userHint;
         }
         const decisions: Record<string, LyricDirectorDecision> = {};
