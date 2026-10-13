@@ -11,7 +11,7 @@ import { useCollectionResourceState } from '../../core/bindings/useCollectionRes
 import { useCollectionView } from '../../core/bindings/useCollectionView';
 import { useCollectionActions } from '../../core/bindings/useCollectionActions';
 import { useCollectionMutationSnapshot } from '../../core/bindings/useCollectionMutations';
-import { useLocalTrackSortStore } from '../../core/state/useLocalTrackSortStore';
+import { useTrackSorting } from '../../core/bindings/useTrackSorting';
 import { useGridSurfaceRegistration } from '../../../hooks/useGridSurfaceRegistration';
 import { canResolveSongCatalogRef } from '../../../services/onlineMusic/catalogRefs';
 import type { BravaisItem, BravaisLayer, BravaisSeamModel } from './bravaisLayer';
@@ -60,33 +60,33 @@ const BravaisCollection: React.FC<LibraryCollectionSurfaceProps> = ({
     const { snapshot } = useCollectionResourceState(resource);
     const tracks = useMemo(() => snapshot?.tracks ?? [], [snapshot?.tracks]);
     const filter = useBravaisCollectionFilter({ sessionKey, isActive });
-    // 与网格、TUI 同一条规则：只有本地文件夹（含「全部歌曲」）按本地排序。
-    const supportsLocalTrackSorting = collection.source === 'local' && collection.type === 'folder';
-    const sortField = useLocalTrackSortStore(state => state.field);
-    const sortDirection = useLocalTrackSortStore(state => state.direction);
-    const setSortField = useLocalTrackSortStore(state => state.setField);
-    const setSortDirection = useLocalTrackSortStore(state => state.setDirection);
     const localSongsById = useMemo(() => new Map(localSongs?.map(song => [song.id, song])), [localSongs]);
-    const localSort = useMemo(() => (
-        supportsLocalTrackSorting ? { songsById: localSongsById, field: sortField, direction: sortDirection } : null
-    ), [localSongsById, sortDirection, sortField, supportsLocalTrackSorting]);
-    const view = useCollectionView({ tracks, committedQuery: filter.committedQuery, localSort });
+    // 与网格、TUI 同一份排序（同一张预设表、同一个 store）。专辑保留音轨顺序，不挂排序。
+    const sorting = useTrackSorting({ source: collection.source, localSongsById });
+    const supportsTrackSorting = sorting.supported && collection.type !== 'album';
+    const view = useCollectionView({
+        tracks,
+        committedQuery: filter.committedQuery,
+        sort: supportsTrackSorting ? sorting.sort : null,
+    });
     const actions = useCollectionActions({ resource, snapshot, view, port: playback, collectionType: collection.type });
     const mutationSnapshot = useCollectionMutationSnapshot(mutations);
 
     // 命令面板：与网格、TUI 同一个构建函数，按 entry 的声明过滤；bravais 没有网格的三个局部动作（见 entry）。
     const surfaceParams = buildCoreSurfaceParams({
         declaredActions,
-        supportsLocalTrackSorting,
+        supportsTrackSorting,
         canReloadOnlineCollection: actions.capabilities.reload.enabled,
         filteredTrackCount: view.contextTracks.length,
         isFilterActive: view.isFilterActive,
-        sortField,
-        sortDirection,
+        sortField: sorting.field,
+        sortDirection: sorting.direction,
+        availableSortPresets: sorting.presets,
         playFiltered: actions.playScope,
         enqueueFiltered: actions.enqueueScope,
-        setSortField,
-        setSortDirection,
+        setSortField: sorting.setField,
+        setSortDirection: sorting.setDirection,
+        setSortPreset: sorting.applyPreset,
         reloadOnlineCollection: actions.reload,
         mutationSnapshot,
         mutations,
@@ -169,11 +169,12 @@ const BravaisCollection: React.FC<LibraryCollectionSurfaceProps> = ({
         committedQuery: filter.committedQuery,
         setQuery: filter.setQuery,
         sort: {
-            supported: supportsLocalTrackSorting,
-            field: sortField,
-            direction: sortDirection,
-            setField: setSortField,
-            setDirection: setSortDirection,
+            supported: supportsTrackSorting,
+            field: sorting.field,
+            direction: sorting.direction,
+            presets: sorting.presets,
+            setPreset: sorting.applyPreset,
+            setDirection: sorting.setDirection,
         },
         trackByKey,
         forms,

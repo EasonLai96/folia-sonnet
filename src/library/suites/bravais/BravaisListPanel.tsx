@@ -112,12 +112,12 @@ const BravaisListPanel: React.FC<{ layer: BravaisLayer; depth: number; actions: 
             {sort && (
                 <div className="bravais-panel-tools" data-bravais-list-sort>
                     <select
-                        value={sort.field}
+                        value={sort.value}
                         aria-label={entries?.panelTitle}
                         data-bravais-list-sort-field
-                        onChange={event => sort.setField(event.target.value)}
+                        onChange={event => sort.selectPreset(event.target.value)}
                     >
-                        {sort.fields.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
+                        {sort.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                     <button type="button" className="bravais-seam-icon" data-bravais-list-sort-direction={sort.direction}
                         onClick={sort.toggleDirection} aria-label={sort.directionLabel} title={sort.directionLabel}>

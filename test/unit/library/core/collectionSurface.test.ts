@@ -9,6 +9,11 @@ import {
 } from '@/library/core/model/collectionSurface';
 import { LIBRARY_ACTION_IDS } from '@/library/core/model/librarySuites';
 import { EMPTY_COLLECTION_MUTATION_SNAPSHOT } from '@/library/core/model/collectionMutationCapabilities';
+import {
+    resolveAvailableSongSortPresets,
+    resolveSongSortCapability,
+    type SongSortCapability,
+} from '@/library/core/model/songSortOptions';
 import type { LibraryDeclaredActions } from '@/library/core/contracts/suite';
 import { resolveCollectionSyncCounts } from '@/library/core/model/collectionProgress';
 
@@ -17,16 +22,19 @@ import { resolveCollectionSyncCounts } from '@/library/core/model/collectionProg
 // 面板只能给出它真能做到的那几件事。
 
 const core = (overrides: Partial<Parameters<typeof buildCoreSurfaceParams>[0]> = {}) => buildCoreSurfaceParams({
-    supportsLocalTrackSorting: false,
+    supportsTrackSorting: false,
     canReloadOnlineCollection: true,
     filteredTrackCount: 3,
     isFilterActive: false,
     sortField: 'fileName',
     sortDirection: 'asc',
+    // 排序命令与菜单同源：这个列表排得了哪些项，命令面板就有哪几条（本地：8 项里没有播放量）。
+    availableSortPresets: resolveAvailableSongSortPresets(resolveSongSortCapability('local')),
     playFiltered: vi.fn(),
     enqueueFiltered: vi.fn(),
     setSortField: vi.fn(),
     setSortDirection: vi.fn(),
+    setSortPreset: vi.fn(),
     reloadOnlineCollection: vi.fn(),
     mutationSnapshot: EMPTY_COLLECTION_MUTATION_SNAPSHOT,
     mutations: null,
@@ -43,8 +51,22 @@ describe('core collection surface', () => {
     });
 
     it('adds the local sort actions when the collection supports them', () => {
-        expect(buildGridSurfaceState(core({ supportsLocalTrackSorting: true, canReloadOnlineCollection: false })).availableActions)
-            .toEqual(['play-filtered', 'enqueue-filtered', 'sort-file-name', 'sort-modified-date', 'sort-album-track', 'sort-toggle-direction']);
+        expect(buildGridSurfaceState(core({ supportsTrackSorting: true, canReloadOnlineCollection: false })).availableActions)
+            .toEqual([
+                'play-filtered',
+                'enqueue-filtered',
+                'sort-newest',
+                'sort-oldest',
+                'sort-title',
+                'sort-artist',
+                'sort-liked-desc',
+                'sort-liked-asc',
+                'sort-default',
+                'sort-file-name',
+                'sort-file-modified',
+                'sort-album-track',
+                'sort-toggle-direction',
+            ]);
     });
 
     it('refuses renderer-only actions and dispatches core ones', () => {
@@ -56,9 +78,17 @@ describe('core collection surface', () => {
     });
 });
 
+/** 每条排序命令都用得上的能力（没有任何单一来源同时给出全部字段，测试里才造得出）。 */
+const EVERY_SORT_CAPABILITY: SongSortCapability = {
+    addedAt: true, liked: true, playCount: true, fileName: true, fileLastModified: true, albumTrack: true,
+};
+
 /** 网格那样什么分支都打开的参数：每个命令都可用，好看出声明过滤掉了哪些。 */
 const everything = (declaredActions?: LibraryDeclaredActions): GridSurfaceParams => ({
-    ...core({ supportsLocalTrackSorting: true }),
+    ...core({
+        supportsTrackSorting: true,
+        availableSortPresets: resolveAvailableSongSortPresets(EVERY_SORT_CAPABILITY),
+    }),
     hasInfoPanel: true,
     hasTrackList: true,
     canResyncFolder: true,
@@ -91,8 +121,17 @@ describe('suite-declared actions on the command surface', () => {
         expect(buildGridSurfaceState(everything(declared)).availableActions).toEqual([
             'play-filtered',
             'enqueue-filtered',
+            'sort-newest',
+            'sort-oldest',
+            'sort-title',
+            'sort-artist',
+            'sort-liked-desc',
+            'sort-liked-asc',
+            'sort-play-count-desc',
+            'sort-play-count-asc',
+            'sort-default',
             'sort-file-name',
-            'sort-modified-date',
+            'sort-file-modified',
             'sort-album-track',
             'sort-toggle-direction',
             'reload-online-collection',

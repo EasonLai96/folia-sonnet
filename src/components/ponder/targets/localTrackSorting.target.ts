@@ -4,9 +4,10 @@ import type { PonderAnchorSource, PonderRelativeRect, PonderSceneScript, PonderT
 // src/components/ponder/targets/localTrackSorting.target.ts
 // 曲目列表侧板头上那两颗排序控件。
 //
-// 它们只对本地文件夹出现（GridView 的 supportsLocalTrackSorting），在线歌单里翻遍也没有 ——
-// 用过一次之后到别处找不到，会被当成 bug。而且排序存在 localStorage 里跨会话保留，
-// 换一个文件夹进去还是上次那个排法。
+// 文件夹、歌单、收藏这些列表都有这两颗控件；专辑页没有（它的音轨顺序就是顺序本身）。
+// 菜单里出现哪些排序方式随来源变：平台没有返回的那一项不会出现（本地不统计播放量，
+// 在线平台歌曲级没有创建时间），所以用惯了一种排法到别处找不到，会以为丢了 —— 引导把这条讲清楚。
+// 排序选择也存在 localStorage 里跨会话保留，换一个列表进去还是上次那个排法。
 
 const panel = {
     kind: 'synthetic',

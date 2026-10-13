@@ -3,6 +3,15 @@
 exports[`command palette registry contract > keeps the registered command order stable 1`] = `
 [
   "filter-view",
+  "grid-sort-newest",
+  "grid-sort-oldest",
+  "grid-sort-title",
+  "grid-sort-artist",
+  "grid-sort-liked-desc",
+  "grid-sort-liked-asc",
+  "grid-sort-play-count-desc",
+  "grid-sort-play-count-asc",
+  "grid-sort-default",
   "grid-sort-file-name",
   "grid-sort-modified-date",
   "grid-sort-album-track",

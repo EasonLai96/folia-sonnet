@@ -1,14 +1,19 @@
 import type { GridSurfaceActionId, GridSurfaceState } from '../../../types/gridCommandSurface';
-import type { LocalSongFolderSortDirection, LocalSongFolderSortField } from '../../../utils/localSongSorting';
+import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
 import type { CollectionMutationController, CollectionMutationSnapshot } from '../contracts/mutations';
 import type { LibraryActionId, LibraryDeclaredActions } from '../contracts/suite';
+import {
+    SONG_SORT_PRESETS,
+    type SongSortPreset,
+    type SongSortPresetId,
+} from './songSortOptions';
 
 // src/library/core/model/collectionSurface.ts
 // Turns a collection view's branch flags and handlers into the flat contract the command palette reads.
 // (Moved from components/folia-grid/gridSurfaceHandle.ts: a list renderer publishes the same handle.)
 //
 // Pure on purpose: the branch rules are the same booleans the buttons are already gated on
-// (GridView's isLocalFolderCollection, supportsLocalTrackSorting, canEditPlaylist ...), so keeping
+// (GridView's isLocalFolderCollection, supportsTrackSorting, canEditPlaylist ...), so keeping
 // them here rather than in a second set of `isAvailable` predicates is what stops a command from
 // offering something the panel would refuse.
 //
@@ -22,7 +27,7 @@ import type { LibraryActionId, LibraryDeclaredActions } from '../contracts/suite
  */
 export type CoreSurfaceParams = {
     /** Branch gating — mirrors the conditions the matching buttons render under. */
-    supportsLocalTrackSorting: boolean;
+    supportsTrackSorting: boolean;
     canResyncFolder: boolean;
     canResyncAllFolders: boolean;
     canOrganizeSongInfo: boolean;
@@ -45,13 +50,17 @@ export type CoreSurfaceParams = {
 
     filteredTrackCount: number;
     isFilterActive: boolean;
-    sortField: LocalSongFolderSortField;
-    sortDirection: LocalSongFolderSortDirection;
+    sortField: SongSortField;
+    sortDirection: SongSortDirection;
+    /** 这个列表排得了的排序方式（菜单与命令面板同一个来源）；探针与单测可以省略。 */
+    availableSortPresets?: readonly SongSortPreset[];
 
     playFiltered: () => void;
     enqueueFiltered: () => void;
-    setSortField: (field: LocalSongFolderSortField) => void;
-    setSortDirection: (direction: LocalSongFolderSortDirection) => void;
+    setSortField: (field: SongSortField) => void;
+    setSortDirection: (direction: SongSortDirection) => void;
+    /** 一次设好字段与方向（菜单里选的就是一个完整的排序方式）。 */
+    setSortPreset?: (preset: SongSortPreset) => void;
     resyncFolder: () => void;
     resyncAllFolders: () => void;
     organizeSongInfo: () => void;
@@ -88,11 +97,13 @@ export type CoreSurfaceInputs = {
 
     filteredTrackCount: number;
     isFilterActive: boolean;
-    supportsLocalTrackSorting: boolean;
-    sortField: LocalSongFolderSortField;
-    sortDirection: LocalSongFolderSortDirection;
-    setSortField: (field: LocalSongFolderSortField) => void;
-    setSortDirection: (direction: LocalSongFolderSortDirection) => void;
+    supportsTrackSorting: boolean;
+    sortField: SongSortField;
+    sortDirection: SongSortDirection;
+    availableSortPresets?: readonly SongSortPreset[];
+    setSortField: (field: SongSortField) => void;
+    setSortDirection: (direction: SongSortDirection) => void;
+    setSortPreset?: (preset: SongSortPreset) => void;
 
     /** 重新拉取此刻可用（useCollectionActions 的 capabilities.reload.enabled）。 */
     canReloadOnlineCollection: boolean;
@@ -139,7 +150,7 @@ export const buildCoreSurfaceParams = (
         ...renderer,
         declaredActions: inputs.declaredActions,
 
-        supportsLocalTrackSorting: inputs.supportsLocalTrackSorting,
+        supportsTrackSorting: inputs.supportsTrackSorting,
         canReloadOnlineCollection: inputs.canReloadOnlineCollection,
         canResyncFolder: hasController && capabilities.resyncFolder.supported,
         canResyncAllFolders: hasController && capabilities.resyncAllFolders.supported,
@@ -154,11 +165,16 @@ export const buildCoreSurfaceParams = (
         isFilterActive: inputs.isFilterActive,
         sortField: inputs.sortField,
         sortDirection: inputs.sortDirection,
+        availableSortPresets: inputs.availableSortPresets ?? [],
 
         playFiltered: inputs.playFiltered,
         enqueueFiltered: inputs.enqueueFiltered,
         setSortField: inputs.setSortField,
         setSortDirection: inputs.setSortDirection,
+        setSortPreset: inputs.setSortPreset ?? ((preset) => {
+            inputs.setSortField(preset.field);
+            inputs.setSortDirection(preset.direction);
+        }),
         reloadOnlineCollection: inputs.reloadOnlineCollection,
         // 结果不在这里处理，与面板按钮一致（失败由控制器经端口的 statusMessage 报出）。
         resyncFolder: () => void mutations?.resyncFolder(),
@@ -177,8 +193,17 @@ export const buildCoreSurfaceParams = (
 export const GRID_SURFACE_ACTION_SOURCES: Readonly<Record<GridSurfaceActionId, { action: LibraryActionId } | { extra: string }>> = {
     'play-filtered': { action: 'play-scope' },
     'enqueue-filtered': { action: 'enqueue-scope' },
+    'sort-newest': { action: 'sort' },
+    'sort-oldest': { action: 'sort' },
+    'sort-title': { action: 'sort' },
+    'sort-artist': { action: 'sort' },
+    'sort-liked-desc': { action: 'sort' },
+    'sort-liked-asc': { action: 'sort' },
+    'sort-play-count-desc': { action: 'sort' },
+    'sort-play-count-asc': { action: 'sort' },
+    'sort-default': { action: 'sort' },
     'sort-file-name': { action: 'sort' },
-    'sort-modified-date': { action: 'sort' },
+    'sort-file-modified': { action: 'sort' },
     'sort-album-track': { action: 'sort' },
     'sort-toggle-direction': { action: 'sort' },
     'toggle-info-panel': { extra: 'toggle-info-panel' },
@@ -199,11 +224,28 @@ export const isGridSurfaceActionDeclared = (action: GridSurfaceActionId, declare
     return 'action' in source ? declared.actions.includes(source.action) : declared.extraActions.includes(source.extra);
 };
 
-const SORT_FIELD_BY_ACTION: Partial<Record<GridSurfaceActionId, LocalSongFolderSortField>> = {
-    'sort-file-name': 'fileName',
-    'sort-modified-date': 'fileLastModified',
-    'sort-album-track': 'albumTrack',
+/**
+ * 排序方式 ↔ 命令面板动作。菜单里每一项自带方向，所以命令也一次设好两样，
+ * 不再有「先选字段再翻方向」两步。
+ */
+const SORT_ACTION_BY_PRESET_ID: Record<SongSortPresetId, GridSurfaceActionId> = {
+    newest: 'sort-newest',
+    oldest: 'sort-oldest',
+    titleAsc: 'sort-title',
+    artistAsc: 'sort-artist',
+    likedDesc: 'sort-liked-desc',
+    likedAsc: 'sort-liked-asc',
+    playCountDesc: 'sort-play-count-desc',
+    playCountAsc: 'sort-play-count-asc',
+    default: 'sort-default',
+    fileNameAsc: 'sort-file-name',
+    fileLastModifiedDesc: 'sort-file-modified',
+    albumTrackAsc: 'sort-album-track',
 };
+
+const SORT_PRESET_BY_ACTION: Partial<Record<GridSurfaceActionId, SongSortPreset>> = Object.fromEntries(
+    SONG_SORT_PRESETS.map(preset => [SORT_ACTION_BY_PRESET_ID[preset.id], preset]),
+);
 
 export const buildGridSurfaceState = (params: GridSurfaceParams): GridSurfaceState => {
     const hasTracks = params.filteredTrackCount > 0;
@@ -213,8 +255,13 @@ export const buildGridSurfaceState = (params: GridSurfaceParams): GridSurfaceSta
     if (hasTracks) {
         availableActions.push('play-filtered', 'enqueue-filtered');
     }
-    if (params.supportsLocalTrackSorting) {
-        availableActions.push('sort-file-name', 'sort-modified-date', 'sort-album-track', 'sort-toggle-direction');
+    // 排序命令与菜单同一个来源：这个列表排得了哪些项，命令面板就有哪几条。
+    if (params.supportsTrackSorting) {
+        (params.availableSortPresets ?? []).forEach(preset => {
+            const action = SORT_ACTION_BY_PRESET_ID[preset.id];
+            if (action) availableActions.push(action);
+        });
+        availableActions.push('sort-toggle-direction');
     }
     if (params.hasInfoPanel) {
         availableActions.push('toggle-info-panel');
@@ -274,9 +321,9 @@ export const runGridSurfaceAction = (action: GridSurfaceActionId, params: GridSu
         return;
     }
 
-    const sortField = SORT_FIELD_BY_ACTION[action];
-    if (sortField) {
-        params.setSortField(sortField);
+    const sortPreset = SORT_PRESET_BY_ACTION[action];
+    if (sortPreset) {
+        params.setSortPreset?.(sortPreset);
         return;
     }
 

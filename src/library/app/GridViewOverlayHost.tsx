@@ -34,6 +34,7 @@ import { buildLocalCatalogIndex, resolveLocalCatalogLink } from '../core/model/l
 import { resolveSongCatalogRef } from '../../services/onlineMusic/catalogRefs';
 import type { HomeSurfaceProps } from '../../components/app/home/homeSurfaceTypes';
 import { useThemeSettingsStore } from '../../stores/useThemeSettingsStore';
+import { setLocalFavoriteSongIds } from '../../stores/useLocalFavoriteSongIdsStore';
 import { countRender } from '../../dev/renderCount';
 import { useLibraryBackdrop } from './useLibraryBackdrop';
 import { useLibrarySuiteStore } from '../core/state/useLibrarySuiteStore';
@@ -184,6 +185,15 @@ const GridViewOverlayHost: React.FC<GridViewOverlayHostProps> = ({
     const collectionSnapshot = useCollectionNavigationStore(state => state.snapshot);
     const isDaylight = useThemeSettingsStore(state => state.isDaylight);
     const localLibraryCatalog = surfaceProps.localLibraryCatalog;
+    // 排序要知道每一首本地歌喜不喜欢，而列表拿不到歌单列表：把「我喜欢的」那份同步进 store，
+    // 排序只读它（见 useSongLikedResolver）。
+    const localFavoriteSongIds = useMemo(() => {
+        const favorite = surfaceProps.localPlaylists.find(playlist => playlist.isFavorite);
+        return new Set(favorite?.songIds ?? []);
+    }, [surfaceProps.localPlaylists]);
+    useEffect(() => {
+        setLocalFavoriteSongIds(localFavoriteSongIds);
+    }, [localFavoriteSongIds]);
     const selectedCollection = getActiveGridViewCollection(collectionSnapshot);
     const suiteId = useLibrarySuiteStore(state => state.suite);
     // 集合层与歌手页都由选中的 suite 渲染（它没实现那个 surface 时回退网格；P4.3 起 TUI 也实现了歌手页）。

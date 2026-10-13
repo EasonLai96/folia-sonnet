@@ -45,6 +45,8 @@ type SubsonicParamValue = SubsonicParamPrimitive | SubsonicParamPrimitive[];
 
 // Check if Navidrome is enabled
 export const isNavidromeEnabled = (): boolean => {
+    // store 在模块加载时就建实例，而单测环境（node）没有 localStorage：读不到就当没开。
+    if (typeof localStorage === 'undefined') return false;
     return localStorage.getItem(ENABLED_KEY) === 'true';
 };
 

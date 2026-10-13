@@ -691,6 +691,15 @@ export default {
       "home-albums": { "title": "打开专辑", "description": "打开专辑 tab" },
       "home-navidrome": { "title": "打开 Navidrome", "description": "打开 Navidrome tab" },
       "home-radio": { "title": "打开电台", "description": "打开电台 tab" },
+      "grid-sort-newest": { "title": "从新到旧排序", "description": "按加入曲库的时间排列，最新的在前" },
+      "grid-sort-oldest": { "title": "从旧到新排序", "description": "按加入曲库的时间排列，最早的在前" },
+      "grid-sort-title": { "title": "按歌曲名排序", "description": "按歌曲名从 A 到 Z 排列" },
+      "grid-sort-artist": { "title": "按歌手名排序", "description": "按歌手名从 A 到 Z 排列" },
+      "grid-sort-liked-desc": { "title": "按喜欢程度 高→低", "description": "把已喜欢的歌排在最前" },
+      "grid-sort-liked-asc": { "title": "按喜欢程度 低→高", "description": "把没标记的歌排在最前" },
+      "grid-sort-play-count-desc": { "title": "按播放量 高→低", "description": "按播放次数排列，听得最多的在前" },
+      "grid-sort-play-count-asc": { "title": "按播放量 低→高", "description": "按播放次数排列，听得最少的在前" },
+      "grid-sort-default": { "title": "恢复默认顺序", "description": "不再排序，按来源给的顺序显示" },
       "grid-sort-file-name": { "title": "按文件名排序", "description": "把本地曲目按文件名排列" },
       "grid-sort-modified-date": { "title": "按修改时间排序", "description": "把本地曲目按文件最后修改时间排列" },
       "grid-sort-album-track": { "title": "按音轨号排序", "description": "把本地曲目按碟号和音轨号排列" },
@@ -3406,6 +3415,17 @@ export default {
     "unknownArtist": "未知歌手",
     "unknownAlbum": "未知专辑",
   },
+  "songSort": {
+    "newest": "从新到旧",
+    "oldest": "从旧到新",
+    "titleAsc": "歌曲名 A-Z",
+    "artistAsc": "歌手名 A-Z",
+    "likedDesc": "喜欢程度 高→低",
+    "likedAsc": "喜欢程度 低→高",
+    "playCountDesc": "播放量 高→低",
+    "playCountAsc": "播放量 低→高",
+    "default": "默认顺序"
+  },
   "localMusic": {
     "foldersAndPlaylists": "文件夹",
     "albums": "专辑",
@@ -4020,7 +4040,7 @@ export default {
       "local_grid_map_page": "本地曲库地图、批量选择，以及对所含曲目的操作。",
       "local_grid_map_directory_tree": "选择整个目录子树、仅直属曲目，并维护导入根目录。",
       "local_metadata_match": "三重条件才出现的那颗铅笔。",
-      "local_track_sorting": "只有本地文件夹能排序，选择跨会话保留。",
+      "local_track_sorting": "曲目列表怎么排，以及为什么有些排序方式在某些来源里没有。",
       "lyrics_animation_settings": "换歌词动画在哪儿换，加上两个影响观感的开关。",
       "panel_account_tab": "当前来源的登录、音质档位和同步。",
       "panel_controls_tab": "三颗大按钮、音量，以及两行模式取景器。",
@@ -4670,7 +4690,7 @@ export default {
       "localFolderActionsMaintenance": "重扫与整理歌曲信息",
       "localFolderActionsDelete": "红色那颗会删东西",
       "localMetadataMatchReveal": "三重条件才出现的一颗铅笔",
-      "localTrackSortingFields": "只有本地文件夹能排序",
+      "localTrackSortingFields": "排序方式由来源决定能排哪些",
       "localGridControlsSources": "文件夹、专辑、艺术家与本地歌单",
       "localGridControlsMaintenance": "导入与刷新本地曲库",
       "onlineCollectionActionsCommon": "在线集合共用的操作",
@@ -5134,9 +5154,9 @@ export default {
         "pencil": "满足之后它浮在歌名右端，只有 65% 不透明度。点开是手动匹配面板，重新给这首歌挑一份正确的标题、歌手和专辑。"
       },
       "localTrackSorting": {
-        "whereOnly": "排序控件只对本地文件夹显示；其他来源的顺序由来源决定。",
-        "fields": "排序方式三选一：文件名、文件修改时间、专辑内音轨号。选好之后存在本地，换一个文件夹进去还是这个排法。",
-        "direction": "左边那颗切升序和降序，和排序方式各自独立。"
+        "whereOnly": "曲目列表头上的排序控件在文件夹、歌单、收藏这些列表里都有；专辑页不给，它的音轨顺序就是顺序本身。",
+        "fields": "这里是完整的排序方式，方向已经带在选项里：从新到旧、从旧到新、歌曲名 A-Z、歌手名 A-Z、喜欢程度高低、播放量高低。分隔线下面还是本地文件那三项。平台没有返回的那一项不会出现，例如本地不统计播放量。",
+        "direction": "左边那颗翻转当前排序方式的升降序，和排序方式各自独立。"
       },
       "gridStyle": {
         "grid3dImage": "「纯图片封面」是首页海报墙的默认样子：整张卡就是一张封面，歌单名压在封面底部的渐变里。",

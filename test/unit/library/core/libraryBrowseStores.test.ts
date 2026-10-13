@@ -86,11 +86,11 @@ describe('local track sort store', () => {
             setItem: (key: string, value: string) => storage.set(key, value),
         });
         vi.resetModules();
-        const { useLocalTrackSortStore } = await import('@/library/core/state/useLocalTrackSortStore');
+        const { useTrackSortStore } = await import('@/library/core/state/useTrackSortStore');
 
-        expect(useLocalTrackSortStore.getState()).toMatchObject({ field: 'albumTrack', direction: 'asc' });
-        useLocalTrackSortStore.getState().setField('fileLastModified');
-        useLocalTrackSortStore.getState().setDirection('desc');
+        expect(useTrackSortStore.getState()).toMatchObject({ field: 'albumTrack', direction: 'asc' });
+        useTrackSortStore.getState().setField('fileLastModified');
+        useTrackSortStore.getState().setDirection('desc');
         expect(storage.get('local_track_sort_field')).toBe('fileLastModified');
         expect(storage.get('local_track_sort_direction')).toBe('desc');
         vi.unstubAllGlobals();

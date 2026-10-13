@@ -17,7 +17,7 @@ import { resolveTrackAlbumLink, resolveTrackArtistLinks, type TrackArtistLink } 
 import { canResolveSongCatalogRef } from '../../../services/onlineMusic/catalogRefs';
 import { useGridCommandFilter } from '../../../hooks/useGridCommandFilter';
 import { useGridSurfaceRegistration } from '../../../hooks/useGridSurfaceRegistration';
-import { useLocalTrackSortStore } from '../../core/state/useLocalTrackSortStore';
+import { useTrackSorting } from '../../core/bindings/useTrackSorting';
 import { colorWithAlpha } from '../../../components/visualizer/colorMix';
 import LibraryTuiHeader from './LibraryTuiHeader';
 import LibraryTuiRow, { LIBRARY_TUI_COLUMNS, LIBRARY_TUI_ROW_HEIGHT, type LibraryTuiRowProps } from './LibraryTuiRow';
@@ -71,18 +71,16 @@ const LibraryTuiView: React.FC<LibraryCollectionSurfaceProps> = ({
     const mutationSnapshot = useCollectionMutationSnapshot(mutations);
     const committedQuery = useCommittedQuery(query);
 
-    // 与网格同一条规则：只有本地文件夹（含「全部歌曲」）按本地排序。
-    const supportsLocalTrackSorting = collection.source === 'local' && collection.type === 'folder';
-    const sortField = useLocalTrackSortStore(state => state.field);
-    const sortDirection = useLocalTrackSortStore(state => state.direction);
-    const setSortField = useLocalTrackSortStore(state => state.setField);
-    const setSortDirection = useLocalTrackSortStore(state => state.setDirection);
     const localSongsById = useMemo(() => new Map(localSongs?.map(song => [song.id, song])), [localSongs]);
-    const localSort = useMemo(() => (
-        supportsLocalTrackSorting ? { songsById: localSongsById, field: sortField, direction: sortDirection } : null
-    ), [localSongsById, sortDirection, sortField, supportsLocalTrackSorting]);
+    // 与网格、bravais 同一份排序（同一张预设表、同一个 store）。专辑保留音轨顺序。
+    const sorting = useTrackSorting({ source: collection.source, localSongsById });
+    const supportsTrackSorting = sorting.supported && collection.type !== 'album';
 
-    const view = useCollectionView({ tracks, committedQuery, localSort });
+    const view = useCollectionView({
+        tracks,
+        committedQuery,
+        sort: supportsTrackSorting ? sorting.sort : null,
+    });
     const actions = useCollectionActions({ resource, snapshot, view, port, collectionType: collection.type });
     const focus = useLibraryTuiFocus(sessionKey, view, committedQuery);
     const trackAtRow = (row: number) => {
@@ -94,16 +92,18 @@ const LibraryTuiView: React.FC<LibraryCollectionSurfaceProps> = ({
     // 与网格同一个构建函数、同一份控制器快照，再按 entry.ts 的声明过滤；TUI 没有 renderer 局部动作。
     const surfaceParams = buildCoreSurfaceParams({
         declaredActions,
-        supportsLocalTrackSorting,
+        supportsTrackSorting,
         canReloadOnlineCollection: actions.capabilities.reload.enabled,
         filteredTrackCount: view.contextTracks.length,
         isFilterActive: view.isFilterActive,
-        sortField,
-        sortDirection,
+        sortField: sorting.field,
+        sortDirection: sorting.direction,
+        availableSortPresets: sorting.presets,
         playFiltered: actions.playScope,
         enqueueFiltered: actions.enqueueScope,
-        setSortField,
-        setSortDirection,
+        setSortField: sorting.setField,
+        setSortDirection: sorting.setDirection,
+        setSortPreset: sorting.applyPreset,
         reloadOnlineCollection: actions.reload,
         mutationSnapshot,
         mutations,

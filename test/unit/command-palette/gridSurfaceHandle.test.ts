@@ -7,6 +7,7 @@ import {
     type GridSurfaceParams,
 } from '../../../src/library/core/model/collectionSurface';
 import { EMPTY_COLLECTION_MUTATION_SNAPSHOT } from '../../../src/library/core/model/collectionMutationCapabilities';
+import { resolveAvailableSongSortPresets, resolveSongSortCapability } from '../../../src/library/core/model/songSortOptions';
 import { resolveLibrarySurfaceActions } from '../../../src/library/registry';
 import type { CollectionMutationController, CollectionMutationSnapshot } from '../../../src/library/core/contracts/mutations';
 import type { LibraryCapability } from '../../../src/library/core/contracts/capability';
@@ -18,7 +19,7 @@ import type { LibraryCapability } from '../../../src/library/core/contracts/capa
 const params = (overrides: Partial<GridSurfaceParams> = {}): GridSurfaceParams => ({
     hasInfoPanel: false,
     hasTrackList: false,
-    supportsLocalTrackSorting: false,
+    supportsTrackSorting: false,
     canResyncFolder: false,
     canResyncAllFolders: false,
     canOrganizeSongInfo: false,
@@ -33,6 +34,8 @@ const params = (overrides: Partial<GridSurfaceParams> = {}): GridSurfaceParams =
     isFilterActive: false,
     sortField: 'fileName',
     sortDirection: 'asc',
+    // 排序命令与菜单同源：这个列表排得了哪些项，命令面板就有哪几条。
+    availableSortPresets: resolveAvailableSongSortPresets(resolveSongSortCapability('local')),
     isInfoPanelOpen: false,
     isTrackListOpen: false,
     isEditMode: false,
@@ -40,6 +43,7 @@ const params = (overrides: Partial<GridSurfaceParams> = {}): GridSurfaceParams =
     enqueueFiltered: vi.fn(),
     setSortField: vi.fn(),
     setSortDirection: vi.fn(),
+    setSortPreset: vi.fn(),
     toggleInfoPanel: vi.fn(),
     toggleTrackList: vi.fn(),
     resyncFolder: vi.fn(),
@@ -64,7 +68,7 @@ describe('grid surface state', () => {
     });
 
     it('offers sorting only where local track sorting applies', () => {
-        const sorting = buildGridSurfaceState(params({ supportsLocalTrackSorting: true })).availableActions;
+        const sorting = buildGridSurfaceState(params({ supportsTrackSorting: true })).availableActions;
 
         expect(sorting).toContain('sort-file-name');
         expect(sorting).toContain('sort-toggle-direction');
@@ -99,16 +103,18 @@ describe('grid surface state', () => {
 });
 
 describe('grid surface dispatch', () => {
-    it('maps each sort command to its field', () => {
-        const sorting = params({ supportsLocalTrackSorting: true });
+    it('maps each sort command to a whole preset, direction included', () => {
+        const sorting = params({ supportsTrackSorting: true });
 
         runGridSurfaceAction('sort-album-track', sorting);
+        expect(sorting.setSortPreset).toHaveBeenCalledWith(expect.objectContaining({ field: 'albumTrack', direction: 'asc' }));
 
-        expect(sorting.setSortField).toHaveBeenCalledWith('albumTrack');
+        runGridSurfaceAction('sort-newest', sorting);
+        expect(sorting.setSortPreset).toHaveBeenCalledWith(expect.objectContaining({ field: 'addedAt', direction: 'desc' }));
     });
 
     it('flips the direction rather than setting a fixed one', () => {
-        const descending = params({ supportsLocalTrackSorting: true, sortDirection: 'desc' });
+        const descending = params({ supportsTrackSorting: true, sortDirection: 'desc' });
 
         runGridSurfaceAction('sort-toggle-direction', descending);
 
@@ -182,9 +188,10 @@ const coreInputs = (
 ): CoreSurfaceInputs => ({
     filteredTrackCount: 4,
     isFilterActive: false,
-    supportsLocalTrackSorting: false,
+    supportsTrackSorting: false,
     sortField: 'fileName',
     sortDirection: 'asc',
+    availableSortPresets: resolveAvailableSongSortPresets(resolveSongSortCapability('local')),
     setSortField: vi.fn(),
     setSortDirection: vi.fn(),
     canReloadOnlineCollection: true,
@@ -223,14 +230,22 @@ const GRID_LOCAL_ACTIONS = ['toggle-info-panel', 'toggle-track-list', 'toggle-ed
 describe('core surface actions across suites', () => {
     it('publishes the same core actions from the same snapshot where both suites declare them', () => {
         const snapshot = snapshotWith({ subscribe: READY });
-        const { grid, tui } = publishBoth(coreInputs(snapshot, fakeController(snapshot), { supportsLocalTrackSorting: true }));
+        const { grid, tui } = publishBoth(coreInputs(snapshot, fakeController(snapshot), { supportsTrackSorting: true }));
 
         const gridCore = grid.filter(action => !GRID_LOCAL_ACTIONS.includes(action));
         expect(gridCore).toEqual([
             'play-filtered',
             'enqueue-filtered',
+            // 本地列表排得了的：8 项按数据能力过滤后剩下的，加旧三项。
+            'sort-newest',
+            'sort-oldest',
+            'sort-title',
+            'sort-artist',
+            'sort-liked-desc',
+            'sort-liked-asc',
+            'sort-default',
             'sort-file-name',
-            'sort-modified-date',
+            'sort-file-modified',
             'sort-album-track',
             'sort-toggle-direction',
             'reload-online-collection',

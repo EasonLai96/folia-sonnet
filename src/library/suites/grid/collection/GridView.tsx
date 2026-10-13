@@ -43,7 +43,7 @@ import TextInputDialog from '../../../../components/shared/TextInputDialog';
 import ConfirmDialog from '../../../../components/shared/ConfirmDialog';
 import { SidePanelList, TrackListItem } from '../../../../components/shared/SidePanelList';
 import { GridListSearchButton } from '../../../../components/shared/GridListSearchButton';
-import { LocalTrackSortDirectionButton, LocalTrackSortMenu } from '../../../../components/shared/LocalTrackSortMenu';
+import { TrackSortDirectionButton, TrackSortMenu } from '../../../../components/shared/TrackSortMenu';
 import { CustomSelect } from '../../../../components/shared/CustomSelect';
 import { deriveProgressiveLoadingState } from '../shared/progressiveGrid';
 import { useProgressiveItemEntrance } from '../shared/useProgressiveItemEntrance';
@@ -70,7 +70,7 @@ import {
     registerLibrarySessionFlush,
     useLibraryBrowseSessionStore,
 } from '../../../core/state/useLibraryBrowseSessionStore';
-import { useLocalTrackSortStore } from '../../../core/state/useLocalTrackSortStore';
+import { useTrackSorting } from '../../../core/bindings/useTrackSorting';
 
 interface GridViewProps {
     title: string;
@@ -399,11 +399,6 @@ export const GridView: React.FC<GridViewProps> = ({
     const [removingTrackKeys, setRemovingTrackKeys] = useState<Set<string>>(() => new Set());
     const trackRemovalTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
     const trackRemovalSeqRef = useRef(0);
-    // 本地排序选择跨 renderer 共用（见 useLocalTrackSortStore）。
-    const localTrackSortField = useLocalTrackSortStore(state => state.field);
-    const localTrackSortDirection = useLocalTrackSortStore(state => state.direction);
-    const handleLocalTrackSortFieldChange = useLocalTrackSortStore(state => state.setField);
-    const handleLocalTrackSortDirectionChange = useLocalTrackSortStore(state => state.setDirection);
     const [isEditMode, setIsEditMode] = useState(false);
     const [editableTitle, setEditableTitle] = useState(title);
     const [isPlaylistPickerOpen, setIsPlaylistPickerOpen] = useState(false);
@@ -471,8 +466,6 @@ export const GridView: React.FC<GridViewProps> = ({
         && isOnlineResource
         && !isDailyRecommendationsCollection
         && collection?.type !== 'radio';
-    // 本地排序只给文件夹（含虚拟的「全部歌曲」）：这是视图规则，不随变更能力走。
-    const supportsLocalTrackSorting = isLocalCollection && collection?.type === 'folder';
     const {
         isLocalFolderCollection,
         isLocalAllSongsCollection,
@@ -486,25 +479,24 @@ export const GridView: React.FC<GridViewProps> = ({
     // 改名成功、宿主的描述还没跟上时，显示控制器记下的新名字（不改描述本身，它可能是导航栈里共用的对象）。
     const collectionName: string | undefined = mutationSnapshot.renamedTo ?? collection?.name;
     const localSongsById = useMemo(() => new Map(localSongs?.map(song => [song.id, song])), [localSongs]);
+    // 能排哪些项按数据来源算（见 songSortOptions）；选择本身跨 renderer 共用（见 useTrackSortStore）。
+    const sorting = useTrackSorting({ source: collectionSource, localSongsById });
+    // 专辑保留它自己的音轨顺序——排序按钮不挂在专辑上。
+    const supportsTrackSorting = sorting.supported && !isAlbumCollection;
     // 只有能选专辑号排序的本地列表才挂轨道号；本地歌单等自定义顺序的列表不属于这个语境。
     const getAlbumTrackLabel = useCallback((track: SongResult): string | null => {
-        if (!supportsLocalTrackSorting) return null;
+        if (!isLocalFolderCollection) return null;
         const localRef = (track as UnifiedSong).localRef;
         if (!localRef) return null;
         const localSong = localSongsById.get(localRef.songId);
         return localSong ? formatLocalAlbumTrackLabel(localSong) : null;
-    }, [localSongsById, supportsLocalTrackSorting]);
-    // 隐藏、本地排序、筛选与操作范围的规则见 library/core/model/collectionView（专辑归属以本地曲库的
+    }, [isLocalFolderCollection, localSongsById]);
+    // 隐藏、排序、筛选与操作范围的规则见 library/core/model/collectionView（专辑归属以本地曲库的
     // 专辑实体为准）；别的 renderer 用同一个 hook，所以同一个筛选在两边命中同一批歌。
-    const localSortContext = useMemo(() => (
-        supportsLocalTrackSorting
-            ? { songsById: localSongsById, field: localTrackSortField, direction: localTrackSortDirection }
-            : null
-    ), [localSongsById, localTrackSortDirection, localTrackSortField, supportsLocalTrackSorting]);
     const collectionView = useCollectionView({
         tracks,
         committedQuery: mode === 'tracks' ? deferredSearchQuery : '',
-        localSort: localSortContext,
+        sort: supportsTrackSorting ? sorting.sort : null,
     });
     const {
         displayTracks,
@@ -1429,11 +1421,13 @@ export const GridView: React.FC<GridViewProps> = ({
         declaredActions,
         filteredTrackCount: contextActionTracks.length,
         isFilterActive: hasSearchQuery,
-        supportsLocalTrackSorting,
-        sortField: localTrackSortField,
-        sortDirection: localTrackSortDirection,
-        setSortField: handleLocalTrackSortFieldChange,
-        setSortDirection: handleLocalTrackSortDirectionChange,
+        supportsTrackSorting,
+        sortField: sorting.field,
+        sortDirection: sorting.direction,
+        availableSortPresets: sorting.presets,
+        setSortField: sorting.setField,
+        setSortDirection: sorting.setDirection,
+        setSortPreset: sorting.applyPreset,
         canReloadOnlineCollection: canReloadOnlineCollection && !loading,
         playFiltered: () => onPlayAll?.(contextActionTracks),
         enqueueFiltered: () => onAddAllToQueue?.(contextActionTracks),
@@ -2010,6 +2004,7 @@ export const GridView: React.FC<GridViewProps> = ({
             )}
 
             {/* Tracks Cut-in Side Panel */}
+            {/* 侧栏标题只给非本地文件夹留着：本地文件夹网格本身就有大标题，那一行让给排序控件。 */}
             {mode === 'tracks' && (
                 <SidePanelList
                     isOpen={showSidePanel}
@@ -2019,17 +2014,20 @@ export const GridView: React.FC<GridViewProps> = ({
                     itemHeight={60}
                     isDaylight={isDaylight}
                     focusedIndex={focusedIndex}
-                    hideTitle={supportsLocalTrackSorting}
-                    headerLeadingActions={supportsLocalTrackSorting ? (
-                        <LocalTrackSortDirectionButton
-                            direction={localTrackSortDirection}
-                            onDirectionChange={handleLocalTrackSortDirectionChange}
+                    hideTitle={isLocalFolderCollection}
+                    headerLeadingActions={supportsTrackSorting ? (
+                        <TrackSortDirectionButton
+                            direction={sorting.direction}
+                            disabled={sorting.field === 'none'}
+                            onDirectionChange={sorting.setDirection}
                         />
                     ) : undefined}
-                    headerActions={supportsLocalTrackSorting ? (
-                        <LocalTrackSortMenu
-                            field={localTrackSortField}
-                            onFieldChange={handleLocalTrackSortFieldChange}
+                    headerActions={supportsTrackSorting ? (
+                        <TrackSortMenu
+                            presets={sorting.presets}
+                            field={sorting.field}
+                            direction={sorting.direction}
+                            onSelect={sorting.applyPreset}
                         />
                     ) : undefined}
                     renderItem={(track, index, style) => (

@@ -689,6 +689,15 @@ export default {
       "home-albums": { "title": "Buka album", "description": "Buka tab album" },
       "home-navidrome": { "title": "Buka Navidrome", "description": "Buka tab Navidrome" },
       "home-radio": { "title": "Buka radio", "description": "Buka tab radio" },
+      "grid-sort-newest": { "title": "Urutkan dari terbaru", "description": "Urutkan lagu berdasarkan waktu ditambahkan, yang terbaru di atas" },
+      "grid-sort-oldest": { "title": "Urutkan dari terlama", "description": "Urutkan lagu berdasarkan waktu ditambahkan, yang terlama di atas" },
+      "grid-sort-title": { "title": "Urutkan berdasarkan nama lagu", "description": "Urutkan lagu berdasarkan namanya, A sampai Z" },
+      "grid-sort-artist": { "title": "Urutkan berdasarkan nama artis", "description": "Urutkan lagu berdasarkan artisnya, A sampai Z" },
+      "grid-sort-liked-desc": { "title": "Urutkan dari paling disukai", "description": "Letakkan lagu yang disukai di bagian atas" },
+      "grid-sort-liked-asc": { "title": "Urutkan dari paling tidak disukai", "description": "Letakkan lagu yang belum ditandai di bagian atas" },
+      "grid-sort-play-count-desc": { "title": "Urutkan dari paling sering diputar", "description": "Urutkan lagu berdasarkan jumlah pemutaran, tertinggi di atas" },
+      "grid-sort-play-count-asc": { "title": "Urutkan dari paling jarang diputar", "description": "Urutkan lagu berdasarkan jumlah pemutaran, terendah di atas" },
+      "grid-sort-default": { "title": "Kembalikan ke urutan bawaan", "description": "Berhenti mengurutkan dan tampilkan sesuai urutan dari sumbernya" },
       "grid-sort-file-name": { "title": "Urutkan berdasarkan nama berkas", "description": "Urutkan lagu lokal berdasarkan nama berkasnya" },
       "grid-sort-modified-date": { "title": "Urutkan berdasarkan tanggal ubah", "description": "Urutkan lagu lokal berdasarkan waktu berkas terakhir diubah" },
       "grid-sort-album-track": { "title": "Urutkan berdasarkan nomor trek", "description": "Urutkan lagu lokal berdasarkan nomor cakram dan trek" },
@@ -3293,6 +3302,17 @@ export default {
     "loopOne": "Ulangi Satu",
     "unknownArtist": "Artis Tidak Dikenal",
     "unknownAlbum": "Album Tidak Dikenal"
+  },
+  "songSort": {
+    "newest": "Terbaru dulu",
+    "oldest": "Terlama dulu",
+    "titleAsc": "Nama lagu A-Z",
+    "artistAsc": "Nama artis A-Z",
+    "likedDesc": "Paling disukai dulu",
+    "likedAsc": "Paling tidak disukai dulu",
+    "playCountDesc": "Paling sering diputar dulu",
+    "playCountAsc": "Paling jarang diputar dulu",
+    "default": "Urutan bawaan"
   },
   "localMusic": {
     "foldersAndPlaylists": "Folder",

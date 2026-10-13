@@ -401,7 +401,7 @@ test.describe(`[${renderer}] filter, play and enqueue`, () => {
         const order = (indexes: readonly number[]) => indexes.map(localKey);
 
         expect(await playFilteredIds(page)).toEqual(order(LOCAL_SORT_ORDERS.fileNameAsc));
-        await runSurface(page, 'sort-modified-date');
+        await runSurface(page, 'sort-file-modified');
         await expect.poll(() => playFilteredIds(page)).toEqual(order(LOCAL_SORT_ORDERS.modifiedAsc));
         await runSurface(page, 'sort-toggle-direction');
         await expect.poll(() => playFilteredIds(page)).toEqual(order(LOCAL_SORT_ORDERS.modifiedDesc));
@@ -1458,7 +1458,7 @@ test.describe('renderer switch', () => {
         await mountProbe(mount, page);
         await open(page, 'local-all');
         await waitForScope(page, 8);
-        await runSurface(page, 'sort-modified-date');
+        await runSurface(page, 'sort-file-modified');
         await expect.poll(() => playFilteredIds(page)).toEqual(LOCAL_SORT_ORDERS.modifiedAsc.map(localKey));
 
         await setRenderer(page, 'tui');

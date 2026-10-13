@@ -12,7 +12,7 @@ import {
     deriveDisplayTracks,
     derivePlayableTracks,
     resolveContextTracks,
-    type LocalTrackSortContext,
+    type SongSortContext,
 } from '../model/collectionView';
 
 // src/library/core/bindings/useCollectionView.ts
@@ -38,16 +38,16 @@ export const useCollectionView = ({
     tracks,
     committedQuery,
     hiddenKeys = NO_HIDDEN_KEYS,
-    localSort = null,
+    sort = null,
 }: {
     tracks: SongResult[];
     committedQuery: string;
     hiddenKeys?: ReadonlySet<string>;
-    localSort?: LocalTrackSortContext | null;
+    sort?: SongSortContext | null;
 }): CollectionView => {
     const displayTracks = useMemo(
-        () => deriveDisplayTracks(tracks, hiddenKeys, localSort),
-        [hiddenKeys, localSort, tracks],
+        () => deriveDisplayTracks(tracks, hiddenKeys, sort),
+        [hiddenKeys, sort, tracks],
     );
     const playableTracks = useMemo(() => derivePlayableTracks(displayTracks, isSongUnavailable), [displayTracks]);
 

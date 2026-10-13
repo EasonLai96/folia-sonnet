@@ -8,7 +8,8 @@ import { resolveCollectionSyncCounts } from '../../core/model/collectionProgress
 import { resolveCollectionDescription } from '../../core/model/collectionDescription';
 import type { CollectionActions } from '../../core/bindings/useCollectionActions';
 import type { CollectionView } from '../../core/bindings/useCollectionView';
-import type { LocalSongFolderSortDirection, LocalSongFolderSortField } from '../../../utils/localSongSorting';
+import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
+import { findSongSortPreset, type SongSortPreset } from '../../core/model/songSortOptions';
 import { projectCollectionStatus, resolveWallPeriodCount } from './bravaisCollectionStatus';
 import type { BravaisLayerEntries, BravaisLayerWall, BravaisSeamCollection, BravaisSeamFilter, BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { useBravaisCollectionForms } from './useBravaisCollectionForms';
@@ -42,10 +43,12 @@ export type BravaisCollectionSeamInput = {
     setQuery: (query: string) => void;
     sort: {
         supported: boolean;
-        field: LocalSongFolderSortField;
-        direction: LocalSongFolderSortDirection;
-        setField: (field: LocalSongFolderSortField) => void;
-        setDirection: (direction: LocalSongFolderSortDirection) => void;
+        field: SongSortField;
+        direction: SongSortDirection;
+        /** 这个列表排得了的项，与网格菜单同源。 */
+        presets: SongSortPreset[];
+        setPreset: (preset: SongSortPreset) => void;
+        setDirection: (direction: SongSortDirection) => void;
     };
     trackByKey: ReadonlyMap<string, SongResult>;
     forms: Forms;
@@ -265,15 +268,15 @@ export const useBravaisCollectionSeam = (input: BravaisCollectionSeamInput) => {
         panelTitle: t('libraryBravaisCollection.panelTitle'),
         listCrumb: t('libraryBravaisCollection.listCrumb'),
         sort: sortInput.supported && declares('sort') ? {
-            field: sortInput.field,
-            fields: [
-                { value: 'fileName', label: t('localMusic.sortByFileName') },
-                { value: 'fileLastModified', label: t('localMusic.sortByModifiedDate') },
-                { value: 'albumTrack', label: t('localMusic.sortByAlbumTrack') },
-            ],
+            options: sortInput.presets.map(preset => ({ value: preset.id, label: t(preset.labelKey) })),
+            value: findSongSortPreset(sortInput.field, sortInput.direction)?.id ?? '',
             direction: sortInput.direction,
             directionLabel: sortInput.direction === 'asc' ? t('localMusic.sortAscending') : t('localMusic.sortDescending'),
-            setField: field => latest.current.sort.setField(field as LocalSongFolderSortField),
+            // 选的是「排序方式」本身（自带方向），不是单独的字段——与网格菜单同一张预设表。
+            selectPreset: (id) => {
+                const preset = latest.current.sort.presets.find(item => item.id === id);
+                if (preset) latest.current.sort.setPreset(preset);
+            },
             toggleDirection: () => latest.current.sort.setDirection(latest.current.sort.direction === 'asc' ? 'desc' : 'asc'),
         } : undefined,
         menuFor: key => {

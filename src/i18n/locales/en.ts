@@ -691,6 +691,15 @@ export default {
       "home-albums": { "title": "Open albums", "description": "Open albums tab" },
       "home-navidrome": { "title": "Open Navidrome", "description": "Open Navidrome tab" },
       "home-radio": { "title": "Open radio", "description": "Open radio tab" },
+      "grid-sort-newest": { "title": "Sort by newest", "description": "Order the tracks by when they were added, newest first" },
+      "grid-sort-oldest": { "title": "Sort by oldest", "description": "Order the tracks by when they were added, oldest first" },
+      "grid-sort-title": { "title": "Sort by song name", "description": "Order the tracks by their name, A to Z" },
+      "grid-sort-artist": { "title": "Sort by artist name", "description": "Order the tracks by their artist, A to Z" },
+      "grid-sort-liked-desc": { "title": "Sort by most liked", "description": "Put the songs you like at the top" },
+      "grid-sort-liked-asc": { "title": "Sort by least liked", "description": "Put the songs you have not liked at the top" },
+      "grid-sort-play-count-desc": { "title": "Sort by most played", "description": "Order the tracks by play count, highest first" },
+      "grid-sort-play-count-asc": { "title": "Sort by least played", "description": "Order the tracks by play count, lowest first" },
+      "grid-sort-default": { "title": "Restore the original order", "description": "Stop sorting and show the collection the way the source ordered it" },
       "grid-sort-file-name": { "title": "Sort by file name", "description": "Order the local tracks by their file name" },
       "grid-sort-modified-date": { "title": "Sort by modified date", "description": "Order the local tracks by when the file was last changed" },
       "grid-sort-album-track": { "title": "Sort by album track number", "description": "Order the local tracks by disc and track number" },
@@ -3407,6 +3416,17 @@ export default {
     "unknownArtist": "Unknown Artist",
     "unknownAlbum": "Unknown Album",
   },
+  "songSort": {
+    "newest": "Newest first",
+    "oldest": "Oldest first",
+    "titleAsc": "Song name A-Z",
+    "artistAsc": "Artist A-Z",
+    "likedDesc": "Most liked first",
+    "likedAsc": "Least liked first",
+    "playCountDesc": "Most played first",
+    "playCountAsc": "Least played first",
+    "default": "Default order"
+  },
   "localMusic": {
     "foldersAndPlaylists": "Folders",
     "albums": "Albums",
@@ -4021,7 +4041,7 @@ export default {
       "local_grid_map_page": "The local-library map, batch selection and actions on the resulting tracks.",
       "local_grid_map_directory_tree": "Select folder subtrees, direct tracks only, and maintain imported roots.",
       "local_metadata_match": "The pencil behind three conditions.",
-      "local_track_sorting": "Only local folders sort, and the choice sticks across sessions.",
+      "local_track_sorting": "How a track list can be ordered, and why some orders are missing in some sources.",
       "lyrics_animation_settings": "Where the lyric animation is changed, plus two switches that affect the look.",
       "panel_account_tab": "Sign-in, audio quality and syncing for the current source.",
       "panel_controls_tab": "Three large buttons, volume, and two mode viewfinder rows.",
@@ -4671,7 +4691,7 @@ export default {
       "localFolderActionsMaintenance": "Re-scanning and tidying up tags",
       "localFolderActionsDelete": "The red one deletes things",
       "localMetadataMatchReveal": "A pencil behind three conditions",
-      "localTrackSortingFields": "Only local folders can be sorted",
+      "localTrackSortingFields": "What you can sort by depends on the source",
       "localGridControlsSources": "Folders, albums, artists and local playlists",
       "localGridControlsMaintenance": "Importing and refreshing the local library",
       "onlineCollectionActionsCommon": "Actions shared by online collections",
@@ -5135,9 +5155,9 @@ export default {
         "pencil": "With all three it floats at the right end of the title at 65% opacity. It opens the manual match panel, where you pick the correct title, artist and album for this song."
       },
       "localTrackSorting": {
-        "whereOnly": "These two sort controls at the top of the track list appear for local folders only. Online playlists, albums and Navidrome lists do not have them \u2014 they are not hidden, those sources decide their own order.",
-        "fields": "Three fields to sort by: file name, file modification time, and track number within the album. The choice is stored locally, so the next folder you open is still sorted this way.",
-        "direction": "The button on the left flips ascending and descending, independently of the field."
+        "whereOnly": "The sort controls at the top of the track list are there for folders, playlists and favourites alike. Albums are the exception: their track order is the order.",
+        "fields": "The menu lists whole sort orders, direction included: newest, oldest, song name A-Z, artist A-Z, most or least liked, most or least played. The divider keeps the three local-file fields below. Anything the source cannot answer for is left out \u2014 local files carry no play count, for one.",
+        "direction": "The button on the left flips the current order between ascending and descending, independently of which one is chosen."
       },
       "gridStyle": {
         "grid3dImage": "\u201cCover only\u201d is the poster wall\u2019s default: the whole card is one piece of artwork, with the collection name sitting in the gradient at its foot.",

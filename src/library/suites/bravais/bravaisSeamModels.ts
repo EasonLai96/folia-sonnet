@@ -126,13 +126,16 @@ export type BravaisLayerWall = {
     loading?: boolean;
 };
 
-/** 列表面板工具行的排序（本地文件夹才有）。 */
+/**
+ * 列表面板工具行的排序。下拉里每一项是一个完整的排序方式（自带方向），
+ * 与网格侧栏的菜单同一张预设表；`value` 是当前选中的预设 id。
+ */
 export type BravaisListSort = {
-    field: string;
-    fields: readonly { value: string; label: string }[];
+    value: string;
+    options: readonly { value: string; label: string }[];
     direction: 'asc' | 'desc';
     directionLabel: string;
-    setField: (field: string) => void;
+    selectPreset: (id: string) => void;
     toggleDirection: () => void;
 };
 
