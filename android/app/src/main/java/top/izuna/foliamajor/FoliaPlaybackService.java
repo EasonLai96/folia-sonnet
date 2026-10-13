@@ -74,6 +74,8 @@ public class FoliaPlaybackService extends android.app.Service {
     private int cachedBadgeRes = 0;
     /** 已经调用过 startForeground 了；见 promoteToForeground()。 */
     private boolean foregrounded = false;
+    /** 最近一次交给系统的通知：promoteToForeground() 重复贴的就是它，省掉重建的开销。 */
+    private Notification cachedNotification;
 
     @Override
     public void onCreate() {
@@ -81,14 +83,18 @@ public class FoliaPlaybackService extends android.app.Service {
         running = true;
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         createNotificationChannel();
-        ensureMediaSession();
-        // 就地前台化。
+        // 就地前台化，**在任何可能卡住的工作之前**。
         //
         // Android 要求 startForegroundService() 之后 5 秒内调用 startForeground()，
         // 超时就抛 ForegroundServiceDidNotStartInTimeException 直接杀进程。
-        // 放在 onCreate 里而不是等 onStartCommand 走完分支，是最稳的做法：
-        // 无论后续 switch 走进哪个分支、甚至 intent 为 null，前台化都已经完成了。
+        // 放在 onCreate 里而不是等 onStartCommand 走完分支是最稳的做法（无论后续 switch
+        // 走进哪个分支、甚至 intent 为 null，前台化都已经完成了）；而它必须在
+        // ensureMediaSession() 之前 —— 建 MediaSession 要跟系统的媒体服务打交道，
+        // 主线程一忙起来（切登录平台时 WebView 正在重载）就把这 5 秒耗掉了。
+        // MediaSession 建好之后再重贴一次通知，好让它带上 MediaStyle 的 token。
         promoteToForeground();
+        ensureMediaSession();
+        publishNotification();
     }
 
     /**
@@ -254,17 +260,39 @@ public class FoliaPlaybackService extends android.app.Service {
      * 这里兜住异常，宁可没有通知也要保住播放。
      */
     private void promoteToForeground() {
-        // 每条 onStartCommand 都会走到这里，而位置现在是每秒推一次。不挡住的话
-        // 通知每秒被重建一遍 —— 封面重新解码、通知闪烁，白白烧 CPU。
-        // startForeground 本身可以重复调用，贵的是 buildForegroundNotification()。
-        if (foregrounded) {
-            return;
-        }
+        // 每一条 startForegroundService 都会给这次启动打上「必须前台化」的标记，
+        // 系统按 5 秒倒计时验收：没在时限内调用 startForeground() 就杀进程。
+        // 而这个标记是**按次**算的 —— 服务已经在前台时再 startForegroundService，
+        // 原先这里会按 foregrounded 直接返回，一次 startForeground 都不调，
+        // 于是倒计时照样走完 → ForegroundServiceDidNotStartInTimeException
+        // （切登录平台时最容易撞上：那边连着推好几条 metadata / state）。
+        // 所以这里每次都调；贵的 buildForegroundNotification() 只在内容真的变了时
+        // 才重跑（见 publishNotification），重复贴的是同一条通知对象。
         try {
-            startForeground(NOTIFICATION_ID, buildForegroundNotification());
+            if (cachedNotification == null) {
+                cachedNotification = buildForegroundNotification();
+            }
+            startForeground(NOTIFICATION_ID, cachedNotification);
             foregrounded = true;
         } catch (Throwable error) {
             Log.e(TAG, "startForeground failed; keeping the service alive without it", error);
+        }
+    }
+
+    /**
+     * 内容变了：重建通知并贴出去。
+     *
+     * 已经前台化时用 notify（不重复走 startForeground 那条路），没前台化时只把通知
+     * 记下来，等 promoteToForeground() 再贴。
+     */
+    private void publishNotification() {
+        try {
+            cachedNotification = buildForegroundNotification();
+            if (foregrounded) {
+                notificationManager.notify(NOTIFICATION_ID, cachedNotification);
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "Failed to build the playback notification", error);
         }
     }
 
@@ -320,13 +348,8 @@ public class FoliaPlaybackService extends android.app.Service {
         }
 
         // 已经贴出去的通知要再 post 一次才会带上新内容。
-        //
-        // promoteToForeground() 在已经前台化时会直接返回（那是它按设计该做的：位置每秒推一次，
-        // 不该每秒重建一遍通知），而它也是 onStartCommand 里唯一的重建点 —— 于是 metadata 变了
-        // 通知却不刷新，只有下载线程那条路径会顺手 notify 一次。这也是「封面慢一拍」的一半原因。
-        if (foregrounded) {
-            notificationManager.notify(NOTIFICATION_ID, buildForegroundNotification());
-        }
+        // （promoteToForeground 只重复贴缓存里那条，不会顺手重建。）
+        publishNotification();
     }
 
     /**
@@ -379,7 +402,7 @@ public class FoliaPlaybackService extends android.app.Service {
                 // 只刷通知的话系统那边拿到的还是「没有封面」的那一份。
                 applyMetadata();
                 // 通知已经发出去了，要再 post 一次才会带上新封面。
-                notificationManager.notify(NOTIFICATION_ID, buildForegroundNotification());
+                publishNotification();
             }
         }, "folia-artwork").start();
     }
@@ -686,6 +709,8 @@ public class FoliaPlaybackService extends android.app.Service {
             stopForeground(true);
         }
         foregrounded = false;
+        // 通知已经被撤下来了：再前台化时按当前缓存重建，别把撤掉的那条贴回去。
+        cachedNotification = null;
     }
 
     // ---- Web 层（useCapacitorPlaybackBridge）通过这些常量与服务交互 ----
