@@ -47,6 +47,7 @@ export type MediaDiagnosticsSnapshot = {
 };
 
 import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
+import { audioBands, audioPower } from '../stores/motionSignals';
 
 let waitingCount = 0;
 let waitingTotalMs = 0;
@@ -201,6 +202,72 @@ export const readMediaDiagnostics = (): MediaDiagnosticsSnapshot => {
         audioContextBaseLatencySec: audioContextDiagnostics.baseLatencySec,
         audioContextOutputLatencySec: audioContextDiagnostics.outputLatencySec,
         audioContextState: audioContextDiagnostics.state,
+    };
+};
+
+/**
+ * 频谱读数 —— 专门用来分开「频谱不动」的两种成因。
+ *
+ * 界面上它们长得一模一样，修法却完全不同：
+ *
+ *  · **采集侧没有数据**：`analyserBuilt` 为 false（AudioContext 没建 / 建的时候抛了），
+ *    或者建了但 `spectrumBins` / `spectrumPeak` 是 0 —— 声音没经过这张 Web Audio 图
+ *    （比如播放已经搬到原生层），这时改绘制代码一点用都没有；
+ *  · **采集有数据，绘制画得太小**：`spectrumPeak` 有正常数值（几十到两百多），
+ *    那问题在可视化那一侧，跟谁在出声无关。
+ *
+ * 以前只能连着 adb 抓日志才分得开，现在摆出来一眼就能定。
+ */
+export type SpectrumDiagnosticsSnapshot = {
+    /** AudioContext 建好、analyser 挂上过没有。建过一次就一直是 true。 */
+    analyserBuilt: boolean;
+    /** 频谱的频点数。0 = 这一帧没有频谱（无声 / 没建）。 */
+    spectrumBins: number;
+    /** 这一帧频谱的最大值，0..255。 */
+    spectrumPeak: number;
+    power: number;
+    bass: number;
+    lowMid: number;
+    mid: number;
+    vocal: number;
+    treble: number;
+};
+
+let analyserBuilt = false;
+
+/** 播放图建好时调一次：只想知道 analyser 到底挂上过没有。 */
+export const noteAnalyser = (analyser: AnalyserNode | null | undefined): void => {
+    if (analyser) {
+        analyserBuilt = true;
+    }
+};
+
+/**
+ * 读这一帧的频谱。
+ *
+ * bin 是隔 4 个抽一个：这里只回答「有没有 / 有多大」，全扫一遍不过是白花时间。
+ */
+export const readSpectrumDiagnostics = (): SpectrumDiagnosticsSnapshot => {
+    const spectrum = audioBands.spectrum?.get();
+    let peak = 0;
+    if (spectrum) {
+        for (let index = 0; index < spectrum.length; index += 4) {
+            const value = spectrum[index];
+            if (value > peak) {
+                peak = value;
+            }
+        }
+    }
+    return {
+        analyserBuilt,
+        spectrumBins: spectrum ? spectrum.length : 0,
+        spectrumPeak: peak,
+        power: Math.round(audioPower.get()),
+        bass: Math.round(audioBands.bass.get()),
+        lowMid: Math.round(audioBands.lowMid.get()),
+        mid: Math.round(audioBands.mid.get()),
+        vocal: Math.round(audioBands.vocal.get()),
+        treble: Math.round(audioBands.treble.get()),
     };
 };
 

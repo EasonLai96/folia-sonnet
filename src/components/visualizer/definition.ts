@@ -53,6 +53,17 @@ export interface VisualizerSharedProps {
      */
     hideCoverArt?: boolean;
     /**
+     * 画在壁纸叠层那一层（wallpaper.html 那个 document）上。
+     *
+     * 叠层浮在原生壁纸之上，存在的意义是**透出壁纸**，所以任何自带底色、自带背板的
+     * 东西都不能画：封面（见上面的 `hideCoverArt`）是一例，浮名那张「排版中」的
+     * 加载卡是另一例 —— 它是一块不透明的圆角卡片带大阴影，挂上去就是糊在壁纸上的
+     * 一块疤，而它在叠层上每来一份新数据就会闪一次。
+     *
+     * 只有壁纸叠层传 true；App 内播放页 / 预览 / OBS 都不传。
+     */
+    isWallpaperSurface?: boolean;
+    /**
      * Tempera canvas images shipped inline by the OBS overlay. That page is a separate browsing
      * context with no access to the app's IndexedDB, so when this is present the visualizer uses
      * it instead of reading the pool from storage.

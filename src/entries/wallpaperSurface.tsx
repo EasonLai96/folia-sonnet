@@ -437,10 +437,38 @@ const CONTENT_DWELL_MS = 400;
  * 拿不到逐字轴才退化成「整行一个词」（只有冷启动、App 还没推过逐字数据那几分钟），
  * 那时候歌词会整段出现 —— 已知的、可以接受的退化。
  */
+/**
+ * 上次算出来的那份 Line，以及它对应的内容签名。
+ *
+ * 原生每 200ms 推一次，每次都是**新数组**（JSON 现构造的），于是 `toLines` 每 200ms
+ * 产出一份新引用 —— 下游那些按 `lines` 做 memo 的模式（浮名会据此重排整篇文章，
+ * 还带一次 96ms 防抖）就跟着每 200ms 重排一次。桌面歌词是要长期挂在桌面上的，
+ * 这份开销纯属白烧，而画面在这期间还可能被重排打断（看着就是「一闪」）。
+ *
+ * 内容没变就还给同一份引用：签名取行数 + 首末行时间 + 首行文本 + 总字数，
+ * 这几项一起变才算歌词真的换了。
+ */
+let lastLinesResult: Line[] = NO_LYRIC_LINES;
+let lastLinesKey = '';
+
+const buildLinesKey = (lines: WallpaperTimedLine[], firstIndex: number): string => {
+    const first = lines[0];
+    const last = lines[lines.length - 1];
+    let charCount = 0;
+    for (const line of lines) {
+        charCount += line.text.length;
+    }
+    return `${firstIndex}|${lines.length}|${first?.start ?? 0}|${last?.start ?? 0}|${charCount}|${first?.text ?? ''}`;
+};
+
 const toLines = (payload: WallpaperPayload): Line[] => {
     const lines = payload.lines ?? [];
     if (lines.length === 0) return NO_LYRIC_LINES;
-    return lines.map((line, index) => ({
+    const key = buildLinesKey(lines, payload.firstIndex ?? 0);
+    if (key === lastLinesKey) {
+        return lastLinesResult;
+    }
+    const result = lines.map((line, index) => ({
         id: `wp-${payload.firstIndex ?? 0}-${index}`,
         fullText: line.text,
         startTime: msToSec(line.start),
@@ -456,6 +484,9 @@ const toLines = (payload: WallpaperPayload): Line[] => {
             endTime: msToSec(word.end),
         })),
     }));
+    lastLinesKey = key;
+    lastLinesResult = result;
+    return result;
 };
 
 const WallpaperSurface: React.FC = () => {
@@ -829,6 +860,14 @@ const WallpaperSurface: React.FC = () => {
                 }}
                 visualizerTunings={tunings}
                 staticMode={themeSettings.staticMode}
+                /*
+                 * 告诉可视化「你画在壁纸叠层上」。
+                 *
+                 * 各模式里凡是有自己底色 / 背板的东西都得据此让开 —— 叠层是浮在原生壁纸
+                 * 之上的一层，糊上去一块就等于把壁纸挖掉一块。目前用到它的是浮名那张
+                 * 「排版中」的加载卡（它还会每来一份数据闪一次）。
+                 */
+                isWallpaperSurface
                 {...typographyProps}
             />
         </div>

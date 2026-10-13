@@ -18,7 +18,7 @@ import { setPlayerState } from '../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { useAppViewStore } from '../stores/useAppViewStore';
-import { noteAudioContext } from '../utils/mediaDiagnostics';
+import { noteAnalyser, noteAudioContext } from '../utils/mediaDiagnostics';
 
 // src/hooks/usePlaybackAudioBridge.ts
 
@@ -165,6 +165,8 @@ export function usePlaybackAudioBridge({
             analyser.fftSize = 2048;
             analyser.smoothingTimeConstant = 0.6;
             analyserRef.current = analyser;
+            // 只为开发者选项那张频谱读数：让它能分清「analyser 没建」和「建了但没数据」。
+            noteAnalyser(analyser);
 
             const { gainNode, fadeNode, effectChain, decksConnected } = buildPlaybackGraph({
                 context: ctx,

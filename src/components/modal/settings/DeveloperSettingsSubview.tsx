@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'r
 import { Activity, FolderOpen, Gauge, RefreshCw, ScrollText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
-import { readMediaDiagnostics, type MediaDiagnosticsSnapshot } from '../../../utils/mediaDiagnostics';
+import {
+    readMediaDiagnostics,
+    readSpectrumDiagnostics,
+    type MediaDiagnosticsSnapshot,
+    type SpectrumDiagnosticsSnapshot,
+} from '../../../utils/mediaDiagnostics';
 import {
     getPhoneInsets,
     getPhoneInsetsSource,
@@ -207,6 +212,108 @@ const AudioBufferReadout: React.FC<{ isDaylight: boolean; cardClass: string }> =
                     </div>
                 </dl>
             )}
+        </div>
+    );
+};
+
+/**
+ * 频谱读数。
+ *
+ * 「可视化里的频谱不动」在真机上有两种成因，界面上一模一样、修法却完全不同：
+ *
+ *  · **采集侧没数据**：`analyserBuilt` 是 false，或者建了但 `bins` / `peak` 一直是 0
+ *    —— 声音没经过这张 Web Audio 图（播放搬到原生层了 / AudioContext 建的时候抛了），
+ *    这时改可视化的绘制代码一点用都没有；
+ *  · **有数据、画太小**：`peak` 有正常数值（几十到两百多），那问题在可视化那一侧。
+ *
+ * 有它就不用连着 adb 抓日志去猜了。
+ */
+const SpectrumReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({ isDaylight, cardClass }) => {
+    const { t } = useTranslation();
+    const [snapshot, setSnapshot] = useState<SpectrumDiagnosticsSnapshot | null>(null);
+    const refresh = useCallback(() => setSnapshot(readSpectrumDiagnostics()), []);
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
+    const rowClass = 'flex items-baseline justify-between gap-2';
+    const hasData = (snapshot?.spectrumPeak ?? 0) > 0;
+
+    return (
+        <div className={`rounded-2xl border p-4 space-y-3 ${cardClass}`}>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                    <div className="p-2 rounded-lg opacity-60 shrink-0">
+                        <Activity size={14} />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                            {t('options.spectrumReadout') || 'Audio spectrum'}
+                        </span>
+                        <div className="text-xs opacity-50" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.spectrumReadoutDesc')
+                                || 'Whether the analyser has real data this frame, or the visualiser is drawing it too small.'}
+                        </div>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    onClick={refresh}
+                    title={t('options.spectrumRefresh') || 'Refresh'}
+                    aria-label={t('options.spectrumRefresh') || 'Refresh'}
+                    className={`shrink-0 rounded-full border p-2 transition-colors ${isDaylight ? 'border-black/10 hover:bg-black/[0.05]' : 'border-white/10 hover:bg-white/[0.07]'}`}
+                    style={{ color: 'var(--text-secondary)' }}
+                >
+                    <RefreshCw size={12} />
+                </button>
+            </div>
+
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                <div className={rowClass}>
+                    <dt className="opacity-60">analyser</dt>
+                    <dd>{snapshot?.analyserBuilt ? 'built' : '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">bins</dt>
+                    <dd>{snapshot?.spectrumBins ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">peak</dt>
+                    <dd>{snapshot?.spectrumPeak ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">power</dt>
+                    <dd>{snapshot?.power ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">bass</dt>
+                    <dd>{snapshot?.bass ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">lowMid</dt>
+                    <dd>{snapshot?.lowMid ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">mid</dt>
+                    <dd>{snapshot?.mid ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">vocal</dt>
+                    <dd>{snapshot?.vocal ?? 0}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">treble</dt>
+                    <dd>{snapshot?.treble ?? 0}</dd>
+                </div>
+            </dl>
+
+            <div className="text-[11px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                {hasData
+                    ? (t('options.spectrumHasData')
+                        || 'Data is reaching the app — if the bars still look flat, it is the drawing side.')
+                    : (t('options.spectrumNoData')
+                        || 'No data this frame: nothing is feeding the analyser (paused, or audio does not run through Web Audio).')}
+            </div>
         </div>
     );
 };
@@ -560,6 +667,9 @@ const DeveloperSettingsSubview: React.FC<DeveloperSettingsSubviewProps> = ({
             {/* 音频缓冲读数：手机上没有调试浮层可看（那个只有桌面端的 Alt+Shift+D 能开），
                 而判断「CPU 一满就撕裂」需要的两个数在这里就能读到，也不用开采样。 */}
             <AudioBufferReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
+
+            {/* 频谱读数：分「采集没数据」和「有数据但画太小」—— 频谱不动时先看这一张。 */}
+            <SpectrumReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
 
             <SafeAreaReadout isDaylight={isDaylight} cardClass={settingsCardClass} />
 

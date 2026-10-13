@@ -16,6 +16,57 @@ interface AudioOverlayProps {
 const BAR_COUNT = 72;
 const MIN_RAW_SPECTRUM_BIN = 6;
 
+/*
+ * 下面这三个常量是「频谱为什么看着不动」的关键，别凭手感往回调。
+ *
+ * 原值是噪声门 16~28、幂 1.8~2.2、低频补偿 0.52 起。典型音乐下（低频 ~205、中频 ~150）
+ * 三道压完只剩 0.15 上下，柱子最高只有画布的 **15%~30%** —— 而静态占位条是 44%。
+ * 于是真数据在动、看着却像趴着不动，叠层更惨：它的 128 段在原生那边已经平均过一次，
+ * 到这里再平均 + 再压一次，实测只有 14.7%。
+ *
+ * 所以噪声门压到 8~14、幂压到 1.2~1.55、低频不再砍半（0.86 起），
+ * 剩下的交给下面那层自动增益按本帧峰值顶上去。
+ */
+const NOISE_FLOOR_BASE = 8;
+const NOISE_FLOOR_TILT = 6;
+const COMPRESSION_BASE = 1.2;
+const COMPRESSION_TILT = 0.35;
+const LOW_COMPENSATION_BASE = 0.86;
+const LOW_COMPENSATION_TILT = 0.5;
+
+/** 自动增益的目标峰值、上限与跟随速度。 */
+const GAIN_TARGET = 0.78;
+const GAIN_MAX = 4.5;
+const GAIN_FOLLOW = 0.06;
+/**
+ * 低于这个峰值就当**没有音频数据**（采集没起来 / 音频没经过 analyser / 蓝牙不给）。
+ *
+ * 注意不要设高：安静段落的真实数据本身就是小值，被判成"没数据"会整条变成呼吸波。
+ */
+const IDLE_PEAK = 0.004;
+
+/**
+ * 自动增益的状态。
+ *
+ * 模块级而不是每实例一份：同一时刻通常只有一处在画，而它必须跨帧连续 ——
+ * 放进 effect 里每次重挂载都会从 1 开始爬，切歌/切主题时频谱会先矮半截再长回来。
+ */
+let spectrumGain = 1;
+
+/**
+ * 按本帧峰值把频谱顶到一个稳定高度。
+ *
+ * 各端给的原始量纲差得远：主应用是 `getByteFrequencyData`（dB 域），
+ * 叠层是原生 `Visualizer` 的线性幅度经 `DB_REFERENCE` 换算过来的，
+ * 同一首歌两边能差一倍。固定增益不可能同时照顾两端 —— 所以让它跟着峰值走。
+ * 静音时不放（见 IDLE_PEAK），否则底噪会被放大成一片抖动。
+ */
+const resolveSpectrumGain = (peak: number): number => {
+    const desired = peak > IDLE_PEAK ? Math.min(GAIN_TARGET / peak, GAIN_MAX) : 1;
+    spectrumGain += (desired - spectrumGain) * GAIN_FOLLOW;
+    return Math.max(1, Math.min(GAIN_MAX, spectrumGain));
+};
+
 const buildSpectrumAnchors = (bands: number[]) => {
     const [bass, lowMid, mid, vocal, treble] = bands;
     return [
@@ -77,17 +128,17 @@ const sampleRawSpectrumProfile = (rawSpectrum: Uint8Array, normalizedIndex: numb
     }
 
     const averaged = weightTotal > 0 ? weightedSum / weightTotal : 0;
-    
-    // Dynamic noise floor based on frequency (higher noise subtraction for lower frequencies)
-    const noiseFloor = 16 + (1 - clampedIndex) * 12;
+
+    // Noise floor by frequency: a little more at the low end, where the hum sits.
+    const noiseFloor = NOISE_FLOOR_BASE + (1 - clampedIndex) * NOISE_FLOOR_TILT;
     const normalized = Math.max(0, Math.min(1, (averaged - noiseFloor) / (255 - noiseFloor)));
 
-    // Power compression to suppress quiet/humming baseline and increase visual peaks (contrast)
-    const power = 1.8 + (1 - clampedIndex) * 0.4;
+    // Mild compression: still separates peaks from the baseline without flattening them.
+    const power = COMPRESSION_BASE + (1 - clampedIndex) * COMPRESSION_TILT;
     const processed = Math.pow(normalized, power);
 
-    const lowFrequencyCompensation = 0.52 + clampedIndex * 0.62;
-    const presenceLift = 0.92 + Math.sqrt(clampedIndex) * 0.14;
+    const lowFrequencyCompensation = LOW_COMPENSATION_BASE + clampedIndex * LOW_COMPENSATION_TILT;
+    const presenceLift = 0.96 + Math.sqrt(clampedIndex) * 0.12;
     return Math.max(0, Math.min(1, processed * lowFrequencyCompensation * presenceLift));
 };
 
@@ -176,6 +227,9 @@ const AudioOverlay: React.FC<AudioOverlayProps> = ({
         let frameId = 0;
         let canvasWidth = 0;
         let canvasHeight = 0;
+        // 每帧采样一次频谱得到的 72 个值。复用同一份数组：这个循环跑在显示刷新率上，
+        // 每帧新建一个是稳定态里最无谓的一笔 GC。
+        const profileValues = new Float64Array(BAR_COUNT);
 
         const resizeCanvas = () => {
             const rect = canvas.getBoundingClientRect();
@@ -237,18 +291,41 @@ const AudioOverlay: React.FC<AudioOverlayProps> = ({
             context.lineWidth = 1.5;
             context.lineCap = 'round';
 
+            // Sampled once per frame, then reused by both shapes below.
+            let peak = 0;
+            for (let index = 0; index < BAR_COUNT; index += 1) {
+                const spectrumIndex = index / (BAR_COUNT - 1);
+                const value = hasRawSpectrum
+                    ? sampleRawSpectrumProfile(rawSpectrum, spectrumIndex)
+                    : sampleSpectrumProfile(bands, spectrumIndex);
+                profileValues[index] = value;
+                if (value > peak) {
+                    peak = value;
+                }
+            }
+            const gain = resolveSpectrumGain(peak);
+            /*
+             * 一点音频数据都没有（采集没起来 / 声音不在这一层 / 蓝牙不给）时的兜底。
+             *
+             * 那时柱子会全趴在底边上，看着就像这个功能坏了。给一条极缓的呼吸波，
+             * 幅度只有静态占位的一半左右 —— 一眼能看出"现在没有音频"，又不至于像死了。
+             * 主应用那边无声时本来就在写呼吸值（usePlaybackVisualizerBridge），这里是同一件事。
+             */
+            const idleBreath = peak <= IDLE_PEAK;
+            const idlePhase = performance.now() * 0.0011;
+
             if (mode === 'line') {
                 const points: { x: number; y: number }[] = [];
                 for (let index = 0; index < BAR_COUNT; index += 1) {
                     const x = (index / (BAR_COUNT - 1)) * width;
                     const spectrumIndex = index / (BAR_COUNT - 1);
-                    const band = hasRawSpectrum
-                        ? sampleRawSpectrumProfile(rawSpectrum, spectrumIndex)
-                        : sampleSpectrumProfile(bands, spectrumIndex);
+                    const band = idleBreath
+                        ? 0.05 + (Math.sin(index * 0.32 + idlePhase) * 0.5 + 0.5) * 0.13
+                        : profileValues[index] * gain;
                     const wave =
                         Math.sin(index * 0.24 + performance.now() * 0.004) * 0.08 +
                         Math.sin(index * 0.68 + performance.now() * 0.0028) * 0.05;
-                    
+
                     const envelope = Math.sin(spectrumIndex * Math.PI);
                     const amplitude = energy * 0.04 + band * 0.8 + wave * 0.04;
                     const y = height - Math.max(0, height * amplitude * envelope);
@@ -285,9 +362,9 @@ const AudioOverlay: React.FC<AudioOverlayProps> = ({
                 const gap = width / BAR_COUNT;
                 for (let index = 0; index < BAR_COUNT; index += 1) {
                     const spectrumIndex = index / (BAR_COUNT - 1);
-                    const band = hasRawSpectrum
-                        ? sampleRawSpectrumProfile(rawSpectrum, spectrumIndex)
-                        : sampleSpectrumProfile(bands, spectrumIndex);
+                    const band = idleBreath
+                        ? 0.05 + (Math.sin(index * 0.32 + idlePhase) * 0.5 + 0.5) * 0.13
+                        : profileValues[index] * gain;
                     const pulse = Math.sin(index * 0.45 + performance.now() * 0.006) * 0.5 + 0.5;
                     
                     const envelope = Math.sin(spectrumIndex * Math.PI);

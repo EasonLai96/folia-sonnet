@@ -52,6 +52,7 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
         showText = true,
         seed,
         staticMode = false,
+        isWallpaperSurface = false,
         lyricsFontScale = 1,
         subtitleFontScale = 1,
         fumeTuning,
@@ -158,7 +159,17 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
             return;
         }
 
-        setIsLayoutPending(true);
+        /*
+         * 「排版中」那张卡只在**从无到有**的时候挂。
+         *
+         * 这个 effect 的依赖里有 `lines`，而叠层那份 `lines` 是原生每 200ms 推一次重建的
+         * —— 于是这里每 200ms 重跑一次，`isLayoutPending` 就每 200ms 亮一瞬（含一次
+         * 96ms 的防抖延时），那张不透明的卡正好把底下的画面盖掉一半时间。
+         * 用户看到的「叠层渲染器一闪而过」就是这个，不是渲染坏了。
+         *
+         * 已经有 article 时旧的那份还在画，重建期间继续用它就够了，没必要再挂卡。
+         */
+        setIsLayoutPending(!hasResolvedArticleRef.current);
 
         let rafId = 0;
         let timeoutId = 0;
@@ -330,7 +341,7 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
                     </motion.div>
                 )}
 
-                {isLayoutPending && (
+                {isLayoutPending && !isWallpaperSurface && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
