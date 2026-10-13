@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { Check, Loader2, Sparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -6,6 +6,12 @@ import {
     writeAiSettings,
     type AiProviderId,
 } from '../../../services/aiSettings';
+import {
+    getDirectorStateVersion,
+    readDirectorSettings,
+    subscribeDirectorState,
+    updateDirectorSettings,
+} from '../../../services/lyricDirector/state';
 import {
     testConfiguredAiConnection,
     type AiConnectionTestResult,
@@ -28,6 +34,11 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
     const [settings, setSettings] = useState(() => readAiSettings());
     const [testState, setTestState] = useState<TestState>('idle');
     const [testResult, setTestResult] = useState<AiConnectionTestResult | null>(null);
+    // The director's own switches live in its own persistence, and the panel tab
+    // can change them while this card is open — this is only the redraw trigger,
+    // the values are read during render.
+    useSyncExternalStore(subscribeDirectorState, getDirectorStateVersion);
+    const directorSettings = readDirectorSettings();
 
     // 即改即存：没有「保存」按钮，避免用户填完忘了提交。
     const update = (patch: Parameters<typeof writeAiSettings>[0]) => {
@@ -48,6 +59,36 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
     const fieldClass = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-white/30 transition-colors';
     const ghostButtonClass = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-default';
     const rowDividerClass = isDaylight ? 'border-black/5' : 'border-white/5';
+
+    /* The two switches the AI lyric animation director answers to. They sit
+     * under the credential because that is what gates them: no key configured,
+     * nothing is ever decided. */
+    const renderDirectorToggle = (
+        label: string,
+        description: string,
+        active: boolean,
+        onChange: (next: boolean) => void,
+    ) => (
+        <div className="flex items-center justify-between gap-4 text-left">
+            <div className="space-y-1 min-w-0">
+                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{label}</div>
+                <div className="text-xs opacity-50 max-w-[380px]" style={{ color: 'var(--text-secondary)' }}>
+                    {description}
+                </div>
+            </div>
+            <button
+                type="button"
+                onClick={() => onChange(!active)}
+                aria-pressed={active}
+                aria-label={label}
+                className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${active
+                    ? 'bg-[rgba(114,119,134,1)]'
+                    : (isDaylight ? 'bg-black/15' : 'bg-white/15')}`}
+            >
+                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${active ? 'translate-x-6' : 'translate-x-0'}`} />
+            </button>
+        </div>
+    );
 
     const renderProviderOption = (id: AiProviderId, label: string) => {
         const selected = settings.provider === id;
@@ -203,6 +244,21 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
 
                 <div className="text-[10px] opacity-45 text-left" style={{ color: 'var(--text-secondary)' }}>
                     {t('options.aiKeyStoredLocally')}
+                </div>
+
+                <div className="space-y-3 pt-1 text-left">
+                    {renderDirectorToggle(
+                        t('aiDirector.allowAutoMode'),
+                        t('aiDirector.allowAutoModeDesc'),
+                        directorSettings.autoOnSongChange,
+                        (next) => updateDirectorSettings({ autoOnSongChange: next }),
+                    )}
+                    {renderDirectorToggle(
+                        t('aiDirector.allowAutoParams'),
+                        t('aiDirector.allowAutoParamsDesc'),
+                        directorSettings.applyParams,
+                        (next) => updateDirectorSettings({ applyParams: next }),
+                    )}
                 </div>
             </div>
         </div>

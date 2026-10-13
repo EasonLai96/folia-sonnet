@@ -54,7 +54,9 @@ interface PersistedState {
 export const DEFAULT_DIRECTOR_SETTINGS: LyricDirectorSettings = {
     autoOnSongChange: true,
     rememberPerSong: true,
-    applyParams: false,
+    // The user asked for both switches in Settings → AI to be on by default:
+    // the mode follows the song, and the parameters go with it.
+    applyParams: true,
     prefetchNext: true,
     userHint: '',
 };

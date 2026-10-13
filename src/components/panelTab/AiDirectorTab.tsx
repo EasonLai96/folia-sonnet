@@ -171,8 +171,8 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
 
             <div className={`rounded-xl border overflow-hidden ${cardClass}`}>
                 <ToggleRow
-                    label={t('aiDirector.settingAuto')}
-                    description={t('aiDirector.settingAutoDesc')}
+                    label={t('aiDirector.allowAutoMode')}
+                    description={t('aiDirector.allowAutoModeDesc')}
                     checked={settings.autoOnSongChange}
                     isDaylight={isDaylight}
                     rowDivider={rowDivider}
@@ -187,8 +187,8 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
                     onChange={(next) => updateDirectorSettings({ rememberPerSong: next })}
                 />
                 <ToggleRow
-                    label={t('aiDirector.settingApplyParams')}
-                    description={t('aiDirector.settingApplyParamsDesc')}
+                    label={t('aiDirector.allowAutoParams')}
+                    description={t('aiDirector.allowAutoParamsDesc')}
                     checked={settings.applyParams}
                     isDaylight={isDaylight}
                     rowDivider={rowDivider}

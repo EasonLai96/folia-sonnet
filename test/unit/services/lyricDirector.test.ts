@@ -188,10 +188,11 @@ describe('lyric director memory', () => {
     });
 
     it('stores behaviour settings with defaults', () => {
+        // Both "allow the AI to…" switches default to on: that is what Settings → AI promises.
         expect(readDirectorSettings()).toMatchObject({
             autoOnSongChange: true,
             rememberPerSong: true,
-            applyParams: false,
+            applyParams: true,
             prefetchNext: true,
         });
         updateDirectorSettings({ applyParams: true, userHint: '多来点转场' });
