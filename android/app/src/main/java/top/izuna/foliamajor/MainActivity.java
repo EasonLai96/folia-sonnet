@@ -79,6 +79,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FoliaPlaybackPlugin.class);
         registerPlugin(FoliaWallpaperPlugin.class);
         registerPlugin(top.izuna.foliamajor.lyricon.FoliaLyriconPlugin.class);
+        // ColorOS 原生锁屏歌词（MediaMetadata["lyricInfo"]）。插件本身不做判定，
+        // 是否启用由 ColorOsLyricBridge 的 ROM 探测决定。
+        registerPlugin(top.izuna.foliamajor.coloros.FoliaColorOsLyricsPlugin.class);
         // 本地登录（内置接口代码 + Cookie/OkHttp）与返回键都在这个插件上。
         registerPlugin(FoliaNativePlugin.class);
         registerPlugin(StatusBarPlugin.class);

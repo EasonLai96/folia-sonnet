@@ -17,6 +17,8 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import top.izuna.foliamajor.coloros.ColorOsLyricBridge;
+
 /**
  * 后台播放的前台服务。
  *
@@ -50,7 +52,8 @@ public class FoliaPlaybackService extends android.app.Service {
      */
     private static volatile boolean running = false;
 
-    static boolean isRunning() {
+    /** 服务是否还活着。public：coloros 包要判断「有没有必要发刷新 intent」。 */
+    public static boolean isRunning() {
         return running;
     }
 
@@ -65,6 +68,7 @@ public class FoliaPlaybackService extends android.app.Service {
     private int cachedState = PlaybackStateCompat.STATE_NONE;
     private long cachedDurationMs = 0L;
     private long cachedPositionMs = 0L;
+    private float cachedSpeed = 1.0f;
     private boolean cachedPlaying = false;
     /** 封面角标（通知 small icon）的资源 id；0 = 还没收到过，用缺省。 */
     private int cachedBadgeRes = 0;
@@ -161,6 +165,12 @@ public class FoliaPlaybackService extends android.app.Service {
                     break;
                 case ACTION_UPDATE_STATE:
                     updatePlaybackState(intent);
+                    break;
+                case ACTION_REFRESH_METADATA:
+                    // ColorOS 原生歌词到的比播放晚（Web 层先拿到词）时用这条：
+                    // 只按缓存重建 metadata 与 PlaybackState，不动前台化状态。
+                    applyMetadata();
+                    applyPlaybackState();
                     break;
                 case ACTION_STOP_FOREGROUND:
                     stopForegroundCompat();
@@ -281,6 +291,9 @@ public class FoliaPlaybackService extends android.app.Service {
         if (songChanged) {
             cachedSongKey = songKey;
             cachedArtwork = null;
+            // 时长也一起清掉：metadata 现在是从缓存整体重建的（见 applyMetadata），
+            // 不清的话「新歌还没带时长」会被填成上一首的时长。
+            cachedDurationMs = 0L;
             // 让这次的 artworkUrl 能重新触发下载（同一个地址在同一首歌里只下一次）。
             pendingArtworkUrl = null;
         }
@@ -296,21 +309,7 @@ public class FoliaPlaybackService extends android.app.Service {
             cachedArtwork = artwork;
         }
         publishSnapshot();
-
-        MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, cachedTitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, cachedArtist)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, cachedAlbum);
-        if (durationMs > 0) {
-            builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs);
-        }
-        if (cachedArtwork != null) {
-            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cachedArtwork);
-        }
-
-        if (mediaSession != null) {
-            mediaSession.setMetadata(builder.build());
-        }
+        applyMetadata();
 
         // 封面优先走原生下载：Web 层用 fetch 抓远端封面常常被 CORS 挡掉，
         // 通知栏就只剩一个默认图标。原生侧没有同源限制，拿到再补一次通知。
@@ -327,6 +326,33 @@ public class FoliaPlaybackService extends android.app.Service {
         // 通知却不刷新，只有下载线程那条路径会顺手 notify 一次。这也是「封面慢一拍」的一半原因。
         if (foregrounded) {
             notificationManager.notify(NOTIFICATION_ID, buildForegroundNotification());
+        }
+    }
+
+    /**
+     * 用当前缓存的字段重建 metadata 并写回 MediaSession。
+     *
+     * 抽成方法是为了让「歌词到了」也能走同一条路（ACTION_REFRESH_METADATA）：
+     * 歌词是 metadata 的**附加字段**，不是另一条通道，必须从同一份缓存整体重建，
+     * 否则后到的那次会把先到的字段抹成空（封面的老问题就是这个）。
+     */
+    private void applyMetadata() {
+        MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, cachedTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, cachedArtist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, cachedAlbum);
+        if (cachedDurationMs > 0) {
+            builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, cachedDurationMs);
+        }
+        if (cachedArtwork != null) {
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cachedArtwork);
+        }
+        // ColorOS 原生锁屏歌词：非 ColorOS 16+ 设备上 ColorOsLyricBridge 手里没有 payload，
+        // 这里就是个空操作，不会往 metadata 里塞无用字段。
+        ColorOsLyricBridge.attach(builder, cachedSongKey);
+
+        if (mediaSession != null) {
+            mediaSession.setMetadata(builder.build());
         }
     }
 
@@ -349,6 +375,9 @@ public class FoliaPlaybackService extends android.app.Service {
                 }
                 cachedArtwork = bitmap;
                 publishSnapshot();
+                // 封面补到了也顺手刷新一次 MediaSession：锁屏歌词页上的封面读的是 metadata，
+                // 只刷通知的话系统那边拿到的还是「没有封面」的那一份。
+                applyMetadata();
                 // 通知已经发出去了，要再 post 一次才会带上新封面。
                 notificationManager.notify(NOTIFICATION_ID, buildForegroundNotification());
             }
@@ -415,17 +444,44 @@ public class FoliaPlaybackService extends android.app.Service {
             compatState = PlaybackStateCompat.STATE_STOPPED;
         }
 
+        cachedState = compatState;
+        cachedPositionMs = positionMs;
+        cachedSpeed = speed;
+        cachedPlaying = playing;
+        publishSnapshot();
+        applyPlaybackState();
+    }
+
+    /**
+     * 用当前缓存的字段重建 PlaybackState 并写回 MediaSession。
+     *
+     * 调用点不止「Web 推状态」一个：歌词到了也要重挂一次翻译按钮（见
+     * ACTION_REFRESH_METADATA），而 PlaybackState 是不可变对象，
+     * 每次重建都得把该保留的东西重新加一遍。
+     */
+    private void applyPlaybackState() {
         PlaybackStateCompat.Builder builder = new PlaybackStateCompat.Builder()
                 .setActions(supportedActions())
-                .setState(compatState, positionMs, speed);
+                .setState(cachedState, cachedPositionMs, cachedSpeed);
+        // ColorOS 锁屏歌词：有翻译 lane 时把 Bridge 的公共「翻译」按钮挂上。
+        //
+        // CustomAction.Builder 强制要求一个**非零**图标资源 id，传 0 会直接构造失败；
+        // 图标长什么样无所谓 —— SystemUI 建好 Action 之后 Bridge 会把它换成自带的
+        // ic_translation。所以拿应用图标当占位即可。
+        if (ColorOsLyricBridge.hasTranslationFor(cachedSongKey)) {
+            builder.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                    ColorOsLyricBridge.ACTION_TOGGLE_TRANSLATION,
+                    "翻译",
+                    translationActionIcon()).build());
+        }
         if (mediaSession != null) {
             mediaSession.setPlaybackState(builder.build());
         }
+    }
 
-        cachedState = compatState;
-        cachedPositionMs = positionMs;
-        cachedPlaying = playing;
-        publishSnapshot();
+    private int translationActionIcon() {
+        int icon = getApplicationInfo().icon;
+        return icon != 0 ? icon : android.R.drawable.ic_menu_manage;
     }
 
     /**
@@ -636,6 +692,14 @@ public class FoliaPlaybackService extends android.app.Service {
 
     static final String ACTION_UPDATE_METADATA = "top.izuna.foliamajor.action.UPDATE_METADATA";
     static final String ACTION_UPDATE_STATE = "top.izuna.foliamajor.action.UPDATE_STATE";
+    /**
+     * 按缓存重建一次 metadata + PlaybackState，不改动任何缓存字段。
+     *
+     * 给 ColorOS 原生歌词用：歌词到的时刻与 metadata 到的时刻是两个独立事件，
+     * 谁先谁后都可能，这条动作让「后到的那个」能把两者合起来重新发出去。
+     * 别的包要用，所以是 public。
+     */
+    public static final String ACTION_REFRESH_METADATA = "top.izuna.foliamajor.action.REFRESH_METADATA";
     static final String ACTION_STOP_FOREGROUND = "top.izuna.foliamajor.action.STOP_FOREGROUND";
     static final String ACTION_WEB_COMMAND = "top.izuna.foliamajor.action.WEB_COMMAND";
     static final String EXTRA_COMMAND = "command";

@@ -99,6 +99,7 @@ import { useBackgroundRenderPause } from './hooks/useBackgroundRenderPause';
 import { noteAudioEvent, resetMediaDiagnostics } from './utils/mediaDiagnostics';
 import { useLyricsWallpaperFeed } from './hooks/useLyricsWallpaperFeed';
 import { useLyriconFeed } from './hooks/useLyriconFeed';
+import { useColorOsLyricFeed } from './hooks/useColorOsLyricFeed';
 import { useScreenAwake } from './hooks/useScreenAwake';
 import { usePlayerChromeAutoHide } from './hooks/usePlayerChromeAutoHide';
 import { usePlaybackAudioBridge } from './hooks/usePlaybackAudioBridge';
@@ -1548,6 +1549,14 @@ export default function App() {
         songId: displaySong?.id == null ? null : String(displaySong.id),
         duration,
         playerState: displayPlayerState,
+    });
+
+    // Android 专有 + ColorOS 16+ 专有：把歌词写进 MediaMetadata["lyricInfo"]，
+    // 交给系统锁屏 / AOD 歌词页原生渲染。不是那台机器时整条通道不启动（判定在原生侧）。
+    useColorOsLyricFeed({
+        lyrics,
+        song: displaySong,
+        duration,
     });
 
     const {

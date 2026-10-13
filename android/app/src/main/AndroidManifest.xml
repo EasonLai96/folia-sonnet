@@ -19,6 +19,19 @@
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
 
         <!--
+            ColorOS 原生锁屏歌词：声明本应用愿意进 OPlus 的 media-history / 媒体管线。
+            部分 ColorOS 会在媒体会话进入 OPlus 管线之前按包过滤，缺了这条声明
+            SystemUI 可能根本看不到我们的 MediaSession。
+
+            它只影响 OPlus 的媒体历史 / 黑名单策略，**不会**生成歌词、也不会把 App 加进
+            任何 Xposed 模块的作用域 —— 歌词仍然由我们自己写进 MediaMetadata["lyricInfo"]。
+            （对应 ColorOS-Live-Lyrics-Bridge 协议里的 OPLUS_MEDIA_HISTORY。）
+        -->
+        <meta-data
+            android:name="io.github.andrealtb.lockscreenlyrics.OPLUS_MEDIA_HISTORY"
+            android:value="true" />
+
+        <!--
             厂商「全屏显示 / 刘海」适配（注册给 ROM 看的部分）。
 
             有用户反馈屏幕顶部有黑边：框架侧的缺省行为是把内容顶到挖孔下方，而部分厂商
