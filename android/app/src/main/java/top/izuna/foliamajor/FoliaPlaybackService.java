@@ -96,6 +96,12 @@ public class FoliaPlaybackService extends android.app.Service {
         super.onCreate();
         running = true;
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        // 新实例起来了：前台状态必须从零算。它是静态的，进程活着时插件读它
+        // （isForegrounded）决定走 startService 还是 startForegroundService；留着上一个
+        // 实例的 true，新实例就会以为自己已经前台化、跳过 startForeground() ——
+        // 5 秒后系统抛 ForegroundServiceDidNotStartInTimeException 杀进程。
+        foregrounded = false;
+        cachedNotification = null;
         createNotificationChannel();
         // 就地前台化，**在任何可能卡住的工作之前**。
         //
@@ -177,6 +183,11 @@ public class FoliaPlaybackService extends android.app.Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // 无条件先兑现一次前台化：startForegroundService 开的那道 5 秒倒计时**不看 intent**，
+        // 而服务已经存在时 onCreate 不会再跑（promoteToForeground 里那句「已前台就返回」
+        // 让它几乎没有开销）。放在 action 判断里面的话，一条没带 action 的
+        // startForegroundService 就永远等不到 startForeground()。
+        promoteToForeground();
         String action = intent == null ? null : intent.getAction();
         if (action != null) {
             switch (action) {
@@ -218,6 +229,12 @@ public class FoliaPlaybackService extends android.app.Service {
     @Override
     public void onDestroy() {
         running = false;
+        // 实例没了，前台状态必须跟着清：它是静态的，进程还在时插件靠它选
+        // startService / startForegroundService。留着 true 会让下一次创建的实例跳过
+        // startForeground()，而那条路是 startForegroundService 开的 —— 5 秒后就是
+        // ForegroundServiceDidNotStartInTimeException。（onCreate 里也重置一次，双保险。）
+        foregrounded = false;
+        cachedNotification = null;
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
@@ -290,15 +307,49 @@ public class FoliaPlaybackService extends android.app.Service {
         if (foregrounded) {
             return;
         }
+        /*
+         * 先用**占位**通知把前台化兑现掉，再贴完整的那条。
+         *
+         * 分开是为了一个真崩过的堆栈：ForegroundServiceDidNotStartInTimeException ——
+         * startForegroundService() 之后系统只给 5 秒，超时直接杀进程。而完整通知不是白来的：
+         * 它要 getLaunchIntentForPackage()（PackageManager 的跨进程调用）和四个
+         * PendingIntent.getBroadcast/getActivity（每次都要跟 system_server 打交道），
+         * 冷启动时主线程正被 WebView 首帧与那一大包 JS 占满，系统侧一忙这些调用能排到秒级。
+         * 「兑现」与「好看」就此分开：前者用一条什么都不带的通知，几乎零成本；
+         * 后者再慢也无所谓 —— 倒计时已经不可能超时了。
+         */
         try {
-            if (cachedNotification == null) {
-                cachedNotification = buildForegroundNotification();
-            }
-            startForeground(NOTIFICATION_ID, cachedNotification);
+            startForeground(NOTIFICATION_ID, buildPlaceholderNotification());
             foregrounded = true;
         } catch (Throwable error) {
             Log.e(TAG, "startForeground failed; keeping the service alive without it", error);
+            return;
         }
+        // 前台化已经兑现，这里再抛异常也不会被系统杀掉，只是通知暂时不完整。
+        try {
+            cachedNotification = buildForegroundNotification();
+            notificationManager.notify(NOTIFICATION_ID, cachedNotification);
+        } catch (Throwable error) {
+            Log.e(TAG, "Failed to build the playback notification", error);
+        }
+    }
+
+    /**
+     * 只够兑现前台化的最小通知：一个图标、一个标题，没有按钮、没有封面、不读 PackageManager。
+     *
+     * 存在的唯一理由就是上面那道 5 秒倒计时。内容随后必被 buildForegroundNotification()
+     * 的完整通知覆盖（promoteToForeground 里前台化成功后立刻 notify 一次），
+     * 所以它长什么样用户几乎看不到 —— 只在极端拥塞的冷启动里闪一下。
+     */
+    private Notification buildPlaceholderNotification() {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("Folia")
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOnlyAlertOnce(true)
+                .setOngoing(true)
+                .build();
     }
 
     /**
