@@ -3,6 +3,7 @@ import { saveLocalSong, saveLocalSongs, deleteLocalSong as dbDeleteLocalSong, de
 import { getLocalPlaylists, saveLocalPlaylists } from './localPlaylistService';
 import { parseEmbeddedMetadataAsync, type EmbeddedMetadataResult } from '../utils/localMetadataWorkerClient';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
+import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { normalizeLyricMatchText } from '../utils/lyrics/matchScore';
 import { createSafeObjectUrl } from '../utils/blobGuards';
 import { repairFlacMetadata } from '../utils/flacMetadataRepair';
@@ -1420,7 +1421,8 @@ export async function matchLyrics(song: LocalSong): Promise<LyricData | null> {
                     matchContext.durationMs,
                     {
                         album: matchContext.album,
-                        preferredSource: shouldUseBestLyric ? settingsLyricSettings.preferredAlternativeLyricSource : undefined,
+                        // 本地文件没有平台来源，跟不了「跟随播放平台」，直接落到「本地歌曲的歌词来源」。
+                        preferredSource: shouldUseBestLyric ? resolveLyricSourcePreference(settingsLyricSettings) : undefined,
                         metadataCandidate: matchContext.metadataCandidate,
                         exactMatchOnly: Boolean(matchContext.metadataCandidate && !shouldUseBestLyric),
                     },

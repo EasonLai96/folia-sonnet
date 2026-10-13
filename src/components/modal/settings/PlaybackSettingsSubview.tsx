@@ -6,7 +6,9 @@ import type { LocalLyricsPriority, QueueAddBehavior, ReplayGainMode, Theme } fro
 import { useAudioOutputDevices } from '../../../hooks/useAudioOutputDevices';
 import { CustomSelect } from '../../shared/CustomSelect';
 import { LYRIC_MATCH_SOURCES } from '../../../utils/lyrics/lyricMatchSources';
-import { getLyricProviderPreferenceLabel } from '../../../utils/lyrics/lyricSourceLabels';
+import { getLyricSourcePreferenceLabel } from '../../../utils/lyrics/lyricSourceLabels';
+// 「跟随播放平台来源」是设置项的取值之一，只有这一格能选；下面「本地歌曲的歌词来源」那一格只能选具体平台。
+import { LYRIC_SOURCE_PREFERENCE_ORDER } from '../../../utils/lyrics/sourcePriority';
 import TransitionSettingsSection from './TransitionSettingsSection';
 import LocalLyricFormatOrderSetting from './LocalLyricFormatOrderSetting';
 import { SettingsAnchor } from './navigation/SettingsAnchorContext';
@@ -81,18 +83,22 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
     const {
         autoUseBestLyric,
         preferredAlternativeLyricSource,
+        localLyricProviderSource,
         localLyricsPriority,
         globalLyricTimelineOffsetMs,
         onToggleAutoUseBestLyric,
         onPreferredAlternativeLyricSourceChange,
+        onLocalLyricProviderSourceChange,
         onLocalLyricsPriorityChange,
     } = useLyricSettingsStore(useShallow(state => ({
         autoUseBestLyric: state.autoUseBestLyric,
         preferredAlternativeLyricSource: state.preferredAlternativeLyricSource,
+        localLyricProviderSource: state.localLyricProviderSource,
         localLyricsPriority: state.localLyricsPriority,
         globalLyricTimelineOffsetMs: state.globalLyricTimelineOffsetMs,
         onToggleAutoUseBestLyric: state.handleToggleAutoUseBestLyric,
         onPreferredAlternativeLyricSourceChange: state.handleSetPreferredAlternativeLyricSource,
+        onLocalLyricProviderSourceChange: state.handleSetLocalLyricProviderSource,
         onLocalLyricsPriorityChange: state.handleSetLocalLyricsPriority,
     })));
     const {
@@ -349,25 +355,53 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
                                     {t('settings.lyricMatchPriorityDesc')}
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
-                                {LYRIC_MATCH_SOURCES.map((source) => {
-                                    const option = { value: source, label: getLyricProviderPreferenceLabel(source) };
-                                    const selected = preferredAlternativeLyricSource === option.value;
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                                {LYRIC_SOURCE_PREFERENCE_ORDER.map((source) => {
+                                    const selected = preferredAlternativeLyricSource === source;
                                     return (
                                         <button
-                                            key={option.value}
+                                            key={source}
                                             type="button"
-                                            onClick={() => onPreferredAlternativeLyricSourceChange(option.value)}
+                                            onClick={() => onPreferredAlternativeLyricSourceChange(source)}
                                             className="rounded-xl border px-3 py-2 text-center transition-colors"
                                             style={getAccentOptionStyle(selected)}
                                         >
                                             <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-                                                {option.label}
+                                                {getLyricSourcePreferenceLabel(source)}
                                             </div>
                                         </button>
                                     );
                                 })}
                             </div>
+                    </div>
+                    {/* 本地文件自己没有平台，跟不了来源，只能单独定一个；它同时是「跟随播放平台」解析不出来时的退路。 */}
+                    <div className="p-4 space-y-3 border-t" style={{ borderColor: 'var(--border-primary, rgba(255,255,255,0.06))' }}>
+                        <div className="space-y-1">
+                            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                                {t('settings.localLyricSource')}
+                            </div>
+                            <div className="text-[11px] opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
+                                {t('settings.localLyricSourceDesc')}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                            {LYRIC_MATCH_SOURCES.map((source) => {
+                                const selected = localLyricProviderSource === source;
+                                return (
+                                    <button
+                                        key={source}
+                                        type="button"
+                                        onClick={() => onLocalLyricProviderSourceChange(source)}
+                                        className="rounded-xl border px-3 py-2 text-center transition-colors"
+                                        style={getAccentOptionStyle(selected)}
+                                    >
+                                        <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                                            {getLyricSourcePreferenceLabel(source)}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                     <button
                         type="button"

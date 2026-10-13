@@ -1210,6 +1210,15 @@ export interface NoCopyrightRecommendation {
 }
 
 export type LyricProviderSource = 'netease' | 'qq' | 'kugou' | 'amll';
+/**
+ * 设置里可选的歌词来源。除了上面那几个具体平台，还有一个「跟随播放平台来源」：
+ * 在线歌按自己所在平台取；本地歌曲 / Navidrome 这类没有平台的退回「本地歌曲的歌词来源」。
+ *
+ * 具体平台才是真正能拿去搜索的取值，所以两个类型是分开的：凡是「要发请求」的地方
+ * （autoMatchBestLyric、各个匹配弹窗）都只收 LyricProviderSource，中间必须经过
+ * resolveLyricSourcePreference 解析一次。
+ */
+export type LyricSourcePreference = LyricProviderSource | 'follow-source';
 export type AmllDbPlatform = 'ncm' | 'qq';
 
 export interface ReplayGainInfo {

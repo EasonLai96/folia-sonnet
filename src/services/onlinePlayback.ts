@@ -5,6 +5,7 @@ import { isPureMusicLyricText } from '../utils/lyrics/pureMusic';
 import { migrateLyricDataRenderHints } from '../utils/lyrics/renderHints';
 import { loadOnlineLyricsState, markOnlineLyricsPureMusic, resolveOnlineLyrics, resolveOnlineLyricsPureMusic, saveOnlineLyricsState } from '../utils/onlineLyricsState';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
+import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { createSafeObjectUrl } from '../utils/blobGuards';
 import type { AudioQualityPreference, MediaId, OmniAudioSource } from '../types/onlineMusic';
 import type { OnlineAudioSourceResult, PlaybackFailure } from '../types/playbackFailure';
@@ -248,7 +249,7 @@ export async function loadOnlineSongLyrics(
             const artistName = metadata.artists.map(a => a.name).join(', ');
             const bestMatch = await autoMatchBestLyric(song.name, artistName, metadata.durationMs, {
                 album: metadata.album?.name,
-                preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                preferredSource: resolveLyricSourcePreference(settingsLyricSettings, song),
                 providerCandidate: song.sourceRef?.kind === 'online'
                     && (song.sourceRef.providerId === 'netease' || song.sourceRef.providerId === 'kugou' || song.sourceRef.providerId === 'qq')
                     ? {

@@ -9,6 +9,7 @@ import { ReplayGainInfo, SongResult, LyricData, OnlineLyricsState, type LyricPro
 import { migrateLyricDataRenderHints } from '../utils/lyrics/renderHints';
 import { isPureMusicLyricText } from '../utils/lyrics/pureMusic';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
+import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { loadOnlineLyricsState, markOnlineLyricsPureMusic, resolveOnlineLyrics, saveOnlineLyricsState } from '../utils/onlineLyricsState';
 import type { AudioQualityPreference, MediaId } from '../types/onlineMusic';
 import { getPlaybackSourceRef } from '../utils/appPlaybackGuards';
@@ -255,8 +256,11 @@ const prefetchSong = async (
         existing.audioUrl = toSafePlaybackUrl(existing.audioUrl) ?? null;
     }
   const currentSettingsLyricSettings = useLyricSettingsStore.getState();
+    // 「跟随播放平台来源」存的是 'follow-source'，缓存里存的是解析出来的具体平台 ——
+    // 两边必须拿同一种值比，否则这一项永远不命中，每轮预取都整首重来。
+    const resolvedLyricSource = resolveLyricSourcePreference(currentSettingsLyricSettings, song);
     const lyricPreferenceMatches = !currentSettingsLyricSettings.autoUseBestLyric
-        || existing?.lyricPreferenceSource === currentSettingsLyricSettings.preferredAlternativeLyricSource;
+        || existing?.lyricPreferenceSource === resolvedLyricSource;
     if (existing && lyricPreferenceMatches && existing.audioUrl && isUrlValid(existing.audioUrlFetchedAt) && (existing.lyrics || existing.lyricRaw?.isPureMusic)) {
         console.log(`[Prefetch] Already cached: ${song.name}`);
         touchPrefetchCacheEntry(songKey, existing);
@@ -306,7 +310,7 @@ const prefetchSong = async (
                 // from the cache can never satisfy the "already cached" test at the top of this
                 // function, so every prefetch pass re-enters the whole thing for it.
                 data.lyricPreferenceSource = currentSettingsLyricSettings.autoUseBestLyric
-                    ? currentSettingsLyricSettings.preferredAlternativeLyricSource
+                    ? resolvedLyricSource
                     : null;
             } else if (!signal.aborted) {
                 const lyricResult = await omni.getLyrics(song, { userId });
@@ -335,7 +339,7 @@ const prefetchSong = async (
   const settingsAutomixSettings = useAutomixSettingsStore.getState();
   const settingsLyricSettings = useLyricSettingsStore.getState();
                 const autoUseBest = settingsLyricSettings.autoUseBestLyric;
-                const preferredSource = settingsLyricSettings.preferredAlternativeLyricSource;
+                const preferredSource = resolveLyricSourcePreference(settingsLyricSettings, song);
                 const shouldAutoMatch = autoUseBest && !onlineLyricsState?.hasOnlineOverride;
 
                 if (shouldAutoMatch) {
@@ -344,7 +348,7 @@ const prefetchSong = async (
                         const artistName = metadata.artists.map(a => a.name).join(', ');
                         const bestMatch = await autoMatchBestLyric(song.name, artistName, metadata.durationMs, {
                             album: metadata.album?.name,
-                            preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                            preferredSource,
                             ...(sourceRef.providerId === 'netease' || sourceRef.providerId === 'kugou' || sourceRef.providerId === 'qq'
                                 ? { providerCandidate: {
                                     providerId: sourceRef.providerId as 'netease' | 'kugou' | 'qq',

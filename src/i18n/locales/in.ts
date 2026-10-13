@@ -1506,7 +1506,8 @@ export default {
     "netease": "NetEase Cloud Music",
     "qq": "QQ Music",
     "kugou": "Kugou Music",
-    "amll": "AMLLDB"
+    "amll": "AMLLDB",
+    "followSource": "Ikuti sumber pemutaran"
   },
   "globalLyricOffset": {
     "title": "Offset Waktu Global",
@@ -1578,7 +1579,9 @@ export default {
   },
   "settings": {
     "lyricMatchPriority": "Prioritas pencocokan lirik",
-    "lyricMatchPriorityDesc": "Saat beberapa sumber lirik memiliki kecocokan berkualitas tinggi, utamakan sumber ini terlebih dahulu."
+    "lyricMatchPriorityDesc": "Saat beberapa sumber lirik memiliki kecocokan berkualitas tinggi, utamakan sumber ini terlebih dahulu. Ikuti sumber pemutaran mencocokkan lagu online dengan penyedia asalnya.",
+    "localLyricSource": "Sumber lirik lagu lokal",
+    "localLyricSourceDesc": "Berkas lokal dan trek Navidrome tidak punya penyedia sendiri, jadi dicocokkan dengan sumber ini. Ini juga menjadi fallback saat prioritas di atas mengikuti sumber pemutaran."
   },
   "options": {
     "ponderHints": "Petunjuk tutorial Ponder",

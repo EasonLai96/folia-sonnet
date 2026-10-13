@@ -1513,6 +1513,7 @@ export default {
     "qq": "QQ 音乐",
     "kugou": "酷狗音乐",
     "amll": "AMLLDB",
+    "followSource": "跟随播放平台",
   },
   "globalLyricOffset": {
     "title": "全局时间偏移",
@@ -1584,7 +1585,9 @@ export default {
   },
   "settings": {
     "lyricMatchPriority": "歌词匹配优先级",
-    "lyricMatchPriorityDesc": "在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果。"
+    "lyricMatchPriorityDesc": "在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果。选「跟随播放平台」时，在线歌曲按自己所在平台取歌词。",
+    "localLyricSource": "本地歌曲的歌词来源",
+    "localLyricSourceDesc": "本地文件和 Navidrome 曲库没有平台来源，用这里选的歌词源匹配；上面的优先级选「跟随播放平台」时，它们也走这一项。"
   },
   "options": {
     "ponderHints": "思索教程提示",

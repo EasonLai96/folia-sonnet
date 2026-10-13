@@ -97,6 +97,7 @@ exports[`store contract > keeps every localStorage key the stores read or write 
   "library_wall_windows_per_block",
   "local_library_auto_scan",
   "local_lyric_format_order",
+  "local_lyric_provider_source",
   "local_lyrics_priority",
   "local_replaygain_mode",
   "local_track_sort_direction",

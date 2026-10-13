@@ -1,5 +1,5 @@
 import i18n from '../../i18n/config';
-import type { AmllDbPlatform, LyricProviderSource, SongResult } from '../../types';
+import type { AmllDbPlatform, LyricProviderSource, LyricSourcePreference, SongResult } from '../../types';
 
 // src/utils/lyrics/lyricSourceLabels.ts
 
@@ -26,6 +26,11 @@ export const getLyricProviderLabel = (
 
 export const getLyricProviderPreferenceLabel = (source: LyricProviderSource): string => (
     source === 'amll' ? i18n.t('lyricProvider.amll') : getBaseLyricProviderLabel(source)
+);
+
+// 设置项那一格的文案：多出来的「跟随播放平台」不是平台，走单独一条。
+export const getLyricSourcePreferenceLabel = (source: LyricSourcePreference): string => (
+    source === 'follow-source' ? i18n.t('lyricProvider.followSource') : getLyricProviderPreferenceLabel(source)
 );
 
 export const getSongNativeLyricProviderSource = (

@@ -26,6 +26,7 @@ import { hydrateNavidromeLyricPayload, resolvePreferredNavidromeLyrics } from '.
 import { migrateLyricDataRenderHints } from '../utils/lyrics/renderHints';
 import { migrateMatchedLyricsCarrierRenderHints } from '../utils/lyrics/storageMigration';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
+import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { resolveExplicitFileTimedLyricFormat } from '../utils/lyrics/formatDetection';
 import { applyUploadedLocalLyrics } from '../utils/lyrics/localLyricsUpload';
 import { omni } from '../services/onlineMusic/omni';
@@ -781,7 +782,7 @@ export function useLibraryPlaybackController({
                     if (settingsLyricSettings.autoUseBestLyric) {
                         const bestMatch = await autoMatchBestLyric(navidromeSong.name, artistName, navidromeMetadata.durationMs, {
                             album: albumName,
-                            preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                            preferredSource: resolveLyricSourcePreference(settingsLyricSettings, navidromeSong),
                         });
                         if (bestMatch?.isPureMusic) {
                             isAutoMatched = true;
@@ -1267,7 +1268,8 @@ export function useLibraryPlaybackController({
                 });
                 const bestMatch = await autoMatchBestLyric(matchContext.title, matchContext.artist, matchContext.durationMs, {
                     album: matchContext.album,
-                    preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                    // 本地文件没有平台来源，跟不了「跟随播放平台」，直接落到「本地歌曲的歌词来源」。
+                    preferredSource: resolveLyricSourcePreference(settingsLyricSettings),
                     metadataCandidate: matchContext.metadataCandidate,
                 });
 
@@ -1318,7 +1320,7 @@ export function useLibraryPlaybackController({
                 const albumName = navidromeMetadata.album?.name || '';
                 const bestMatch = await autoMatchBestLyric(navidromeSong.name, artistName, navidromeMetadata.durationMs, {
                     album: albumName,
-                    preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                    preferredSource: resolveLyricSourcePreference(settingsLyricSettings, navidromeSong),
                 });
 
                 if (!bestMatch) {
@@ -1367,7 +1369,7 @@ export function useLibraryPlaybackController({
             const ownLyricsResult = await omni.getLyrics(currentSong);
             const bestMatch = await autoMatchBestLyric(currentSong.name, artistName, currentSongMetadata.durationMs, {
                 album: albumName,
-                preferredSource: settingsLyricSettings.preferredAlternativeLyricSource,
+                preferredSource: resolveLyricSourcePreference(settingsLyricSettings, currentSong),
                 providerCandidate: sourceRef.kind === 'online'
                     && (sourceRef.providerId === 'netease' || sourceRef.providerId === 'kugou')
                     ? { providerId: sourceRef.providerId as 'netease' | 'kugou', song: currentSong, lyricsResult: ownLyricsResult }

@@ -1514,6 +1514,7 @@ export default {
     "qq": "QQ Music",
     "kugou": "Kugou Music",
     "amll": "AMLLDB",
+    "followSource": "Follow playback source",
   },
   "globalLyricOffset": {
     "title": "Global Timing Offset",
@@ -1585,7 +1586,9 @@ export default {
   },
   "settings": {
     "lyricMatchPriority": "Lyric match priority",
-    "lyricMatchPriorityDesc": "When multiple lyric sources have high-confidence matches, prefer this source first."
+    "lyricMatchPriorityDesc": "When multiple lyric sources have high-confidence matches, prefer this source first. Follow playback source matches an online track against the provider it came from.",
+    "localLyricSource": "Lyric source for local songs",
+    "localLyricSourceDesc": "Local files and Navidrome tracks carry no provider of their own, so they are matched with this source. It is also the fallback when the priority above follows the playback source."
   },
   "options": {
     "ponderHints": "Ponder tutorial hints",
