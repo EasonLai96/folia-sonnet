@@ -124,6 +124,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(top.izuna.foliamajor.coloros.FoliaColorOsLyricsPlugin.class);
         // 本地登录（内置接口代码 + Cookie/OkHttp）与返回键都在这个插件上。
         registerPlugin(FoliaNativePlugin.class);
+        // 歌词动画录成视频。「渲染导出」原本只是个模组（只在桌面端加载），安卓上
+        // 这条能力由这个插件 + 控制面板那一页接住。
+        registerPlugin(top.izuna.foliamajor.export.FoliaExportPlugin.class);
         registerPlugin(StatusBarPlugin.class);
         registerPlugin(SplashScreenPlugin.class);
         registerPlugin(BrowserPlugin.class);

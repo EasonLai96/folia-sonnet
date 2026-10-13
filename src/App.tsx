@@ -122,6 +122,7 @@ import { useLocalLibraryCatalog } from './hooks/useLocalLibraryCatalog';
 import { usePlaybackVisualizerBridge } from './hooks/usePlaybackVisualizerBridge';
 import { useRandomVisualizerMode } from './hooks/useRandomVisualizerMode';
 import { useLyricAnimationDirector } from './hooks/useLyricAnimationDirector';
+import { useVideoExportBridge } from './hooks/useVideoExportBridge';
 import { useObsBrowserSourcePublisher } from './hooks/useObsBrowserSourcePublisher';
 import { useLyricApiPublisher } from './hooks/useLyricApiPublisher';
 import { useSessionRestoreController } from './hooks/useSessionRestoreController';
@@ -522,6 +523,10 @@ export default function App() {
     // AI 歌词动画导演：原来是模组，而安卓包根本加载不了模组，所以搬进了本体。
     // 换歌与歌词就绪都在这里接上，面板和命令走的是同一个服务。
     useLyricAnimationDirector();
+
+    // 「歌词动画录成视频」的帧驱动。必须常驻在这里而不是挂在面板那一页上：
+    // 导出期间面板要收起来（不然会被一起录进画面），挂在那里会跟着卸载。
+    useVideoExportBridge();
 
     const setLyrics = useMemo(
         () => createLyricsSetter(setLyricsState, lyricFilterEnabled ? lyricFilterPattern : '', currentSongFullRef, {

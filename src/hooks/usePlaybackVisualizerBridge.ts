@@ -7,6 +7,7 @@ import type { AudioBands, LyricData } from '../types';
 import { setCurrentLineIndex, setPlayerState } from '../stores/usePlaybackStore';
 import { selectDisplayLyrics, usePlaybackStore } from '../stores/usePlaybackStore';
 import { audioBands, audioPower, currentTime, lyricCurrentTime } from '../stores/motionSignals';
+import { isExportClockTakenOver } from '../services/videoExport/controller';
 
 // src/hooks/usePlaybackVisualizerBridge.ts
 
@@ -146,16 +147,30 @@ export function usePlaybackVisualizerBridge({
 
         if (isActuallyPlaying && audioElement) {
             const time = audioElement.currentTime;
-            currentTime.set(time);
 
-            const effectiveLyricTime = time - lyricTimelineOffsetMs / 1000;
-            lyricCurrentTime.set(effectiveLyricTime);
+            /*
+             * 导出期间这里一个字都不写。
+             *
+             * 录视频时画面是由导出循环一帧一帧往前推的（每帧一次握手，见
+             * services/videoExport/controller）；而这个循环是按墙钟跑的，
+             * 只要它继续写，画面就会被拽回真实播放位置 —— 录出来的是"跟着播放走"
+             * 而不是"按帧推进"，慢机器上还会整段重复。
+             *
+             * 正常流程里导出开始前会先暂停播放，压根走不到这一支；这条挡的是
+             * 用户在导出途中又按了播放。
+             */
+            if (!isExportClockTakenOver()) {
+                currentTime.set(time);
 
-            if (lyrics) {
-                const foundIndex = findLatestActiveLineIndex(lyrics.lines, effectiveLyricTime);
-                if (foundIndex !== currentLineIndexRef.current) {
-                    currentLineIndexRef.current = foundIndex;
-                    setCurrentLineIndex(foundIndex);
+                const effectiveLyricTime = time - lyricTimelineOffsetMs / 1000;
+                lyricCurrentTime.set(effectiveLyricTime);
+
+                if (lyrics) {
+                    const foundIndex = findLatestActiveLineIndex(lyrics.lines, effectiveLyricTime);
+                    if (foundIndex !== currentLineIndexRef.current) {
+                        currentLineIndexRef.current = foundIndex;
+                        setCurrentLineIndex(foundIndex);
+                    }
                 }
             }
         } else if (isNowPlayingStageActive) {
