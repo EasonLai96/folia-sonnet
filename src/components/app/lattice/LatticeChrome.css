@@ -46,7 +46,13 @@
 :root[data-reduce-motion~='lattice'] .lattice-chrome-time { transition: none; }
 @media (max-width: 640px) {
     /* Compensate for the wall's mobile camera scale so touch targets stay finger-sized. */
-    .lattice-chrome { width: min(100%, 640px); padding: 0; gap: 16px; }
+    /* 手机上控制条常亮（见 useLatticeChromeDisclosure：没有指针就没有 hover），六颗按钮全在行里。
+       640px 这个上限会在右边空出一大块，而槽位那排被 .lattice-chrome-actions 的 overflow 裁掉
+       —— 下一首就这么不见了。用满整行，并把槽位排设成不收缩：真挤不下时先牺牲时间读数。 */
+    .lattice-chrome { width: 100%; padding: 0; gap: 16px; }
+    /* 真挤不下时先让时间读数让位（它是 nowrap，得显式允许收缩），槽位那排才留得下。
+       别给 .lattice-chrome-details 加 flex-shrink: 0 —— 那样它会整排溢出到海报外面。 */
+    .lattice-chrome-time { min-width: 0; overflow: hidden; }
     .lattice-root .lattice-chrome button { border-radius: 20px !important; }
     .lattice-progress { margin-right: 28px; }
     .lattice-chrome button { width: 86px; height: 86px; }

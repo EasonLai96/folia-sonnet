@@ -4952,7 +4952,7 @@ export default {
         "latticePan": "Drag the field or use the wheel to pan the camera. Posters enter as the viewport moves, and momentum never changes queue order.",
         "latticeFocusKeys": "Arrow keys first adopt the nearest poster to the viewport center, then move spatially and pan the camera to keep the next target visible.",
         "latticePosterOpen": "Click or press Enter to expand a poster. The current song shows synchronized lyrics; another song shows its title and play entry without reordering the queue.",
-        "latticeChrome": "The expanded poster contains play/pause, extra slots, time, scrubbing, and Open Player. Tap the expanded poster again, or press Space, to reveal or hide it.",
+        "latticeChrome": "The expanded poster contains play/pause, extra slots, time, scrubbing, and Open Player. On a phone there is no pointer, so the row stays revealed; press Space to hide it.",
         "latticeTools": "The bottom-right tools match the library wall: the icon row focuses the current song, shuffles the queue, generates a theme, shows the play queue, goes home and opens the player; below are volume, follow track changes, lights and key help. Sliding the button left opens commands.",
         "latticeLights": "Lights Off dims the wall while retaining its structure. It is only a display setting: playback and queue order are unchanged.",
         "latticePosterKeys": "Enter or Space expands a closed poster. Once open, Enter plays or pauses, Space toggles controls, and Escape collapses and clears focus first.",

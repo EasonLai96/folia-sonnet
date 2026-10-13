@@ -4837,7 +4837,7 @@ export default {
         "latticePan": "Seret bidang atau gunakan roda untuk menggeser kamera. Poster muncul mengikuti viewport dan momentum tidak mengubah urutan antrean.",
         "latticeFocusKeys": "Tombol panah mula-mula memilih poster terdekat dari pusat viewport, lalu bergerak secara spasial sambil menjaga target terlihat.",
         "latticePosterOpen": "Klik atau tekan Enter untuk memperluas poster. Lagu aktif menampilkan lirik sinkron; lagu lain menampilkan judul dan tombol putar tanpa mengubah antrean.",
-        "latticeChrome": "Poster terbuka berisi putar/jeda, slot ekstra, waktu, geser progres, dan Buka Player. Ketuk lagi atau tekan Spasi untuk menampilkan atau menyembunyikannya.",
+        "latticeChrome": "Poster terbuka berisi putar/jeda, slot ekstra, waktu, geser progres, dan Buka Player. Di ponsel tidak ada pointer, jadi kontrolnya selalu tampil; tekan Spasi untuk menyembunyikannya.",
         "latticeTools": "Alat kanan bawah sama dengan dinding pustaka: deretan ikon memfokuskan lagu aktif, mengacak antrean, membuat tema, menampilkan antrean putar, kembali ke Beranda, dan membuka pemutar; di bawahnya ada volume, ikuti pergantian lagu, lampu, dan bantuan tombol. Geser ke kiri membuka perintah.",
         "latticeLights": "Lampu mati meredupkan dinding namun mempertahankan strukturnya. Ini hanya tampilan; pemutaran dan urutan antrean tidak berubah.",
         "latticePosterKeys": "Enter atau Spasi memperluas poster tertutup. Setelah terbuka, Enter memutar atau menjeda, Spasi mengubah kontrol, dan Escape menutup serta membersihkan fokus.",
