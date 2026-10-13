@@ -78,7 +78,13 @@ const fetchCoverForSong = async (song: LocalSong): Promise<boolean> => {
         lyrics: 'keep',
         matchMode: 'automatic',
     });
-    return result.coverCached;
+    /*
+     * 看 `coverAttempted` 不看 `coverCached`：后者只是「封面二进制存进本地缓存」成没成，
+     * 而界面用的是写进记录里的 `onlineMetadata.coverUrl`。缓存写失败（图片取不回来很常见）
+     * 时记录照样变了，曲库该重读 —— 只看缓存的话这一批一首都不算数，最后不通知，
+     * 墙上的占位色就一直挂着。
+     */
+    return result.coverAttempted;
 };
 
 /**
