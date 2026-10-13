@@ -9,7 +9,7 @@ type ResolveNextUpTrackParams = {
      * （即将淡出的），因为 currentSong 在 arm 时就已经异步推进过去了。
      */
     song: SongResult | null;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     isFmMode: boolean;
     isStageActive: boolean;
     /** 基准曲目不在队列里时是否退回队首，对齐 handleNextTrack 的下标规则 */

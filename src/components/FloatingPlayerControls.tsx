@@ -64,7 +64,7 @@ interface FloatingPlayerControlsProps {
     currentTime: MotionValue<number>;
     lyricCurrentTime?: MotionValue<number>;
     duration: number;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     currentView: 'home' | 'player' | 'lattice';
     audioSrc: string | null;
     canTogglePlay?: boolean;

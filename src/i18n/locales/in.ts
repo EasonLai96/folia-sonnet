@@ -1007,10 +1007,10 @@ export default {
     "stale": "Kamu mengganti lagu saat AI berpikir — hasilnya disimpan untuk lagu yang lain itu.",
     "allowAutoMode": "Izinkan AI mengganti animasi lirik otomatis",
     "allowAutoModeDesc": "Setelah lirik lagu siap, AI memilih mode yang paling pas; lagu yang diingat langsung memakai pilihannya.",
-    "settingRemember": "Ingat pilihan setiap lagu",
-    "settingRememberDesc": "Memutar ulang lagu memakai mode dan parameter tersimpan, tanpa memanggil AI lagi.",
     "allowAutoParams": "Izinkan AI mengatur parameter animasi juga",
     "allowAutoParamsDesc": "Ikut menyesuaikan nilai mode yang dipilih (kamera, transisi, grain…). Mati berarti hanya mode yang berganti dan nilaimu tetap.",
+    "settingRemember": "Ingat pilihan setiap lagu",
+    "settingRememberDesc": "Memutar ulang lagu memakai mode dan parameter tersimpan, tanpa memanggil AI lagi.",
     "settingPrefetch": "Siapkan lagu berikutnya lebih awal",
     "settingPrefetchDesc": "Setelah lagu saat ini selesai, lagu berikutnya diputuskan lebih awal ke memorinya, jadi langsung berlaku saat diputar.",
     "settingHint": "Petunjuk preferensi (opsional)",
@@ -3344,6 +3344,7 @@ export default {
     "loopOff": "Ulangi Mati",
     "loopAll": "Ulangi Semua",
     "loopOne": "Ulangi Satu",
+    "loopShuffle": "Acak",
     "unknownArtist": "Artis Tidak Dikenal",
     "unknownAlbum": "Album Tidak Dikenal"
   },
@@ -3912,7 +3913,8 @@ export default {
     "videoExport": "Ekspor video",
     "loopOff": "Ulangi Mati",
     "loopAll": "Ulangi Semua",
-    "loopOne": "Ulangi Satu"
+    "loopOne": "Ulangi Satu",
+    "loopShuffle": "Acak"
   },
   "aiHelp": {
     "openButton": "Butuh bantuan?",

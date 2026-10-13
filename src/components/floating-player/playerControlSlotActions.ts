@@ -15,7 +15,7 @@ export type { PlayerControlSlotActionId };
 
 /** 槽位渲染所需的全部输入；由 buildAppOverlaysModel 组装，全部来自已有 handler。 */
 export type PlayerControlSlotContext = {
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     onToggleLoop: () => void;
     onPrev: () => void;
     onNext: () => void;
@@ -66,17 +66,19 @@ export const PLAYER_CONTROL_SLOT_OPTIONS: readonly { id: PlayerControlSlotAction
     { id: 'sleep-timer', icon: Timer, labelKey: 'options.playerControlSlotAction_sleepTimer' },
 ];
 
-/** 循环按钮的图标反映当前模式，是这批动作里唯一的三态图标。 */
+/** 播放顺序按钮的图标反映当前模式（顺序 / 列表循环 / 单曲循环 / 随机播放）。 */
 const resolveLoopIcon = (loopMode: PlayerControlSlotContext['loopMode']): LucideIcon => {
     if (loopMode === 'off') return RepeatOff;
     if (loopMode === 'one') return Repeat1;
+    if (loopMode === 'shuffle') return Shuffle;
     return Repeat;
 };
 
-/** 循环按钮的提示文本反映当前模式。 */
+/** 播放顺序按钮的提示文本反映当前模式。 */
 const resolveLoopLabelKey = (loopMode: PlayerControlSlotContext['loopMode']): string => {
     if (loopMode === 'off') return 'player.loopOff';
     if (loopMode === 'one') return 'player.loopOne';
+    if (loopMode === 'shuffle') return 'player.loopShuffle';
     return 'player.loopAll';
 };
 

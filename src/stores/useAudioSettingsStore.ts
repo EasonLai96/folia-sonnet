@@ -117,13 +117,13 @@ const readStoredAudioOutputDeviceId = (): string => {
     return localStorage.getItem('audio_output_device_id') ?? '';
 };
 
-const readStoredLoopMode = (): 'off' | 'all' | 'one' => {
+const readStoredLoopMode = (): 'off' | 'all' | 'one' | 'shuffle' => {
     if (typeof window === 'undefined') {
         return 'off';
     }
 
     const saved = localStorage.getItem('player_loop_mode');
-    return saved === 'all' || saved === 'one' ? saved : 'off';
+    return saved === 'all' || saved === 'one' || saved === 'shuffle' ? saved : 'off';
 };
 
 const readStoredVolume = () => {
@@ -157,7 +157,7 @@ export type AudioSettingsState = {
     isAudioEqualizerOpen: boolean;
     volume: number;
     isMuted: boolean;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     setAudioQuality: (quality: AudioQuality) => void;
     handleToggleMediaCache: (enable: boolean) => void;
     handleSetMediaCacheLimitGb: (gigabytes: number) => void;
@@ -300,17 +300,27 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
         set({ isMuted: next });
     },
     handleToggleLoopMode: () => {
+        // 顺序（off）→ 列表循环（all）→ 单曲循环（one）→ 随机播放（shuffle）→ 回到顺序。
+        // 随机放在最后：它是这一圈里唯一的「会把队列重排一遍」的模式，挨着顺序放容易误触。
         const prev = get().loopMode;
         const next = prev === 'off'
             ? 'all'
             : prev === 'all'
                 ? 'one'
-                : 'off';
+                : prev === 'one'
+                    ? 'shuffle'
+                    : 'off';
         if (typeof window !== 'undefined') {
             localStorage.setItem('player_loop_mode', next);
         }
         set({ loopMode: next });
-        const loopModeKey = next === 'off' ? 'loopOff' : next === 'one' ? 'loopOne' : 'loopAll';
+        const loopModeKey = next === 'off'
+            ? 'loopOff'
+            : next === 'one'
+                ? 'loopOne'
+                : next === 'shuffle'
+                    ? 'loopShuffle'
+                    : 'loopAll';
         setStatusMessage({
             type: 'success',
             text: i18n.t(`player.${loopModeKey}`),

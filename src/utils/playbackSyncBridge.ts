@@ -23,7 +23,7 @@ export interface PlaybackSyncBridgeModel {
     durationSec: number;
     stageDurationSec: number;
     playerState: PlayerState;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     isFmMode: boolean;
     canGoPrevious: boolean;
     canGoNext: boolean;
@@ -54,7 +54,7 @@ export interface BuildPlaybackSyncBridgeModelArgs {
     playerState: PlayerState;
     coverUrl: string | null;
     cachedCoverUrl?: string | null;
-    effectiveLoopMode: 'off' | 'all' | 'one';
+    effectiveLoopMode: 'off' | 'all' | 'one' | 'shuffle';
     isFmMode: boolean;
     isStageActive: boolean;
     controlsDisabled: boolean;

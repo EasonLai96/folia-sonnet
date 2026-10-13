@@ -323,7 +323,7 @@ declare global {
     currentTime: number;
     duration: number;
     playerState: string;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     canGoPrevious: boolean;
     canGoNext: boolean;
     prevTrackKey: string | null;

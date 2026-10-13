@@ -131,7 +131,13 @@ export type HomeViewTab = 'playlist' | 'local' | 'albums' | 'navidrome' | 'radio
 
 export type PlaybackContext = 'main' | 'stage';
 export type StageSource = 'stage-api' | 'now-playing' | 'playercap';
-export type StageLoopMode = 'off' | 'all' | 'one';
+/**
+ * 播放顺序（播放模式）。
+ *
+ * `shuffle` = 随机播放：进入时把队列打乱（当前这首留在首位），然后照这个新顺序往下走；
+ * 走到最后一首时**再打乱一次**接着播，所以不会停在队尾。见 utils/playbackShuffle.ts。
+ */
+export type StageLoopMode = 'off' | 'all' | 'one' | 'shuffle';
 export type QueueAddBehavior = 'append' | 'next';
 export type StageActiveEntryKind = 'lyrics' | 'media';
 

@@ -90,7 +90,7 @@ export type AppOverlaysDeps = {
     /** 搜索结果按当前本地曲库目录重算展示（见 SearchWorkspace 的同名 prop）。 */
     resolveSearchResultDisplay: NonNullable<SearchOverlayProps['resolveTrackDisplay']>;
     devDebugSnapshot: any;
-    effectiveLoopMode: 'off' | 'all' | 'one';
+    effectiveLoopMode: 'off' | 'all' | 'one' | 'shuffle';
     canToggleCurrentPlayback: boolean;
     isNowPlayingControlDisabled: boolean;
     stageActiveEntryKind: string | null;

@@ -28,7 +28,7 @@ const blockedNeighbor = (): PlaybackNeighbor => ({ canGo: false, key: null, titl
 type ResolvePlaybackNeighborsParams = {
     playQueue: SongResult[];
     currentSong: SongResult | null;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     isFmMode: boolean;
     isStageActive: boolean;
     /**
@@ -85,14 +85,25 @@ export const resolvePlaybackNeighbors = ({
         nextIndex = 0;
     } else if (loopMode === 'all') {
         nextIndex = 0;
+    } else if (loopMode === 'shuffle' && playQueue.length === 1) {
+        // 只有一首时没得洗，按列表循环处理（和 handleNextTrack 同一条规则）。
+        nextIndex = 0;
     }
 
     // FM 走到队列末尾时会追加新曲目再跳，标题此刻无法预知
     const fmWillFetch = isFmMode && currentIndex === lastIndex;
+    /**
+     * 随机播放走到最后一首：不是停在队尾，而是把后面的重新打乱再接着播
+     * （见 usePlaybackQueueController.handleNextTrack）。所以**能跳**，但目标此刻还没洗出来，
+     * 给不出标题 —— 和 FM 那一条一样走 unknown。
+     */
+    const shuffleWillReshuffle = loopMode === 'shuffle'
+        && currentIndex === lastIndex
+        && playQueue.length > 1;
 
     return {
         prev: prevIndex >= 0 ? neighborAt(prevIndex) : blockedNeighbor(),
-        next: fmWillFetch
+        next: (fmWillFetch || shuffleWillReshuffle)
             ? unknownNeighbor()
             : nextIndex >= 0
                 ? neighborAt(nextIndex)

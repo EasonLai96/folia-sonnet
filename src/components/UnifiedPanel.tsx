@@ -45,7 +45,7 @@ type UnifiedPanelPlaybackProps = {
     currentSong: SongResult | null;
     onAlbumSelect: (song: SongResult, album: Album) => void;
     onSelectArtist: (song: SongResult, artist: Artist) => void;
-    loopMode: 'off' | 'all' | 'one';
+    loopMode: 'off' | 'all' | 'one' | 'shuffle';
     onToggleLoop: () => void;
     onLike: () => void;
     isLiked: boolean;

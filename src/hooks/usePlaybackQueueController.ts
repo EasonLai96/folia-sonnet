@@ -28,6 +28,7 @@ import {
 } from '../utils/appPlaybackGuards';
 import { applyQueueAddBehavior } from '../utils/queueAddBehavior';
 import { moveQueueItem } from '../utils/queueReorder';
+import { buildShuffledQueue } from '../utils/playbackShuffle';
 import { buildStagePlayerSnapshot, resolveStagePlayerQueueItemIndex } from '../utils/stagePlayerSnapshot';
 import type { LocalLibraryDisplayCatalog } from '../services/playbackAdapters';
 import type { SearchReturnView, SearchSource } from '../stores/useSearchNavigationStore';
@@ -223,6 +224,29 @@ export function usePlaybackQueueController({
     const searchQuery = useSearchNavigationStore(state => state.searchQuery);
     const searchSourceTab = useSearchNavigationStore(state => state.searchSourceTab);
     const searchReturnView = useSearchNavigationStore(state => state.searchReturnView);
+
+    /**
+     * 切**进**随机播放时把队列打乱一遍。
+     *
+     * 随机模式不是另存一份顺序表，而是真的把队列重排（见 utils/playbackShuffle.ts），
+     * 所以这一步不做的话「随机」只是照着原来的顺序播下去 —— 看起来完全没生效。
+     *
+     * 只在**模式从别的档切过来**的那一刻洗一次：队列后面怎么变（加歌、删歌）都不再重洗，
+     * 否则每次编辑队列顺序都会跳一下。重洗的另一条路是走到队尾，见 handleNextTrack。
+     */
+    const previousLoopModeRef = useRef(loopMode);
+    useEffect(() => {
+        const previousLoopMode = previousLoopModeRef.current;
+        previousLoopModeRef.current = loopMode;
+        if (loopMode !== 'shuffle' || previousLoopMode === 'shuffle') return;
+        if (isNowPlayingStageActive || playQueue.length <= 1) return;
+
+        const nextQueue = buildShuffledQueue(playQueue, currentSong ? getPlaybackSongKey(currentSong) : null);
+        setPlayQueue(nextQueue);
+        if (currentSong) {
+            invalidateAndRefetch(currentSong, nextQueue, audioQuality, userId);
+        }
+    }, [audioQuality, currentSong, isNowPlayingStageActive, loopMode, playQueue, userId]);
 
     const [pendingUnavailableReplacement, setPendingUnavailableReplacement] = useState<UnavailableReplacementRequest | null>(null);
 
@@ -1002,11 +1026,28 @@ export function usePlaybackQueueController({
 
         let nextIndex = -1;
 
+        // 随机播放：走到队尾时**把后面的重新打乱一遍**再接着播（用户要的那一条）。
+        // 当前这首会变成新队首，所以顺位就是第二首 —— 随机播放因此不会停在最后一首。
+        if (loopMode === 'shuffle' && currentIndex >= 0 && currentIndex === playQueue.length - 1 && playQueue.length > 1) {
+            const nextQueue = buildShuffledQueue(playQueue, currentSongKey);
+            setPlayQueue(nextQueue);
+            void playSong(nextQueue[1], nextQueue, isFmMode, {
+                shouldNavigateToPlayer,
+                unavailableSkipCount: options?.unavailableSkipCount,
+                isAutomixAdvance: options?.isAutomixAdvance,
+            });
+            return;
+        }
+
         if (currentIndex >= 0 && currentIndex < playQueue.length - 1) {
             nextIndex = currentIndex + 1;
         } else if (currentIndex < 0 && playQueue.length > 0) {
             nextIndex = 0;
         } else if (loopMode === 'all') {
+            nextIndex = 0;
+        } else if (loopMode === 'shuffle' && playQueue.length === 1) {
+            // 队列只有一首时没得洗，按「继续放这一首」处理 —— 和列表循环一个行为，
+            // 免得随机模式下按下一首直接停住。
             nextIndex = 0;
         }
 
@@ -1402,23 +1443,10 @@ export function usePlaybackQueueController({
         if (isNowPlayingStageActive) return;
         if (!playQueue || playQueue.length <= 1) return;
 
+        // 与随机播放（loopMode === 'shuffle'）同一套排序：当前这首留首位，其余打乱。
+        // 见 utils/playbackShuffle.ts。
         const currentSongKey = currentSong ? getPlaybackSongKey(currentSong) : null;
-        let songsToShuffle: SongResult[] = [];
-        let firstSong: SongResult | null = null;
-
-        if (currentSongKey) {
-            firstSong = playQueue.find(song => getPlaybackSongKey(song) === currentSongKey) || null;
-            songsToShuffle = playQueue.filter(song => getPlaybackSongKey(song) !== currentSongKey);
-        } else {
-            songsToShuffle = [...playQueue];
-        }
-
-        for (let index = songsToShuffle.length - 1; index > 0; index -= 1) {
-            const randomIndex = Math.floor(Math.random() * (index + 1));
-            [songsToShuffle[index], songsToShuffle[randomIndex]] = [songsToShuffle[randomIndex], songsToShuffle[index]];
-        }
-
-        const nextQueue = firstSong ? [firstSong, ...songsToShuffle] : songsToShuffle;
+        const nextQueue = buildShuffledQueue(playQueue, currentSongKey);
 
         setPlayQueue(nextQueue);
         setStatusMsg({ type: 'success', text: t('status.queueShuffled') || 'Queue Shuffled' });
