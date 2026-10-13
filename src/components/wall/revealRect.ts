@@ -25,6 +25,16 @@ export type RevealInput = {
     pad?: number;
     /** Screen px the rect's bottom edge must stay above (player bar safe area); defaults to pad. */
     bottomInset?: number;
+    /**
+     * 相机落到这一段区间的哪里：
+     *
+     * - `minimal`（默认）：**最小平移**。矩形已经完整可见时相机一动不动，只在它被挡着的时候
+     *   把它挪进来。适合键盘焦点移动、「顺手露一下」这类被动场合 —— 手没动，画面也不该跳。
+     * - `centered`：**居中**。一律落到「它在哪都行」这段区间的中点，看得见的位移。
+     *   适合「定位正在播放」这种用户明确点名要看的东西 —— 这时候再给最小平移，
+     *   卡片刚好在屏幕边上就成了「只选中了、什么都没发生」。
+     */
+    mode?: 'minimal' | 'centered';
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -39,7 +49,17 @@ export const resolveRevealCenter = ({
     seamWidth,
     pad = 24,
     bottomInset = pad,
+    mode = 'minimal',
 }: RevealInput): WallViewCenter => {
+    // 两个 place 的区别只有「落在区间哪里」：minimal 尽量贴着当前 center，centered 取区间中点。
+    const place = (low: number, high: number, fallbackLow: number, fallbackHigh: number, current: number): number => {
+        if (mode === 'centered') {
+            return low <= high ? (low + high) / 2 : (fallbackLow + fallbackHigh) / 2;
+        }
+        return low <= high
+            ? clamp(current, low, high)
+            : clamp(current, Math.min(fallbackLow, fallbackHigh), Math.max(fallbackLow, fallbackHigh));
+    };
     const lineX = getViewLineX(view);
     const scale = view.scale;
     const hasSeam = anchorX !== null && seamWidth > 1;
@@ -55,15 +75,17 @@ export const resolveRevealCenter = ({
         const need = seamWidth / 2 + SEAM_EDGE_MARGIN;
         const seamLow = anchorX! - (view.width - need - lineX) / scale;
         const seamHigh = anchorX! + (lineX - need) / scale;
-        const low = Math.max(fitLow, seamLow);
-        const high = Math.min(fitHigh, seamHigh);
-        x = low <= high ? clamp(center.x, low, high) : clamp(center.x, Math.min(fitLow, fitHigh), Math.max(fitLow, fitHigh));
+        // 优先保住缝（`low..high` 是「矩形进得来」与「缝还在屏内」的交集）；交集为空时退回到只看矩形。
+        x = place(Math.max(fitLow, seamLow), Math.min(fitHigh, seamHigh), fitLow, fitHigh, center.x);
     } else {
-        x = clamp(center.x, Math.min(fitLow, fitHigh), Math.max(fitLow, fitHigh));
+        x = place(fitLow, fitHigh, fitLow, fitHigh, center.x);
     }
 
     const yLow = rect.y + rect.height - (view.height / 2 - bottomInset) / scale;
     const yHigh = rect.y - (pad - view.height / 2) / scale;
-    const y = yLow <= yHigh ? clamp(center.y, yLow, yHigh) : rect.y + rect.height / 2;
+    // 矩形比可视区还高时区间为空，两种模式都退回「无视边距把矩形中心对到屏幕中心」。
+    const y = yLow <= yHigh
+        ? (mode === 'centered' ? (yLow + yHigh) / 2 : clamp(center.y, yLow, yHigh))
+        : rect.y + rect.height / 2;
     return { x, y };
 };

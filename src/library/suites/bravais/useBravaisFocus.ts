@@ -39,7 +39,8 @@ export const useBravaisFocus = ({
     /** slot 此刻画在哪（聚焦块里取让位后的矩形）。 */
     const drawnRect = useCallback((slot: WallSlot): WallSlot => reflowRef.current.get(slot.key) ?? slot, []);
 
-    const reveal = useCallback((rect: RevealRect) => {
+    /** `mode`：见 revealRect —— 键盘焦点移动用最小平移，「定位正在播放」用居中。 */
+    const reveal = useCallback((rect: RevealRect, mode: 'minimal' | 'centered' = 'minimal') => {
         const frame = frameRef.current;
         if (!frame.view) return;
         tweenTo(resolveRevealCenter({
@@ -52,17 +53,18 @@ export const useBravaisFocus = ({
             seamWidth: Math.max(frame.openWidth, frame.targetOpenWidth),
             pad: BRAVAIS_REVEAL_PAD_PX,
             bottomInset: getBottomInset(),
+            mode,
         }));
     }, [frameRef, getBottomInset, tweenTo]);
 
-    const focusSlot = useCallback((slot: WallSlot | null, options: { reveal?: boolean } = {}) => {
+    const focusSlot = useCallback((slot: WallSlot | null, options: { reveal?: boolean; center?: boolean } = {}) => {
         const key = slot?.key ?? null;
         if (focusedRef.current !== key) {
             focusedRef.current = key;
             setFocusedSlotKey(key);
             onFocusEntry(key);
         }
-        if (slot && options.reveal) reveal(drawnRect(slot));
+        if (slot && options.reveal) reveal(drawnRect(slot), options.center ? 'centered' : 'minimal');
     }, [drawnRect, onFocusEntry, reveal]);
 
     const expand = useCallback((slot: WallSlot) => {

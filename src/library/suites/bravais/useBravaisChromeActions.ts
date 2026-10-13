@@ -49,7 +49,8 @@ export const useBravaisChromeActions = ({
     /** 缝本该张开却被挤到屏外收起了。 */
     isCollapsed: () => boolean;
     reopenHere: () => void;
-    focusSlot: (slot: WallSlot, options: { reveal?: boolean }) => void;
+    /** `reveal` 时相机要不要把它挪到中间（revealRect 的 `centered` 档）；键盘焦点移动不给。 */
+    focusSlot: (slot: WallSlot, options: { reveal?: boolean; center?: boolean }) => void;
     /** B7：打开列表面板。 */
     openList?: () => void;
 }) => {
@@ -96,7 +97,15 @@ export const useBravaisChromeActions = ({
                 isAvailable: () => nowPlayingSlot() !== null,
                 run: () => {
                     const slot = nowPlayingSlot();
-                    if (slot) focusSlot(slot, { reveal: true });
+                    /*
+                     * 居中，不是露一下。
+                     *
+                     * 键盘焦点移动那套给的是**最小平移**：卡片已经在屏幕上时相机一动不动 —— 那
+                     * 是对的，手没动画面不该跳。但用户点「定位正在播放」是想看它在这儿，卡片恰好
+                     * 在屏幕边角就成了「只选中了、什么都没发生」。所以这条走 `centered`：相机
+                     * 把它挪到中间。
+                     */
+                    if (slot) focusSlot(slot, { reveal: true, center: true });
                 },
             },
             // 透光（B6b③）：写 app 层偏好，stage 读它换档（同一层的数据更新，只翻开窗 / 关窗与内容挪了的 slot）。
