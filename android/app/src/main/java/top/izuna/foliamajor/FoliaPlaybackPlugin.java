@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.util.Log;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -18,11 +19,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * 而是通过这个插件把意图转成 service 的 startService 动作。
  *
  * 注意 Android 8+ 不允许后台启动服务，所以 startForegroundService 之后
- * 服务端必须在一个「准点」上调用 startForeground 来满足系统的 5 秒要求；
- * FoliaPlaybackService.onStartCommand 收到 ACTION_UPDATE_STATE 且 state=playing 时立刻前台化。
+ * 服务端必须在一个「准点」上调用 startForeground 来满足系统的 5 秒要求。
+ * 「要前台化」时用 startForegroundService，服务已经在前台时改走普通 startService
+ * （见 startServiceCompat）。
  */
 @CapacitorPlugin(name = "FoliaPlayback")
 public class FoliaPlaybackPlugin extends Plugin {
+
+    private static final String TAG = "FoliaPlaybackPlugin";
 
     /**
      * 服务发来的控制命令经 MainActivity 的广播接收器转到这里，再派发给 JS。
@@ -170,11 +174,33 @@ public class FoliaPlaybackPlugin extends Plugin {
         context.sendBroadcast(intent);
     }
 
+    /**
+     * 只在「这条 intent 需要把服务顶到前台」时才用 startForegroundService。
+     *
+     * startForegroundService 给**每一次**启动都开一个「5 秒内必须 startForeground()」
+     * 的倒计时，而播放位置是每秒推一次的 —— 服务已经在前台时仍走这条路，服务端就
+     * 得每秒调一次 startForeground() 去兑现。通知里带着 512×512 的封面 Bitmap
+     * （约 1 MB），那是每秒在主线程上搬一次 1 MB：播放页单帧本来就要二三十毫秒，
+     * 被它定期拖一下就是肉眼可见的卡顿。
+     *
+     * 而服务已经在前台时，这条 intent 只是「更新一下内容」，不需要新的前台化承诺 ——
+     * 普通 startService 不开倒计时，也就不用兑。（进程里有前台服务，系统当它是前台，
+     * 后台启动服务的限制在这里不适用。）
+     */
     private void startServiceCompat(Activity activity, Intent intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            activity.startForegroundService(intent);
-        } else {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !FoliaPlaybackService.isForegrounded()) {
+            try {
+                activity.startForegroundService(intent);
+                return;
+            } catch (Throwable error) {
+                // 起不来就退回普通那条路：服务要是在跑，内容照样能送到。
+                Log.e(TAG, "startForegroundService failed; falling back to startService", error);
+            }
+        }
+        try {
             activity.startService(intent);
+        } catch (Throwable error) {
+            Log.e(TAG, "startService failed", error);
         }
     }
 }

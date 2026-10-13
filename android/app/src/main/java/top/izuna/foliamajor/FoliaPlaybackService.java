@@ -57,6 +57,15 @@ public class FoliaPlaybackService extends android.app.Service {
         return running;
     }
 
+    /**
+     * 服务是否**已经在前台**（通知已经贴出去了）。public：插件要靠它选 startService
+     * 还是 startForegroundService —— 已在前台时再走 startForegroundService，服务端
+     * 就得每秒再调一次 startForeground() 去兑现那道倒计时（见 promoteToForeground）。
+     */
+    public static boolean isForegrounded() {
+        return foregrounded;
+    }
+
     // 通知内容缓存：metadata 与 playbackState 是两次独立更新，
     // 每次都基于这些字段重建整条通知，而不是互相覆盖。
     private String cachedTitle = "";
@@ -72,8 +81,13 @@ public class FoliaPlaybackService extends android.app.Service {
     private boolean cachedPlaying = false;
     /** 封面角标（通知 small icon）的资源 id；0 = 还没收到过，用缺省。 */
     private int cachedBadgeRes = 0;
-    /** 已经调用过 startForeground 了；见 promoteToForeground()。 */
-    private boolean foregrounded = false;
+    /**
+     * 已经调用过 startForeground 了；见 promoteToForeground()。
+     *
+     * 静态 + volatile 是给插件那边读的（isForegrounded）：它要在发 intent 之前知道
+     * 服务在不在前台，决定用 startService 还是 startForegroundService。
+     */
+    private static volatile boolean foregrounded = false;
     /** 最近一次交给系统的通知：promoteToForeground() 重复贴的就是它，省掉重建的开销。 */
     private Notification cachedNotification;
 
@@ -260,14 +274,22 @@ public class FoliaPlaybackService extends android.app.Service {
      * 这里兜住异常，宁可没有通知也要保住播放。
      */
     private void promoteToForeground() {
-        // 每一条 startForegroundService 都会给这次启动打上「必须前台化」的标记，
-        // 系统按 5 秒倒计时验收：没在时限内调用 startForeground() 就杀进程。
-        // 而这个标记是**按次**算的 —— 服务已经在前台时再 startForegroundService，
-        // 原先这里会按 foregrounded 直接返回，一次 startForeground 都不调，
-        // 于是倒计时照样走完 → ForegroundServiceDidNotStartInTimeException
-        // （切登录平台时最容易撞上：那边连着推好几条 metadata / state）。
-        // 所以这里每次都调；贵的 buildForegroundNotification() 只在内容真的变了时
-        // 才重跑（见 publishNotification），重复贴的是同一条通知对象。
+        /*
+         * 已经在前台就直接返回 —— 这里有守卫是**省掉一整笔开销**，不是偷懒：
+         *
+         * startForeground() 会把通知整个跨进程交给系统，通知里带着 512×512 的封面
+         * Bitmap（约 1 MB）。而播放位置是每秒推一次的，没有这道守卫就等于每秒
+         * 在主线程上搬一次 1 MB —— 播放页单帧本来就要二三十毫秒，被它定期拖一下
+         * 就成了肉眼可见的卡顿。
+         *
+         * 那「每一条 startForegroundService 都要在 5 秒内 startForeground() 兑现」
+         * 这条怎么办？由**发送方**负责：FoliaPlaybackPlugin 只在服务还没前台时才用
+         * startForegroundService（见 startServiceCompat），服务已经在前台时改走普通
+         * startService —— 那条路不会开倒计时，也就不需要在这里兑现。
+         */
+        if (foregrounded) {
+            return;
+        }
         try {
             if (cachedNotification == null) {
                 cachedNotification = buildForegroundNotification();
