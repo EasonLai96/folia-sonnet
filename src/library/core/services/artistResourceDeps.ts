@@ -1,6 +1,6 @@
 import { omni } from '../../../services/onlineMusic/omni';
 import { getNavidromeConfig, navidromeApi } from '../../../services/navidromeService';
-import { getLocalCoverAssetUrl } from '../../../services/localCoverAssetUrl';
+import { getPreferredLocalSongCoverUrl } from '../../../services/localCoverAssetUrl';
 import { applyLocalSongCoverDisplay, buildLocalQueue } from '../../../services/playbackAdapters';
 import type { ArtistResourceDeps } from './artistResource';
 
@@ -25,8 +25,8 @@ export const createArtistResourceDeps = (t: ArtistResourceDeps['t']): ArtistReso
     },
     local: {
         resolveCoverUrl: (song) => {
-            const localCoverUrl = getLocalCoverAssetUrl(song.localCoverAssetId, 512);
-            return (song.useOnlineCover ? (song.onlineMetadata?.coverUrl || localCoverUrl) : localCoverUrl) || undefined;
+            // 走统一那份取法：useOnlineCover 关着时在线封面仍要当兜底。
+            return getPreferredLocalSongCoverUrl(song, 512) || undefined;
         },
         toTracks: (songs, catalog) => buildLocalQueue(songs, undefined, catalog),
         applyCover: (track, coverUrl) => applyLocalSongCoverDisplay(track, coverUrl),

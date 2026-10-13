@@ -39,6 +39,7 @@ import {
     setLocalFolderIgnored,
 } from './localLibraryFolderIgnore';
 import { fetchOnlineCoversForImportedSongs } from './localCoverAutoFetch';
+import { announceLocalCoverReady } from './localCoverReadyEvent';
 import {
     copyAndroidLocalAudio,
     deleteAndroidImportedAudio,
@@ -121,7 +122,11 @@ export const LOCAL_MUSIC_SCAN_PROGRESS_EVENT = 'folia-local-music-scan-progress'
  * 播放这一首时、预热相邻几首时、列表回填时。没有这一下通知，那些条目就一直带着
  * 「没有封面」的那份快照 —— 于是播放页有封面、磁贴墙一片空白。
  */
-export const LOCAL_COVER_READY_EVENT = 'folia-local-cover-ready';
+/**
+ * 见 `services/localCoverReadyEvent`：写在线封面那一侧（`localSongMatchSelectionService`）
+ * 也要广播同一个事件，而它不能 import 本模块（会成环），所以常量住在那边。
+ */
+export { LOCAL_COVER_READY_EVENT } from './localCoverReadyEvent';
 const HYDRATION_BATCH_SIZE = 25;
 const HYDRATION_REFRESH_EVERY = 100;
 const SNAPSHOT_HASH_SEED = 2166136261;
@@ -148,8 +153,7 @@ function notifyLocalMusicUpdated() {
 }
 
 function notifyLocalCoverReady(songId: string, assetId: string) {
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(new CustomEvent(LOCAL_COVER_READY_EVENT, { detail: { songId, assetId } }));
+    announceLocalCoverReady({ songId, assetId });
 }
 
 async function removeDeletedSongIdsFromPlaylists(songIds: string[]): Promise<void> {

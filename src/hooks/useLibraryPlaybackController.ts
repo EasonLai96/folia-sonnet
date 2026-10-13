@@ -46,7 +46,7 @@ import { applyQueueAddBehavior } from '../utils/queueAddBehavior';
 import { loadOnlineLyricsState, resolveOnlineLyrics, saveOnlineLyricsState, getOnlineLyricsStateCacheKey } from '../utils/onlineLyricsState';
 import { hasLocalSongCover } from '../utils/localSongCover';
 import { isSameLocalSongRecord } from '../utils/localSongRecordEquality';
-import { getLocalCoverAssetUrl } from '../services/localCoverAssetUrl';
+import { getPreferredLocalSongCoverUrl } from '../services/localCoverAssetUrl';
 import { applyMatchedMetadata } from '../services/localLibraryCatalogService';
 import { setLocalSongPureMusicMark } from '../services/localSongMatchSelectionService';
 import { buildLocalSongLyricMatchContext, shouldRefreshLocalSongLyricsFromMetadata, shouldRunLocalSongAutomaticMatch } from '../utils/lyrics/localSongMatchContext';
@@ -428,11 +428,9 @@ export function useLibraryPlaybackController({
     }, [patchLocalSongsInState, setStatusMsg]);
 
     const resolveLocalMetadataUI = useCallback(async (localData: LocalSong, matchedSong: SongResult | null) => {
-        const localCoverUrl = getLocalCoverAssetUrl(localData.localCoverAssetId, 1024);
-        const preferOnlineCover = localData.useOnlineCover === true;
-        const coverUrl = preferOnlineCover
-            ? (localData.onlineMetadata?.coverUrl || localCoverUrl || null)
-            : localCoverUrl;
+        // 走统一那份取法：useOnlineCover 关着时在线封面仍要当兜底（以前这里直接给 null，
+        // 于是「有在线封面但开关关着」的歌播到它时也还是空白）。
+        const coverUrl = getPreferredLocalSongCoverUrl(localData, 1024);
 
         const resolvedLyrics = await resolveLocalSongLyrics(
             localData,

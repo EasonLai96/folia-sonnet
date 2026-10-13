@@ -21,7 +21,7 @@ import {
     isSamePlaybackSong,
     replacePlaybackSongInQueue,
 } from '../../../utils/appPlaybackGuards';
-import { getLocalCoverAssetUrl } from '../../../services/localCoverAssetUrl';
+import { getLocalCoverAssetUrl, getPreferredLocalSongCoverUrl } from '../../../services/localCoverAssetUrl';
 import { isPureMusicLyricText } from '../../../utils/lyrics/pureMusic';
 import { migrateLyricDataRenderHints } from '../../../utils/lyrics/renderHints';
 import { resolveLocalSongLyrics } from '../../../utils/lyrics/localSongLyrics';
@@ -193,9 +193,8 @@ export const restorePlaybackSourceForSong = async (
         const restoredSong = applyLocalLibraryEntityDisplay(buildUnifiedLocalSong({
             localSong: songToRestore,
             matchedSong: null,
-            coverUrl: songToRestore.useOnlineCover
-                ? songToRestore.onlineMetadata?.coverUrl || localCoverUrl
-                : localCoverUrl,
+            // 走统一那份取法：useOnlineCover 关着时在线封面仍要当兜底。
+            coverUrl: getPreferredLocalSongCoverUrl(songToRestore, 1024),
             preferOnlineMetadata: false,
         }), catalog);
         setCurrentSong(restoredSong);

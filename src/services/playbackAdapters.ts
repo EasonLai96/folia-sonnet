@@ -2,7 +2,7 @@ import { AmllDbPlatform, LocalSong, LyricProviderSource, SongResult, UnifiedSong
 import { NavidromeSong } from '../types/navidrome';
 import type { LocalLibraryAssignment, LocalLibraryEntity } from '../types/localLibrary';
 import { buildLocalLibraryIndex, followEntityRedirect, type LocalLibraryIndex } from '../utils/localLibraryIndex';
-import { getLocalCoverAssetUrl } from './localCoverAssetUrl';
+import { getPreferredLocalSongCoverUrl } from './localCoverAssetUrl';
 import { buildLocalSourceRevision, buildNavidromeSourceRevision } from './playbackRecovery/sourceRevision';
 
 export type LocalLibraryDisplayCatalog = {
@@ -227,13 +227,15 @@ export function buildLocalQueue(
         ? buildLocalLibraryIndex(catalog.entities, catalog.assignments)
         : undefined;
     const convertedQueue = queue.map(song => {
-        const localCoverUrl = getLocalCoverAssetUrl(song.localCoverAssetId, coverSize);
         return applyLocalLibraryEntityDisplay(buildUnifiedLocalSong({
             localSong: song,
             matchedSong: null,
-            coverUrl: song.useOnlineCover
-                ? song.onlineMetadata?.coverUrl || localCoverUrl
-                : localCoverUrl,
+            /*
+             * 走统一那份取法：`useOnlineCover` 关着时在线封面仍要当兜底。
+             * 之前这里只认 `localCoverUrl`，于是「有在线封面但开关关着」的歌在
+             * 磁贴墙 / 歌单页 / 艺术家页全是空白卡片。
+             */
+            coverUrl: getPreferredLocalSongCoverUrl(song, coverSize),
             preferOnlineMetadata: false,
         }), catalog, catalogIndex);
     });

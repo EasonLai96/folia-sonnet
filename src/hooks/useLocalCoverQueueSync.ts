@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type React from 'react';
 import type { SongResult, UnifiedSong } from '../types';
 import { getLocalCoverAssetUrl } from '../services/localCoverAssetUrl';
-import { LOCAL_COVER_READY_EVENT } from '../services/localMusicService';
+import { LOCAL_COVER_READY_EVENT, type LocalCoverReadyDetail } from '../services/localCoverReadyEvent';
 
 // src/hooks/useLocalCoverQueueSync.ts
 // 把「后来才抽出来的本地封面」同步进播放队列。
@@ -15,8 +15,6 @@ import { LOCAL_COVER_READY_EVENT } from '../services/localMusicService';
 // 这里就补这一件事：`localMusicService` 抽到新封面会广播 `LOCAL_COVER_READY_EVENT`，
 // 收到后把队列里**同一首**且**当前没有封面**的条目补上封面 URL（已经有封面的一律不动 ——
 // 那多半是在线匹配来的，不该被内嵌图盖掉）。
-
-type LocalCoverReadyDetail = { songId?: string; assetId?: string };
 
 /** 这一条是不是「这一首本地歌」：本地条目带 localRef，兜一条 sourceRef（还原播放那份也有）。 */
 const localSongIdOf = (song: SongResult): string | undefined => {
@@ -75,7 +73,11 @@ export const useLocalCoverQueueSync = ({
         const handleCoverReady = (event: Event) => {
             const detail = (event as CustomEvent<LocalCoverReadyDetail>).detail;
             const songId = detail?.songId;
-            const coverUrl = getLocalCoverAssetUrl(detail?.assetId, 1024);
+            /*
+             * 在线封面那一侧直接给 URL；内嵌封面那一侧只给资源 id，按队列要的尺寸现算。
+             * 两条路原来只有后者会广播，所以自动匹配来的在线封面一直进不了磁贴墙。
+             */
+            const coverUrl = detail?.coverUrl || getLocalCoverAssetUrl(detail?.assetId, 1024);
             if (!songId || !coverUrl) return;
 
             const next = patchQueueWithLocalCover(playQueue, songId, coverUrl);

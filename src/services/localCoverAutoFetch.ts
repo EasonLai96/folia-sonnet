@@ -17,17 +17,34 @@ import { findAutomaticOnlineMetadataCandidate } from './onlineMetadataSearchServ
 // 二进制缓存到 cover_local_<songId>）。封面 URL 进了 onlineMetadata，列表那边的
 // getPreferredLocalSongCoverUrl 立刻就能用它，不用等播放。
 //
-// 三件事收着：同一首歌一次会话里只试一遍（没匹配上就别反复发搜索）、并发 2（不跟导入的
-// hydration 抢 IO）、每次只碰「此刻确实没有封面」的歌（落库前再读一次，避免和后台抽内嵌
-// 封面撞车——那条路补上了就不需要联网）。
+// 三件事收着：同一首歌有冷却窗口（见下面的 RETRY_COOLDOWN_MS，没匹配上就别反复发搜索）、
+// 并发 2（不跟导入的 hydration 抢 IO）、每次只碰「此刻确实没有封面」的歌（落库前再读一次，
+// 避免和后台抽内嵌封面撞车——那条路补上了就不需要联网）。
 
 /** 与 localMusicService 的 LOCAL_MUSIC_UPDATED_EVENT 同一个事件；这里不 import 那个模块，免得来回引用。 */
 const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 const COVER_FETCH_CONCURRENCY = 2;
 const REFRESH_EVERY = 8;
 
-/** 这一会话里已经试过的歌（匹配不上也不再试）。 */
-const attemptedSongIds = new Set<string>();
+/**
+ * 同一首歌多久之内不再重试联网要封面。
+ *
+ * 原来是「一次会话里只试一遍」，试过就永久记着。于是导入那一刻没匹配上的歌，
+ * 之后用户在资料库里再怎么翻都不会再试 —— 占位色就一直挂着，看着像「不会自动更新」。
+ * 可也不能不设限：不设限的话每次进首页都要把这一屏重搜一遍。
+ *
+ * 给个冷却窗口，让「刚才断网 / 服务端后来才收录」这类情况有出口，
+ * 又不至于把同一批歌反复搜。
+ */
+const RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** 上一次为这首歌联网要封面的时刻。 */
+const attemptedAt = new Map<string, number>();
+
+const recentlyAttempted = (songId: string): boolean => {
+    const at = attemptedAt.get(songId);
+    return at !== undefined && Date.now() - at < RETRY_COOLDOWN_MS;
+};
 /** 串行链：一次导入还没跑完又来一批时排队，不并发叠加。 */
 let queue: Promise<void> = Promise.resolve();
 
@@ -67,13 +84,23 @@ const fetchCoverForSong = async (song: LocalSong): Promise<boolean> => {
 /**
  * 排队给这批刚导入的歌补在线封面。同步返回，不等结果 —— 导入流程不该被它拖住。
  *
- * 断网时直接不排队：这一批会在下次导入 / 刷新时被重新考虑（attemptedSongIds 不记它们）。
+ * 断网时直接不排队：这一批会在下次导入 / 刷新时被重新考虑（冷却表里不记它们）。
+ *
+ * `force`：跳过冷却，无论如何再搜一遍。只有 `localCoverBackfill` 会用 —— 它交过来的
+ * 歌是「刚刚确认过文件里没有内嵌封面」的，等于一个明确的「这首现在确实什么都没有」
+ * 的信号；不跳过的话，导入那一刻搜过且没搜到的歌在这里会被冷却挡下，那条补路等于白接。
  */
-export const fetchOnlineCoversForImportedSongs = (songs: readonly LocalSong[]): void => {
+export const fetchOnlineCoversForImportedSongs = (
+    songs: readonly LocalSong[],
+    options?: { force?: boolean },
+): void => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    const pending = songs.filter(song => needsOnlineCover(song) && !attemptedSongIds.has(song.id));
+    const pending = songs.filter(
+        song => needsOnlineCover(song) && (options?.force === true || !recentlyAttempted(song.id)),
+    );
     if (pending.length === 0) return;
-    pending.forEach(song => attemptedSongIds.add(song.id));
+    const now = Date.now();
+    pending.forEach(song => attemptedAt.set(song.id, now));
 
     queue = queue
         .then(async () => {

@@ -22,6 +22,8 @@ import { backfillLocalCovers } from '../../../services/localCoverBackfill';
 
 /** 一次补多少首歌的封面。开屏时不该对着一整屏卡片发几十个请求。 */
 const COVER_BACKFILL_LIMIT = 12;
+/** 一次最多给多少首歌去联网要封面 —— 本地抽封面是便宜的 IO，联网不是。 */
+const ONLINE_COVER_FETCH_LIMIT = 8;
 
 export type LibraryHomeLocalSection = {
     key: LocalHomeSectionKey;
@@ -80,13 +82,27 @@ export const useLibraryHomeLocal = ({
      * 补封面：本地歌的内嵌封面原本只在导入和播放那一刻抽，从没打开过的歌单因此一直是空白
      * 卡片 —— 点开一次才有。这里从当前分组里挑几首还没有封面的排进队列，抽到之后界面自己
      * 会重建（见 services/localCoverBackfill）。只在首页本地页签做，别的地方不付这份 IO。
+     *
+     * 两件事原来都收得太紧，于是「占位色」补不完：
+     *
+     * 1. **每组只取前 2 首**。一个专辑 / 歌单里几十首歌，只有开头两首会被考虑，
+     *    剩下的不管等多久都不会自动有封面。改成整组摊平，由 limit 决定碰多少首。
+     * 2. **只抽内嵌、不联网**。文件里压根没有内嵌封面的歌，`ensureLocalSongCoverAsset`
+     *    对它就到头了，而联网那条路只挂在导入 / 扫描上 —— 平时打开资料库根本不跑。
+     *    这里开 `fallbackToOnline`，让本地抽不出来那部分继续走在线匹配。
+     *
+     * 候选是「看上去还没封面」的歌：已经有在线封面的不占名额，否则一次 12 个名额
+     * 全被「有在线封面、只是文件里没内嵌图」的歌吃掉，真正空白的那些排不上。
      */
     useEffect(() => {
         const candidates = sections
             .flatMap(section => section.groups)
-            .flatMap(group => group.songs.slice(0, 2))
-            .filter(song => !song.localCoverAssetId);
-        backfillLocalCovers(candidates, COVER_BACKFILL_LIMIT);
+            .flatMap(group => group.songs)
+            .filter(song => !song.localCoverAssetId && !song.onlineMetadata?.coverUrl);
+        backfillLocalCovers(candidates, COVER_BACKFILL_LIMIT, {
+            fallbackToOnline: true,
+            onlineLimit: ONLINE_COVER_FETCH_LIMIT,
+        });
     }, [sections]);
 
     return {

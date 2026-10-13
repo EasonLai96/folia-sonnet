@@ -2,6 +2,7 @@ import type { AmllDbPlatform, LocalSong, LyricData, LyricProviderSource } from '
 import type { LocalLibraryAssignmentOrigin } from '../types/localLibrary';
 import type { OnlineMetadataCandidate } from './onlineMetadataSearchService';
 import { cacheLocalSongOnlineCover, removeCachedCover } from './coverCache';
+import { announceLocalCoverReady } from './localCoverReadyEvent';
 import { sourceProvidesSongMetadata } from '../utils/lyrics/matchResult';
 import { applyMatchedMetadata, restoreImportedMetadata } from './localLibraryCatalogService';
 
@@ -143,11 +144,26 @@ export const applyLocalSongMatchSelection = async (
     await applyMatchedMetadata(input.songId, candidateMetadata, { lyricsOnly: true, songPatch });
   }
 
-  const coverAttempted = input.cover === 'online' && Boolean(input.candidate?.coverUrl);
-  const coverCached = coverAttempted && input.candidate?.coverUrl
-    ? await cacheLocalSongOnlineCover(input.songId, input.candidate.coverUrl)
+  const onlineCoverUrl = input.candidate?.coverUrl;
+  const coverAttempted = input.cover === 'online' && Boolean(onlineCoverUrl);
+  const coverCached = coverAttempted && onlineCoverUrl
+    ? await cacheLocalSongOnlineCover(input.songId, onlineCoverUrl)
     : false;
   if (input.cover === 'embedded') await removeCachedCover(`cover_local_${input.songId}`);
+  /*
+   * 在线封面也要广播「有封面了」，和抽到内嵌封面那条路一样。
+   *
+   * 原来只有 `localMusicService` 抽到内嵌封面才广播，于是自动匹配 / 手动匹配拿到的
+   * 在线封面**永远进不了磁贴墙** —— 队列里烤的是建队那一刻的快照，歌曲记录上的字段
+   * 再怎么变它都看不见。列表（直接按记录现算）跟着更新了，磁贴墙还是一片占位色。
+   *
+   * 不看 `coverCached`：那份缓存只是「断网时也能显示」的副本，封面本身用的是
+   * `onlineMetadata.coverUrl` 这个远程地址。缓存写失败了界面照样能显示，
+   * 不该因为副本没存下就让这一屏继续挂着占位色。
+   */
+  if (coverAttempted && onlineCoverUrl) {
+    announceLocalCoverReady({ songId: input.songId, coverUrl: onlineCoverUrl });
+  }
 
   return {
     coverAttempted,
