@@ -187,14 +187,20 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * 返回键先交给网页：设置面板、弹层之类的层级会自己关掉自己（复用 Escape 的处理），
-     * 没人接管才真的退出 —— 否则在设置里按返回会直接把整个 App 关掉。
+     * 没人接管（也就是已经在主界面上）才退到后台。
+     *
+     * 这里是 `moveTaskToBack(true)` 而不是 `finish()`：这是个播放器，按返回时歌还在放，
+     * 销毁 Activity 等于把这次会话整个扔掉，下次进来一切从头。退到后台才是对的 ——
+     * Activity 留在栈里、播放与通知照旧，点图标原样回来。网页那条路同样走后台化
+     * （`FoliaNativePlugin.moveToBackground`），两边行为必须一致，否则「有没有监听者」
+     * 会变成「按返回有时退出有时不退出」。
      */
     private void installBackPressedHandler() {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
                 if (FoliaNativePlugin.emitBackPressed()) return;
-                finish();
+                moveTaskToBack(true);
             }
         });
     }

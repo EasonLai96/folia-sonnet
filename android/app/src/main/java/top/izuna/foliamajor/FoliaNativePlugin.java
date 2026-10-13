@@ -610,11 +610,36 @@ public class FoliaNativePlugin extends Plugin {
         return rawCookie + "; Path=/";
     }
 
+    /**
+     * 真正的退出：销毁 Activity。
+     *
+     * 只有「确定要结束这次会话」才走它（例如设置里的退出项）。**返回键不归这里管** ——
+     * 返回键走 {@link #moveToBackground}，见那边的说明。
+     */
     @PluginMethod
     public void exitApp(PluginCall call) {
         Activity activity = getActivity();
         call.resolve();
         if (activity != null) activity.runOnUiThread(activity::finish);
+    }
+
+    /**
+     * 把整个任务挪到后台（等价于按 Home 键），Activity 与播放状态都留着。
+     *
+     * 为什么返回键要它而不是 `finish()`：这是个播放器，按返回时歌还在放。finish() 销毁
+     * Activity，进程只剩前台服务吊着，下次进来一切从头（页面、播放页、搜索结果全丢），
+     * 用户看到的正是「返回键直接把 App 杀了」。moveTaskToBack 才是「退到桌面继续听」：
+     * Activity 留在栈里，点图标原样回来，前台服务与通知照旧。
+     *
+     * 它同时会走 onStop → `appBackground` → 网页停掉整套渲染，和锁屏 / 切多任务那条路一致。
+     */
+    @PluginMethod
+    public void moveToBackground(PluginCall call) {
+        Activity activity = getActivity();
+        call.resolve();
+        if (activity != null) {
+            activity.runOnUiThread(() -> activity.moveTaskToBack(true));
+        }
     }
 
     // ---- 应用内更新（下载到私有缓存目录，再交给系统安装器）----

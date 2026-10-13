@@ -33,7 +33,15 @@ export type NativeHttpResponse = {
 };
 
 interface FoliaNativePlugin {
+    /** 销毁 Activity，结束这次会话。设置里的「退出」才用它，返回键不用 —— 见 moveToBackground。 */
     exitApp(): Promise<void>;
+    /**
+     * 把整个任务挪到后台（等价于按 Home 键），Activity 与播放状态都留着。
+     *
+     * 返回键走到主界面时该是它而不是 exitApp：这是个播放器，按返回时歌还在放，
+     * 销毁 Activity 等于把页面、播放页、搜索结果全扔掉，下次进来一切从头。
+     */
+    moveToBackground(): Promise<void>;
     /**
      * 可视化歌词页面专用：隐藏系统栏（状态栏 + 导航栏）。
      *
