@@ -989,7 +989,26 @@ export default {
     "visualizer": "歌词动画",
     "playlist": "播放列表",
     "account": "账户",
-    "aiDirector": "AI 导演"
+    "aiDirector": "AI 导演",
+    "videoExport": "录视频"
+  },
+  "videoExport": {
+    "intro": "把当前歌词动画录成一段视频。录的是屏幕上真实看到的画面，背景不透明。",
+    "desktopOnly": "录视频只在安卓包里有：桌面端走的是「透明 MOV 歌词动画导出」那个模组。",
+    "unsupported": "这台机器录不了（抓屏需要安卓 8.0 以上）。",
+    "running": "录制中，请不要离开这个应用、也不要锁屏。",
+    "runningHint": "抓屏一帧一帧来，比实时慢很多：30 秒的片段通常要跑好几分钟。",
+    "done": "导出完成，已经存到相册：",
+    "cancelled": "已取消。录下来的那部分仍然会存成一个能播的片段。",
+    "failed": "导出失败。",
+    "dismiss": "知道了",
+    "start": "开始录制",
+    "cancel": "取消",
+    "clipLength": "片段长度",
+    "wholeSong": "整首",
+    "quality": "画质",
+    "frameRate": "帧率",
+    "notice": "录制期间画面由导出程序一帧一帧推进，播放会先暂停；界面收起来是为了不把它自己录进去。安卓的编码器不支持透明通道，所以导出的 MP4 是带背景的。"
   },
   "aiDirector": {
     "title": "AI 歌词动画导演",

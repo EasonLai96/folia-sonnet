@@ -984,7 +984,26 @@ export default {
     "visualizer": "Animasi Lirik",
     "playlist": "Playlist",
     "account": "Akun",
-    "aiDirector": "Sutradara AI"
+    "aiDirector": "Sutradara AI",
+    "videoExport": "Rekam"
+  },
+  "videoExport": {
+    "intro": "Rekam animasi lirik saat ini menjadi video. Yang direkam persis seperti di layar, dengan latar tidak transparan.",
+    "desktopOnly": "Perekaman hanya ada di paket Android. Di desktop gunakan modul ekspor MOV transparan.",
+    "unsupported": "Perangkat ini tidak bisa merekam (menangkap layar butuh Android 8.0 ke atas).",
+    "running": "Sedang merekam — tetap di aplikasi dan jangan matikan layar.",
+    "runningHint": "Frame diambil satu per satu, jauh lebih lambat dari realtime: klip 30 detik biasanya butuh beberapa menit.",
+    "done": "Selesai. Disimpan ke galeri:",
+    "cancelled": "Dibatalkan. Bagian yang sudah terekam tetap disimpan sebagai klip yang bisa diputar.",
+    "failed": "Ekspor gagal.",
+    "dismiss": "Oke",
+    "start": "Mulai merekam",
+    "cancel": "Batal",
+    "clipLength": "Panjang klip",
+    "wholeSong": "Seluruh lagu",
+    "quality": "Kualitas",
+    "frameRate": "Frame rate",
+    "notice": "Pemutaran dijeda selama merekam dan antarmuka menyingkir agar tidak ikut terekam. Encoder Android tidak punya kanal alpha, jadi MP4-nya tetap berlatar."
   },
   "aiDirector": {
     "title": "Sutradara animasi lirik AI",

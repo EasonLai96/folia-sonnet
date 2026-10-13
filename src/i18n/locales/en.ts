@@ -989,7 +989,26 @@ export default {
     "visualizer": "Lyrics Animation",
     "playlist": "Playlist",
     "account": "Account",
-    "aiDirector": "AI director"
+    "aiDirector": "AI director",
+    "videoExport": "Record"
+  },
+  "videoExport": {
+    "intro": "Record the current lyric animation as a video. It captures exactly what is on screen, with an opaque background.",
+    "desktopOnly": "Recording is Android-only. On desktop, use the transparent MOV export mod instead.",
+    "unsupported": "This device cannot record (screen capture needs Android 8.0 or newer).",
+    "running": "Recording — stay in the app and keep the screen on.",
+    "runningHint": "Frames are captured one at a time, far slower than realtime: a 30s clip usually takes several minutes.",
+    "done": "Done. Saved to your gallery:",
+    "cancelled": "Cancelled. The part already recorded is still saved as a playable clip.",
+    "failed": "Export failed.",
+    "dismiss": "OK",
+    "start": "Start recording",
+    "cancel": "Cancel",
+    "clipLength": "Clip length",
+    "wholeSong": "Whole song",
+    "quality": "Quality",
+    "frameRate": "Frame rate",
+    "notice": "Playback pauses while recording and the interface steps aside so it is not captured. Android encoders have no alpha channel, so the MP4 keeps its background."
   },
   "aiDirector": {
     "title": "AI lyric animation director",
