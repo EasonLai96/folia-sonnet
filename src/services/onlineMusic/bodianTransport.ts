@@ -1,6 +1,7 @@
 import { OnlineProviderError } from '../../types/onlineMusic';
 import type { BodianOperation, BodianParams, BodianResult } from 'bodian-music-api';
 import { isFoliaExtensionBridgeConfigured, requestFoliaExtension } from '../foliaExtensionBridge';
+import { toBodianProviderError } from './bodianErrors';
 
 // src/services/onlineMusic/bodianTransport.ts
 
@@ -42,8 +43,13 @@ export async function requestBodian<T = unknown>(operation: BodianOperation, par
     if (hasElectronBodian()) {
         let result: BodianBridgeResult;
         try { result = await window.electron!.bodianRequest(operation, boundedParams); }
-        catch { throw new OnlineProviderError('network', 'Bodian desktop request failed', 'bodian'); }
-        if (!result.ok) throw new OnlineProviderError(result.error.code, result.error.message, 'bodian');
+        // IPC 被拒是本地桌面进程的故障，不是网络故障。
+        catch (error) {
+            throw new OnlineProviderError('unavailable', 'Bodian desktop request failed', 'bodian',
+                error, undefined, undefined, { stage: 'ipc' });
+        }
+        // 包的 message 模板在 bodianErrors.ts 细分；auth-required 始终原样保留，useBodianLibrary 靠它清理会话。
+        if (!result.ok) throw toBodianProviderError(result.error);
         return result.data as T;
     }
 
@@ -70,5 +76,7 @@ export async function requestBodian<T = unknown>(operation: BodianOperation, par
         return result.data as T;
     }
 
-    throw new OnlineProviderError('unavailable', 'Bodian requires the desktop app', 'bodian');
+    // 桌面桥与本地桥都没有：重试不会变好，transient:false 让播放侧显示「未配置」而不是「稍后再试」。
+    throw new OnlineProviderError('unavailable', 'Bodian requires the desktop app', 'bodian',
+        undefined, undefined, undefined, { stage: 'runtime', transient: false });
 }
