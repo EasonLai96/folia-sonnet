@@ -10,46 +10,70 @@ import type {
 
 // src/services/playbackRecovery/playbackFailurePolicy.ts
 // 播放失败的集中策略表：每个原因对应的文案、是否停播、是否倒计时跳歌、给哪些按钮、是否静默重试、是否冷却。
-// 只有 taken-down 会倒计时跳歌并提供替代版本；其余原因一律保留队列，由用户决定重试或跳过。
+//
+// 默认「出错就自动下一首」：倒计时期间不停播，倒计时自带「跳过 / 取消」；连跳次数用尽
+// （usePlaybackQueueController 的 MAX_UNAVAILABLE_AUTO_SKIP_COUNT，现在是 2 —— 即跳两首，
+// 第三首还错就停）或没有下一首可播时，才落到停播 + 一条普通消息。
+// 少数原因是「整个平台都放不了」而不是「这一首放不了」（未登录、登录过期、服务没配置），
+// 跳到下一首照样错，这类不倒计时，直接停。
 
 const NO_RETRY: readonly number[] = [];
 
+/** 出错后自动跳下一首的倒计时文案（与本地 / 转码那条旧路径同一条）。 */
+const AUTO_SKIP_COUNTDOWN_KEY = 'status.playbackErrorPrompt';
+
 // 停播、只给“跳过”：账号、权限、试听、地区这类重试也不会变好的原因。
-const stopWithSkip = (messageKey: PlaybackFailureMessageKey): PlaybackFailurePolicy => ({
-    messageKey,
-    stopPlayback: true,
-    autoSkip: 'none',
-    actions: ['skip'],
-    autoRetryDelaysMs: NO_RETRY,
-    cooldown: null,
-    offerReplacement: false,
-});
+// 默认倒计时跳歌；`autoSkipCountdown: false` 用于「整平台都放不了」的原因。
+const stopWithSkip = (
+    messageKey: PlaybackFailureMessageKey,
+    options: { autoSkipCountdown?: boolean } = {},
+): PlaybackFailurePolicy => {
+    const autoSkipCountdown = options.autoSkipCountdown !== false;
+    return {
+        messageKey,
+        ...(autoSkipCountdown ? { countdownKey: AUTO_SKIP_COUNTDOWN_KEY } : {}),
+        stopPlayback: true,
+        autoSkip: autoSkipCountdown ? 'countdown' : 'none',
+        actions: ['skip'],
+        autoRetryDelaysMs: NO_RETRY,
+        cooldown: null,
+        offerReplacement: false,
+    };
+};
 
 // 停播、给“重试 / 跳过”：可能是暂时的，或证据不足的原因。
+// 默认不自动跳：网络、超时、限流、服务不可用都是「整条链路」的事，跳到下一首照样放不了，
+// 而且网一好，该放回去的是当前这首。只有证据指向「就是这一首放不出来」的原因
+// （invalid-response / unknown，含解码失败与源不支持）才给倒计时。
 const stopWithRetry = (
     messageKey: PlaybackFailureMessageKey,
-    overrides: Partial<Pick<PlaybackFailurePolicy, 'autoRetryDelaysMs' | 'cooldown'>> = {},
-): PlaybackFailurePolicy => ({
-    messageKey,
-    stopPlayback: true,
-    autoSkip: 'none',
-    actions: ['retry', 'skip'],
-    autoRetryDelaysMs: NO_RETRY,
-    cooldown: null,
-    offerReplacement: false,
-    ...overrides,
-});
+    overrides: Partial<Pick<PlaybackFailurePolicy, 'autoRetryDelaysMs' | 'cooldown'>> & { autoSkipCountdown?: boolean } = {},
+): PlaybackFailurePolicy => {
+    const { autoSkipCountdown = false, ...rest } = overrides;
+    return {
+        messageKey,
+        ...(autoSkipCountdown ? { countdownKey: AUTO_SKIP_COUNTDOWN_KEY } : {}),
+        stopPlayback: true,
+        autoSkip: autoSkipCountdown ? 'countdown' : 'none',
+        actions: ['retry', 'skip'],
+        autoRetryDelaysMs: NO_RETRY,
+        cooldown: null,
+        offerReplacement: false,
+        ...rest,
+    };
+};
 
 /** 每个原因的基础策略；用 Record 穷举，漏掉任何原因 tsc 都会报错。随 failure 变化的变体在 resolvePlaybackFailurePolicy 里解析。 */
 export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, PlaybackFailurePolicy>> = {
-    'not-signed-in': stopWithSkip('status.songLoginRequired'),
-    'session-expired': stopWithSkip('status.loginExpired'),
+    // 未登录 / 登录过期：换哪首都一样放不了，跳就是不试了，直接停。
+    'not-signed-in': stopWithSkip('status.songLoginRequired', { autoSkipCountdown: false }),
+    'session-expired': stopWithSkip('status.loginExpired', { autoSkipCountdown: false }),
     'membership-required': stopWithSkip('status.songMembershipRequired'),
     'purchase-required': stopWithSkip('status.songPurchaseRequired'),
     'entitlement-required': stopWithSkip('status.songEntitlementRequired'),
     'preview-only': stopWithSkip('status.songPreviewOnly'),
     'region-restricted': stopWithSkip('status.songRegionRestricted'),
-    // 保持现状：倒计时期间不暂停；倒计时自带“跳过 / 取消”，次数用尽后只留一条消息。
+    // 倒计时期间不暂停；倒计时自带“跳过 / 取消”，次数用尽后只留一条消息。
     'taken-down': {
         messageKey: 'status.songUnavailable',
         countdownKey: 'status.songUnavailablePrompt',
@@ -64,8 +88,10 @@ export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, Pla
     timeout: stopWithRetry('status.songRequestTimedOut', { autoRetryDelaysMs: [2000] }),
     'service-unavailable': stopWithRetry('status.songServiceUnavailable', { cooldown: 'retry-after' }),
     'rate-limited': stopWithRetry('status.songRateLimitedNoWait', { cooldown: 'retry-after' }),
-    'invalid-response': stopWithRetry('status.songTemporarilyUnavailable'),
-    unknown: stopWithRetry('status.songTemporarilyUnavailable'),
+    // 响应不对 / 说不清为什么（含媒体元素解码失败、源不支持）：重试过一次还是不行，
+    // 基本就是这一首的问题，交给倒计时跳下一首。
+    'invalid-response': stopWithRetry('status.songTemporarilyUnavailable', { autoSkipCountdown: true }),
+    unknown: stopWithRetry('status.songTemporarilyUnavailable', { autoSkipCountdown: true }),
 };
 
 /** 文案及其变体：限流带等待秒数、服务未配置、证据不足但登录可能有用。 */
@@ -103,9 +129,10 @@ export const resolvePlaybackFailurePolicy = (
         ...(message.params ? { messageParams: message.params } : {}),
     };
 
-    // 未配置 / 需要桌面版：重试不会变好，只留“跳过”。
+    // 未配置 / 需要桌面版：重试不会变好，只留“跳过”；也不是这一首的问题，别去跳下一首。
     if (failure.reason === 'service-unavailable' && failure.transient === false) {
-        policy = { ...policy, actions: ['skip'] };
+        policy = { ...policy, autoSkip: 'none', actions: ['skip'] };
+        delete policy.countdownKey;
     }
 
     if (context === 'restore') {

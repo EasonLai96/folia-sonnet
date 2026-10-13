@@ -13,7 +13,8 @@ import {
 import type { PlaybackFailure, PlaybackFailurePolicy, PlaybackFailureReason } from '@/types/playbackFailure';
 
 // test/unit/playback/playbackFailurePolicy.test.ts
-// 策略表逐行锁定：只有 taken-down 会倒计时跳歌和提供替代版本，其余原因都保留队列。
+// 策略表逐行锁定：默认「出错就倒计时跳下一首」，只有「整个平台都放不了」的原因（未登录、
+// 登录过期，以及服务未配置）才停在那一条消息上不跳；替代版本仍然只有 taken-down 提供。
 
 const failure = (reason: PlaybackFailureReason, extra: Partial<PlaybackFailure> = {}): PlaybackFailure => ({
     reason,
@@ -28,18 +29,18 @@ type Row = [PlaybackFailureReason, Pick<PlaybackFailurePolicy, 'messageKey' | 's
 const TABLE: Row[] = [
     ['not-signed-in', { messageKey: 'status.songLoginRequired', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
     ['session-expired', { messageKey: 'status.loginExpired', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['membership-required', { messageKey: 'status.songMembershipRequired', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['purchase-required', { messageKey: 'status.songPurchaseRequired', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['entitlement-required', { messageKey: 'status.songEntitlementRequired', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['preview-only', { messageKey: 'status.songPreviewOnly', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['region-restricted', { messageKey: 'status.songRegionRestricted', stopPlayback: true, autoSkip: 'none', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['membership-required', { messageKey: 'status.songMembershipRequired', stopPlayback: true, autoSkip: 'countdown', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['purchase-required', { messageKey: 'status.songPurchaseRequired', stopPlayback: true, autoSkip: 'countdown', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['entitlement-required', { messageKey: 'status.songEntitlementRequired', stopPlayback: true, autoSkip: 'countdown', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['preview-only', { messageKey: 'status.songPreviewOnly', stopPlayback: true, autoSkip: 'countdown', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['region-restricted', { messageKey: 'status.songRegionRestricted', stopPlayback: true, autoSkip: 'countdown', actions: ['skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
     ['taken-down', { messageKey: 'status.songUnavailable', stopPlayback: false, autoSkip: 'countdown', actions: [], autoRetryDelaysMs: [], cooldown: null, offerReplacement: true }],
     ['network', { messageKey: 'status.songNetworkFailed', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [1000, 3000], cooldown: null, offerReplacement: false }],
     ['timeout', { messageKey: 'status.songRequestTimedOut', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [2000], cooldown: null, offerReplacement: false }],
     ['service-unavailable', { messageKey: 'status.songServiceUnavailable', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: 'retry-after', offerReplacement: false }],
     ['rate-limited', { messageKey: 'status.songRateLimitedNoWait', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: 'retry-after', offerReplacement: false }],
-    ['invalid-response', { messageKey: 'status.songTemporarilyUnavailable', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
-    ['unknown', { messageKey: 'status.songTemporarilyUnavailable', stopPlayback: true, autoSkip: 'none', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['invalid-response', { messageKey: 'status.songTemporarilyUnavailable', stopPlayback: true, autoSkip: 'countdown', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
+    ['unknown', { messageKey: 'status.songTemporarilyUnavailable', stopPlayback: true, autoSkip: 'countdown', actions: ['retry', 'skip'], autoRetryDelaysMs: [], cooldown: null, offerReplacement: false }],
 ];
 
 const ALL_REASONS = TABLE.map(([reason]) => reason);
@@ -53,15 +54,29 @@ describe('playback failure policy table', () => {
         expect(resolvePlaybackFailurePolicy(failure(reason), 'play')).toMatchObject(expected);
     });
 
-    it('lets only taken-down count down to a skip and offer a replacement', () => {
+    it('counts down to the next song for everything but the whole-platform failures', () => {
         for (const reason of ALL_REASONS) {
             const policy = resolvePlaybackFailurePolicy(failure(reason), 'play');
-            const isTakenDown = reason === 'taken-down';
-            expect(policy.autoSkip === 'countdown', reason).toBe(isTakenDown);
-            expect(policy.offerReplacement, reason).toBe(isTakenDown);
-            expect(Boolean(policy.countdownKey), reason).toBe(isTakenDown);
+            // 未登录 / 登录过期：换哪首都一样放不了，跳就是不试了。
+            // 整条链路的事（没登录、登录过期、断网、超时、限流、服务不可用）跳了也放不了，
+            // 只有「就是这一首放不出来」的原因才跳。
+            const platformWide = ['not-signed-in', 'session-expired', 'network', 'timeout', 'service-unavailable', 'rate-limited'].includes(reason);
+            expect(policy.autoSkip === 'countdown', reason).toBe(!platformWide);
+            expect(Boolean(policy.countdownKey), reason).toBe(!platformWide);
+            expect(policy.offerReplacement, reason).toBe(reason === 'taken-down');
         }
         expect(PLAYBACK_FAILURE_POLICY['taken-down'].countdownKey).toBe('status.songUnavailablePrompt');
+    });
+
+    it('uses the generic playback-error countdown for every reason but taken-down', () => {
+        for (const reason of ALL_REASONS.filter(candidate => candidate !== 'taken-down')) {
+            const policy = resolvePlaybackFailurePolicy(failure(reason), 'play');
+            if (policy.autoSkip === 'countdown') {
+                expect(policy.countdownKey, reason).toBe('status.playbackErrorPrompt');
+            } else {
+                expect(policy.countdownKey, reason).toBeUndefined();
+            }
+        }
     });
 
     it('never says "unavailable" for anything but taken-down', () => {
@@ -76,7 +91,15 @@ describe('playback failure policy table', () => {
                 for (const context of ['play', 'restore', 'mid-playback'] as const) {
                     const policy = resolvePlaybackFailurePolicy(variant, context);
                     expect(['status.songUnavailable', 'status.songUnavailablePrompt']).not.toContain(policy.messageKey);
-                    expect(policy.countdownKey).toBeUndefined();
+                    // 会话恢复不跳歌（那一屏是「上次听到哪」），其余上下文照策略表。
+                    // 「服务未配置」同上：那不是这一首的问题，跳到下一首照样错。
+                    const isPlatformWide = ['not-signed-in', 'session-expired', 'network', 'timeout', 'rate-limited'].includes(reason)
+                        || reason === 'service-unavailable';
+                    if (context === 'restore' || isPlatformWide) {
+                        expect(policy.countdownKey, reason).toBeUndefined();
+                    } else {
+                        expect(policy.countdownKey, reason).toBe('status.playbackErrorPrompt');
+                    }
                 }
             }
         }
@@ -111,7 +134,8 @@ describe('policy variants', () => {
 
     it('a service that is not configured offers no retry', () => {
         const policy = resolvePlaybackFailurePolicy(failure('service-unavailable', { transient: false }), 'play');
-        expect(policy).toMatchObject({ messageKey: 'status.songServiceNotConfigured', actions: ['skip'] });
+        expect(policy).toMatchObject({ messageKey: 'status.songServiceNotConfigured', actions: ['skip'], autoSkip: 'none' });
+        expect(policy.countdownKey).toBeUndefined();
     });
 
     it('a service that may come back keeps retry', () => {

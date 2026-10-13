@@ -515,7 +515,9 @@ export function usePlaybackQueueController({
         const deferredPlayOptions: PlaybackNavigationOptions = { ...options, isAutomixAdvance: undefined };
         const providerId = getOnlineProviderIdForSong(song) ?? undefined;
 
-        // 按策略表展示这次点歌的失败；“跳过”只在有下一首可播歌曲时提供，只有 taken-down 才累计连跳次数。
+        // 按策略表展示这次点歌的失败；“跳过”只在有下一首可播歌曲时提供。
+        // 跳走的次数无条件累计：连着 N 首都放不出来（MAX_UNAVAILABLE_AUTO_SKIP_COUNT）之后
+        // 就停在一条普通消息上，不再一首首往下试。
         const presentOnlineFailure = (failure: PlaybackFailure) => {
             restoreFmModeIfNotLanded();
             const nextSong = getNextPlayableQueueSong(queueContext, song);
@@ -541,7 +543,7 @@ export function usePlaybackQueueController({
                     const targetQueue = readClickTimeQueue() ?? newQueue;
                     void latestQueueActionsRef.current.playSong(getNextPlayableQueueSong(targetQueue, song) ?? nextSong, targetQueue, isFmCall, {
                         ...deferredPlayOptions,
-                        unavailableSkipCount: failure.reason === 'taken-down' ? skipCount + 1 : 0,
+                        unavailableSkipCount: skipCount + 1,
                     });
                 } : undefined,
             }, presenterDeps);
@@ -1080,7 +1082,8 @@ export function usePlaybackQueueController({
                 skip: hasNextTrack ? () => void latestQueueActionsRef.current.handleNextTrack({
                     allowStopOnMissing: true,
                     shouldNavigateToPlayer: false,
-                    unavailableSkipCount: failure.reason === 'taken-down' ? skipCount + 1 : 0,
+                    // 与点歌失败那条路一样无条件累计：连着 N 首都放不出来就停，不再往下试。
+                    unavailableSkipCount: skipCount + 1,
                     fromSong: currentSong ?? undefined,
                 }) : undefined,
             }, presenterDeps);
