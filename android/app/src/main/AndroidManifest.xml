@@ -254,4 +254,11 @@
         运行时检查见 FoliaNativePlugin.installUpdate。
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!--
+        壁纸叠层的音频采集：叠层是独立 WebView，拿不到主应用那个 AnalyserNode，
+        只能用 android.media.audiofx.Visualizer 的 session 0（全局混音）去抓频谱，
+        否则莫奈的「音频图案」在叠层上永远是死的。
+        这是 **normal 级权限**，装的时候就给了，不需要运行时弹窗。
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>

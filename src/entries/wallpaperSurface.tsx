@@ -146,18 +146,115 @@ export type WallpaperPayload = {
     coverUrl?: string | null;
 };
 
-// 壁纸这边拿不到音频频谱：叠层页面不在播放会话里，没有 AnalyserNode。
-// 和 OBS 浏览器源一样，能量恒为 0，可视化会走「安静」那一支。
-const useSilentAudio = (): { audioPower: MotionValue<number>; audioBands: AudioBands } => {
+/**
+ * 原生推下来的音频帧。
+ *
+ * 叠层是独立 WebView，拿不到主应用播放会话里那个 AnalyserNode；而主应用的 rAF 在
+ * 用户回到桌面后会被系统停掉，所以也不能把那边采到的数据转发过来（数据源本身就冻了）。
+ * 真源在原生侧：`WallpaperAudioTap` 用 `Visualizer` 抓系统混音，算好之后经
+ * `WallpaperOverlay.pushAudioFrame` 走独立通道推到这里。
+ *
+ * 所有数值都是 0..255，量纲和主应用 `motionSignals` 里那份一致 ——
+ * band 走的是同一组频率边界与同一条 shape 曲线，spectrum 的语义对齐
+ * `getByteFrequencyData`，于是 `AudioOverlay` 里那套降噪 + 幂压缩能原样吃下去，
+ * 叠层画出来的形状跟播放页是同一套。
+ */
+export type WallpaperAudioPayload = {
+    power: number;
+    bass: number;
+    lowMid: number;
+    mid: number;
+    vocal: number;
+    treble: number;
+    /** 0..255 的频谱。空数组 = 没有数据（暂停 / 采集不可用）。 */
+    spectrum: number[];
+};
+
+const EMPTY_SPECTRUM = new Uint8Array(0);
+
+/**
+ * 断流判定时长。
+ *
+ * 原生是**推**模型的：采集停了、蓝牙切回扬声器期间、或者那一帧被 WebView 吞了，
+ * 页面这边都不会收到任何「没了」的通知。不自己看一眼，频谱就永远冻在断流前那一帧上。
+ * 采集节拍是 20Hz（50ms），给到 1.2s 是二十来帧的余量。
+ */
+const AUDIO_STALE_MS = 1200;
+
+/** 复用同一段缓冲，别每帧都新开一份 Uint8Array。 */
+let audioSpectrumBuffer: Uint8Array<ArrayBuffer> | null = null;
+
+const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: AudioBands } => {
     const audioPower = useMotionValue(0);
     const bass = useMotionValue(0);
     const lowMid = useMotionValue(0);
     const mid = useMotionValue(0);
     const vocal = useMotionValue(0);
     const treble = useMotionValue(0);
+    const spectrum = useMotionValue<Uint8Array<ArrayBuffer>>(EMPTY_SPECTRUM);
+
+    const audioBands = React.useMemo(
+        () => ({ bass, lowMid, mid, vocal, treble, spectrum }),
+        [bass, lowMid, mid, vocal, treble, spectrum]);
+
+    React.useEffect(() => {
+        let lastFrameAtMs = 0;
+
+        const apply = (payload: WallpaperAudioPayload | null) => {
+            if (!payload) {
+                audioPower.set(0);
+                bass.set(0);
+                lowMid.set(0);
+                mid.set(0);
+                vocal.set(0);
+                treble.set(0);
+                spectrum.set(EMPTY_SPECTRUM);
+                return;
+            }
+            lastFrameAtMs = performance.now();
+            audioPower.set(payload.power);
+            bass.set(payload.bass);
+            lowMid.set(payload.lowMid);
+            mid.set(payload.mid);
+            vocal.set(payload.vocal);
+            treble.set(payload.treble);
+            const source = payload.spectrum;
+            if (source && source.length > 0) {
+                let buffer = audioSpectrumBuffer;
+                if (!buffer || buffer.length !== source.length) {
+                    buffer = new Uint8Array(source.length);
+                    audioSpectrumBuffer = buffer;
+                }
+                buffer.set(source);
+                spectrum.set(buffer);
+            } else {
+                spectrum.set(EMPTY_SPECTRUM);
+            }
+        };
+
+        window.__foliaWallpaperPushAudio = apply;
+        const watchdog = window.setInterval(() => {
+            if (lastFrameAtMs === 0) {
+                return;
+            }
+            if (performance.now() - lastFrameAtMs < AUDIO_STALE_MS) {
+                return;
+            }
+            // 归零之后就别再重复写了（没数据可写），但要留着看门狗等它回来。
+            lastFrameAtMs = 0;
+            apply(null);
+        }, 500);
+
+        return () => {
+            window.__foliaWallpaperPushAudio = undefined;
+            window.clearInterval(watchdog);
+            apply(null);
+        };
+    }, [audioPower, bass, lowMid, mid, vocal, treble, spectrum]);
+
     return React.useMemo(
-        () => ({ audioPower, audioBands: { bass, lowMid, mid, vocal, treble } }),
-        [audioPower, bass, lowMid, mid, vocal, treble]);
+        () => ({ audioPower, audioBands }),
+        [audioPower, audioBands]);
 };
 
 /** 原生推下来的最后一个快照。 */
@@ -216,6 +313,14 @@ declare global {
          * 而歌词看起来还在正常走（位置是页面自己按墙钟外推的），症状很隐蔽。
          */
         __foliaWallpaperPushCover?: (payload: { url?: string; data?: string }) => void;
+        /**
+         * 音频单独那条通道。
+         *
+         * 同样不能挤进整包：整包是「签名变了才推」的离散模型，而音频是每秒 20 次的
+         * 连续流，既塞不进签名也过不了那道去重的门。传 `null` = 暂停 / 没数据，
+         * 页面把频谱落回 0。
+         */
+        __foliaWallpaperPushAudio?: (payload: WallpaperAudioPayload | null) => void;
     }
 }
 
@@ -345,7 +450,7 @@ const WallpaperSurface: React.FC = () => {
     );
 
     const currentTime = useMotionValue(0);
-    const { audioPower, audioBands } = useSilentAudio();
+    const { audioPower, audioBands } = useBridgedAudio();
     const [currentLineIndex, setCurrentLineIndex] = React.useState(-1);
     const [isDaylight, setIsDaylight] = React.useState(false);
 

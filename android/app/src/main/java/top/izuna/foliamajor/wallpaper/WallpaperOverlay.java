@@ -106,6 +106,14 @@ public final class WallpaperOverlay {
      */
     private boolean appForeground = false;
 
+    /**
+     * 音频采集。
+     *
+     * 叠层是独立 WebView，拿不到主应用那个 AnalyserNode，而主应用的 rAF 在后台会被
+     * 系统停掉 —— 所以莫奈的「音频图案」只能靠这里从系统混音里抓。见 WallpaperAudioTap。
+     */
+    private final WallpaperAudioTap audioTap = new WallpaperAudioTap(this::pushAudioFrame);
+
     /** 由 MainActivity 的生命周期报告。 */
     public void setAppForeground(boolean value) {
         runOnUi(() -> {
@@ -1547,6 +1555,8 @@ public final class WallpaperOverlay {
         handler.removeCallbacks(pushTask);
         cancelPaintPoll();
         pushScheduled = false;
+        // 页面要销毁了，采集必须跟着停 —— 它是常驻的，漏在这就是一整夜的白耗电。
+        audioTap.stop();
         // 页面都没了，稳定结论当然是「不显示」（见 settleHidden）。
         settleHidden();
         // 页面会被销毁，重新 attach 时是全新的一份 —— 推送签名必须一起清掉，
@@ -2612,6 +2622,73 @@ public final class WallpaperOverlay {
     }
 
     /**
+     * 音频帧是否已经落回 0 了。
+     *
+     * 暂停之后不必每 50ms 再推一份空值 —— 推一次让它落下去，然后停手。
+     */
+    private boolean lastAudioSilent = false;
+
+    /**
+     * 把采到的音频推给叠层，走一条**独立于整包签名**的通道。
+     *
+     * 为什么不能挤进整包：整包是「签名变了才构造、才推」的离散模型，而音频是每秒 20 次
+     * 的连续流。签名里塞不下（它会让整包每 50ms 重建一次、还带着整条逐字时间轴），
+     * 也过不了那道「状态没变就不推」的门。
+     *
+     * 频率（20Hz）也比页面画的慢，但页面自己有 rAF，柱子是逐帧插值的 ——
+     * 再快只是白烧桥带宽，看不出差别。
+     */
+    private void pushAudioFrame(WallpaperAudioTap.Frame frame) {
+        if (webView == null || !pageReady) {
+            return;
+        }
+        if (!WallpaperLyricsState.get().playing) {
+            if (lastAudioSilent) {
+                return;
+            }
+            lastAudioSilent = true;
+            evaluateAudio("null");
+            return;
+        }
+        lastAudioSilent = false;
+
+        StringBuilder payload = new StringBuilder(512);
+        payload.append("{\"power\":").append(frame.power)
+                .append(",\"bass\":").append(frame.bass)
+                .append(",\"lowMid\":").append(frame.lowMid)
+                .append(",\"mid\":").append(frame.mid)
+                .append(",\"vocal\":").append(frame.vocal)
+                .append(",\"treble\":").append(frame.treble)
+                .append(",\"spectrum\":[");
+        for (int index = 0; index < frame.spectrum.length; index += 1) {
+            if (index > 0) {
+                payload.append(',');
+            }
+            payload.append(frame.spectrum[index]);
+        }
+        payload.append("]}");
+        evaluateAudio(payload.toString());
+    }
+
+    /**
+     * 注入音频帧。
+     *
+     * payload 里的数字全是自己算出来的整数，不含任何文本，直接拼进字面量是安全的。
+     * 掉帧不用记状态：下一帧 50ms 后就到，而这里本来就是「最新值覆盖」的语义。
+     */
+    private void evaluateAudio(String payload) {
+        try {
+            webView.evaluateJavascript(
+                    "(function(){if(window.__foliaWallpaperPushAudio){"
+                            + "window.__foliaWallpaperPushAudio(" + payload + ");return 1;}"
+                            + "return 0;})()",
+                    null);
+        } catch (Throwable ignored) {
+            // 页面还在导航期会静默失败。
+        }
+    }
+
+    /**
      * 只发可见的那几行，而不是整条时间轴：
      * 桥上一次传几十行 JSON 每 200ms 走一遍没有意义，页面只画当前行与翻译。
      */
@@ -2751,6 +2828,14 @@ public final class WallpaperOverlay {
              * 表现是「刚挂上叠层时没有封面，非得换一首歌才出现」。
              */
             lastPushedCover = null;
+            lastAudioSilent = false;
+            /*
+             * 音频采集跟着页面一起起。
+             *
+             * 页面还没加载完就抓没有意义，而采集是常驻的 —— 叠层收摊时必须一起停
+             * （见 detach），漏在这就是一整夜白耗电。
+             */
+            audioTap.start();
             handler.postDelayed(WallpaperOverlay.this::pushState, PAGE_PUSH_DELAY_MS);
         }
 
