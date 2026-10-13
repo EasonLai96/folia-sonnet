@@ -92,6 +92,7 @@ const readHasSeenFreeSoftwareNotice = (): boolean => (
     typeof window !== 'undefined' && localStorage.getItem(FREE_SOFTWARE_NOTICE_SEEN_STORAGE_KEY) === '1'
 );
 
+
 /**
  * Runs the first-launch sequence: release notes, the two-page choice prompt (library interface, then
  * playback destination), then the Ponder shortcut gate. The prompt is gated by the playback choice alone,

@@ -123,12 +123,9 @@ void Promise.allSettled([bootFolium(), bootNavidrome()])
         if (navidrome.status === 'rejected') console.warn('[Navidrome] Server preset boot failed:', navidrome.reason);
     })
     .finally(() => {
-        void initializeLocalCoverRuntime()
-            .catch((error) => {
-                console.error('[bootstrap] Local cover runtime failed; continuing to render.', error);
-            })
-            .finally(() => {
-                clearTimeout(bootFallbackTimer);
-                renderOnce();
-            });
+        // 不等它：封面 worker 接管页面后 controllerchange 会自己把这一期间失败的封面重新要一遍，
+        // 为了它卡住首屏不值当（首次安装时它可能要等一整个 precache 下载完才接管）。
+        initializeLocalCoverRuntime();
+        clearTimeout(bootFallbackTimer);
+        renderOnce();
     });
