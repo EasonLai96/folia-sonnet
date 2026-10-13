@@ -13,7 +13,9 @@ import {
     resyncAllFolders,
     resyncFolder,
     removeImportedRoot,
+    renameLocalSong,
 } from '@/services/localMusicService';
+import { isAndroidNativeRuntime } from '@/services/nativeLocalMusic';
 import {
     deleteDirHandle,
     deleteLocalLibrarySnapshot,
@@ -57,6 +59,11 @@ vi.mock('@/services/db', () => ({
 }));
 vi.mock('@/services/coverCache', () => ({
     removeCachedCover: vi.fn(),
+}));
+// 其余用例都跑在「桌面」这条路上，只有改名那一组会把安卓打开。
+vi.mock('@/services/nativeLocalMusic', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/services/nativeLocalMusic')>()),
+    isAndroidNativeRuntime: vi.fn(() => false),
 }));
 
 class FakeFileHandle {
@@ -832,6 +839,53 @@ describe('localMusicService', () => {
             ignoredFolderPaths: [],
             rootRemoved: true,
         }));
+    });
+
+    describe('renameLocalSong', () => {
+        afterEach(() => {
+            vi.mocked(isAndroidNativeRuntime).mockReturnValue(false);
+        });
+
+        it('rejects an empty name and one that carries a path separator', async () => {
+            vi.mocked(getLocalSongs).mockResolvedValue([createSong()]);
+            expect(await renameLocalSong('local-track-01', '   ')).toMatchObject({ ok: false, reason: 'invalid' });
+            expect(await renameLocalSong('local-track-01', 'Disc 2/Track')).toMatchObject({ ok: false, reason: 'invalid' });
+            expect(saveLocalSong).not.toHaveBeenCalled();
+        });
+
+        it('on android only rewrites the displayed name and leaves the file path alone', async () => {
+            vi.mocked(isAndroidNativeRuntime).mockReturnValue(true);
+            vi.mocked(getLocalSongs).mockResolvedValue([
+                createSong({ id: 'media-1', fileName: 'a.mp3', filePath: 'Android/MediaStore/1' }),
+            ]);
+
+            expect(await renameLocalSong('media-1', '新的名字')).toEqual({ ok: true, renamedFile: false, title: '新的名字' });
+            // 'manual' 是重扫时的护身符：导入与补元数据都只在 titleOrigin === 'import' 时覆盖标题。
+            expect(saveLocalSong).toHaveBeenCalledWith(expect.objectContaining({
+                id: 'media-1',
+                title: '新的名字',
+                titleOrigin: 'manual',
+                filePath: 'Android/MediaStore/1',
+                fileName: 'a.mp3',
+            }));
+        });
+
+        it('falls back to the display name when the file handle is gone', async () => {
+            // 句柄丢了（重启后没恢复 / 文件夹授权失效）：磁盘改不动，但显示名还是改掉。
+            vi.mocked(getDirHandles).mockResolvedValue({});
+            vi.mocked(getLocalSongs).mockResolvedValue([createSong()]);
+
+            expect(await renameLocalSong('local-track-01', '新名字')).toEqual({
+                ok: true,
+                renamedFile: false,
+                title: '新名字',
+                reason: 'no-handle',
+            });
+            expect(saveLocalSong).toHaveBeenCalledWith(expect.objectContaining({
+                title: '新名字',
+                titleOrigin: 'manual',
+            }));
+        });
     });
 
     it('matches android songs against the folder card name, not the fake file path root', async () => {

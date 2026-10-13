@@ -5,6 +5,7 @@ import { getProviderSongMetadata } from './onlineMusic/songMetadata';
 import { searchQQLyrics } from '../utils/lyrics/providers/qqLyricProvider';
 import { calculateMatchScoreDetails } from '../utils/lyrics/matchScore';
 import { buildLyricSearchQuery } from '../utils/lyrics/searchQuery';
+import { usesImportedSongMetadata } from '../utils/localSongMetadata';
 import {
     getMatchResultAlbumId,
     getMatchResultAlbumName,
@@ -42,10 +43,10 @@ const stripAudioExtension = (fileName: string) => fileName.replace(/\.(mp3|flac|
 
 export const buildLocalSongMetadataSearchTarget = (song: LocalSong): OnlineMetadataSearchTarget => ({
     title: song.title || stripAudioExtension(song.fileName),
-    artist: song.titleOrigin === 'import'
+    artist: usesImportedSongMetadata(song)
         ? song.importedMetadata.artistNames.join(', ')
         : song.onlineMetadata?.artists.map(artist => artist.name).join(', ') || song.importedMetadata.artistNames.join(', '),
-    album: song.titleOrigin === 'import'
+    album: usesImportedSongMetadata(song)
         ? song.importedMetadata.albumName || ''
         : song.onlineMetadata?.album?.name || song.importedMetadata.albumName || '',
     durationMs: song.duration || 0,

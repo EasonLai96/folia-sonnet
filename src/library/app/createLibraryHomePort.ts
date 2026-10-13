@@ -2,7 +2,13 @@ import i18n from '../../i18n/config';
 import type { LibraryHomePort, LibraryHomeScanProgress } from '../core/contracts/homeModel';
 import type { HomeSurfaceProps } from '../../components/app/home/homeSurfaceTypes';
 import { translateHomeMessage } from '../core/model/homeSources';
-import { deleteSongsByIds, importFolder, resyncAllFolders, LOCAL_MUSIC_SCAN_PROGRESS_EVENT } from '../../services/localMusicService';
+import {
+    deleteSongsByIds,
+    importFolder,
+    renameLocalSong as renameLocalSongService,
+    resyncAllFolders,
+    LOCAL_MUSIC_SCAN_PROGRESS_EVENT,
+} from '../../services/localMusicService';
 import { getLocalLibraryAvailability } from '../../services/localLibraryAvailability';
 import { isAndroidNativeRuntime, scanAndroidDeviceMusic } from '../../services/nativeLocalMusic';
 import { importLocalPlaylistFile } from '../../services/localPlaylistFileService';
@@ -43,6 +49,12 @@ export const createLibraryHomePort = (getSurface: () => HomePortSurface): Librar
         // 服务自己会通知曲库更新；这里再刷一次宿主的状态（首页的分组与目录树要重算）。
         await deleteSongsByIds(songIds as string[]);
         await getSurface().onRefreshLocalSongs();
+    },
+    renameLocalSong: async (songId, name) => {
+        // 服务自己会通知曲库更新；这里再刷一次宿主的状态（首页的分组与目录树要重算）。
+        const result = await renameLocalSongService(songId, name);
+        await getSurface().onRefreshLocalSongs();
+        return result;
     },
     refreshLocalSongs: () => getSurface().onRefreshLocalSongs(),
     subscribeScanProgress: (listener) => {

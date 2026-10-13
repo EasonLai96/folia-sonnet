@@ -27,6 +27,7 @@ const createPort = (patch: Partial<LibraryHomePort> = {}) => {
         resyncAllFolders: vi.fn(async () => 1),
         importPlaylistFile: vi.fn(async () => ({ playlistName: 'List', matchedCount: 3, skippedCount: 0 })),
         deleteLocalSongs: vi.fn(async () => {}),
+        renameLocalSong: vi.fn(async () => ({ ok: true, renamedFile: true, title: 'Renamed' })),
         refreshLocalSongs: vi.fn(),
         subscribeScanProgress: vi.fn((listener) => {
             scanListener = listener;
@@ -125,6 +126,43 @@ describe('createLibraryHomeActions — local imports', () => {
         expect(await actions.deleteLocalSongs(['a'])).toEqual({ ok: false, reason: 'busy' });
         expect(port.deleteLocalSongs).not.toHaveBeenCalled();
         unsubscribe();
+    });
+
+    it('renaming a local song refreshes the library and says the file was renamed', async () => {
+        const { port, notices } = createPort();
+        const actions = createLibraryHomeActions(port);
+        expect(await actions.renameLocalSong('a', 'New Name')).toEqual({ ok: true });
+        expect(port.renameLocalSong).toHaveBeenCalledWith('a', 'New Name');
+        expect(port.refreshLocalSongs).toHaveBeenCalledTimes(1);
+        expect(notices).toEqual([{
+            kind: 'status',
+            type: 'success',
+            message: { key: 'localMusic.renameSuccessFile', values: { name: 'Renamed' } },
+        }]);
+    });
+
+    it('a rename that could not touch the file still succeeds, but says so', async () => {
+        // 安卓改不了磁盘文件名；桌面也可能是文件夹授权失效 —— 两种都只改了显示名。
+        const { port, notices } = createPort({
+            renameLocalSong: vi.fn(async () => ({ ok: true, renamedFile: false, title: 'Only Shown', reason: 'no-handle' as const })),
+        });
+        const actions = createLibraryHomeActions(port);
+        expect(await actions.renameLocalSong('a', 'Only Shown')).toEqual({ ok: true });
+        expect(notices).toEqual([{
+            kind: 'status',
+            type: 'info',
+            message: { key: 'localMusic.renameSuccessTitle', values: { name: 'Only Shown' } },
+        }]);
+    });
+
+    it('a failed rename reports the reason and does not refresh', async () => {
+        const { port, notices } = createPort({
+            renameLocalSong: vi.fn(async () => ({ ok: false, renamedFile: false, title: 'New Name', reason: 'conflict' as const })),
+        });
+        const actions = createLibraryHomeActions(port);
+        expect(await actions.renameLocalSong('a', 'New Name')).toEqual({ ok: false, reason: 'failed' });
+        expect(port.refreshLocalSongs).not.toHaveBeenCalled();
+        expect(notices).toEqual([{ kind: 'status', type: 'error', message: { key: 'localMusic.renameNameTaken' } }]);
     });
 
     it('an active scan blocks folder import and refresh, but not a playlist file import', async () => {

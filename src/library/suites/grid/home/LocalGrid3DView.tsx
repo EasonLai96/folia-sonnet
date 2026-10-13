@@ -270,6 +270,7 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
                 onDelete={async (songIds) => {
                     await homeActions.deleteLocalSongs(songIds);
                 }}
+                onRename={async (songId, name) => (await homeActions.renameLocalSong(songId, name)).ok}
                 onClose={() => setIsManageOpen(false)}
             />
         </>

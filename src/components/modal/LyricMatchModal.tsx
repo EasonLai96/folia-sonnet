@@ -23,6 +23,7 @@ import {
 import { LyricPreviewPanel } from './LyricPreviewPanel';
 import { DurationMatchBadge } from './DurationMatchBadge';
 import { hasRenderableLyrics } from '../../utils/lyrics/validity';
+import { usesImportedSongMetadata } from '../../utils/localSongMetadata';
 
 interface LyricMatchModalProps {
     song: LocalSong;
@@ -68,7 +69,7 @@ const LyricMatchModal: React.FC<LyricMatchModalProps> = ({ song, onClose, onMatc
     // Online data toggle state (dots)
     const [lyricsSource, setLyricsSource] = useState<'local' | 'embedded' | 'online' | undefined>(song.lyricsSource || 'online');
     const [useOnlineCover, setUseOnlineCover] = useState(song.useOnlineCover ?? !song.localCoverAssetId);
-    const [useOnlineMetadata, setUseOnlineMetadata] = useState(song.titleOrigin !== 'import');
+    const [useOnlineMetadata, setUseOnlineMetadata] = useState(!usesImportedSongMetadata(song));
 
     // Derive song information for matching
     const songInfo = useMemo(() => {

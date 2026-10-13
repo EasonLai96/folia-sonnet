@@ -17,7 +17,12 @@ export interface LocalLibraryEntity {
 
 export type LocalLibraryAssignmentOrigin = 'import' | 'auto-match' | 'manual-match' | 'manual' | 'split';
 
-export type LocalSongTitleOrigin = 'import' | 'auto-match' | 'manual-match';
+/**
+ * 'manual' 是用户在「管理歌曲」里直接改的名字（安卓上改不了磁盘文件名，改的就是它）。
+ * 它不是在线匹配来的 —— 判断「歌手 / 专辑该看导入快照还是在线元数据」时和 'import' 一类，
+ * 一律走 utils/localSongMetadata 的 usesImportedSongMetadata，别在这里手写 === 'import'。
+ */
+export type LocalSongTitleOrigin = 'import' | 'auto-match' | 'manual-match' | 'manual';
 export type LocalSongMetadataSource = 'netease' | 'qq' | 'kugou';
 
 export interface LocalSongImportedMetadata {

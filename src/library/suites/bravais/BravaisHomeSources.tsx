@@ -272,6 +272,7 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
                 onDelete={async (songIds) => {
                     await homeActions.deleteLocalSongs(songIds);
                 }}
+                onRename={async (songId, name) => (await homeActions.renameLocalSong(songId, name)).ok}
                 onClose={() => setIsManageOpen(false)}
             />
         </>

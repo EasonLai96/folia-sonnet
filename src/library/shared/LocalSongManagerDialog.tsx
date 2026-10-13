@@ -1,14 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Search, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Search, Trash2 } from 'lucide-react';
 import ThemedDialog from '../../components/shared/ThemedDialog';
 import ConfirmDialog from '../../components/shared/ConfirmDialog';
 import type { LocalSong } from '../../types';
 import { formatTime } from '../../utils/appPlaybackHelpers';
+import { isAndroidNativeRuntime } from '../../services/nativeLocalMusic';
 
 // src/library/shared/LocalSongManagerDialog.tsx
-// 本地曲库的「管理歌曲」对话框：搜索、勾选、删除。删的是曲库里的这首歌（安卓上连导入时
+// 本地曲库的「管理歌曲」对话框：搜索、勾选、重命名、删除。删的是曲库里的这首歌（安卓上连导入时
 // 复制的音频副本一起删），所以删除都先经确认；曲库可能上万首，列表只渲染筛选后的前
 // MAX_VISIBLE 条 —— 剩下的靠搜索缩小范围，不然一打开就渲染几千行会卡死。
 //
@@ -27,6 +28,12 @@ type LocalSongManagerDialogProps = {
     isDaylight: boolean;
     /** 删这些歌（真的删，不是挪出歌单）；做完由调用方刷新与提示。 */
     onDelete: (songIds: string[]) => Promise<void>;
+    /**
+     * 改一首歌的名字；返回 true 表示改成了（面板随即关掉）。
+     * 桌面会把磁盘文件名真改掉，安卓只改显示名 —— 能不能改成文件由服务那边判断，
+     * 这里只负责把名字收上来并反映成败。
+     */
+    onRename: (songId: string, name: string) => Promise<boolean>;
     onClose: () => void;
 };
 
@@ -48,6 +55,7 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
     songs,
     isDaylight,
     onDelete,
+    onRename,
     onClose,
 }) => {
     const { t } = useTranslation();
@@ -55,6 +63,10 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [deleting, setDeleting] = useState(false);
     const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
+    const [renameTarget, setRenameTarget] = useState<LocalSong | null>(null);
+    const [renameValue, setRenameValue] = useState('');
+    const [renaming, setRenaming] = useState(false);
+    const [renameError, setRenameError] = useState<string | null>(null);
 
     const filtered = useMemo(() => {
         const keyword = query.trim().toLowerCase();
@@ -91,6 +103,31 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
         }
     };
 
+    const openRename = (song: LocalSong) => {
+        // 初始值给当前显示名：多数时候用户就是想改列表里看到的那个名字。
+        setRenameTarget(song);
+        setRenameValue(songTitle(song));
+        setRenameError(null);
+    };
+
+    const submitRename = async () => {
+        if (!renameTarget) return;
+        setRenaming(true);
+        setRenameError(null);
+        try {
+            if (await onRename(renameTarget.id, renameValue)) {
+                setRenameTarget(null);
+                return;
+            }
+            setRenameError(t('localMusic.renameFailed'));
+        } catch (error) {
+            console.error('[LocalSongManager] Failed to rename song:', error);
+            setRenameError(t('localMusic.renameFailed'));
+        } finally {
+            setRenaming(false);
+        }
+    };
+
     const rowClass = isDaylight
         ? 'border-zinc-200/70 hover:bg-zinc-500/10'
         : 'border-white/10 hover:bg-white/5';
@@ -103,13 +140,18 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
         <>
             <ThemedDialog
                 isOpen={isOpen}
-                onClose={onClose}
+                onClose={() => {
+                    if (renaming) return;
+                    // 改名面板是并列渲染的另一层，主对话框关了它必须跟着走，否则会剩一个孤零零的输入框。
+                    setRenameTarget(null);
+                    onClose();
+                }}
                 isDaylight={isDaylight}
                 title={t('localMusic.manageSongsTitle')}
                 description={t('localMusic.manageSongsHint')}
                 maxWidthClass="max-w-2xl"
                 panelKind="local-song-manager"
-                closeDisabled={deleting}
+                closeDisabled={deleting || renaming}
                 footer={(
                     <div className="flex w-full items-center justify-between gap-3">
                         <button
@@ -175,6 +217,14 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
                                     </div>
                                     <button
                                         type="button"
+                                        title={t('localMusic.renameSong')}
+                                        onClick={() => openRename(song)}
+                                        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${isDaylight ? 'hover:bg-zinc-500/15' : 'hover:bg-white/10'}`}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
                                         title={t('localMusic.deleteFromLibrary')}
                                         onClick={() => setPendingDelete([song.id])}
                                         className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-500/15 transition-colors cursor-pointer"
@@ -188,6 +238,60 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
                             <div className={`py-8 text-center text-sm ${mutedClass}`}>{t('localMusic.noSongsFound')}</div>
                         ) : null}
                     </div>
+                </div>
+            </ThemedDialog>
+
+            <ThemedDialog
+                isOpen={Boolean(renameTarget)}
+                onClose={() => setRenameTarget(null)}
+                isDaylight={isDaylight}
+                title={t('localMusic.renameSong')}
+                description={isAndroidNativeRuntime()
+                    ? t('localMusic.renameSongHintAndroid')
+                    : t('localMusic.renameSongHint')}
+                maxWidthClass="max-w-md"
+                panelKind="local-song-rename"
+                closeDisabled={renaming}
+                footer={(
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setRenameTarget(null)}
+                            disabled={renaming}
+                            className="rounded-full border border-zinc-400/40 px-4 py-2 text-xs font-medium transition-colors opacity-80 hover:opacity-100 cursor-pointer"
+                        >
+                            {t('localMusic.renameCancel')}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={renaming || !renameValue.trim()}
+                            onClick={() => void submitRename()}
+                            className="rounded-full px-5 py-2 text-xs font-semibold transition-colors bg-blue-500/15 text-blue-500 border border-blue-500/30 hover:bg-blue-500/25 disabled:opacity-40 cursor-pointer flex items-center gap-1.5"
+                        >
+                            {renaming ? <Loader2 size={13} className="animate-spin" /> : <Pencil size={13} />}
+                            {t('localMusic.renameConfirm')}
+                        </button>
+                    </div>
+                )}
+            >
+                <div className="flex flex-col gap-3">
+                    <input
+                        value={renameValue}
+                        onChange={event => setRenameValue(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key !== 'Enter') return;
+                            event.preventDefault();
+                            void submitRename();
+                        }}
+                        placeholder={t('localMusic.renamePlaceholder')}
+                        className={`w-full rounded-full border px-3 py-2 text-sm outline-none ${isDaylight ? 'border-zinc-200 bg-white/60' : 'border-white/10 bg-white/5'}`}
+                    />
+                    {renameError ? <div className="text-xs text-red-500">{renameError}</div> : null}
+                    {renameTarget?.fileName ? (
+                        <div className={`text-xs ${mutedClass}`}>
+                            {t('localMusic.renameCurrentFile', { name: renameTarget.fileName })}
+                        </div>
+                    ) : null}
                 </div>
             </ThemedDialog>
 

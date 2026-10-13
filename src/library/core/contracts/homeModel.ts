@@ -172,6 +172,19 @@ export type LibraryHomeActionResult =
     | { ok: true }
     | { ok: false; reason: 'busy' | 'unsupported' | 'failed' };
 
+/**
+ * 本地歌曲改名的结果（端口把曲库服务的结果压成这几个字段）。
+ * renamedFile 为 false 不一定是失败：安卓改不了磁盘文件名，那边只改曲库里显示的名字。
+ */
+export type LibraryHomeRenameResult = {
+    ok: boolean;
+    /** 磁盘上的文件名真的改了。 */
+    renamedFile: boolean;
+    /** 改名之后的显示名；失败时是原来的。 */
+    title: string;
+    reason?: 'invalid' | 'not-found' | 'conflict' | 'no-handle' | 'unsupported' | 'error';
+};
+
 /** 歌单文件导入的结果（端口把曲库服务的结果压成这几个数）。 */
 export type LibraryHomePlaylistImportResult = {
     /** 建出来的歌单名；一首都没匹配上时为 null（不建歌单）。 */
@@ -208,6 +221,11 @@ export interface LibraryHomePort {
      * —— 库记录、缓存封面，安卓上还有导入时复制的那份音频。
      */
     deleteLocalSongs(songIds: readonly string[]): Promise<void>;
+    /**
+     * 给本地歌曲改名。
+     * 桌面会把磁盘上的文件名真改掉（同名歌词一起改）；安卓没有写权限，只改曲库里显示的名字。
+     */
+    renameLocalSong(songId: string, name: string): Promise<LibraryHomeRenameResult>;
     /** 重新读取本地曲库。 */
     refreshLocalSongs(): Promise<void> | void;
     /** 订阅扫描进度；返回退订函数。 */
@@ -235,6 +253,8 @@ export interface LibraryHomeActionsController {
     importPlaylistFile(file: File): Promise<LibraryHomeActionResult>;
     /** 从本地曲库删歌（管理对话框用）；删完刷新曲库并提示删了几首。 */
     deleteLocalSongs(songIds: readonly string[]): Promise<LibraryHomeActionResult>;
+    /** 给本地歌曲改名（管理对话框用）；改完刷新曲库并提示改成什么。 */
+    renameLocalSong(songId: string, name: string): Promise<LibraryHomeActionResult>;
     /** 取私人 FM 并从第一首开始播放（取不到歌时什么都不做）。 */
     playPersonalFm(): Promise<LibraryHomeActionResult>;
     /** 打开在线卡片：私人 FM 直接播放，其余交给宿主打开集合。 */

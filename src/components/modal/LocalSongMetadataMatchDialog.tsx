@@ -16,6 +16,7 @@ import {
 } from '../../services/onlineMetadataSearchService';
 import { DurationMatchBadge } from './DurationMatchBadge';
 import { getSizedCoverUrl } from '../../utils/coverUrl';
+import { usesImportedSongMetadata } from '../../utils/localSongMetadata';
 
 // src/components/modal/LocalSongMetadataMatchDialog.tsx
 // Lets the user search one provider and independently choose its metadata bundle and cover.
@@ -38,16 +39,16 @@ export const LocalSongMetadataMatchDialog = ({ song, assignment, isDaylight, onC
     const [applying, setApplying] = useState(false);
     const [restoringLocalInfo, setRestoringLocalInfo] = useState(false);
     const [markingPureMusic, setMarkingPureMusic] = useState(false);
-    const [useOnlineMetadata, setUseOnlineMetadata] = useState(song.titleOrigin !== 'import');
+    const [useOnlineMetadata, setUseOnlineMetadata] = useState(!usesImportedSongMetadata(song));
     const [useOnlineCover, setUseOnlineCover] = useState(song.useOnlineCover ?? !song.localCoverAssetId);
     const localCoverUrl = getLocalCoverAssetUrl(song.localCoverAssetId, 512);
     const requestIdRef = useRef(0);
     const target = useMemo(() => buildLocalSongMetadataSearchTarget(song), [song]);
     const currentTitle = song.title;
-    const currentArtist = (song.titleOrigin !== 'import'
+    const currentArtist = (!usesImportedSongMetadata(song)
         ? song.onlineMetadata?.artists.map(artist => artist.name).join(', ')
         : song.importedMetadata.artistNames.join(', ')) || t('localMusic.unknownArtist');
-    const currentAlbum = (song.titleOrigin !== 'import'
+    const currentAlbum = (!usesImportedSongMetadata(song)
         ? song.onlineMetadata?.album?.name
         : song.importedMetadata.albumName) || t('localMusic.unknownAlbum');
     const currentCoverUrl = song.useOnlineCover && song.onlineMetadata?.coverUrl

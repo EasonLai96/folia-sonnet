@@ -167,6 +167,46 @@ export const createLibraryHomeActions = (port: LibraryHomePort): LibraryHomeActi
             return OK;
         },
 
+        /**
+         * 给本地歌曲改名。不跟导入共用「忙」：改名只动一首、也不重扫目录，导入进行中改也不会
+         * 让两边看到的曲库打架（导入按路径认歌，改名后路径是同步改过的）。
+         */
+        renameLocalSong: async (songId, name) => {
+            try {
+                const result = await port.renameLocalSong(songId, name);
+                if (!result.ok) {
+                    port.notify({
+                        kind: 'status',
+                        type: 'error',
+                        message: {
+                            key: result.reason === 'conflict'
+                                ? 'localMusic.renameNameTaken'
+                                : result.reason === 'invalid'
+                                    ? 'localMusic.renameInvalidName'
+                                    : 'localMusic.renameFailed',
+                        },
+                    });
+                    return FAILED;
+                }
+                await port.refreshLocalSongs();
+                // 磁盘文件没改成也算成功：安卓改不了文件名、桌面可能是文件夹授权失效，
+                // 这两种情况只改了显示名，得跟用户说清楚。
+                port.notify({
+                    kind: 'status',
+                    type: result.renamedFile ? 'success' : 'info',
+                    message: {
+                        key: result.renamedFile ? 'localMusic.renameSuccessFile' : 'localMusic.renameSuccessTitle',
+                        values: { name: result.title },
+                    },
+                });
+                return OK;
+            } catch (error) {
+                console.error('[LibraryHome] Failed to rename local song:', error);
+                port.notify({ kind: 'status', type: 'error', message: { key: 'localMusic.renameFailed' } });
+                return FAILED;
+            }
+        },
+
         playPersonalFm,
 
         openOnlineCard: async (card: LibraryHomeCard, providerId: string, open: LibraryHomeOpenCollection) => {

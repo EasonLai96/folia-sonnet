@@ -4,6 +4,7 @@ import type { LocalLibraryAssignment, LocalLibraryEntity } from '../types/localL
 import { buildLocalLibraryIndex, followEntityRedirect, type LocalLibraryIndex } from '../utils/localLibraryIndex';
 import { getPreferredLocalSongCoverUrl } from './localCoverAssetUrl';
 import { buildLocalSourceRevision, buildNavidromeSourceRevision } from './playbackRecovery/sourceRevision';
+import { usesImportedSongMetadata } from '../utils/localSongMetadata';
 
 export type LocalLibraryDisplayCatalog = {
     entities: LocalLibraryEntity[];
@@ -152,11 +153,11 @@ export function buildUnifiedLocalSong({
         localSong.lyricsSource === 'online'
         || (!localSong.lyricsSource && (Boolean(localSong.markedPureMusic) || (!localSong.hasLocalLyrics && !localSong.hasEmbeddedLyrics)));
     const displayTitle = localSong.title;
-    const displayArtists = (localSong.titleOrigin === 'import'
+    const displayArtists = (usesImportedSongMetadata(localSong)
         ? localSong.importedMetadata.artistNames
         : localSong.onlineMetadata?.artists.map(artist => artist.name) || localSong.importedMetadata.artistNames)
         .map(name => ({ id: 0, name }));
-    const displayAlbum = localSong.titleOrigin === 'import'
+    const displayAlbum = usesImportedSongMetadata(localSong)
         ? localSong.importedMetadata.albumName
         : localSong.onlineMetadata?.album?.name || localSong.importedMetadata.albumName;
 
