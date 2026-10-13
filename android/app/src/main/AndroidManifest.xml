@@ -1,8 +1,31 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        把自己申报成「游戏」（appCategory），让系统把它当成渲染密集的应用。
+
+        为什么音乐播放器要这么做：歌词壁纸、壁纸叠层、各类可视化都是贴着壁纸 Surface
+        按帧跑的（原生 GLES / WebGL），和游戏是同一种负载——掉帧就是肉眼可见的顿挫。
+
+        appCategory="game" 的作用不是让 AOSP 直接提频（AOSP 只拿它做分类统计与耗电归因），
+        而是让 ROM 的游戏管线认得这个包：各家的游戏助手 / Game Dashboard 按它决定要不要
+        给出「性能模式」，adb 的 `cmd game mode performance <pkg>` 也要求先声明成游戏才认。
+
+        isGame 是 API 21 的老写法，API 33 起标记废弃但在 manifest 里仍然合法；留着是因为
+        部分 ROM 的老识别逻辑还在读它。两个一起给，覆盖面最广。
+
+        注意：这里没有加那条 android.game_mode_config 的 meta-data。官方那条配置的含义是
+        「由应用自己响应 PERFORMANCE / BATTERY 模式并实现优化」，一旦声明，平台会把 OEM
+        原本自动施加的游戏模式干预重置掉——那正是我们想白拿的那部分。不声明则 OEM 的
+        兜底干预继续生效，更符合「让系统多给点调度」。
+
+        代价：部分 ROM 会把它收进「游戏空间」，前台时出现游戏助手悬浮球 / 免打扰；
+        上 Google Play 时类别会落到「游戏」（本项目是自用发布，不走 Play）。
+    -->
     <application
         android:name=".FoliaApplication"
         android:allowBackup="true"
+        android:appCategory="game"
+        android:isGame="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
