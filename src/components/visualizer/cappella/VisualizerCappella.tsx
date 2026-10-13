@@ -170,13 +170,8 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
             audioBands={audioBands}
             sharedProps={props}
         >
-            {/* 安全区：气泡列从顶部往下排，第一颗就是曲名 —— CSS 把上内边距叠在 pt-12 上
-                （见 androidPhoneFit.css ⑥）。 */}
             {showText && (
-                <div
-                    data-folia-cappella-stage
-                    className="relative z-10 flex h-full w-full items-start justify-center overflow-visible px-4 pb-36 pt-12 sm:px-8 sm:pb-40 sm:pt-16 lg:px-14 lg:pt-20"
-                >
+                <div className="relative z-10 flex h-full w-full items-start justify-center overflow-visible px-4 pb-36 pt-12 sm:px-8 sm:pb-40 sm:pt-16 lg:px-14 lg:pt-20">
                     <div className="relative flex w-full max-w-4xl flex-col justify-start gap-3 overflow-visible">
                         <AnimatePresence initial={false} mode="popLayout">
                             {visibleMessages.map((message) => (

@@ -870,6 +870,12 @@ html[data-runtime='capacitor-android'] [data-folia-safe-top='nudge'] {
   top: var(--folia-safe-area-top, 0px);
 }
 
+/* 播放页左上角那颗返回：按安全区挪完仍贴着挖孔下沿，再多让 6px。
+ * 写在 shift 那条之后 —— 同特异性，后者生效。 */
+html[data-runtime='capacitor-android'] [data-folia-player-back] {
+  margin-top: calc(var(--folia-safe-area-top, 0px) + 6px);
+}
+
 html[data-runtime='capacitor-android'] [data-folia-safe-bottom='shift'] {
   margin-bottom: var(--folia-safe-area-bottom, 0px);
 }
@@ -938,11 +944,4 @@ html[data-runtime='capacitor-android'] .lattice-back {
  * 搜索所有变体；它的 padding-bottom 由播放条安全区的 MotionValue 写在行内，两边不打架。 */
 html[data-runtime='capacitor-android'] .bravais-seam-body {
   padding-top: var(--folia-safe-area-top, 0px);
-}
-
-/* Cappella 的歌词气泡：从顶部往下排（`items-start` + `pt-12`），第一颗气泡就是曲名。
- * 让的是外层容器，padding-top 叠在原来的 3rem 上（直接写会把它顶掉）。
- * 只在安卓跑，所以 sm/lg 那两档差出来的十几像素无所谓。 */
-html[data-runtime='capacitor-android'] [data-folia-cappella-stage] {
-  padding-top: calc(3rem + var(--folia-safe-area-top, 0px));
 }
