@@ -92,6 +92,7 @@ export const LIBRARY_HOME_ACTION_IDS: readonly LibraryHomeActionId[] = [
     'home-import-folder',
     'home-refresh-folders',
     'home-import-playlist',
+    'home-manage-songs',
     'home-scan-device-music',
     'home-refresh-navidrome',
 ];

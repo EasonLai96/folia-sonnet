@@ -41,6 +41,8 @@ const GRID_HOME_ACTIONS: readonly LibraryHomeActionId[] = [
     'home-import-folder',
     'home-refresh-folders',
     'home-import-playlist',
+    // 「管理歌曲」：本地页右上角那颗（整库删歌的对话框，网格一直有）。
+    'home-manage-songs',
     'home-scan-device-music',
     'home-refresh-navidrome',
 ];

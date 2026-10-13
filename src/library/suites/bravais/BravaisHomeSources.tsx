@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { LocalLibraryGroup, LocalPlaylist, LocalSong } from '../../../types';
 import type { LibraryCollectionDescriptor } from '../../core/contracts/collection';
@@ -28,7 +28,9 @@ import type { BravaisHomeTool } from './bravaisHomeModels';
 import type { BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { BravaisHomeChrome } from './useBravaisHomeChrome';
 import BravaisHomeDirectory from './BravaisHomeDirectory';
+import LocalSongManagerDialog from '../../shared/LocalSongManagerDialog';
 import { useBravaisHomeAccount } from './useBravaisHomeAccount';
+import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 
 // src/library/suites/bravais/BravaisHomeSources.tsx
 // bravais 首页三个来源的墙（设计稿 §10.5）：在线（账户歌单 / 电台 / 收藏专辑）、本地（文件夹 / 专辑 / 歌手 / 歌单
@@ -54,6 +56,7 @@ const LOCAL_ACTION_IDS: Record<string, LibraryHomeActionId> = {
     'import-folder': 'home-import-folder',
     'refresh-folders': 'home-refresh-folders',
     'import-playlist': 'home-import-playlist',
+    'manage-songs': 'home-manage-songs',
     'scan-device-music': 'home-scan-device-music',
 };
 
@@ -124,7 +127,10 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
     directoryActions?: LibraryDirectoryBatchController;
 }> = ({ meta, localSongs, localPlaylists, catalog, activeRow, setActiveRow, treesResource, directoryActions, homeActions, onOpenGridView, ...common }) => {
     const { t } = useTranslation();
+    const isDaylight = useThemeSettingsStore(state => state.isDaylight);
     const playlistFileInputRef = useRef<HTMLInputElement>(null);
+    // 「管理歌曲」对话框：与网格本地页同一颗按钮、同一个对话框（整库删歌的唯一入口）。
+    const [isManageOpen, setIsManageOpen] = useState(false);
     const directoryTrees = useLocalDirectoryTrees(treesResource, localSongs);
     const local = useLibraryHomeLocal({ localSongs, localPlaylists, catalog, activeRow });
     const { snapshot: actionState } = useLibraryHomeActions(homeActions);
@@ -141,13 +147,18 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
      *
      * 这一条原本只有 grid（LocalGrid3DView）给 —— 于是同一份本地曲换到 Bravais 墙上就少了一个入口：
      * 系统文件管理器挑不出「设备里已经收录的所有音乐」，安卓上只剩这条能一次性收进来。
+     * 「管理歌曲」同理：它的对话框是 suite 挂的（网格一直挂，墙上没挂），所以按 suite
+     * 自己有没有挂来告诉 core —— 挂了才摆按钮。
      */
-    const localActions = resolveLocalHomeActions(actionState, { deviceScan: isAndroidNativeRuntime() })
-        .filter(action => common.declaredActions.actions.includes(LOCAL_ACTION_IDS[action.id]));
+    const localActions = resolveLocalHomeActions(actionState, {
+        deviceScan: isAndroidNativeRuntime(),
+        manageSongs: true,
+    }).filter(action => common.declaredActions.actions.includes(LOCAL_ACTION_IDS[action.id]));
     const runAction = (id: string) => {
         if (id === 'import-folder') void homeActions.importFolder();
         else if (id === 'refresh-folders') void homeActions.refreshFolders();
         else if (id === 'import-playlist') playlistFileInputRef.current?.click();
+        else if (id === 'manage-songs') setIsManageOpen(true);
         else if (id === 'scan-device-music') void homeActions.scanDeviceMusic();
     };
     const runActionRef = useRef(runAction);
@@ -196,8 +207,13 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
         const section = sectionsRef.current.sections.find(candidate => candidate.key === key);
         if (section) sectionsRef.current.setActiveRow(section.row);
     }, []);
-    const menuKey = localActions.map(action => `${action.id}:${action.labelKey}:${action.disabled}`).join('|');
-    const menu = useMemo<BravaisSeamMenuItem[]>(() => localActions.map(action => ({
+    // 空库那一屏只留「导入文件夹」与「扫描设备音乐」—— 与网格空库那一屏同一组，
+    // 没有歌可管的「管理歌曲」和没有根可刷的「刷新」先收起来。
+    const menuActions = isEmptyLibrary
+        ? localActions.filter(action => action.id === 'import-folder' || action.id === 'scan-device-music')
+        : localActions;
+    const menuKey = menuActions.map(action => `${action.id}:${action.labelKey}:${action.disabled}`).join('|');
+    const menu = useMemo<BravaisSeamMenuItem[]>(() => menuActions.map(action => ({
         id: `home-${action.id}`,
         label: t(action.labelKey),
         disabled: action.disabled,
@@ -246,6 +262,15 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
                 panelTitle={activeSection.label}
                 onOpen={onOpen}
                 shortcutCards={isEmptyLibrary ? NO_CARDS : shortcutCards}
+            />
+            <LocalSongManagerDialog
+                isOpen={isManageOpen}
+                songs={localSongs}
+                isDaylight={isDaylight}
+                onDelete={async (songIds) => {
+                    await homeActions.deleteLocalSongs(songIds);
+                }}
+                onClose={() => setIsManageOpen(false)}
             />
         </>
     );

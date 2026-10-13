@@ -107,6 +107,8 @@ const HOME_ACTIONS: readonly LibraryHomeActionId[] = [
     'home-import-folder',
     'home-refresh-folders',
     'home-import-playlist',
+    // 「管理歌曲」：与网格同一颗按钮（整库删歌的对话框），网格一直有、墙上没有，这里补上。
+    'home-manage-songs',
     'home-scan-device-music',
     'home-refresh-navidrome',
 ];

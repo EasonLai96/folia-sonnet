@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Search, Trash2 } from 'lucide-react';
-import ThemedDialog from '../../../../components/shared/ThemedDialog';
-import ConfirmDialog from '../../../../components/shared/ConfirmDialog';
-import type { LocalSong } from '../../../../types';
-import { formatTime } from '../../../../utils/appPlaybackHelpers';
+import ThemedDialog from '../../components/shared/ThemedDialog';
+import ConfirmDialog from '../../components/shared/ConfirmDialog';
+import type { LocalSong } from '../../types';
+import { formatTime } from '../../utils/appPlaybackHelpers';
 
-// src/library/suites/grid/home/LocalSongManagerDialog.tsx
+// src/library/shared/LocalSongManagerDialog.tsx
 // 本地曲库的「管理歌曲」对话框：搜索、勾选、删除。删的是曲库里的这首歌（安卓上连导入时
 // 复制的音频副本一起删），所以删除都先经确认；曲库可能上万首，列表只渲染筛选后的前
 // MAX_VISIBLE 条 —— 剩下的靠搜索缩小范围，不然一打开就渲染几千行会卡死。

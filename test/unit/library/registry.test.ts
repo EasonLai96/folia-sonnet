@@ -134,7 +134,9 @@ describe('library suite registry', () => {
         expect([...resolveLibrarySurfaceActions('artist', 'bravais').actions].sort()).toEqual([...LIBRARY_ARTIST_ACTION_IDS].sort());
         // 首页：两套都实现了全部首页动作（网格的焦点类动作在卡片与目录树的按钮上，TUI 的在命令面板与键盘上）。
         expect([...resolveLibrarySurfaceActions('home', 'grid').actions].sort()).toEqual([...LIBRARY_HOME_ACTION_IDS].sort());
-        expect([...resolveLibrarySurfaceActions('home', 'tui').actions].sort()).toEqual([...LIBRARY_HOME_ACTION_IDS].sort());
+        // TUI 是纯文本列表，没有挂「管理歌曲」那个对话框，所以不声明它（与它的目录面板同一条规则）。
+        expect([...resolveLibrarySurfaceActions('home', 'tui').actions].sort())
+            .toEqual([...LIBRARY_HOME_ACTION_IDS].sort().filter(action => action !== 'home-manage-songs'));
         // 账户（A5 / A6）：两套都实现全部 7 个账户动作（TUI 的诊断只复制报告，后端重启是 Enter）。
         expect(resolveLibrarySurface('account', 'grid').declaredActions).toEqual({ actions: LIBRARY_ACCOUNT_ACTION_IDS, extraActions: [] });
         expect([...resolveLibrarySurfaceActions('account', 'tui').actions].sort()).toEqual([...LIBRARY_ACCOUNT_ACTION_IDS].sort());

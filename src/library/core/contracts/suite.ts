@@ -117,6 +117,7 @@ export type LibraryHomeActionId =
     | 'home-import-folder'
     | 'home-refresh-folders'
     | 'home-import-playlist'
+    | 'home-manage-songs'
     | 'home-scan-device-music'
     | 'home-refresh-navidrome';
 
