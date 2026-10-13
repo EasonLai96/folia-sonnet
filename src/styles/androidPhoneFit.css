@@ -911,3 +911,26 @@ html[data-runtime='capacitor-android'] [data-folia-artistgrid-header='true'] {
 
 /* 播放页歌词里的曲目信息（歌手 / 曲名 / 专辑）用 nudge：Monet 那块在 `justify-center`
  * 的列里，加内外边距只挪一半（居中算的是含边距的整个盒子），`relative; top` 才是整份位移。 */
+
+/* 两面墙（Lattice 队列拼贴 / bravais 资料库墙）左上角那颗返回：两墙共用同一个按钮
+ * （components/wall/WallBackButton，`.lattice-back`，absolute top:20px left:24px）。
+ * 它是墙上唯一常驻的顶部控件，也是最容易顶进挖孔的那一颗。 */
+html[data-runtime='capacitor-android'] .lattice-back {
+  margin-top: var(--folia-safe-area-top, 0px);
+  margin-left: var(--folia-safe-area-left, 0px);
+}
+
+/* bravais 的缝：整条缝是 `absolute; top:0; bottom:0`，里面的页签、标题、折叠 / 缩回按钮
+ * 只靠 `.bravais-seam-home` 那 16px 上内边距垫着 —— 摄像头区域里塞的就是这一排文字与按钮。
+ * 让的是缝内容那一层（`.bravais-seam-body`），一套规则覆盖首页 / 歌单 / 歌手 / 账户 /
+ * 搜索所有变体；它的 padding-bottom 由播放条安全区的 MotionValue 写在行内，两边不打架。 */
+html[data-runtime='capacitor-android'] .bravais-seam-body {
+  padding-top: var(--folia-safe-area-top, 0px);
+}
+
+/* Cappella 的歌词气泡：从顶部往下排（`items-start` + `pt-12`），第一颗气泡就是曲名。
+ * 让的是外层容器，padding-top 叠在原来的 3rem 上（直接写会把它顶掉）。
+ * 只在安卓跑，所以 sm/lg 那两档差出来的十几像素无所谓。 */
+html[data-runtime='capacitor-android'] [data-folia-cappella-stage] {
+  padding-top: calc(3rem + var(--folia-safe-area-top, 0px));
+}
