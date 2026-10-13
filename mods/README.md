@@ -28,7 +28,6 @@ Folium 是 Folia 的模组平台，形状参照 Minecraft Forge：模组通过**
 | `sample-progress-bar` | 改造进度条：按钮、样式、外部动态数据图层、设置分区、net.fetch、storage |
 | `more-progress-buttons` | 进度条两侧加「打乱队列」「音量」「喜爱」按钮，可分别关闭；用 `--folium-player-bar-extra` 把胶囊加宽补回轨道长度（1.3） |
 | `sample-rickroll` | 在播放页嵌入外部网页（stageLayers + ui.embed + embedOrigins） |
-| `lyric-ai-director` | AI 为每首歌挑歌词动画模式并调参：`folium.ai`（宿主自己的 AI 设置）+ playerPanelTabs + commands + settingsSections + storage（每首歌记忆） |
 
 ## 安全声明（重要）
 

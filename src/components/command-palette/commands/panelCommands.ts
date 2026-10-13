@@ -1,4 +1,4 @@
-import { ListMusic } from 'lucide-react';
+import { ListMusic, Sparkles } from 'lucide-react';
 import type { CommandPaletteCommand } from '../types';
 import { createPanelCommand } from '../commandFactories';
 import { LOCAL_MUSIC_COMMAND_PLATFORMS } from '../../../platform/runtime';
@@ -14,4 +14,5 @@ export const panelCommands: CommandPaletteCommand[] = [
     createPanelCommand('local', 'Panel: local', 'Open the local panel tab', ['local panel', '本地面板'], undefined, {}, [...LOCAL_MUSIC_COMMAND_PLATFORMS]),
     createPanelCommand('navi', 'Panel: Navidrome', 'Open the Navidrome panel tab', ['panel navi', 'navi panel', 'navidrome 面板', '服务器面板']),
     createPanelCommand('onlineLyrics', 'Panel: lyrics', 'Open the online lyrics panel tab', ['lyrics panel', '歌词面板']),
+    createPanelCommand('aiDirector', 'Panel: AI director', 'Open the AI lyric animation director tab', ['ai director', 'ai 导演', '动画导演'], Sparkles),
 ];
