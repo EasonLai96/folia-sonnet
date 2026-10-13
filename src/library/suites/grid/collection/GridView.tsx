@@ -1497,6 +1497,8 @@ export const GridView: React.FC<GridViewProps> = ({
                 // 返回按钮表示看完了（onDone）：宿主清掉浏览会话、让每套 suite 忘掉布局记录（网格的 sessionStorage
                 // 记录经 entry 的 layout.forget），再返回。Escape 与浏览器后退保留（onBack）。P4.5 起不在这里清。
                 onClick={onDone}
+                /* 安全区：`absolute top-5` —— CSS 用 margin-top 往下让（见 androidPhoneFit.css ⑥）。 */
+                data-folia-safe-top="shift"
                 className="absolute left-6 top-5 w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg hover:scale-105 active:scale-95 z-[70]"
                 style={{
                     backgroundColor: isDaylight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.08)',
@@ -1511,6 +1513,8 @@ export const GridView: React.FC<GridViewProps> = ({
                     type="button"
                     onClick={resumeBackgroundSync}
                     disabled={!backgroundLoadError}
+                    /* 安全区：右上角那颗同步 / 重试 —— 与返回按钮同一档 `absolute top-5`。 */
+                    data-folia-safe-top="shift"
                     className="absolute right-6 top-5 z-[70] flex items-center gap-2 rounded-full px-3 py-2 text-xs tabular-nums backdrop-blur-md disabled:cursor-default"
                     style={{ backgroundColor: 'color-mix(in srgb, var(--bg-color) 65%, transparent)' }}
                     title={backgroundLoadError
@@ -1529,6 +1533,9 @@ export const GridView: React.FC<GridViewProps> = ({
                     if (!hasCutInPanel) return;
                     setShowCutInPanel(!showCutInPanel);
                 }}
+                /* 安全区：居中标题。垂直方向是 `absolute top-5`（不是居中），所以 margin-top
+                   就是整份位移 —— 与艺术家页那颗标题同一档（见 androidPhoneFit.css ⑥）。 */
+                data-folia-safe-top="shift"
                 className={`group/grid-title absolute left-1/2 top-5 -translate-x-1/2 z-[70] text-center flex flex-col items-center select-none transition-all px-5 py-2 rounded-2xl backdrop-blur-md ${hasCutInPanel ? 'cursor-pointer hover:scale-[1.01] active:scale-98' : ''}`}
                 style={{
                     backgroundColor: 'color-mix(in srgb, var(--bg-color) 20%, transparent)',
