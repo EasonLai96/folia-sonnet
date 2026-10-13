@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { LibraryAccountController, LibraryAccountSnapshot } from '../../core/contracts/account';
 import type { LibraryHomeOnlineSource } from '../../core/contracts/homeModel';
 import { useLibraryAccountProviders, useLibraryAccountSelector } from '../../core/bindings/useLibraryAccount';
+import { ALL_PROVIDERS_ID, isAllProvidersId } from '../../core/model/onlineProviderScope';
+import { selectIsAllProvidersScope, useLibraryOnlineProviderScopeStore } from '../../core/state/useLibraryOnlineProviderScopeStore';
 import { canRunLogout, projectAccountSwitcherRows } from './bravaisAccountModel';
 import type { BravaisHomeAccount } from './bravaisHomeModels';
 
@@ -18,14 +20,24 @@ export const useBravaisHomeAccount = (account: LibraryAccountController, online:
     const { t } = useTranslation();
     const { providers, activeProviderId } = useLibraryAccountProviders(account);
     const logout = useLibraryAccountSelector(account, selectLogout);
+    // 首页在线页签的数据范围（「全部」= 各家歌单合在一起；null = 跟随当前平台）。
+    const allScope = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
     const rows = useMemo(
-        () => projectAccountSwitcherRows({ providers, activeProviderId, logout, t }),
-        [activeProviderId, logout, providers, t],
+        () => projectAccountSwitcherRows({ providers, activeProviderId, logout, allScope, t }),
+        [activeProviderId, allScope, logout, providers, t],
     );
     const latest = useRef({ account, rows });
     latest.current = { account, rows };
 
     const onSelect = useCallback((providerId: string) => {
+        // 「全部」不是一家平台：只换首页看数据的方式，当前平台不动（登录 / 搜索 / 播放仍按它）。
+        // 选真实平台时反过来——先把范围清掉，否则会出现「选了某家、墙还是合并的」。
+        const scope = useLibraryOnlineProviderScopeStore.getState();
+        if (isAllProvidersId(providerId)) {
+            scope.selectScope(ALL_PROVIDERS_ID);
+            return;
+        }
+        scope.clearScope();
         void latest.current.account.selectProvider(providerId);
     }, []);
     const onLogout = useCallback((providerId: string) => {

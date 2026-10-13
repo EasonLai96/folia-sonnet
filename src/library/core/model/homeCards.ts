@@ -22,8 +22,18 @@ export const getProviderCollectionArtistLabel = (
     return artists || collection?.creator?.nickname || '';
 };
 
-/** 账户歌单页签（含云盘）。 */
-export const buildOnlinePlaylistCards = (collections: readonly ProviderCollection[], t: TFunction): LibraryHomeCard[] => (
+/**
+ * 账户歌单页签（含云盘）。
+ *
+ * `markSourceProvider`：「全部」视图里打开。合并了各家歌单之后，每张卡必须记住自己来自哪家
+ * （封面角标、打开歌单取曲目都靠它；见 LibraryHomeCard.sourceProviderId 的注释），默认不开 ——
+ * 单平台视图里整屏都是同一家，逐卡带一遍只是噪音。
+ */
+export const buildOnlinePlaylistCards = (
+    collections: readonly ProviderCollection[],
+    t: TFunction,
+    { markSourceProvider = false }: { markSourceProvider?: boolean } = {},
+): LibraryHomeCard[] => (
     collections.map(collection => ({
         id: collection.id,
         name: collection.name,
@@ -33,6 +43,7 @@ export const buildOnlinePlaylistCards = (collections: readonly ProviderCollectio
         summary: collection.description || '',
         type: collection.type,
         raw: collection,
+        ...(markSourceProvider && collection.providerId ? { sourceProviderId: collection.providerId } : {}),
     }))
 );
 

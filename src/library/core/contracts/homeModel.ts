@@ -141,6 +141,12 @@ export type LibraryHomeCard = {
     albumDuration?: number;
     /** Navidrome 自建歌单可编辑。 */
     editable?: boolean;
+    /**
+     * 这张卡来自哪家平台（只有「全部」视图里填）：合了各家歌单之后，「哪家来的」不再是整个列表的属性，
+     * 而是每张卡自己的 —— 封面右下角的来源图标靠它，打开歌单也必须用**它自己**的 providerId 去取曲目
+     * （用当前平台去取别家的歌单只会取空或取错）。单平台视图里不填：那时来源就是当前平台，不必每卡都带。
+     */
+    sourceProviderId?: string;
 };
 
 /** 本地扫描进度（导入 / 重扫时曲库服务广播）。 */

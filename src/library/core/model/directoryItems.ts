@@ -1,4 +1,5 @@
 import type { LibraryDirectoryItem } from '../contracts/directory';
+import { scopeCardId } from './onlineProviderScope';
 
 // src/library/core/model/directoryItems.ts
 // 首页卡片 → 目录条目，以及目录条目上「路径」那一格写什么。网格的 GridMap 与 TUI 的目录列表共用这两条规则，
@@ -17,13 +18,20 @@ type HomeCardLike = {
     trackCount?: number;
     trackIds?: string[];
     isVirtual?: boolean;
+    /** 「全部」视图里这张卡来自哪家（见 contracts/homeModel 的 LibraryHomeCard.sourceProviderId）。 */
+    sourceProviderId?: string;
 };
 
-/** 首页卡片在目录里的样子（GridMap 的条目、TUI 的一行）。 */
+/**
+ * 首页卡片在目录里的样子（GridMap 的条目、TUI 的一行）。
+ *
+ * 合了各家歌单之后不同平台的歌单 id 会撞（都是数字），条目的 id 按平台分开：
+ * 它们是隐藏表、批选、墙上条目的身份，撞了会出现「隐藏 A 家的歌单、B 家同 id 的那张也跟着藏了」。
+ */
 export const homeCardToDirectoryItem = (card: HomeCardLike): LibraryDirectoryItem => {
     const isFolder = card.type === 'folder';
     return {
-        id: card.id,
+        id: card.sourceProviderId ? scopeCardId(card.sourceProviderId, card.id) : card.id,
         name: card.name,
         coverUrl: card.coverUrl,
         description: isFolder ? card.name : card.description,

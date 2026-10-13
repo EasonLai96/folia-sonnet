@@ -10,6 +10,7 @@ import {
     translateHomeMessage,
 } from '../model/homeSources';
 import { useLibraryHomeOnlineFeeds } from './useLibraryHomeOnlineFeeds';
+import { selectIsAllProvidersScope, useLibraryOnlineProviderScopeStore } from '../state/useLibraryOnlineProviderScopeStore';
 import type { LibraryHomeSources } from './useLibraryHomeSources';
 
 // src/library/core/bindings/useLibraryHomeOnline.ts
@@ -40,7 +41,12 @@ export const useLibraryHomeOnline = (
         canUseRadio: online.canUseRadio,
     });
 
-    const playlistCards = useMemo(() => buildOnlinePlaylistCards(online.collections, t), [online.collections, t]);
+    // 「全部」视图里每张歌单卡记住自己来自哪家：封面角标与打开歌单取曲目都靠它（单平台视图不用带）。
+    const allProviders = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
+    const playlistCards = useMemo(
+        () => buildOnlinePlaylistCards(online.collections, t, { markSourceProvider: allProviders }),
+        [allProviders, online.collections, t],
+    );
     const albumCards = useMemo(() => buildOnlineAlbumCards(favoriteAlbums.data, t), [favoriteAlbums.data, t]);
     const radioCards = useMemo(
         () => buildOnlineRadioCards(radioFeed.data, { t, personalFmModeLabel }),

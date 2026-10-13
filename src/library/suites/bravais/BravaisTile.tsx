@@ -349,6 +349,18 @@ function BravaisTile({
                                 onToggleHidden={handlers.toggleHidden ? () => handlers.toggleHidden?.(slotKey) : undefined}
                             />
                         )}
+                        {/* 「全部」视图：封面右下角的来源图标（哪家平台的歌单）。装饰性的 —— 可访问名由磁贴的
+                            aria-label 给，读屏不念图；点与拖都归磁贴自己（它是 span，不吃事件）。 */}
+                        {display.sourceIcon && (
+                            <img
+                                className="bravais-tile-source"
+                                src={display.sourceIcon}
+                                alt=""
+                                aria-hidden
+                                draggable={false}
+                                data-bravais-source
+                            />
+                        )}
                         {isExpanded ? (
                             <BravaisFocusCardBody
                                 slotKey={slotKey}
@@ -359,7 +371,8 @@ function BravaisTile({
                                 actions={handlers}
                             />
                         ) : (
-                            <span className="lattice-poster-copy">
+                            // 有来源图标时给右下角让出一格：标题 / 副标题不压到它下面。
+                            <span className={`lattice-poster-copy${display.sourceIcon ? ' has-source' : ''}`}>
                                 <WallTitle
                                     title={display.title}
                                     expanded={false}

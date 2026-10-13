@@ -526,6 +526,30 @@
 
 .bravais-tile-check svg { width: 15px; height: 15px; stroke-width: 3; }
 
+/* 「全部」视图：封面右下角的来源图标（哪家平台的歌单）。
+   只在此刻真的有来源时才渲染，所以这里不必管「没有」的布局。压过标题那一层（z-index 3），
+   不吃事件（span/img 本来就不拦点击）—— 点它等于点这张磁贴。 */
+.bravais-tile-source {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 3;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    object-fit: cover;
+    pointer-events: none;
+    /* 海报上的封面明暗不定，给一圈描边 + 一点投影，浅色封面上也看得见。
+       不用 backdrop-filter：每层一个模糊会把每张海报提成独立合成层，那是墙上最大的一笔 GPU 开销
+       （同 wall.css 的 .lattice-poster-badge）。 */
+    box-shadow:
+        0 0 0 1px rgb(0 0 0 / 55%),
+        0 2px 6px rgb(0 0 0 / 45%);
+}
+
+/* 有来源图标时右下角让出一格：标题 / 副标题不压到图标下面。 */
+.lattice-poster-copy.has-source { padding-right: 26px; }
+
 /* 灰度 + 半透明（GridMap 批量模式的未选中、隐藏编辑模式的已隐藏），原地变色不重排。 */
 .lattice-poster.bravais-tile-face.is-dimmed:not(.is-expanded) {
     filter: grayscale(1);

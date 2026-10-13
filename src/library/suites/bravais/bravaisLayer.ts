@@ -47,6 +47,12 @@ export type BravaisItem = {
      * 换成强调色底 + 小图标（BravaisTile）。普通卡片没有。
      */
     special?: LibraryHomeSpecialKind;
+    /**
+     * 「全部」视图里封面右下角的来源图标（哪家平台的歌单）。图是 assets/providers/appIcons 的
+     * getProviderAppIcon —— 与窄缝的账户徽章、网格的切换器、登录弹窗同一份来源，别在这里另写一张
+     * providerId → 文件的对照表。单平台视图里没有（整屏都是同一家，标了是噪音）。
+     */
+    sourceIcon?: string;
 };
 
 /** 首页缝里的页签（只有首页层有）。 */

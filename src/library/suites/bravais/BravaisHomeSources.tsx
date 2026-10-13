@@ -94,9 +94,11 @@ export const BravaisHomeOnline: React.FC<BravaisHomeSourceCommonProps & {
     const account = useBravaisHomeAccount(accountController, online);
     const latest = useRef({ homeActions, providerId: online.providerId, onOpenGridView });
     latest.current = { homeActions, providerId: online.providerId, onOpenGridView };
+    // 打开歌单要按**这张卡自己**的平台去取曲目：合了各家之后，用当前平台去取别家的歌单只会取空或取错
+    // （sourceProviderId 只在「全部」视图里有，单平台视图里退回当前平台，与原先一致）。
     const onOpen = useMemo(() => (card: Parameters<LibraryHomeActionsController['openOnlineCard']>[0]) => {
         const { homeActions: actions, providerId, onOpenGridView: open } = latest.current;
-        void actions.openOnlineCard(card, providerId, open);
+        void actions.openOnlineCard(card, card.sourceProviderId || providerId, open);
     }, []);
     return (
         <BravaisHomeDirectory

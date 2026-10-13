@@ -14,6 +14,7 @@ import type {
 import { canLogoutProvider, isAwaitingLoginMethod, resolveProviderSelectLabel } from '../../core/model/accountRules';
 import { canSwitchToProviderDirectly } from '../../core/model/onlineProviderAccountView';
 import { translateHomeMessage } from '../../core/model/homeSources';
+import { ALL_PROVIDERS_ID, countMergeableProviders } from '../../core/model/onlineProviderScope';
 
 // src/library/suites/bravais/bravaisAccountModel.ts
 // B10 账户（设计稿 §10.7）的纯投影：
@@ -326,20 +327,29 @@ const describeProviderStatus = (provider: ProviderAccountSummary, t: TFunction):
 /**
  * provider 列表 → 切换器的行。与 grid 的切换器一样不列运行时不可用的 provider（availability.reason 为
  * runtime-unavailable，例如本构建不带的后端）。
+ *
+ * 最前面还有一行「全部」（`allScope` 为 true 时它就是选中项）：它不是一家平台，选了之后当前平台不变，
+ * 只是首页歌单那一屏换成各家歌单的合并结果（见 core/state/useLibraryOnlineProviderScopeStore）。
+ * 只有真有得合时才给 —— 一家都没登录的话，「全部」点下去是一面空墙，不如不给。
  */
 export const projectAccountSwitcherRows = ({
     providers,
     activeProviderId,
     logout,
+    allScope = false,
     t,
 }: {
     providers: readonly ProviderAccountSummary[];
     activeProviderId: OnlineProviderId;
     logout: LibraryAccountLogoutState;
+    /** 首页此刻是不是在「全部」视图上（决定那一行带不带当前标记）。 */
+    allScope?: boolean;
     t: TFunction;
 }): BravaisAccountRow[] => {
     const logoutPending = logout.status === 'pending';
-    return providers
+    // 有几家平台真的有歌单可合 —— 由 provider 列表自己算，调用方不必另传一份（也免得两边算得不一样）。
+    const mergeableCount = countMergeableProviders(providers);
+    const rows = providers
         .filter(provider => provider.availability.reason !== 'runtime-unavailable')
         .map(provider => {
             const current = provider.providerId === activeProviderId;
@@ -367,4 +377,22 @@ export const projectAccountSwitcherRows = ({
                     : null,
             };
         });
+
+    if (mergeableCount < 2) return rows;
+    // 「全部」那一行：不是平台，所以没有头像 / 昵称 / 登出，也永远可选（有得合才出现）。
+    const allRow: BravaisAccountRow = {
+        providerId: ALL_PROVIDERS_ID,
+        label: t('home.allProviders'),
+        displayName: t('home.allProviders'),
+        detail: t('home.allProvidersDetail', { count: mergeableCount }),
+        note: t('home.allProvidersDetail', { count: mergeableCount }),
+        avatarUrl: null,
+        nickname: null,
+        current: allScope,
+        configured: true,
+        direct: true,
+        actionLabel: allScope ? '' : t('home.allProvidersAction'),
+        logout: null,
+    };
+    return [allRow, ...rows];
 };
