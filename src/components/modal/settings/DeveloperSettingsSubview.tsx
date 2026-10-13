@@ -212,6 +212,40 @@ const AudioBufferReadout: React.FC<{ isDaylight: boolean; cardClass: string }> =
 };
 
 /**
+ * 原生那份「窗口几何」快照（PhoneFitCutout.describe，插件方法 getPhoneFitLayout）。
+ *
+ * 只为取证「顶部黑条」这一类问题：光看安全区四边分不清是哪一层坏了 ——
+ * · `decorHeightPx < screenHeightPx` → 窗口被 ROM 收着（letterbox），代码救不了，走设置；
+ * · decor 满而 `webViewHeightPx` 少一条 → WebView 链上有 padding/边距被回填（强制铺满守卫管的就是它）。
+ * 标签保持英文原样（与 latencyHint / source 这些读数一致），这是给开发者看的一手数值。
+ */
+type PhoneFitLayoutSnapshot = {
+    screenHeightPx?: number;
+    decorHeightPx?: number;
+    contentHeightPx?: number;
+    webViewHeightPx?: number;
+    decorPaddingTopPx?: number;
+    contentPaddingTopPx?: number;
+    webViewPaddingTopPx?: number;
+    visibleFrame?: { top?: number };
+    layoutInDisplayCutoutMode?: number;
+    hasCutout?: boolean;
+};
+
+const fetchPhoneFitLayout = async (): Promise<PhoneFitLayoutSnapshot | null> => {
+    try {
+        const plugin = (window as unknown as { Capacitor?: { Plugins?: Record<string, unknown> } })
+            .Capacitor?.Plugins?.FoliaNative as
+            | { getPhoneFitLayout?: () => Promise<Record<string, unknown>> }
+            | undefined;
+        if (!plugin?.getPhoneFitLayout) return null;
+        return await plugin.getPhoneFitLayout() as PhoneFitLayoutSnapshot;
+    } catch {
+        return null;
+    }
+};
+
+/**
  * 安全区读数。
  *
  * 放这儿是因为「顶部控件没让开」在现场有两种完全不同的原因，光看界面分不出来：
@@ -223,11 +257,18 @@ const SafeAreaReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({
     const { t } = useTranslation();
     const [insets, setInsets] = useState<PhoneInsets>(() => getPhoneInsets());
     const [source, setSource] = useState(() => getPhoneInsetsSource());
+    const [layout, setLayout] = useState<PhoneFitLayoutSnapshot | null>(null);
+
+    const refreshLayout = useCallback(() => {
+        void fetchPhoneFitLayout().then(setLayout);
+    }, []);
 
     useEffect(() => subscribePhoneInsets((next) => {
         setInsets(next);
         setSource(getPhoneInsetsSource());
-    }), []);
+        refreshLayout();
+    }), [refreshLayout]);
+    useEffect(() => { refreshLayout(); }, [refreshLayout]);
 
     const rowClass = 'flex items-baseline justify-between gap-2';
     const sides: Array<keyof PhoneInsets> = ['top', 'right', 'bottom', 'left'];
@@ -267,6 +308,52 @@ const SafeAreaReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({
                             ? '—'
                             : (document.documentElement.getAttribute('data-folia-device-resolved') ?? '—')}
                     </dd>
+                </div>
+            </dl>
+
+            <div className="text-[11px] opacity-45 pt-1" style={{ color: 'var(--text-secondary)' }}>
+                window (screen / decor / content / webView, px)
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                <div className={rowClass}>
+                    <dt className="opacity-60">screen</dt>
+                    <dd>{layout?.screenHeightPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">decor</dt>
+                    <dd>{layout?.decorHeightPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">content</dt>
+                    <dd>{layout?.contentHeightPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">webView</dt>
+                    <dd>{layout?.webViewHeightPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">decorPad</dt>
+                    <dd>{layout?.decorPaddingTopPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">contentPad</dt>
+                    <dd>{layout?.contentPaddingTopPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">webPad</dt>
+                    <dd>{layout?.webViewPaddingTopPx ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">visibleTop</dt>
+                    <dd>{layout?.visibleFrame?.top ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">cutoutMode</dt>
+                    <dd>{layout?.layoutInDisplayCutoutMode ?? '—'}</dd>
+                </div>
+                <div className={rowClass}>
+                    <dt className="opacity-60">hasCutout</dt>
+                    <dd>{layout?.hasCutout === undefined ? '—' : String(layout.hasCutout)}</dd>
                 </div>
             </dl>
         </div>

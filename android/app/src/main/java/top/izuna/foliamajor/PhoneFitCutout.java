@@ -42,6 +42,7 @@ final class PhoneFitCutout {
     private static final String INSET_LISTENER_TAG = "folia-cutout-inset-listener";
     private static final String DECOR_PADDING_GUARD_TAG = "folia-cutout-decor-padding-guard";
     private static final String CONTENT_PADDING_GUARD_TAG = "folia-cutout-content-padding-guard";
+    private static final String CHAIN_GUARD_TAG = "folia-cutout-chain-guard";
 
     private PhoneFitCutout() {
     }
@@ -125,6 +126,9 @@ final class PhoneFitCutout {
         installDecorPaddingGuard(decor);
         // ② 同步改写 decor 收到的 insets：把 systemBars 归零，系统就不会再按 inset 垫 padding。
         installDecorInsetListener(activity, decor);
+        // ③ 整条链的强制铺满：ColorOS / OriginOS 会在布局期把 inset 回填成**任意一层**的
+        //    padding（不一定重新派发 inset），decor 与内容根两个守卫盖不满全链。
+        installFullscreenChainGuard(activity);
         View root = decor;
         if (decor instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) decor;
@@ -181,6 +185,70 @@ final class PhoneFitCutout {
                 contentRoot.setPadding(0, 0, 0, 0);
             }
         });
+    }
+
+    /**
+     * WebView → decor 整条链的布局期强制铺满。
+     *
+     * 反馈现场（OPPO / vivo 都有）：原生量得出 inset（读数 top≈40），但 WebView 实际没画进
+     * 状态栏那一条 —— ROM 在**重新布局**时把系统栏 inset 回填成了链上某一层的 padding 或
+     * WebView 的边距，不重新派发 inset，inset 监听与 apply 时的一次性清理都拦不住。
+     * 链就四层（decor → 内容根 → content → CoordinatorLayout → WebView），与其层层设守卫，
+     * 不如从 WebView 往上一次清干净，再把 WebView 自己的 LayoutParams 压成满幅零边距。
+     *
+     * 只在确实有偏差时才写，避免监听器自己触发新的布局形成死循环；健康机型上恒为无操作。
+     */
+    private static void installFullscreenChainGuard(final Activity activity) {
+        View decor = activity == null || activity.getWindow() == null
+            ? null
+            : activity.getWindow().getDecorView();
+        if (decor == null || decor.getTag(CHAIN_GUARD_TAG.hashCode()) != null) {
+            return;
+        }
+        decor.setTag(CHAIN_GUARD_TAG.hashCode(), Boolean.TRUE);
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> enforceWebViewFullscreen(decor));
+    }
+
+    /** 单次强制：清整链 padding + 把 WebView 压成满幅零边距。有改动才 requestLayout。 */
+    private static void enforceWebViewFullscreen(View decor) {
+        if (decor == null) {
+            return;
+        }
+        WebView webView = findWebView(decor);
+        if (webView == null) {
+            return;
+        }
+        boolean changed = false;
+        for (View node = webView; node != null; ) {
+            if (node.getPaddingLeft() != 0
+                || node.getPaddingTop() != 0
+                || node.getPaddingRight() != 0
+                || node.getPaddingBottom() != 0) {
+                node.setPadding(0, 0, 0, 0);
+                changed = true;
+            }
+            node = node.getParent() instanceof View ? (View) node.getParent() : null;
+        }
+        ViewGroup.LayoutParams params = webView.getLayoutParams();
+        if (params instanceof ViewGroup.MarginLayoutParams) {
+            ViewGroup.MarginLayoutParams marginParams = (ViewGroup.MarginLayoutParams) params;
+            if (marginParams.leftMargin != 0
+                || marginParams.topMargin != 0
+                || marginParams.rightMargin != 0
+                || marginParams.bottomMargin != 0) {
+                marginParams.setMargins(0, 0, 0, 0);
+                changed = true;
+            }
+        }
+        if (params.width != ViewGroup.LayoutParams.MATCH_PARENT
+            || params.height != ViewGroup.LayoutParams.MATCH_PARENT) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            changed = true;
+        }
+        if (changed) {
+            webView.requestLayout();
+        }
     }
 
     /**
