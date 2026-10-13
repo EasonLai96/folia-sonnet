@@ -912,6 +912,18 @@ html[data-runtime='capacitor-android'] [data-folia-artistgrid-header='true'] {
 /* 播放页歌词里的曲目信息（歌手 / 曲名 / 专辑）用 nudge：Monet 那块在 `justify-center`
  * 的列里，加内外边距只挪一半（居中算的是含边距的整个盒子），`relative; top` 才是整份位移。 */
 
+/* 两面墙右下角那排工具（Lattice / bravais 共用 components/wall/WallToolsButton）。
+ *
+ * 它是从**底部**往上排的（.lattice-tools-stack `bottom: 64px` + column-reverse），但向上能长到
+ * `calc(100vh - 底距 - 64px - var(--wall-tools-top-reserve))` —— 顶上让出的那 48px 是给
+ * **Electron 自绘标题栏**（h-8 = 32px + 16px 间距）留的。安卓没有标题栏，于是队列浮岛一开，
+ * 它的头部（「队列」那行字 + 存为歌单 / 清空两颗按钮）正好顶进摄像头区域 —— 两面墙都中。
+ *
+ * 所以安卓上把这份预留补上安全区：浮岛长到那么高时头部就停在系统栏下面。 */
+html[data-runtime='capacitor-android'] .lattice-tools {
+  --wall-tools-top-reserve: calc(48px + var(--folia-safe-area-top, 0px));
+}
+
 /* 两面墙（Lattice 队列拼贴 / bravais 资料库墙）左上角那颗返回：两墙共用同一个按钮
  * （components/wall/WallBackButton，`.lattice-back`，absolute top:20px left:24px）。
  * 它是墙上唯一常驻的顶部控件，也是最容易顶进挖孔的那一颗。 */
