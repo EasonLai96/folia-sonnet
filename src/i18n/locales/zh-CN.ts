@@ -2005,7 +2005,7 @@ export default {
     "floatingLyricsWindow": "悬浮歌词小窗",
     "floatingLyricsReset": "重置",
     "floatingLyricsResetDone": "已重置",
-    "floatingLyricsResetDesc": "把它拖到角落、或者缩到最小又上了锁之后，用它恢复到默认的位置和大小。",
+    "floatingLyricsResetDesc": "把它拖到角落、或者缩到最小又上了锁之后，用它恢复到默认的位置和大小。锁定后整层触摸会穿透，只有右上角那颗锁还能点。",
     "lyricsWallpaperOverlay": "画质叠层（实验）",
     "lyricsWallpaperOverlayDesc": "在壁纸之上叠一层页面，直接跑播放页同一套可视化。需要「显示在其他应用上层」权限，未授权时壁纸会退回原生渲染。",
     "lyricsWallpaperOverlayGrant": "去授权",

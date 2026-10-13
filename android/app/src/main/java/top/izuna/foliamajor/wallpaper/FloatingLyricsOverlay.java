@@ -59,6 +59,13 @@ public final class FloatingLyricsOverlay {
     private static final int MIN_HEIGHT_DP = 58;
     private static final int MAX_WIDTH_DP = 460;
     private static final int MAX_HEIGHT_DP = 260;
+    /**
+     * 锁定后那颗解锁按钮的边长（dp）。
+     *
+     * 必须正好是 26：主窗把锁画在 `(宽 - 13dp, 13dp)`，只有以那一点为心的 26dp 方框
+     * 才能严丝合缝盖住它 —— 大了会多吃掉一块触摸区，小了点不准。
+     */
+    private static final int LOCK_CHIP_DP = 26;
     /** 纯音乐要唱过这么久才认定「确实没歌词」，与叠层同一个数。 */
     private static final long INSTRUMENTAL_CONFIRM_MS = 4000L;
     /** 最后一句唱完再留这么久才收窗：片尾那段没有歌词，立刻收会显得突兀。 */
@@ -81,6 +88,10 @@ public final class FloatingLyricsOverlay {
     private LyricsFloatView view = null;
     private WindowManager.LayoutParams params = null;
     private volatile boolean added = false;
+    /** 锁定后单独挂的那颗解锁按钮（另一个窗口，见 syncLockChip）。 */
+    private LockChipView chipView = null;
+    private WindowManager.LayoutParams chipParams = null;
+    private boolean chipAdded = false;
     private boolean appForeground = false;
     private volatile boolean screenOn = true;
     private boolean receiverRegistered = false;
@@ -146,6 +157,10 @@ public final class FloatingLyricsOverlay {
                     WindowManager.LayoutParams fresh = buildParams();
                     applyLayout(fresh.x, fresh.y, fresh.width, fresh.height);
                 }
+                // 锁也一起解了：buildParams 只按「现在锁不锁」决定 FLAG_NOT_TOUCHABLE，
+                // 所以这里要单独把那个标记清掉，否则重置完小窗还是点不动。
+                syncLockTouchable();
+                syncLockChip();
                 if (view != null) view.invalidate();
             }
         });
@@ -268,6 +283,8 @@ public final class FloatingLyricsOverlay {
             params = buildParams();
             windowManager.addView(view, params);
             added = true;
+            // 上过锁的话还得把那颗解锁按钮单独挂起来（主窗已经整体不吃触摸了）。
+            syncLockChip();
         } catch (Throwable error) {
             Log.w(TAG, "attach floating lyrics failed", error);
             view = null;
@@ -276,6 +293,7 @@ public final class FloatingLyricsOverlay {
     }
 
     private void detach() {
+        detachLockChip();
         if (!added || view == null) return;
         // 视图自己排的下一帧不能留着：窗口已经摘了，那条 Runnable 还会把 view 拽着不让它回收。
         handler.removeCallbacks(view.frameTask);
@@ -286,6 +304,102 @@ public final class FloatingLyricsOverlay {
         }
         view = null;
         added = false;
+    }
+
+    // ------------------------------------------------------------------
+    // 锁定后的触摸：整层穿透，只有右上角那颗锁还能点
+    // ------------------------------------------------------------------
+
+    /**
+     * 锁定时把主窗设成 `FLAG_NOT_TOUCHABLE`。
+     *
+     * 这是唯一能让触摸**真的穿过去**的办法 —— `onTouchEvent` 返回 false 不管用：
+     * 输入分发是**先按窗口挑一层**的，挑中了我们这一层，事件就落在这一层里，
+     * 我们不处理它就只是丢掉，不会退给底下那一层（NOT_TOUCH_MODAL 只管窗口**外面**）。
+     * 而 FLAG_NOT_TOUCHABLE 是整窗生效，所以那颗解锁按钮必须另开一个小窗口来接。
+     */
+    private void syncLockTouchable() {
+        if (params == null || !added) return;
+        if (isLocked()) {
+            params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        } else {
+            params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
+        applyLayout(params.x, params.y, params.width, params.height);
+    }
+
+    /**
+     * 锁定后挂的那颗解锁按钮：**单独一个窗口**，只有右上角 26dp 见方那么大。
+     *
+     * 它**什么都不画** —— 锁那个图标是主窗画的（位置严丝合缝：主窗画在
+     * `宽 - 13dp, 13dp`，这一块正好是以那一点为心的 26dp 方框），
+     * 自己再画一遍就是两个半透明圆叠一起，颜色会变深。它的全部作用就是接触摸。
+     */
+    private void syncLockChip() {
+        if (!added || view == null || !isLocked()) {
+            detachLockChip();
+            return;
+        }
+        if (chipAdded && chipView != null) {
+            positionLockChip();
+            return;
+        }
+        try {
+            chipView = new LockChipView(context);
+            chipParams = buildChipParams();
+            windowManager.addView(chipView, chipParams);
+            chipAdded = true;
+        } catch (Throwable error) {
+            Log.w(TAG, "attach lock chip failed", error);
+            chipView = null;
+            chipAdded = false;
+        }
+    }
+
+    private WindowManager.LayoutParams buildChipParams() {
+        float density = context.getResources().getDisplayMetrics().density;
+        int size = Math.round(LOCK_CHIP_DP * density);
+        int x = params == null ? 0 : params.x + params.width - size;
+        int y = params == null ? 0 : params.y;
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                size, size, x, y, windowType(),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                android.graphics.PixelFormat.TRANSPARENT);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+        return lp;
+    }
+
+    /** 主窗挪过之后要跟着走：这一块是照着主窗右上角算出来的绝对坐标。 */
+    private void positionLockChip() {
+        if (!chipAdded || chipView == null || chipParams == null || params == null) return;
+        int x = params.x + params.width - chipParams.width;
+        int y = params.y;
+        if (x == chipParams.x && y == chipParams.y) return;
+        chipParams.x = x;
+        chipParams.y = y;
+        try {
+            windowManager.updateViewLayout(chipView, chipParams);
+        } catch (Throwable error) {
+            Log.w(TAG, "move lock chip failed", error);
+        }
+    }
+
+    private void detachLockChip() {
+        if (!chipAdded || chipView == null) return;
+        try {
+            windowManager.removeView(chipView);
+        } catch (Throwable error) {
+            Log.w(TAG, "detach lock chip failed", error);
+        }
+        chipView = null;
+        chipParams = null;
+        chipAdded = false;
     }
 
     private int windowType() {
@@ -318,11 +432,15 @@ public final class FloatingLyricsOverlay {
         x = clampInt(x, 0, Math.max(0, screenW - width));
         y = clampInt(y, 0, Math.max(0, screenH - height));
 
+        int flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        // 上着锁的话整层不收触摸：让手指直接落到下面的桌面 / 应用上（见 syncLockTouchable）。
+        if (isLocked()) {
+            flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                width, height, x, y, windowType(),
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                width, height, x, y, windowType(), flags,
                 android.graphics.PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.LEFT;
         // 让这一层不吃掉窗口 inset：它自己按存的坐标摆，系统栏那一条由用户拖出来的位置决定。
@@ -344,6 +462,7 @@ public final class FloatingLyricsOverlay {
         } catch (Throwable error) {
             Log.w(TAG, "update floating lyrics layout failed", error);
         }
+        positionLockChip();
     }
 
     private void persistLayout() {
@@ -363,6 +482,9 @@ public final class FloatingLyricsOverlay {
     private void setLocked(boolean locked) {
         prefs.edit().putBoolean(KEY_LOCKED, locked).apply();
         if (view != null) view.invalidate();
+        // 顺序有讲究：先把主窗的触摸开关翻过来，再决定那颗解锁按钮挂不挂。
+        syncLockTouchable();
+        syncLockChip();
     }
 
     /** 点一下进应用。用 REORDER_TO_FRONT：已经在后台就把它叫回来，不新起一个实例。 */
@@ -701,10 +823,13 @@ public final class FloatingLyricsOverlay {
             float cx = width - dp(13);
             float cy = dp(13);
             float r = dp(9);
-            controlPaint.setColor(withAlpha(baseColor, 0.72f * appear));
+            // 锁着的时候这颗锁是**唯一**还能点的地方（整层都穿透了），
+            // 所以画得实一点 —— 否则用户只看到一块半透明歌词，根本不知道该点哪儿解锁。
+            float lockAlpha = isLocked() ? 0.92f : 0.72f;
+            controlPaint.setColor(withAlpha(baseColor, lockAlpha * appear));
             canvas.drawCircle(cx, cy, r, controlPaint);
             controlPaint.setStyle(Paint.Style.STROKE);
-            controlPaint.setColor(withAlpha(primaryColor, 0.72f * appear));
+            controlPaint.setColor(withAlpha(primaryColor, lockAlpha * appear));
             // 锁体
             float bodyW = dp(7);
             float bodyH = dp(5.5f);
@@ -817,6 +942,42 @@ public final class FloatingLyricsOverlay {
             int x = clampInt(params.x, 0, Math.max(0, screenW - width));
             int y = clampInt(params.y, 0, Math.max(0, screenH - height));
             applyLayout(x, y, width, height);
+        }
+    }
+
+    /**
+     * 锁定后那颗解锁按钮所在的小窗口。
+     *
+     * 它**什么都不画**（见 syncLockChip 里为什么），存在的全部意义是在主窗已经
+     * `FLAG_NOT_TOUCHABLE` 的情况下，把右上角那一小块接触摸收下来 —— 于是
+     * 「锁定 = 整层穿透，只有解锁按钮能点」这两件事能同时成立。
+     */
+    private final class LockChipView extends View {
+
+        LockChipView(Context ctx) {
+            super(ctx);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            // 故意不画：锁那个图标是主窗画的，再画一遍两个半透明圆会叠深。
+            super.onDraw(canvas);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (event == null) return false;
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                // 延后一拍再解锁：解锁要把自己这个窗口摘掉，
+                // 在触摸派发的中途 removeView 容易撞上「正在派发的窗口没了」。
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        setLocked(false);
+                    }
+                });
+            }
+            return true;
         }
     }
 

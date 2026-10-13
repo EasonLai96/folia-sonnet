@@ -2006,7 +2006,7 @@ export default {
     "floatingLyricsWindow": "Floating lyric window",
     "floatingLyricsReset": "Reset",
     "floatingLyricsResetDone": "Reset",
-    "floatingLyricsResetDesc": "Use it when the window ended up in a corner, or was shrunk to the minimum and locked.",
+    "floatingLyricsResetDesc": "Use it when the window ended up in a corner, or was shrunk to the minimum and locked. Once locked, touches pass straight through — only the padlock in the top-right corner still responds.",
     "lyricsWallpaperOverlay": "Visualizer overlay (experimental)",
     "lyricsWallpaperOverlayDesc": "Draws a page on top of the wallpaper that runs the exact same visualizer as the player. Requires the \"display over other apps\" permission; without it the wallpaper falls back to native rendering.",
     "lyricsWallpaperOverlayGrant": "Grant",

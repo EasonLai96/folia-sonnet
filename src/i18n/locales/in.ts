@@ -1998,7 +1998,7 @@ export default {
     "floatingLyricsWindow": "Jendela lirik melayang",
     "floatingLyricsReset": "Setel ulang",
     "floatingLyricsResetDone": "Disetel ulang",
-    "floatingLyricsResetDesc": "Pakai ini kalau jendelanya terdorong ke pojok, atau mengecil lalu terkunci.",
+    "floatingLyricsResetDesc": "Pakai ini kalau jendelanya terdorong ke pojok, atau mengecil lalu terkunci. Saat terkunci, sentuhan tembus ke bawahnya — hanya ikon gembok di pojok kanan atas yang masih merespons.",
     "lyricsWallpaperOverlay": "Lapisan visualizer (eksperimental)",
     "lyricsWallpaperOverlayDesc": "Menampilkan lapisan di atas wallpaper yang menjalankan visualizer yang sama persis dengan pemutar. Butuh izin \"tampil di atas aplikasi lain\"; tanpa izin itu wallpaper kembali ke rendering native.",
     "lyricsWallpaperOverlayGrant": "Beri izin",
