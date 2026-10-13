@@ -2003,6 +2003,8 @@ export default {
     "lyricsWallpaperStyleFollow": "跟随播放页",
     "lyricsWallpaperStyleMinimalDesc": "精简用安静的背景和平实的歌词动画；退出应用后桌面上会挂一颗可以拖动、改大小、上锁的悬浮歌词小窗（点一下回应用）。需要「显示在其他应用上层」权限。",
     "floatingLyricsWindow": "悬浮歌词小窗",
+    "floatingLyricsOpacity": "小窗底色不透明度",
+    "floatingLyricsOpacityDesc": "那颗悬浮歌词小窗底色的浓淡。调低让它更贴近桌面，调高让两行字更清楚。描边不会跟着一起淡到底，不然小窗就找不着了。",
     "floatingLyricsReset": "重置",
     "floatingLyricsResetDone": "已重置",
     "floatingLyricsResetDesc": "把它拖到角落、或者缩到最小又上了锁之后，用它恢复到默认的位置和大小。锁定后整层触摸会穿透，只有右上角那颗锁还能点。",

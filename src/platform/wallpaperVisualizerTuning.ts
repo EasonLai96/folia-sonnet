@@ -76,6 +76,13 @@ export const WALLPAPER_GLOBAL_KEYS = {
     geometricDisabled: 'wp.geometricDisabled',
     /** 叠层整体窗口的不透明度。 */
     overlayOpacity: 'wp.overlayOpacity',
+    /**
+     * 「精简」样式那颗悬浮歌词小窗的底色不透明度。
+     *
+     * 单独一个 key：小窗是另一层系统窗口，底色浓淡跟壁纸背景（backgroundOpacity）
+     * 和跟随样式那层 WebView 叠层（overlayOpacity）都无关，共用只会两头对不上。
+     */
+    floatingBackgroundOpacity: 'wp.floatingBackgroundOpacity',
     /** 叠层总开关。关掉就一层都不挂。 */
     overlayEnabled: 'wp.overlayEnabled',
     /** 音乐锁屏：锁屏之上也挂叠层。 */
@@ -127,6 +134,10 @@ export const withGlobalSettings = (
     const overlayOpacity = settings.wallpaperOverlayOpacity;
     if (typeof overlayOpacity === 'number' && Number.isFinite(overlayOpacity)) {
         out[WALLPAPER_GLOBAL_KEYS.overlayOpacity] = overlayOpacity;
+    }
+    const floatingOpacity = settings.wallpaperFloatingOpacity;
+    if (typeof floatingOpacity === 'number' && Number.isFinite(floatingOpacity)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingBackgroundOpacity] = floatingOpacity;
     }
     out[WALLPAPER_GLOBAL_KEYS.overlayEnabled] = settings.wallpaperOverlayEnabled === false ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.showOnLockScreen] = settings.wallpaperOverlayLockScreen ? 1 : 0;

@@ -70,6 +70,8 @@ public final class FloatingLyricsOverlay {
     private static final long INSTRUMENTAL_CONFIRM_MS = 4000L;
     /** 最后一句唱完再留这么久才收窗：片尾那段没有歌词，立刻收会显得突兀。 */
     private static final long LYRICS_END_GRACE_MS = 4000L;
+    /** 小窗底色的默认浓度。滑条没推过来时用它（与 store 里那个缺省值同一个数）。 */
+    private static final float DEFAULT_BACKGROUND_OPACITY = 0.62f;
 
     private static volatile FloatingLyricsOverlay instance;
 
@@ -506,6 +508,18 @@ public final class FloatingLyricsOverlay {
         return value == null ? fallback : value >= 0.5f;
     }
 
+    /** 读一个 wp. 开头的数值开关，缺了就用 fallback。 */
+    private static float tuningFloat(String key, float fallback) {
+        java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
+        Float value = tuning == null ? null : tuning.get(key);
+        if (value == null || !Float.isFinite(value)) return fallback;
+        return clamp(value, 0.05f, 1f);
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private static int clampInt(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -733,13 +747,22 @@ public final class FloatingLyricsOverlay {
         private void drawBackground(Canvas canvas, int width, int height, float appear) {
             float radius = dp(14);
             frame.set(0f, 0f, width, height);
+            /*
+             * 底色浓度是设置里那根「简易 · 背景不透明度」滑条（wp.floatingBackgroundOpacity）。
+             *
+             * 每帧现读而不是缓存：tuning 是应用随时推下来的，而这一层的 Snapshot.stamp
+             * 只在换了歌 / 换了外观时才变 —— 缓存住的话，用户拖动滑条要等下一首歌才看到效果。
+             * 一次 HashMap.get 而已，30fps 下可以忽略。
+             */
+            float opacity = tuningFloat("wp.floatingBackgroundOpacity", DEFAULT_BACKGROUND_OPACITY);
             backgroundPaint.setStyle(Paint.Style.FILL);
-            backgroundPaint.setColor(withAlpha(baseColor, 0.62f * appear));
+            backgroundPaint.setColor(withAlpha(baseColor, opacity * appear));
             canvas.drawRoundRect(frame, radius, radius, backgroundPaint);
 
+            // 描边**不跟着一起淡到底**：底色调到很淡时，没有这条边小窗就彻底找不着了。
             borderPaint.setStyle(Paint.Style.STROKE);
             borderPaint.setStrokeWidth(Math.max(1f, dp(1)));
-            borderPaint.setColor(withAlpha(accentColor, 0.26f * appear));
+            borderPaint.setColor(withAlpha(accentColor, (0.14f + 0.22f * opacity) * appear));
             canvas.drawRoundRect(frame, radius, radius, borderPaint);
         }
 

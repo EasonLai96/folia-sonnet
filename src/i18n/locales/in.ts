@@ -1996,6 +1996,8 @@ export default {
     "lyricsWallpaperStyleFollow": "Ikuti pemutar",
     "lyricsWallpaperStyleMinimalDesc": "Sederhana memakai latar tenang dengan animasi lirik polos. Setelah keluar dari aplikasi, jendela lirik melayang kecil muncul di layar utama: bisa digeser, diubah ukurannya, dikunci, atau diketuk untuk kembali. Butuh izin tampil di atas aplikasi lain.",
     "floatingLyricsWindow": "Jendela lirik melayang",
+    "floatingLyricsOpacity": "Opasitas latar jendela",
+    "floatingLyricsOpacityDesc": "Seberapa pekat latar jendela lirik melayang. Turunkan agar menyatu dengan layar utama, naikkan agar dua barisnya lebih jelas. Garis tepinya tidak ikut memudar sampai hilang, supaya jendelanya tetap terlihat.",
     "floatingLyricsReset": "Setel ulang",
     "floatingLyricsResetDone": "Disetel ulang",
     "floatingLyricsResetDesc": "Pakai ini kalau jendelanya terdorong ke pojok, atau mengecil lalu terkunci. Saat terkunci, sentuhan tembus ke bawahnya — hanya ikon gembok di pojok kanan atas yang masih merespons.",

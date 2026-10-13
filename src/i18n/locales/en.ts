@@ -2004,6 +2004,8 @@ export default {
     "lyricsWallpaperStyleFollow": "Follow player",
     "lyricsWallpaperStyleMinimalDesc": "Minimal keeps a calm background with plain lyric animation. Once you leave the app, a small floating lyric window appears on the home screen: drag it, resize it, lock it, or tap it to come back. It needs the draw-over-other-apps permission.",
     "floatingLyricsWindow": "Floating lyric window",
+    "floatingLyricsOpacity": "Window background opacity",
+    "floatingLyricsOpacityDesc": "How solid the floating window background is. Lower it to blend into the home screen, raise it to make the two lines easier to read. The border never fades out completely, so the window stays findable.",
     "floatingLyricsReset": "Reset",
     "floatingLyricsResetDone": "Reset",
     "floatingLyricsResetDesc": "Use it when the window ended up in a corner, or was shrunk to the minimum and locked. Once locked, touches pass straight through — only the padlock in the top-right corner still responds.",

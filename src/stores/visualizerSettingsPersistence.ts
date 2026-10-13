@@ -47,6 +47,28 @@ export const readStoredWallpaperOverlayOpacity = () => {
 };
 
 /**
+ * 「精简」样式那颗悬浮歌词小窗的底色不透明度。
+ *
+ * 单独一份，不复用 `backgroundOpacity`（那是壁纸背景的）也不复用
+ * `wallpaperOverlayOpacity`（那是跟随样式那层 WebView 叠层的）：
+ * 小窗是**另一层窗口**，它的底色浓淡跟壁纸那头的观感完全无关，
+ * 跟着壁纸那个滑条一起动只会让人两头都对不上。
+ *
+ * 缺省 0.62：两行字压在桌面上要看得清，但又不能糊住后面的图标。
+ */
+export const WALLPAPER_FLOATING_OPACITY_STORAGE_KEY = 'folia.wallpaperFloatingOpacity';
+
+export const readStoredWallpaperFloatingOpacity = () => {
+    if (typeof window === 'undefined') {
+        return 0.62;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_OPACITY_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 0.62;
+    // 下限 0.05：完全透明 = 一块看不见的窗口，用户只会以为功能没生效。
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0.05, parsed)) : 0.62;
+};
+
+/**
  * 叠层总开关。
  *
  * 关掉之后一层都不挂（原生那层歌词照旧）。它同时也是「叠层由应用进程托管」的开关 ——

@@ -125,6 +125,9 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     const onToggleWallpaperOverlayLockScreenOnly = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayLockScreenOnly);
     const wallpaperOverlayOpacity = useVisualizerSettingsStore(state => state.wallpaperOverlayOpacity);
     const onSetWallpaperOverlayOpacity = useVisualizerSettingsStore(state => state.handleSetWallpaperOverlayOpacity);
+    // 「精简」样式那颗悬浮歌词小窗的底色浓度。单独一根滑条，不复用叠层那根。
+    const wallpaperFloatingOpacity = useVisualizerSettingsStore(state => state.wallpaperFloatingOpacity);
+    const onSetWallpaperFloatingOpacity = useVisualizerSettingsStore(state => state.handleSetWallpaperFloatingOpacity);
     const wallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.wallpaperOverlayAllApps);
     const onToggleWallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayAllApps);
     const wallpaperOverlayHideNativeLyrics = useVisualizerSettingsStore(state => state.wallpaperOverlayHideNativeLyrics);
@@ -491,23 +494,50 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                         {/* 精简模式下歌词是那颗可以拖的小窗，拖到角落 / 缩到最小又上了锁之后
                             光靠手势弄不回来，所以这里给一颗「重置」当出口。 */}
                         {lyricsWallpaperStyle === 'minimal' && (
-                            <SettingsRow
-                                title={t('options.floatingLyricsWindow')}
-                                description={t('options.floatingLyricsResetDesc')}
-                                dividerClass={dividerClass}
-                                control={(
-                                    <button
-                                        type="button"
-                                        onClick={handleResetFloatingLyricsWindow}
-                                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                        style={{ color: 'var(--text-primary)' }}
-                                    >
-                                        {floatingResetDone
-                                            ? t('options.floatingLyricsResetDone')
-                                            : t('options.floatingLyricsReset')}
-                                    </button>
-                                )}
-                            />
+                            <>
+                                {/* 小窗的底色浓度。单独一根：它是另一层系统窗口，
+                                    跟壁纸背景那根、叠层那根都无关。 */}
+                                <SettingsRow
+                                    title={t('options.floatingLyricsOpacity')}
+                                    description={t('options.floatingLyricsOpacityDesc')}
+                                    dividerClass={dividerClass}
+                                    control={(
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="range"
+                                                min={5}
+                                                max={100}
+                                                step={5}
+                                                value={Math.round(wallpaperFloatingOpacity * 100)}
+                                                onChange={(event) => onSetWallpaperFloatingOpacity(Number(event.target.value) / 100)}
+                                                className="h-1 w-28 cursor-pointer accent-white"
+                                            />
+                                            <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                {Math.round(wallpaperFloatingOpacity * 100)}%
+                                            </span>
+                                        </div>
+                                    )}
+                                />
+                                {/* 拖到角落 / 缩到最小又上了锁之后光靠手势弄不回来，
+                                    所以这里给一颗「重置」当出口。 */}
+                                <SettingsRow
+                                    title={t('options.floatingLyricsWindow')}
+                                    description={t('options.floatingLyricsResetDesc')}
+                                    dividerClass={dividerClass}
+                                    control={(
+                                        <button
+                                            type="button"
+                                            onClick={handleResetFloatingLyricsWindow}
+                                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
+                                            style={{ color: 'var(--text-primary)' }}
+                                        >
+                                            {floatingResetDone
+                                                ? t('options.floatingLyricsResetDone')
+                                                : t('options.floatingLyricsReset')}
+                                        </button>
+                                    )}
+                                />
+                            </>
                         )}
                         {/* 可视化叠层要 SYSTEM_ALERT_WINDOW；没授权时它静默不工作，
                             用户只会看到「壁纸跟以前一样」，所以这里必须给明确入口。 */}
