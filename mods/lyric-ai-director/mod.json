@@ -1,0 +1,12 @@
+{
+  "folium": 1,
+  "id": "lyric-ai-director",
+  "name": "AI 歌词动画导演",
+  "version": "2.0.0",
+  "author": "duoduo1232",
+  "description": "为每首歌挑选歌词动画模式并微调其参数，模式取自播放器当前可用的模式列表。接口地址、模型与密钥都来自宿主的「设置 → AI」（folium.ai），模组自己不再持有密钥。每首歌会记住自己的选择，再次播放直接复用；当前歌播完后还会趁下一首还没播放提前做好准备，切歌瞬间就套用，开头不再沿用上一首的动画。",
+  "client": "client.mjs",
+  "preview": "preview.jpg",
+  "permissions": ["filesystem.data", "ai.request"],
+  "folia": ">=0.7.0 <0.8.0"
+}

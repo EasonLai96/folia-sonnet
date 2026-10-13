@@ -1,5 +1,52 @@
 // Shared OpenAI-compatible endpoint detection and bounded request-shape negotiation.
 
+const DEFAULT_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
+const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
+
+/**
+ * The chat-completions URL for whatever the user typed: a bare origin, a
+ * `/v1`, a `/v1beta`, or the endpoint itself all land on `/chat/completions`.
+ * The `/v\d+` test is what keeps Azure-style and proxied gateways working.
+ */
+export const normalizeChatCompletionsUrl = (rawUrl) => {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) return DEFAULT_CHAT_COMPLETIONS_URL;
+  try {
+    const parsed = new URL(trimmed);
+    const path = parsed.pathname.replace(/\/+$/, '');
+    if (!path || path === '/') {
+      parsed.pathname = '/v1/chat/completions';
+      return parsed.toString();
+    }
+    if (/\/v\d+$/.test(path)) {
+      parsed.pathname = `${path}/chat/completions`;
+      return parsed.toString();
+    }
+    parsed.pathname = path;
+    return parsed.toString();
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
+};
+
+/**
+ * The model for an endpoint: whatever the user configured, else a default the
+ * endpoint is known to answer to. Guessing a "best" model from an unknown host
+ * cannot work, so only DeepSeek gets special treatment.
+ */
+export const resolveOpenAICompatibleModel = (apiUrl, configuredModel) => {
+  const trimmed = typeof configuredModel === 'string' ? configuredModel.trim() : '';
+  if (trimmed) return trimmed;
+  try {
+    const hostname = new URL(apiUrl).hostname.toLowerCase();
+    if (hostname === 'api.deepseek.com' || hostname.endsWith('.deepseek.com')) return DEEPSEEK_DEFAULT_MODEL;
+  } catch {
+    // Unparseable URL: fall through to the generic default.
+  }
+  return DEFAULT_MODEL;
+};
+
 const capabilityCache = new Map();
 
 const getCapabilities = (apiUrl, model) => {

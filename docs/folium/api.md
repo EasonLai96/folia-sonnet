@@ -2,7 +2,7 @@
 
 # Folium API 参考
 
-当前契约版本：**Folium 1.4**（运行时用 `folium.host.folium.minor` 做功能探测）。
+当前契约版本：**Folium 1.5**（运行时用 `folium.host.folium.minor` 做功能探测）。
 
 本文列出模组能用到的全部公开类型，内容直接来自契约文件 [`src/mods/folium/contract.ts`](../../src/mods/folium/contract.ts)，
 成员说明保留契约里的原文注释。平台规则（清单、权限、生命周期、安全模型）见 [Folium 规范](../../mods/README.md)，
@@ -14,7 +14,7 @@
 - **注册表与条目**：[FoliumVisualizerDef](#foliumvisualizerdef) · [FoliumTuningDef](#foliumtuningdef) · [FoliumCommandContext](#foliumcommandcontext) · [FoliumCommandDef](#foliumcommanddef) · [FoliumBackgroundContext](#foliumbackgroundcontext) · [FoliumBackgroundDef](#foliumbackgrounddef) · [FoliumStageSlot](#foliumstageslot) · [FoliumStageLayerDef](#foliumstagelayerdef) · [FoliumSettingsSectionDef](#foliumsettingssectiondef) · [FoliumPlayerPanelTabDef](#foliumplayerpaneltabdef) · [FoliumProgressContext](#foliumprogresscontext) · [FoliumControlSlot](#foliumcontrolslot) · [FoliumControlButtonDef](#foliumcontrolbuttondef) · [FoliumProgressLayerDef](#foliumprogresslayerdef) · [FoliumStyleDef](#foliumstyledef) · [FoliumRegistryHandle](#foliumregistryhandle) · [FoliumSettingsSectionHandle](#foliumsettingssectionhandle) · [FoliumRegistry](#foliumregistry) · [FoliumRegistries](#foliumregistries)
 - **宿主容器与上下文**：[FoliumMount](#foliummount) · [FoliumPanelContext](#foliumpanelcontext) · [FoliumSettingsPanelContext](#foliumsettingspanelcontext) · [FoliumClock](#foliumclock) · [FoliumSurface](#foliumsurface) · [FoliumAudioBands](#foliumaudiobands) · [FoliumAudio](#foliumaudio) · [FoliumDisplay](#foliumdisplay) · [FoliumStageContext](#foliumstagecontext)
 - **事件**：[FoliumEventPriority](#foliumeventpriority) · [FoliumNotificationEvents](#foliumnotificationevents) · [FoliumLyricsTransformEvent](#foliumlyricstransformevent) · [FoliumBeforePlayEvent](#foliumbeforeplayevent) · [FoliumOmniLyricsEvent](#foliumomnilyricsevent) · [FoliumOmniAudioEvent](#foliumomniaudioevent) · [FoliumHookEvents](#foliumhookevents) · [FoliumEventMap](#foliumeventmap) · [FoliumEvents](#foliumevents)
-- **服务**：[FoliumPlaybackService](#foliumplaybackservice) · [FoliumFileHandle](#foliumfilehandle) · [FoliumIconOptions](#foliumiconoptions) · [FoliumUiService](#foliumuiservice) · [FoliumFetchInit](#foliumfetchinit) · [FoliumFetchResponse](#foliumfetchresponse) · [FoliumNetService](#foliumnetservice)
+- **服务**：[FoliumPlaybackService](#foliumplaybackservice) · [FoliumFileHandle](#foliumfilehandle) · [FoliumIconOptions](#foliumiconoptions) · [FoliumUiService](#foliumuiservice) · [FoliumFetchInit](#foliumfetchinit) · [FoliumFetchResponse](#foliumfetchresponse) · [FoliumNetService](#foliumnetservice) · [FoliumAiTarget](#foliumaitarget) · [FoliumAiCompletionRequest](#foliumaicompletionrequest) · [FoliumAiCompletionResult](#foliumaicompletionresult) · [FoliumAiService](#foliumaiservice)
 - **共享工具**：[FoliumWordSegment](#foliumwordsegment) · [FoliumWordColorRange](#foliumwordcolorrange) · [FoliumLyricsHelpers](#foliumlyricshelpers) · [FoliumThemeHelpers](#foliumthemehelpers)
 - **参数 schema**：[FoliumParamType](#foliumparamtype) · [FoliumParamOption](#foliumparamoption) · [FoliumParam](#foliumparam) · [FoliumParamValues](#foliumparamvalues) · [FoliumParamAccess](#foliumparamaccess)
 - **数据结构**：[FoliumLyricRuby](#foliumlyricruby) · [FoliumLyricSyllable](#foliumlyricsyllable) · [FoliumLyricAlternateText](#foliumlyricalternatetext) · [FoliumWord](#foliumword) · [FoliumBackgroundVocal](#foliumbackgroundvocal) · [FoliumLineTimingClass](#foliumlinetimingclass) · [FoliumLineTransitionMode](#foliumlinetransitionmode) · [FoliumWordRevealMode](#foliumwordrevealmode) · [FoliumLineRenderHints](#foliumlinerenderhints) · [FoliumLine](#foliumline) · [FoliumTheme](#foliumtheme) · [FoliumSong](#foliumsong) · [FoliumPlaybackState](#foliumplaybackstate) · [FoliumPlaybackSnapshot](#foliumplaybacksnapshot) · [FoliumLyricFormat](#foliumlyricformat) · [FoliumLyricsTrack](#foliumlyricstrack) · [FoliumLyricsResult](#foliumlyricsresult) · [FoliumLegacyLyricsResult](#foliumlegacylyricsresult) · [FoliumParsedLyrics](#foliumparsedlyrics)
@@ -89,6 +89,7 @@ The object a client entry's `activate(folium)` receives.
 | `readonly playback` | `FoliumPlaybackService` | Playback state and control. |
 | `readonly ui` | `FoliumUiService` | Toasts, panels, files, embeds, icons. |
 | `readonly net` | `FoliumNetService` | Network access through the host. |
+| `readonly ai` | `FoliumAiService` | Folium 1.5: the host's AI connection, as configured in its own AI settings. |
 | `readonly storage` | `FoliumStorage` | This mod's data file. |
 | `readonly rpc` | `FoliumRpc` | Calls into this mod's main entry. |
 | `readonly lyrics` | `FoliumLyricsHelpers` | Folium 1.3. |
@@ -96,7 +97,7 @@ The object a client entry's `activate(folium)` receives.
 | `readonly experimental` | `Readonly<Record<string, unknown>>` | Unfrozen surfaces; each requires the matching manifest `experimental` opt-in. |
 | `readonly internals` | `Readonly<Record<string, unknown>>` | Host internals with no compatibility promise. Only available when the manifest pins host versions with `"folia"`; otherwise accessing it throws. |
 
-相关：[FoliumHostInfo](#foliumhostinfo) · [FoliumContextKind](#foliumcontextkind) · [FoliumLogger](#foliumlogger) · [FoliumRegistries](#foliumregistries) · [FoliumEvents](#foliumevents) · [FoliumPlaybackService](#foliumplaybackservice) · [FoliumUiService](#foliumuiservice) · [FoliumNetService](#foliumnetservice) · [FoliumStorage](#foliumstorage) · [FoliumRpc](#foliumrpc) · [FoliumLyricsHelpers](#foliumlyricshelpers) · [FoliumThemeHelpers](#foliumthemehelpers)
+相关：[FoliumHostInfo](#foliumhostinfo) · [FoliumContextKind](#foliumcontextkind) · [FoliumLogger](#foliumlogger) · [FoliumRegistries](#foliumregistries) · [FoliumEvents](#foliumevents) · [FoliumPlaybackService](#foliumplaybackservice) · [FoliumUiService](#foliumuiservice) · [FoliumNetService](#foliumnetservice) · [FoliumAiService](#foliumaiservice) · [FoliumStorage](#foliumstorage) · [FoliumRpc](#foliumrpc) · [FoliumLyricsHelpers](#foliumlyricshelpers) · [FoliumThemeHelpers](#foliumthemehelpers)
 
 ### FoliumClientModule
 
@@ -642,7 +643,7 @@ The event bus, as `folium.events`.
 
 ## 服务
 
-`folium.playback` / `folium.ui` / `folium.net`。标注需要权限的方法未在 `mod.json` 声明对应权限时抛 `permission-denied:<权限>`；导出窗口里调用会抛 `*-unavailable-in-export-context`（`ui.icon` 除外）。
+`folium.playback` / `folium.ui` / `folium.net` / `folium.ai`（1.5）。标注需要权限的方法未在 `mod.json` 声明对应权限时抛 `permission-denied:<权限>`；导出窗口里调用会抛 `*-unavailable-in-export-context`（`ui.icon` 除外）。`folium.ai` 走宿主自己的 AI 设置，模组拿不到密钥。
 
 ### FoliumPlaybackService
 
@@ -738,6 +739,53 @@ A fully read response (body at most 5 MB); `text` and `json` return synchronousl
 | `fetch()` | `(url: string, init?: FoliumFetchInit): Promise<FoliumFetchResponse>` | Fetch through the host (no CORS limits); needs the `net.fetch` permission. |
 
 相关：[FoliumFetchInit](#foliumfetchinit) · [FoliumFetchResponse](#foliumfetchresponse)
+
+### FoliumAiTarget
+
+Folium 1.5: which AI the host will ask, as configured in the host's own AI settings.
+
+| 成员 | 类型 | 说明 |
+| --- | --- | --- |
+| `provider` | `'gemini' \| 'openai'` | The provider selected in Settings → AI. |
+| `model` | `string` | The model actually sent; where the settings leave it blank the host fills in its own default. |
+
+### FoliumAiCompletionRequest
+
+Folium 1.5: one prompt for `folium.ai.complete`. Names deliberately say `system` / `prompt`, not `messages`.
+
+| 成员 | 类型 | 说明 |
+| --- | --- | --- |
+| `system` | `string` | The standing rules the answer must follow. |
+| `prompt` | `string` | Everything specific to this call. |
+| `temperature?` | `number` | 0–2; left out means the temperature saved in the host's AI settings. |
+| `maxTokens?` | `number` | Output token ceiling. Best effort: the key differs per provider and some ignore it. |
+| `json?` | `boolean` | Ask for JSON output where the provider supports it. Default `true`. |
+| `signal?` | `AbortSignal` | Aborts the request; a mod should wire this to its own deactivate. |
+
+### FoliumAiCompletionResult
+
+Folium 1.5: what `folium.ai.complete` answered.
+
+| 成员 | 类型 | 说明 |
+| --- | --- | --- |
+| `text` | `string` | The answer, unparsed — validating it against the mod's own contract is the caller's job. |
+| `target` | `FoliumAiTarget` | The provider and model that answered. |
+
+相关：[FoliumAiTarget](#foliumaitarget)
+
+### FoliumAiService
+
+`folium.ai` (Folium 1.5): the AI service the user configured in the host's own
+AI settings. The mod never holds a credential — it is read per request, used
+inside the call, and never returned, thrown or logged.
+
+| 成员 | 类型 | 说明 |
+| --- | --- | --- |
+| `isConfigured()` | `(): boolean` | Whether the selected provider has a credential in the host's settings. Never throws. |
+| `describe()` | `(): FoliumAiTarget \| null` | What the next completion would use; null when nothing is configured. Never throws. |
+| `complete()` | `(request: FoliumAiCompletionRequest): Promise<FoliumAiCompletionResult>` | Runs one prompt; needs the `ai.request` permission. |
+
+相关：[FoliumAiTarget](#foliumaitarget) · [FoliumAiCompletionRequest](#foliumaicompletionrequest) · [FoliumAiCompletionResult](#foliumaicompletionresult)
 
 ## 共享工具
 
@@ -1173,7 +1221,7 @@ online song. Use folium.net.fetch for network access.
 The Folium version this host implements; mods read it at runtime as `folium.host.folium`.
 
 ```ts
-const FOLIUM_VERSION = Object.freeze({ major: 1, minor: 4 })
+const FOLIUM_VERSION = Object.freeze({ major: 1, minor: 5 })
 ```
 
 ### FoliumId

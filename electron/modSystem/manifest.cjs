@@ -9,7 +9,7 @@
  * `minor` grows with every additive change inside 1.x and is exposed to mods at
  * runtime (`api.host.folium`, `folium.host.folium`) for feature detection.
  */
-const FOLIUM_VERSION = Object.freeze({ major: 1, minor: 4 });
+const FOLIUM_VERSION = Object.freeze({ major: 1, minor: 5 });
 
 // Folium 1 permission set. Anything else is rejected at validation time so a
 // mod can never claim a capability the loader does not implement (fail closed).
@@ -22,6 +22,7 @@ const KNOWN_PERMISSIONS = new Set([
     'net.fetch',
     'net.embed',
     'ui.stage',
+    'ai.request',
 ]);
 
 // Unfrozen surfaces a mod must opt into explicitly; they may change in any minor.

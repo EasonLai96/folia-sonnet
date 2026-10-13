@@ -28,6 +28,7 @@ Folium 是 Folia 的模组平台，形状参照 Minecraft Forge：模组通过**
 | `sample-progress-bar` | 改造进度条：按钮、样式、外部动态数据图层、设置分区、net.fetch、storage |
 | `more-progress-buttons` | 进度条两侧加「打乱队列」「音量」「喜爱」按钮，可分别关闭；用 `--folium-player-bar-extra` 把胶囊加宽补回轨道长度（1.3） |
 | `sample-rickroll` | 在播放页嵌入外部网页（stageLayers + ui.embed + embedOrigins） |
+| `lyric-ai-director` | AI 为每首歌挑歌词动画模式并调参：`folium.ai`（宿主自己的 AI 设置）+ playerPanelTabs + commands + settingsSections + storage（每首歌记忆） |
 
 ## 安全声明（重要）
 
@@ -150,6 +151,7 @@ client 只能用相对路径 import 模组目录里的 `.mjs/.js`，**不能 imp
 | `playback.control` | `folium.playback` 的播放、暂停、跳转、切歌、入队、打乱队列、喜爱 |
 | `net.fetch` | `folium.net.fetch()`（经主进程代发，不受 CORS 限制） |
 | `net.embed` | `folium.ui.embed()`，还需要 `embedOrigins` |
+| `ai.request` | `folium.ai.complete()`（1.5）：走宿主自己的 AI 设置发出一次补全，模组拿不到密钥 |
 | `ui.stage` | `registries.stageLayers`（往播放页上画东西） |
 
 ## client 入口
@@ -497,6 +499,25 @@ CSS 放进 `@layer folium-mods`（在 Tailwind 各层之后声明），不用 `!
 
 **`folium.net.fetch(url, { method, headers, body, timeoutMs })`**：需 `net.fetch`；在主进程发出，只允许 http(s)，
 超时默认 15s（最长 60s），响应体上限 5 MB；返回 `{ ok, status, statusText, headers, text(), json() }`。
+
+**`folium.ai`**（1.5）：宿主的 AI 连接，也就是「设置 → AI」里配的那一个。模组不必、也**不能**自带密钥。
+
+| 方法 | 说明 |
+| --- | --- |
+| `complete({ system, prompt, temperature?, maxTokens?, json?, signal? })` | 需 `ai.request`。发一次补全，返回 `{ text, target: { provider, model } }`；`text` 是模型原文，宿主不解析 |
+| `isConfigured()` | 当前选中的服务商有没有凭据；不抛错 |
+| `describe()` | 下一次请求会用的 `{ provider, model }`，没配置时为 `null`；不抛错 |
+
+要点：
+
+- **密钥不经过模组**。它按每次请求在宿主内读取、直接交给传输层，不会出现在返回值、异常和日志里；也没有任何接口能把它读回来。
+  错误是 `ai-` 前缀的错误码（`ai-not-configured`、`ai-http-error:<状态>`、`ai-empty-response`、`ai-aborted`、
+  `ai-request-failed:<原因>`），服务商返回的错误正文会先抹掉可能的凭据再附上——网关有时会把请求头原样回显。
+- **跟随宿主的 AI 设置**：换服务商、换模型、换地址都在「设置 → AI」一处完成，模组不用改。
+- **每个端都能用**。请求不是走主进程，而是从模组所在的窗口经 `createAiFetch()` 发出：安卓包没有 Electron 主进程，
+  WebView 里的普通 fetch 又会被 CORS 拦掉，只有原生桥能把请求送出去。因此在安卓上也能调用，不像 `net.fetch`。
+- `temperature` 省略时用宿主 AI 设置里保存的值；`maxTokens` 各家键名不同，属于尽力而为。
+- 没有凭据时 `complete()` 抛 `ai-not-configured`。想提示用户去填，先用 `isConfigured()` 判断，别拿异常当流程控制。
 
 ## main 入口（Node）
 
