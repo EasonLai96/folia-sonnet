@@ -749,6 +749,19 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
   if (operation === 'user_playlist') {
     try {
       const result = await handleQQUserPlaylists(cookie);
+      // 凭据失效时上游一路「未登录」的业务码，收集到的结果是空数组 —— 回
+      // `{ code: 0, playlist: [] }` 就等于告诉上层「这个人没有歌单」，界面只剩一句
+      // 没有来由的「暂无内容」。如实报 AUTH_REQUIRED，上层才会提示重新登录。
+      if (result?.loginRequired || result?.loggedIn === false) {
+        noteLibraryStep('qq', 'playlists:login-required', {
+          loginExpired: Boolean(result?.loginExpired),
+          message: result?.message || '',
+        });
+        return {
+          __foliaBridgeError: 'AUTH_REQUIRED',
+          message: result?.message || 'QQ 登录已失效，请重新登录',
+        };
+      }
       const playlist = (result?.playlists || []).map(qqPlaylistRow);
       noteLibraryStep('qq', 'playlists', {
         count: playlist.length,

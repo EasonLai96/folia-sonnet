@@ -15,6 +15,39 @@ import { noteLibraryStep } from './libraryTrace.js';
 
 const noteQQLibraryStep = (step, detail) => noteLibraryStep('qq', step, detail);
 
+// ---- 「凭据不被接受」与「真的没有数据」必须分开 ----
+//
+// cookie 过期之后请求照样发得出去、服务端也照样应答 —— 只是业务码变成「未登录」
+// （CGI 的 1000 / result 301）。把它当成「没有数据」就会把登录失效伪装成空歌单：
+// 界面只剩一片空白且什么都不说，唯一的破绽是连歌单名都一个都取不回来
+// （收藏歌单那两条腿一起失败，最后只剩硬塞的「我喜欢」）。
+// 所以这几处要认出这一类码并让它冒上去，而不是兜成空数组。
+
+/** QQ 上游表示「不认这个凭据」的业务码。 */
+const QQ_AUTH_REJECTED_CODES = new Set([1000, 301]);
+
+const isQQAuthRejectedCode = (code) => QQ_AUTH_REJECTED_CODES.has(Number(code));
+
+// musicu 应答有两层码：整体一个，req_0 里还有一个。任一层说未登录都算。
+const isQQAuthRejectedResponse = (json) => (
+  isQQAuthRejectedCode(Number(json && json.code))
+  || isQQAuthRejectedCode(Number(json && json.req_0 && json.req_0.code))
+);
+
+function qqLoginRequiredError(where, code) {
+  const error = new Error(`QQ ${where}: login required (code ${Number(code) || 'unknown'})`);
+  error.loginRequired = true;
+  return error;
+}
+
+// 歌单这几条路互为兜底（老 CGI 与 musicu 各取一份再合并），所以网络抖动、上游抽风
+// 照旧兜成空数组 —— 但「凭据不被接受」不是抖动：所有腿会一起失败，兜下去界面上
+// 看着就像账号本来就没收藏。只有这一类错误要继续往外冒。
+const swallowUnlessLoginRequired = (error) => {
+  if (error && error.loginRequired) throw error;
+  return [];
+};
+
 /**
  * Bridge wrappers around sansenjian/qq-music-api QR login:
  * GET  /user/getQQLoginQr  → handleQQLoginQrCreate
@@ -665,8 +698,23 @@ export async function getQQLoginStatus(cookieHeader) {
     vipLevel: (info.isVip || vip.isVip) ? 'vip' : 'none',
     vipLabel: (info.isVip || vip.isVip) ? 'QQ VIP' : '无VIP',
   };
-  if (profileBody && (profileBody.code === 1000 || profileBody.result === 301)) {
-    return { ...merged, profileUnavailable: true };
+  if (profileBody
+    && (isQQAuthRejectedCode(profileBody.code) || isQQAuthRejectedCode(profileBody.result))) {
+    // cookie 罐里 uin 与 qm_keyst 都还在，本地那句 `loggedIn` 判定会说已登录 ——
+    // 但上游已经明确不认这个凭据了。这里必须翻成未登录：否则接下来所有请求都拿着
+    // 过期凭据去问，拿回来的全是「未登录」的业务码，界面上就是歌单和名字一起消失，
+    // 而账号卡片仍然显示已登录 —— 除了重新登录没有别的解法，界面却什么都没说。
+    // 只有上游明确给出未登录码才翻（资料页请求本身失败时 profileBody 为 null，不动）。
+    noteQQLibraryStep('login-status:credential-rejected', {
+      code: Number(profileBody.code ?? profileBody.result),
+    });
+    return {
+      ...merged,
+      loggedIn: false,
+      loginExpired: true,
+      profileUnavailable: true,
+      message: 'QQ 登录已失效，请重新登录',
+    };
   }
   if (!merged.vipType && !merged.isVip && vipQueryBody) {
     merged.vipSource = 'vip-query';
@@ -1337,7 +1385,10 @@ async function fetchQQUserCreatedPlaylistsLegacy(uin, cookieHeader) {
     platform: 'yqq.json',
     needNewCode: '0',
   }, cookieHeader);
-  if (!body || body.code === 1000) return [];
+  if (!body) return [];
+  if (isQQAuthRejectedCode(Number(body.code ?? body.result))) {
+    throw qqLoginRequiredError('created-playlists(legacy)', body.code ?? body.result);
+  }
   const list = (body.data && body.data.disslist) || [];
   return list.map((pl) => normalizeQQUserPlaylistRow(pl, { subscribed: false })).filter(Boolean);
 }
@@ -1353,7 +1404,10 @@ async function fetchQQUserCreatedPlaylistsByUin(uin, cookieHeader) {
   }, cookieHeader);
   const block = json && json.req_0;
   const code = Number(block && block.code);
-  if (code && code !== 0 && code !== 200) return [];
+  if (code && code !== 0 && code !== 200) {
+    if (isQQAuthRejectedResponse(json)) throw qqLoginRequiredError('created-playlists', code);
+    return [];
+  }
   const data = (block && block.data) || {};
   const list = data.v_playlist || data.vPlaylist || data.playlist || data.list || [];
   return (Array.isArray(list) ? list : [])
@@ -1362,9 +1416,12 @@ async function fetchQQUserCreatedPlaylistsByUin(uin, cookieHeader) {
 }
 
 async function fetchQQUserCreatedPlaylists(uin, cookieHeader) {
-  const primary = await fetchQQUserCreatedPlaylistsByUin(uin, cookieHeader).catch(() => []);
+  // 两趟互为兜底（musicu 优先，老 CGI 补位），所以普通失败照旧兜成空数组；
+  // 但「凭据不被接受」不是抖动 —— 它必须冒上去，否则空数组会被当成「没有歌单」。
+  const primary = await fetchQQUserCreatedPlaylistsByUin(uin, cookieHeader)
+    .catch(swallowUnlessLoginRequired);
   if (primary && primary.length) return primary;
-  return fetchQQUserCreatedPlaylistsLegacy(uin, cookieHeader).catch(() => []);
+  return fetchQQUserCreatedPlaylistsLegacy(uin, cookieHeader).catch(swallowUnlessLoginRequired);
 }
 
 async function fetchQQUserCollectedPlaylistsLegacy(uin, cookieHeader) {
@@ -1376,6 +1433,9 @@ async function fetchQQUserCollectedPlaylistsLegacy(uin, cookieHeader) {
     sin: 0,
     ein: 200,
   }, cookieHeader);
+  if (isQQAuthRejectedCode(Number(body && (body.code ?? body.result)))) {
+    throw qqLoginRequiredError('collected-playlists(legacy)', body.code ?? body.result);
+  }
   const list = (body && body.data && body.data.cdlist) || [];
   return list.map((pl) => normalizeQQUserPlaylistRow(pl, { subscribed: true })).filter(Boolean);
 }
@@ -1391,7 +1451,10 @@ async function fetchQQUserCollectedPlaylistsFavApi(uin, cookieHeader) {
   }, cookieHeader);
   const block = json && json.req_0;
   const code = Number(block && block.code);
-  if (code && code !== 0 && code !== 200) return [];
+  if (code && code !== 0 && code !== 200) {
+    if (isQQAuthRejectedResponse(json)) throw qqLoginRequiredError('collected-playlists', code);
+    return [];
+  }
   const data = (block && block.data) || {};
   const list = data.v_list || data.vList || data.list || data.cdlist || [];
   return (Array.isArray(list) ? list : [])
@@ -1401,8 +1464,8 @@ async function fetchQQUserCollectedPlaylistsFavApi(uin, cookieHeader) {
 
 async function fetchQQUserCollectedPlaylists(uin, cookieHeader) {
   const [legacy, modern] = await Promise.all([
-    fetchQQUserCollectedPlaylistsLegacy(uin, cookieHeader).catch(() => []),
-    fetchQQUserCollectedPlaylistsFavApi(uin, cookieHeader).catch(() => []),
+    fetchQQUserCollectedPlaylistsLegacy(uin, cookieHeader).catch(swallowUnlessLoginRequired),
+    fetchQQUserCollectedPlaylistsFavApi(uin, cookieHeader).catch(swallowUnlessLoginRequired),
   ]);
   return mergeQQUserPlaylists([modern, legacy]);
 }
@@ -1414,7 +1477,10 @@ async function fetchQQPersonalPlaylists(uin, cookieHeader) {
   }, cookieHeader);
   const block = json && json.req_0;
   const code = Number(block && block.code);
-  if (code && code !== 0 && code !== 200) return [];
+  if (code && code !== 0 && code !== 200) {
+    if (isQQAuthRejectedResponse(json)) throw qqLoginRequiredError('personal-playlists', code);
+    return [];
+  }
   const data = (block && block.data) || {};
   const list = data.cdlist || data.v_playlist || data.vPlaylist || [];
   return (Array.isArray(list) ? list : [])
@@ -1427,18 +1493,34 @@ export async function handleQQUserPlaylists(cookieHeader) {
   if (!status.loggedIn) return { loggedIn: false, playlists: [] };
   const uin = status.uin || qqCookieUin(cookieHeader) || '0';
   let playlists = [];
-  const createdResult = await fetchQQUserCreatedPlaylists(uin, cookieHeader).catch((error) => {
-    noteQQLibraryStep('playlists:created:error', { message: error && error.message ? error.message : String(error) });
+  // 三趟里任意一趟报「凭据不被接受」就算登录失效。cookie 过期时三趟会一起拒，
+  // 而每一趟单独的失败（网络、上游抽风）仍然只是少一份来源，不影响其它两趟。
+  let loginRequired = false;
+  const guard = (step) => (error) => {
+    const message = error && error.message ? error.message : String(error);
+    if (error && error.loginRequired) {
+      loginRequired = true;
+      noteQQLibraryStep(`playlists:${step}:login-required`, { message });
+      return [];
+    }
+    noteQQLibraryStep(`playlists:${step}:error`, { message });
     return [];
-  });
-  const collectedResult = await fetchQQUserCollectedPlaylists(uin, cookieHeader).catch((error) => {
-    noteQQLibraryStep('playlists:collected:error', { message: error && error.message ? error.message : String(error) });
-    return [];
-  });
-  const personalResult = await fetchQQPersonalPlaylists(uin, cookieHeader).catch((error) => {
-    noteQQLibraryStep('playlists:personal:error', { message: error && error.message ? error.message : String(error) });
-    return [];
-  });
+  };
+  const createdResult = await fetchQQUserCreatedPlaylists(uin, cookieHeader).catch(guard('created'));
+  const collectedResult = await fetchQQUserCollectedPlaylists(uin, cookieHeader).catch(guard('collected'));
+  const personalResult = await fetchQQPersonalPlaylists(uin, cookieHeader).catch(guard('personal'));
+  if (loginRequired) {
+    // 关键：这里不能回「成功但没有歌单」。空数组会被上层原样当成列表，界面只剩一句
+    // 没有来由的「暂无内容」，用户除了重新登录无从下手 —— 而重新登录恰恰是唯一的解法。
+    return {
+      loggedIn: false,
+      loginRequired: true,
+      playlists: [],
+      provider: 'qq',
+      count: 0,
+      message: 'QQ 登录凭据已失效，请重新登录',
+    };
+  }
   noteQQLibraryStep('playlists:sources', {
     created: createdResult.length,
     collected: collectedResult.length,

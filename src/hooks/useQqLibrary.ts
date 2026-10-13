@@ -10,6 +10,7 @@ import type {
     ProviderPage,
     ProviderUser,
 } from '../types/onlineMusic';
+import { OnlineProviderError } from '../types/onlineMusic';
 import { handleLoginStatusFailure } from '../services/onlineMusic/loginStatusFailure';
 import {
     clearProviderAccountSnapshot,
@@ -115,7 +116,13 @@ export const refreshQqLibraryAccount = async ({
             likedSongCount: likedSongIds.length,
         });
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'qq_library_failed';
+        // 凭据过期时这条路径拿到的是「鉴权失效」，而它的 message 是原生桥/后端那句原话 ——
+        // 直接摆到界面上没人看得懂。UI 认的是 'auth-required' 这个标记（needsRelogin），
+        // 归一成它，界面才会说「登录已失效，请重新登录」，而不是一句没有来由的失败。
+        const authRequired = error instanceof OnlineProviderError && error.code === 'auth-required';
+        const message = authRequired
+            ? 'auth-required'
+            : (error instanceof Error ? error.message : 'qq_library_failed');
         updateAccount({
             status: 'authenticated',
             user,
