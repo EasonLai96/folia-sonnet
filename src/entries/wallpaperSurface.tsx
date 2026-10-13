@@ -59,6 +59,7 @@ import { useTypographySettingsStore } from '../stores/useTypographySettingsStore
 import { useThemeSettingsStore } from '../stores/useThemeSettingsStore';
 import type { AudioBands, Line, Theme, VisualizerMode } from '../types';
 import { syncLyricFlatAttribute, useLyricFlatSettingsStore } from '../stores/useLyricFlatSettingsStore';
+import { applyPushedPhoneInsets } from '../services/phoneInsets';
 
 /*
  * 挂「歌词改为纯色扁平」这个开关。
@@ -144,6 +145,19 @@ export type WallpaperPayload = {
      * 挤在里面时只要那一次没送达，封面就永远停在上一首。
      */
     coverUrl?: string | null;
+    /**
+     * 安全区（CSS px）：叠层这一层自己**量不到**。
+     *
+     * 它是另一个 WebView，里面没有 Capacitor 桥 —— `installPhoneInsets` 在那儿只会拿到
+     * 'unavailable'，四项永远 0；安卓的 `env(safe-area-inset-*)` 又只报挖孔、不报系统栏。
+     * 而叠层画在桌面 / 锁屏之上，状态栏与手势条照样压着它 —— 商籁右上角那行歌曲描述
+     * （画在 Pixi 画布里，CSS 够不着）就会顶在挖孔底下，和应用里让开的那一行对不上。
+     *
+     * 所以数值由原生把主 Activity 算好的那一份（PhoneFitCutout.resolveInsets）跟着
+     * 状态包推下来（见 WallpaperOverlay.buildPayload），页面按
+     * `applyPushedPhoneInsets` 落到同一份 CSS 变量 / `getPhoneInsets()` 上。
+     */
+    insets?: { top?: number; right?: number; bottom?: number; left?: number };
 };
 
 /**
@@ -361,6 +375,16 @@ window.__foliaWallpaperPush = (incoming) => {
      */
     if (!payload.coverUrl && !payload.cover && (latest.coverUrl || latest.cover)) {
         payload = { ...payload, coverUrl: latest.coverUrl, cover: latest.cover };
+    }
+    /*
+     * 安全区必须在**通知订阅者之前**落下去。
+     *
+     * 叠层这一层没有 Capacitor 桥，量不到自己的安全区（见 WallpaperPayload.insets）。
+     * 商籁的场景是收到数据之后才建的 —— 描述那一行在建场景那一刻读 `getPhoneInsets().top`，
+     * 晚了就白推一次，得等下一次换歌（重建场景）才挪下来。
+     */
+    if (payload.insets) {
+        applyPushedPhoneInsets(payload.insets);
     }
     latest = payload;
     receivedAtMs = performance.now();

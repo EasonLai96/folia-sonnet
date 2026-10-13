@@ -190,6 +190,22 @@ public class FoliaNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * 最近一次算出来的安全区（CSS px），**给叠层那一层取用**。
+     *
+     * 叠层（画在桌面 / 锁屏之上那层悬浮窗）是**另一个 WebView / document**：里面没有
+     * Capacitor 桥，拿不到这个插件，网页自己只能读到 `env(safe-area-inset-*)` 那份 ——
+     * 而安卓上那份不可信（只报挖孔、不报系统栏，见 PhoneFitCutout.resolveInsets）。
+     * 叠层又是 `setFitInsetsTypes(0)` 的满屏窗口，状态栏与手势条照样盖在它上面，
+     * 于是它画出来的歌词描述照样会被压住，只是这次没人给它让路。
+     *
+     * 所以数值从这里取一份，跟着叠层的状态包一起推下去（见 WallpaperOverlay.buildPayload）。
+     * 没算出来时返回 null，页面那边按「还没量到」处理，行为和不推一样。
+     */
+    public static JSObject peekPhoneInsets() {
+        return lastPhoneInsets;
+    }
+
     /** 网页首屏拉取安全区：事件只能覆盖「变了之后」，第一次的值得靠这一下。 */
     @PluginMethod
     public void getPhoneInsets(PluginCall call) {

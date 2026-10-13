@@ -29,6 +29,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import top.izuna.foliamajor.FoliaNativePlugin;
 import top.izuna.foliamajor.LockScreenMusicActivity;
 
 import java.io.IOException;
@@ -2734,6 +2735,21 @@ public final class WallpaperOverlay {
                 } catch (JSONException ignored) {
                     // 主题 JSON 坏了：退回只按四个颜色画，别让整包数据推不出去。
                 }
+            }
+
+            /*
+             * 安全区（CSS px）：叠层是**另一个 WebView**，里面没有 Capacitor 桥，
+             * 网页自己量不到 —— 安卓的 env(safe-area-inset-*) 只报挖孔、不报系统栏，
+             * 而这一层是 setFitInsetsTypes(0) 的满屏窗口，状态栏与手势条照样盖在它上面。
+             * 商籁右上角那行歌曲描述是画在 Pixi 画布里的（CSS 够不着），没有这份数值
+             * 它就一直顶在挖孔 / 状态栏底下，和应用里已经让开的那一行对不上。
+             *
+             * 数值取主 Activity 已经算好的那一份（PhoneFitCutout.resolveInsets），
+             * 不在这里另算一遍：叠层窗口拿不到 Activity 的 decor，算出来的口径还不一样。
+             */
+            JSONObject insets = FoliaNativePlugin.peekPhoneInsets();
+            if (insets != null) {
+                out.put("insets", insets);
             }
 
             // 必须发**整条时间轴**，不能只发当前行附近那几行。

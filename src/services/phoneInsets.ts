@@ -79,6 +79,23 @@ export const subscribePhoneInsets = (listener: PhoneInsetsListener): (() => void
 };
 
 /**
+ * 叠层（系统悬浮层）那一页的入口 —— 它是**另一个 WebView / document**。
+ *
+ * 那儿没有 Capacitor 桥（`installPhoneInsets` 进去只会拿到 'unavailable'，四项永远 0），
+ * 而它画在桌面 / 锁屏之上、又是 `setFitInsetsTypes(0)` 的满屏窗口 —— 状态栏和手势条
+ * 照样盖在它上面。商籁右上角那行歌曲描述画在 Pixi 画布里，CSS 那套
+ * `data-folia-safe-top` 够不着，只能靠 `getPhoneInsets().top`；在那儿读到的却是 0。
+ *
+ * 所以数值由原生跟着状态包一起推下来（`WallpaperOverlay.buildPayload` 的 `insets`），
+ * 这里只负责把它落到同一份 `current` 和 CSS 变量上 —— 画布里那行描述读到的就是真值，
+ * 和应用里那一行用的是同一份口径。
+ */
+export const applyPushedPhoneInsets = (payload: unknown): void => {
+    source = 'native';
+    apply(readPayload(payload));
+};
+
+/**
  * 全 0 一律不写。
  *
  * 手机上不存在「状态栏高度 0」这回事，四个数同时为 0 只可能是**还没量到**（首帧窗口 inset
