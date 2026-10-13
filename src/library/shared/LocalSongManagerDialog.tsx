@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Search, Trash2 } from 'lucide-react';
 import ThemedDialog from '../../components/shared/ThemedDialog';
@@ -10,6 +11,13 @@ import { formatTime } from '../../utils/appPlaybackHelpers';
 // 本地曲库的「管理歌曲」对话框：搜索、勾选、删除。删的是曲库里的这首歌（安卓上连导入时
 // 复制的音频副本一起删），所以删除都先经确认；曲库可能上万首，列表只渲染筛选后的前
 // MAX_VISIBLE 条 —— 剩下的靠搜索缩小范围，不然一打开就渲染几千行会卡死。
+//
+// DOM 走 portal 挂到 body：调用它的一方可能是 bravais 的首页来源（BravaisHomeLocal），而 bravais 的
+// surface 是一个「不可见锚点」—— 根节点 `aria-hidden` + `pointer-events-none`，它只把卡片投影进 stage，
+// 真正的墙由 BravaisStage 另画（BravaisHomeDirectory 干脆只渲染 null）。对话框挂在那棵子树里会继承
+// pointer-events: none：弹得出来、看着也正常，但搜索框、复选框、删除、关闭全都点不动，就是用户说的
+// 「弹出来的窗口卡死了」。portal 只挪 DOM，状态与寿命仍跟着调用它的来源（网格那边本来就在可交互的
+// 树里，portal 之后行为不变）。
 
 const MAX_VISIBLE = 200;
 
@@ -88,7 +96,10 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
         : 'border-white/10 hover:bg-white/5';
     const mutedClass = isDaylight ? 'text-zinc-500' : 'text-zinc-400';
 
-    return (
+    // 见文件头：DOM 必须挪出「不可见锚点」子树，否则整块弹层点不动。
+    if (typeof document === 'undefined') return null;
+
+    return createPortal((
         <>
             <ThemedDialog
                 isOpen={isOpen}
@@ -195,7 +206,7 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
                 isDaylight={isDaylight}
             />
         </>
-    );
+    ), document.body);
 };
 
 export default LocalSongManagerDialog;
