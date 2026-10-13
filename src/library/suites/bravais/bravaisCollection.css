@@ -319,19 +319,9 @@
     white-space: nowrap;
 }
 
+/* 排序控件是网页自己画的（不再是原生 <select>：原生弹层由浏览器画，
+   跟界面不是一套东西，暗色下也吃不到主题变量）。菜单 portal 到 body，这里只管触发按钮。 */
 .bravais-panel-tools { display: flex; align-items: center; gap: 6px; }
-
-.bravais-panel-tools select {
-    min-width: 0;
-    flex: 1 1 auto;
-    padding: 6px 10px;
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 10px;
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-    background: var(--bravais-seam-paper);
-}
 
 .bravais-seam-panel > .bravais-panel-list { min-height: 0; flex: 1 1 0; margin: 0 -10px; }
 

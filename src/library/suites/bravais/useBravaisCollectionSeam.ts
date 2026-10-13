@@ -9,7 +9,7 @@ import { resolveCollectionDescription } from '../../core/model/collectionDescrip
 import type { CollectionActions } from '../../core/bindings/useCollectionActions';
 import type { CollectionView } from '../../core/bindings/useCollectionView';
 import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
-import { findSongSortPreset, type SongSortPreset } from '../../core/model/songSortOptions';
+import type { SongSortPreset } from '../../core/model/songSortOptions';
 import { projectCollectionStatus, resolveWallPeriodCount } from './bravaisCollectionStatus';
 import type { BravaisLayerEntries, BravaisLayerWall, BravaisSeamCollection, BravaisSeamFilter, BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { useBravaisCollectionForms } from './useBravaisCollectionForms';
@@ -268,15 +268,12 @@ export const useBravaisCollectionSeam = (input: BravaisCollectionSeamInput) => {
         panelTitle: t('libraryBravaisCollection.panelTitle'),
         listCrumb: t('libraryBravaisCollection.listCrumb'),
         sort: sortInput.supported && declares('sort') ? {
-            options: sortInput.presets.map(preset => ({ value: preset.id, label: t(preset.labelKey) })),
-            value: findSongSortPreset(sortInput.field, sortInput.direction)?.id ?? '',
+            // 与网格侧栏同一组控件、同一张预设表：每一项自带方向，网页自己画菜单。
+            presets: sortInput.presets,
+            field: sortInput.field,
             direction: sortInput.direction,
             directionLabel: sortInput.direction === 'asc' ? t('localMusic.sortAscending') : t('localMusic.sortDescending'),
-            // 选的是「排序方式」本身（自带方向），不是单独的字段——与网格菜单同一张预设表。
-            selectPreset: (id) => {
-                const preset = latest.current.sort.presets.find(item => item.id === id);
-                if (preset) latest.current.sort.setPreset(preset);
-            },
+            selectPreset: (preset) => latest.current.sort.setPreset(preset),
             toggleDirection: () => latest.current.sort.setDirection(latest.current.sort.direction === 'asc' ? 'desc' : 'asc'),
         } : undefined,
         menuFor: key => {

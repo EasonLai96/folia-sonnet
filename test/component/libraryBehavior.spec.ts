@@ -162,6 +162,21 @@ const openBravaisList = async (page: Page) => {
     await expect(panel).toBeVisible();
 };
 
+/**
+ * bravais：经列表面板的排序菜单选一种排序方式（`label` 是英文界面上那一项的文字）。
+ *
+ * 菜单是网页画的（不再是原生 <select>，没有 selectOption 可用），而且弹层 portal 到
+ * document.body，所以要在整个页面上找那一项，不是在面板里找。
+ */
+const sortViaPanelMenu = async (page: Page, label: string) => {
+    const trigger = page.locator('[data-bravais-list-sort] [data-track-sort-trigger]');
+    await trigger.click();
+    const menu = page.locator('[data-track-sort-menu]');
+    await expect(menu).toBeVisible();
+    await menu.getByText(label, { exact: true }).click();
+    await expect(menu).toHaveCount(0);
+};
+
 /** bravais：等墙上的翻牌放完（移除的两段、过滤、数据到达）——翻牌期间聚焦卡会被收起。 */
 const waitForBravaisWall = (page: Page) => (
     expect(page.locator('[data-library-stage="bravais"][data-bravais-settling]')).toHaveCount(0)
@@ -2068,7 +2083,7 @@ test.describe('[bravais-only] collection page, more', () => {
         await open(page, 'local-all');
         await waitForScope(page, 8);
         await openBravaisList(page);
-        await page.locator('[data-bravais-list-sort-field]').selectOption('fileLastModified');
+        await sortViaPanelMenu(page, 'Modified date');
         await expect.poll(() => playFilteredIds(page)).toEqual(LOCAL_SORT_ORDERS.modifiedAsc.map(localKey));
         await expect(page.locator('[data-bravais-list-row]').first()).toHaveAttribute('data-bravais-list-row', `${localKey(8)}-0`);
         await page.locator('[data-bravais-list-sort-direction]').click();

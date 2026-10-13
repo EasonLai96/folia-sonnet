@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronLeft, ListPlus, Play } from 'lucide-react';
+import { ChevronLeft, ListPlus, Play } from 'lucide-react';
 import { List, useListRef, type RowComponentProps } from 'react-window';
 import { useTranslation } from 'react-i18next';
 import type { BravaisItem, BravaisLayer } from './bravaisLayer';
@@ -7,6 +7,7 @@ import { BravaisSeamStatusLine } from './BravaisSeamCollection';
 import BravaisSeamFilterField from './BravaisSeamFilterField';
 import { setBravaisLinkedKey, useBravaisUiStore } from './bravaisUiStore';
 import BravaisSeamCrumbs from './BravaisSeamCrumbs';
+import { TrackSortDirectionButton, TrackSortMenu } from '../../../components/shared/TrackSortMenu';
 
 // src/library/suites/bravais/BravaisListPanel.tsx
 // 列表面板（设计稿 §5「面板」「歌曲列表」）：缝加宽到 min(420, 视口 − 52)，标题横排压在顶部，下面是工具行（本地文件夹的
@@ -111,18 +112,23 @@ const BravaisListPanel: React.FC<{ layer: BravaisLayer; depth: number; actions: 
             <div className="bravais-seam-meta">{seam.meta}</div>
             {sort && (
                 <div className="bravais-panel-tools" data-bravais-list-sort>
-                    <select
-                        value={sort.value}
-                        aria-label={entries?.panelTitle}
-                        data-bravais-list-sort-field
-                        onChange={event => sort.selectPreset(event.target.value)}
-                    >
-                        {sort.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                    <button type="button" className="bravais-seam-icon" data-bravais-list-sort-direction={sort.direction}
-                        onClick={sort.toggleDirection} aria-label={sort.directionLabel} title={sort.directionLabel}>
-                        {sort.direction === 'asc' ? <ArrowUpNarrowWide aria-hidden /> : <ArrowDownWideNarrow aria-hidden />}
-                    </button>
+                    {/* 与网格侧栏同一个控件：网页自己画菜单，不弹浏览器 / 系统那套 spinner 弹窗。 */}
+                    <TrackSortMenu
+                        variant="label"
+                        presets={sort.presets}
+                        field={sort.field}
+                        direction={sort.direction}
+                        onSelect={sort.selectPreset}
+                    />
+                    <TrackSortDirectionButton
+                        className="bravais-seam-icon"
+                        data-bravais-list-sort-direction={sort.direction}
+                        direction={sort.direction}
+                        disabled={sort.field === 'none'}
+                        onDirectionChange={sort.toggleDirection}
+                        aria-label={sort.directionLabel}
+                        title={sort.directionLabel}
+                    />
                 </div>
             )}
             <div className="bravais-panel-list" role="listbox" aria-label={entries?.panelTitle}>

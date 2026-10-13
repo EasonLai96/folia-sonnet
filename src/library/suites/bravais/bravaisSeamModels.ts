@@ -1,4 +1,6 @@
 import type { BravaisFormState } from './bravaisFormModel';
+import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
+import type { SongSortPreset } from '../../core/model/songSortOptions';
 
 // src/library/suites/bravais/bravaisSeamModels.ts
 // B7 集合页挂在层描述上的扩展类型（设计稿 §10.2 / §10.6）：缝里的收藏星标、补页进度、状态行、结果提示、过滤输入位（每面墙都有）、
@@ -127,15 +129,15 @@ export type BravaisLayerWall = {
 };
 
 /**
- * 列表面板工具行的排序。下拉里每一项是一个完整的排序方式（自带方向），
- * 与网格侧栏的菜单同一张预设表；`value` 是当前选中的预设 id。
+ * 列表面板工具行的排序。两项都与网格侧栏用的是同一组控件、同一张预设表，
+ * 所以这里给的是预设本身而不是「value + options」——网页下拉不需要字符串键。
  */
 export type BravaisListSort = {
-    value: string;
-    options: readonly { value: string; label: string }[];
-    direction: 'asc' | 'desc';
+    presets: readonly SongSortPreset[];
+    field: SongSortField;
+    direction: SongSortDirection;
     directionLabel: string;
-    selectPreset: (id: string) => void;
+    selectPreset: (preset: SongSortPreset) => void;
     toggleDirection: () => void;
 };
 
