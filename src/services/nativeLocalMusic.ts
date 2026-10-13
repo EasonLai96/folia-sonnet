@@ -1,6 +1,7 @@
 import type { LocalSong } from '../types';
 import { getLocalSongs, saveLocalSongs } from './db';
 import { stageLocalCoverAsset } from './localCoverAssetService';
+import { fetchOnlineCoversForImportedSongs } from './localCoverAutoFetch';
 import { clearLocalRootRemoved, isLocalRootRemoved } from './localLibraryFolderIgnore';
 import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
 import { parseEmbeddedMetadataAsync } from '../utils/localMetadataWorkerClient';
@@ -278,6 +279,9 @@ export const scanAndroidDeviceMusic = async (
 
         if (freshSongs.length > 0) {
             await saveLocalSongs(freshSongs);
+            // MediaStore 这条路连文件字节都没读（没有内嵌封面可抽），整批歌的封面只能靠联网。
+            // 不在这里补的话，扫完设备音乐看到的就是一屏占位色。
+            fetchOnlineCoversForImportedSongs(freshSongs);
         }
         noteLibraryStep('local', 'scan:done', {
             songs: freshSongs.length,
@@ -467,6 +471,9 @@ const buildAndStoreImportedTracks = async (tracks: NativeAudioTrack[]): Promise<
     if (freshSongs.length > 0) {
         await saveLocalSongs(freshSongs);
         noteLibraryStep('local', 'pick:saved', { songs: freshSongs.length });
+        // 文件里没内嵌封面的歌（原生解析拿不到 cover 的那种）立刻去在线平台要一张，
+        // 不用等播到它。扫描设备音乐与外部音频导入都走这里，所以挂在这一处就够。
+        fetchOnlineCoversForImportedSongs(freshSongs);
     }
     return { fresh: freshSongs, resolved: resolvedSongs };
 };

@@ -38,6 +38,7 @@ import {
     runLocalFolderMutation,
     setLocalFolderIgnored,
 } from './localLibraryFolderIgnore';
+import { fetchOnlineCoversForImportedSongs } from './localCoverAutoFetch';
 import {
     copyAndroidLocalAudio,
     deleteAndroidImportedAudio,
@@ -1332,6 +1333,14 @@ async function importFolderContents(dirHandle: FileSystemDirectoryHandle, expect
         void hydrateImportedSongsInBackground(rootFolderName, songsToPersist).catch(error => {
             console.error(`[LocalMusic][Import] Background metadata hydration failed for "${rootFolderName}":`, error);
         });
+        /*
+         * 联网补封面与后台抽内嵌封面并行跑，不等后者。
+         *
+         * 文件里没有内嵌封面的歌，原先要等「播到它」才在歌词匹配里顺手带回在线封面 ——
+         * 于是刚导入完的这一屏全是占位色。这里立刻补；两边撞车（hydration 随后抽出了内嵌
+         * 封面）由 localCoverAutoFetch 落库前重读一次解决，内嵌的那张优先。
+         */
+        fetchOnlineCoversForImportedSongs(importedSongs);
 
         return importedSongs;
     } catch (error) {
