@@ -1,5 +1,6 @@
 import type { SonnetTuning, Theme } from '../../../types';
 import { normalizeFontWeight, resolveThemeFontStack } from '../../../utils/fontStacks';
+import { getPhoneInsets } from '../../../services/phoneInsets';
 import type { SonnetParagraph, SonnetShot } from './types';
 import { hashSonnetSeed } from './sonnetRandom';
 import { buildSonnetShotMg } from './sonnetShotMg';
@@ -162,7 +163,15 @@ export const buildSonnetScene = (
             })
         });
         descText.alpha = 0.3;
-        descText.position.set(width - 20, 20);
+        /*
+         * 右上角那一行歌曲描述：安卓上要躲开挖孔 / 状态栏。
+         *
+         * 它是画在 Pixi 画布**里面**的，不是 DOM —— CSS 那套 `data-folia-safe-top`
+         * （androidPhoneFit.css）够不着，所以只能在这儿按原生量出来的顶部 inset
+         * 把 y 往下推。桌面端与壁纸叠层拿到的 inset 是 0（phoneInsets 只在安卓原生
+         * 运行时才写值），加 0 等于位置不变，行为不受影响。
+         */
+        descText.position.set(width - 20, 20 + getPhoneInsets().top);
         descText.anchor.set(1, 0);
         if (showOuterMetadata) sceneBackgroundLayer.addChild(descText);
     }
