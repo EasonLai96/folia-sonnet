@@ -921,6 +921,9 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
                                     {currentTab === 'videoExport' && (
                                         <VideoExportTab
                                             isDaylight={isDaylight}
+                                            theme={theme}
+                                            visualizerMode={visualizerMode}
+                                            currentSong={currentSong}
                                             onTogglePlay={onTogglePlay}
                                         />
                                     )}

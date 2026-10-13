@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Folia Export</title>
+    <style>
+        /*
+         * 整页必须透明：这一页是**离屏渲染**用的，背景透出来才能拿到 alpha。
+         * 底下的底色由导出参数决定（见 ExportRenderConfig.backgroundColor）。
+         */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            overflow: hidden;
+        }
+        #export-root {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+    </style>
+    <script type="module" src="/src/entries/exportSurface.tsx"></script>
+</head>
+<body>
+    <div id="export-root"></div>
+</body>
+</html>

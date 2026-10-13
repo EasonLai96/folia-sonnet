@@ -1,22 +1,22 @@
-import { lyricCurrentTime } from '../../stores/motionSignals';
 import {
     cancelVideoExport,
     checkVideoExportSupport,
-    notifyExportFrameReady,
     startVideoExport as callStartVideoExport,
-    watchExportFrameRequests,
     watchExportProgress,
     type VideoExportListenerHandle,
     type VideoExportSpec,
 } from '../../platform/foliaExport';
+import { writeExportRenderConfig, type ExportRenderConfig } from './exportConfig';
 
 // src/services/videoExport/controller.ts
-// 导出这条链路的状态机与帧驱动。面板那一页只负责发起和显示，驱动部分常驻在 App 里。
+// 导出这条链路的状态机。面板那一页只负责发起和显示，监听部分常驻在 App 里。
 //
-// 为什么驱动不能挂在面板上：导出期间必须**关掉面板**——PixelCopy 抓的是整个窗口合成
-// 之后的内容，面板只要还在画面上就会被一起录进去。而面板一关，挂在它里面的监听
-// 就跟着卸载了，原生那边每一帧都等不到回报（4 秒超时跳过），录出来就是一串空帧。
-// 所以这里做成模块级：谁在显示都不影响它在跑。
+// 为什么监听不能挂在面板上：导出期间面板会被收起来（面板一开就挡着画面），
+// 挂在它里面的监听就跟着卸载了 —— 之后原生回报的进度一个都收不到，
+// 界面会一直停在「导出中」不再动。所以这里做成模块级：谁在显示都不影响它在跑。
+//
+// 注意这里**没有**帧驱动：画面由原生那边的离屏渲染页自己推
+// （见 android/.../export/ExportRenderView），主应用全程不参与时钟。
 
 export type VideoExportStatus =
     | 'idle'
@@ -62,42 +62,15 @@ export const subscribeVideoExport = (listener: () => void): (() => void) => {
     return () => listeners.delete(listener);
 };
 
-/**
- * 时钟是不是被导出接管了。
- *
- * `usePlaybackVisualizerBridge` 的 rAF 在播放时每帧写一次 `lyricCurrentTime`；
- * 导出期间画面得由导出循环推，两边同时写就是画面乱跳。正常流程里导出开始前会先
- * 暂停播放，这一条挡的是「用户在导出途中又按了播放」。
- */
-let clockTakenOver = false;
-/** 时钟是否被导出接管。见上面的说明。 */
-export const isExportClockTakenOver = (): boolean => clockTakenOver;
-
-let frameHandle: VideoExportListenerHandle | null = null;
 let progressHandle: VideoExportListenerHandle | null = null;
 let installed = false;
 
-/**
- * 装上帧驱动。在 App 里调一次，卸载时把返回的清理函数跑掉。
- *
- * 「画好了」不是设置完 motion value 就算数：写入的那一帧只是改了值，画面要到
- * **下一帧**才按新值重画。所以等两帧再回报 —— 等一帧会稳定地录到「上一帧的画面」，
- * 整条视频看起来就是慢半拍。
- */
+/** 装上进度监听。在 App 里调一次，卸载时把返回的清理函数跑掉。 */
 export const installVideoExportBridge = (): (() => void) => {
     if (installed) {
         return () => undefined;
     }
     installed = true;
-
-    void watchExportFrameRequests(({ index, timeSec }) => {
-        lyricCurrentTime.set(timeSec);
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            void notifyExportFrameReady(index);
-        }));
-    }).then(handle => {
-        frameHandle = handle;
-    });
 
     void watchExportProgress(progress => {
         if (progress.state === 'running') {
@@ -110,10 +83,7 @@ export const installVideoExportBridge = (): (() => void) => {
             });
             return;
         }
-        clockTakenOver = false;
         installed = false;
-        void frameHandle?.remove();
-        frameHandle = null;
         void progressHandle?.remove();
         progressHandle = null;
         if (progress.state === 'done') {
@@ -137,9 +107,6 @@ export const installVideoExportBridge = (): (() => void) => {
 
     return () => {
         installed = false;
-        clockTakenOver = false;
-        void frameHandle?.remove();
-        frameHandle = null;
         void progressHandle?.remove();
         progressHandle = null;
     };
@@ -148,9 +115,14 @@ export const installVideoExportBridge = (): (() => void) => {
 /**
  * 开始一次导出。
  *
- * `spec` 由调用方按当前歌曲和窗口比例算好；这里只管先确认支持、再接管时钟。
+ * `config` 先落到 localStorage —— 离屏渲染页是另一个 WebView，两端之间没有桥，
+ * 这是唯一能把「拍哪首歌、哪个模式、什么主题」送过去的地方（见 exportConfig.ts）。
+ * 写不进去就没法拍（渲染页拿不到歌词），直接报出来，别让用户干等。
  */
-export const beginVideoExport = async (spec: VideoExportSpec): Promise<boolean> => {
+export const beginVideoExport = async (
+    spec: VideoExportSpec,
+    config: ExportRenderConfig,
+): Promise<boolean> => {
     if (snapshot.status === 'running') {
         return false;
     }
@@ -165,14 +137,22 @@ export const beginVideoExport = async (spec: VideoExportSpec): Promise<boolean> 
         });
         return false;
     }
+    if (!writeExportRenderConfig(config)) {
+        publish({
+            status: 'error',
+            frame: 0,
+            total: 0,
+            path: null,
+            message: null,
+        });
+        return false;
+    }
     installVideoExportBridge();
-    clockTakenOver = true;
     publish({ status: 'running', frame: 0, total: spec.totalFrames, path: null, message: null });
     try {
         await callStartVideoExport(spec);
         return true;
     } catch (error) {
-        clockTakenOver = false;
         publish({
             status: 'error',
             frame: 0,

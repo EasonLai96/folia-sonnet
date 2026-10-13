@@ -3,7 +3,6 @@ package top.izuna.foliamajor.export;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -12,18 +11,14 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
-import android.view.PixelCopy;
+import android.util.Log;
 import android.view.Surface;
-import android.view.Window;
 
 import java.io.FileDescriptor;
 import java.nio.ByteBuffer;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 一整次「把歌词动画录成视频」的会话。
+ * 一整次「把歌词动画渲染成视频」的会话。
  *
  * 为什么必须自己写这一层：导出能力原来只存在于 Electron 那一侧
  * （`electron/modSystem/exportService.cjs` + ffmpeg），安卓上 `src/mods/ipc.ts`
@@ -33,17 +28,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * 三段拼起来：
  *
- *  1. **抓帧**：`PixelCopy` 抓主窗口当前这一帧（API 26+）。
- *     不能用离屏 WebView —— 不可见的 View 不会被合成，PixelCopy 只能抓到空白，
- *     而 `View.draw()` 对 WebView 也画不出 Surface 上的内容。所以导出期间画面必须
- *     真的在屏幕上，这也是「导出中请留在应用里」这条要求的由来。
+ *  1. **取帧**：`FrameSource`（实际是 `ExportRenderView`）把离屏渲染页推到第 N 帧的
+ *     时间，等它画完，把画面交回来。**这一层不抓屏** —— 抓主窗口会把播放条、
+ *     系统栏、控制面板一起录进去，那是录屏不是渲染。
  *  2. **编码**：H.264 走 `createInputSurface()`，把帧用 Canvas 画上去，
  *     YUV 转换由 MediaCodec 自己做 —— 手写一遍既慢又容易在部分机型上出绿边。
  *  3. **合成**：`MediaMuxer` 出 MP4。
  *
- * 帧不是按墙钟走的，而是**每帧一次握手**：请求 Web 侧把可视化推到第 N 帧的时间，
- * 等它回报「画好了」再抓。这样录出来的是确定性的画面，而不是「刚好赶上什么算什么」
- * —— 也顺带让慢机器不会录出一堆重复帧。
+ * 帧不是按墙钟走的，而是**一帧一次推进**：把时间往前推一格、等页面画完、取帧、编码。
+ * 这样录出来的是确定性的画面，而不是「刚好赶上什么算什么」—— 也顺带让慢机器
+ * 不会录出一堆重复帧。
  *
  * 透明：**不做**。MediaCodec 的 VP8/VP9/AV1 在安卓上都不支持 alpha 通道，
  * HEVC alpha / ProRes 也没有；要保住透明只能打包第三方编码器。所以这里是带背景的
@@ -54,11 +48,32 @@ public final class VideoExportSession {
     private static final String TAG = "FoliaVideoExport";
     private static final String MIME = MediaFormat.MIMETYPE_VIDEO_AVC;
 
-    /** 等 Web 侧「这一帧画好了」的时限。超时就当这一帧丢了，不能把整条导出卡死。 */
-    private static final long FRAME_READY_TIMEOUT_MS = 4000;
-    /** 等 PixelCopy 的时限。趁它慢的机型上不至于无限等。 */
-    private static final long CAPTURE_TIMEOUT_MS = 1500;
     private static final long CODEC_TIMEOUT_US = 10_000L;
+    /**
+     * 连续多少帧「画面是空的」就认定这条路走不通。
+     *
+     * 离屏取帧的前提是关掉硬件加速后 WebView 愿意把内容画进 `View.draw()`，
+     * 这一条在不同机型 / WebView 版本上不是必然。给它几帧的余量（开头一两句
+     * 歌词没到时画面本来就可能很空），过了就换降级路径。
+     */
+    private static final int BLANK_LIMIT = 30;
+
+    /**
+     * 帧从哪儿来。
+     *
+     * 抽成接口是因为取帧有两条路（离屏 `View.draw()` / 降级后的抓窗口），
+     * 而"哪些路能走、什么时候换"是 `ExportRenderView` 自己的事 —— 这里只管要帧。
+     */
+    public interface FrameSource {
+        /** 把画面推进到第 `timeSec` 秒（第 `index` 帧）并取回这一帧。可在后台线程调。 */
+        Bitmap captureFrame(double timeSec, int index);
+
+        /** 这一帧是不是空的（什么都没画出来）。 */
+        boolean isBlank(Bitmap bitmap);
+
+        /** 换降级路径。返回 false 表示已经没有别的路可走。 */
+        boolean fallback();
+    }
 
     /** 一次导出的参数。全部由 Web 侧给。 */
     public static final class Spec {
@@ -68,7 +83,7 @@ public final class VideoExportSession {
         public final int bitrateMbps;
         public final int totalFrames;
         public final double startSec;
-        /** 背景色（不透明）。画面里的透明像素会先被铺上它。 */
+        /** 兜底底色。取帧失败那一帧会用它补上。 */
         public final int backgroundColor;
 
         public Spec(int width, int height, int fps, int bitrateMbps, int totalFrames,
@@ -84,9 +99,6 @@ public final class VideoExportSession {
     }
 
     public interface Listener {
-        /** 让 Web 侧把画面推到第 `index` 帧（时间 `timeSec`）。跑在主线程。 */
-        void onFrameRequested(int index, double timeSec);
-
         /** 进度。跑在主线程。 */
         void onProgress(int frame, int total);
 
@@ -99,7 +111,7 @@ public final class VideoExportSession {
         void onCancelled();
     }
 
-    private final Window window;
+    private final FrameSource source;
     private final FileDescriptor output;
     private final String outputLabel;
     private final Spec spec;
@@ -112,22 +124,21 @@ public final class VideoExportSession {
     private MediaCodec codec;
     private MediaMuxer muxer;
     private Surface inputSurface;
-    private Bitmap captureBitmap;
-    private Rect captureRect;
     private int videoTrackIndex = -1;
     private boolean muxerStarted = false;
 
     private volatile boolean running = false;
     private volatile boolean cancelled = false;
     private volatile int frameIndex = 0;
-    /** Web 侧回报「画好了」的门闩；每帧换一个新的。 */
-    private volatile CountDownLatch frameReadyLatch;
+    private int blankStreak = 0;
+    private boolean usedFallback = false;
+    private boolean blankedOut = false;
 
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
 
-    public VideoExportSession(Window window, FileDescriptor output, String outputLabel,
+    public VideoExportSession(FrameSource source, FileDescriptor output, String outputLabel,
                               Spec spec, Listener listener) {
-        this.window = window;
+        this.source = source;
         this.output = output;
         this.outputLabel = outputLabel;
         this.spec = spec;
@@ -140,7 +151,7 @@ public final class VideoExportSession {
             return;
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            fail("安卓 8.0（API 26）以下抓不到屏幕内容，无法导出。");
+            fail("安卓 8.0（API 26）以下没有可用的取帧路径，无法导出。");
             return;
         }
         running = true;
@@ -153,23 +164,6 @@ public final class VideoExportSession {
     /** 用户点取消。已经写出去的那部分会正常收尾成一个可播的片段。 */
     public void cancel() {
         cancelled = true;
-        CountDownLatch latch = frameReadyLatch;
-        if (latch != null) {
-            latch.countDown();
-        }
-    }
-
-    /**
-     * Web 侧回报：第 `index` 帧已经画好了，可以抓了。
-     *
-     * 只认当前这一帧的序号 —— 慢一拍到达的回报会把后面那帧提前放行，
-     * 录出来就是一串跳帧。
-     */
-    public void notifyFrameReady(int index) {
-        CountDownLatch latch = frameReadyLatch;
-        if (latch != null && index == frameIndex) {
-            latch.countDown();
-        }
     }
 
     private void prepare() {
@@ -191,21 +185,19 @@ public final class VideoExportSession {
             codec.start();
             muxer = new MediaMuxer(output, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             /*
-             * 屏幕方向：导出期间页面是竖的还是横的由 Web 侧决定，这里只按实际
-             * 输出的宽高写。录完发现是躺着的，改页面方向再来一次即可。
+             * 屏幕方向：导出期间页面是竖的还是横的由 Web 侧决定（输出宽高就是页面尺寸），
+             * 这里只按实际输出写。录完发现是躺着的，改页面方向再来一次即可。
              */
             muxer.setOrientationHint(0);
-
-            captureBitmap = Bitmap.createBitmap(spec.width, spec.height, Bitmap.Config.ARGB_8888);
         } catch (Throwable error) {
-            android.util.Log.e(TAG, "编码器起不来", error);
+            Log.e(TAG, "编码器起不来", error);
             fail("这台机器的 H.264 编码器起不来，导出中止。");
             return;
         }
         worker.post(this::stepFrame);
     }
 
-    /** 一帧的循环：请求 → 等回报 → 抓 → 编 → 下一帧。 */
+    /** 一帧的循环：推时间 → 取帧 → 编 → 下一帧。 */
     private void stepFrame() {
         if (!running) {
             return;
@@ -217,19 +209,10 @@ public final class VideoExportSession {
 
         final int index = frameIndex;
         final double timeSec = spec.startSec + (index / (double) spec.fps);
-        CountDownLatch latch = new CountDownLatch(1);
-        frameReadyLatch = latch;
-        mainHandler.post(() -> listener.onFrameRequested(index, timeSec));
+        captureAndEncode(index, timeSec);
 
-        try {
-            if (!latch.await(FRAME_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                android.util.Log.w(TAG, "第 " + index + " 帧没有等到渲染回报，跳过");
-            } else {
-                captureAndEncode(index);
-            }
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            finish();
+        if (blankedOut) {
+            fail("画面一直是空的：这台机器画不出离屏内容，导出中止。");
             return;
         }
 
@@ -238,9 +221,28 @@ public final class VideoExportSession {
         worker.post(this::stepFrame);
     }
 
-    /** 抓这一帧并交给编码器。抓不到就留空（黑底），不让整条导出挂掉。 */
-    private void captureAndEncode(int index) {
-        Bitmap frame = captureFrame();
+    /** 取这一帧并交给编码器。取不到就留空（底色），不让整条导出挂掉。 */
+    private void captureAndEncode(int index, double timeSec) {
+        Bitmap frame = source.captureFrame(timeSec, index);
+        if (frame == null || source.isBlank(frame)) {
+            blankStreak += 1;
+            if (!usedFallback && blankStreak >= BLANK_LIMIT && source.fallback()) {
+                usedFallback = true;
+                blankStreak = 0;
+                Log.w(TAG, "离屏画面一直是空的，降级到可见窗口取帧");
+                frame = source.captureFrame(timeSec, index);
+            }
+            if (frame == null || source.isBlank(frame)) {
+                if (blankStreak >= BLANK_LIMIT) {
+                    blankedOut = true;
+                }
+            } else {
+                blankStreak = 0;
+            }
+        } else {
+            blankStreak = 0;
+        }
+
         Canvas canvas = null;
         try {
             canvas = inputSurface.lockCanvas(null);
@@ -250,7 +252,7 @@ public final class VideoExportSession {
                         new android.graphics.RectF(0, 0, spec.width, spec.height), paint);
             }
         } catch (Throwable error) {
-            android.util.Log.w(TAG, "第 " + index + " 帧写入编码器失败", error);
+            Log.w(TAG, "第 " + index + " 帧写入编码器失败", error);
         } finally {
             if (canvas != null) {
                 try {
@@ -263,47 +265,6 @@ public final class VideoExportSession {
         drain(false);
     }
 
-    /**
-     * 抓主窗口当前这一帧。
-     *
-     * `PixelCopy` 抓的是**这个窗口**合成之后的内容，别的窗口（通知、悬浮窗）不会混进来
-     * —— 所以进度提示放在原生通知里是安全的，而放在 Web 页面上就会被一起录进去。
-     */
-    private Bitmap captureFrame() {
-        if (captureRect == null) {
-            android.view.View decor = window.getDecorView();
-            int width = decor.getWidth();
-            int height = decor.getHeight();
-            if (width <= 0 || height <= 0) {
-                return null;
-            }
-            captureRect = new Rect(0, 0, width, height);
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return null;
-        }
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicBoolean ok = new AtomicBoolean(false);
-        try {
-            PixelCopy.request(window, captureRect, captureBitmap,
-                    result -> {
-                        ok.set(result == PixelCopy.SUCCESS);
-                        latch.countDown();
-                    },
-                    mainHandler);
-        } catch (Throwable error) {
-            android.util.Log.w(TAG, "PixelCopy 调用失败", error);
-            return null;
-        }
-        try {
-            latch.await(CAPTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-        return ok.get() ? captureBitmap : null;
-    }
-
     /** 把编码器吐出来的数据搬进 muxer。`end` 时先发 EOS 再排空。 */
     private void drain(boolean end) {
         if (codec == null) {
@@ -313,7 +274,7 @@ public final class VideoExportSession {
             try {
                 codec.signalEndOfInputStream();
             } catch (Throwable error) {
-                android.util.Log.w(TAG, "EOS 发不出去", error);
+                Log.w(TAG, "EOS 发不出去", error);
             }
         }
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
@@ -343,7 +304,7 @@ public final class VideoExportSession {
                 try {
                     muxer.writeSampleData(videoTrackIndex, buffer, info);
                 } catch (Throwable error) {
-                    android.util.Log.w(TAG, "写入 muxer 失败", error);
+                    Log.w(TAG, "写入 muxer 失败", error);
                 }
             }
             codec.releaseOutputBuffer(index, false);
@@ -361,7 +322,7 @@ public final class VideoExportSession {
         try {
             drain(true);
         } catch (Throwable error) {
-            android.util.Log.w(TAG, "收尾排空失败", error);
+            Log.w(TAG, "收尾排空失败", error);
         }
         releaseAll();
         if (cancelled) {
@@ -395,7 +356,7 @@ public final class VideoExportSession {
                 muxer.release();
             }
         } catch (Throwable error) {
-            android.util.Log.w(TAG, "muxer 释放失败", error);
+            Log.w(TAG, "muxer 释放失败", error);
         }
         muxer = null;
         try {
@@ -404,7 +365,7 @@ public final class VideoExportSession {
                 codec.release();
             }
         } catch (Throwable error) {
-            android.util.Log.w(TAG, "编码器释放失败", error);
+            Log.w(TAG, "编码器释放失败", error);
         }
         codec = null;
         try {
@@ -415,7 +376,6 @@ public final class VideoExportSession {
             // 已经随编码器释放了。
         }
         inputSurface = null;
-        captureBitmap = null;
         if (workerThread != null) {
             workerThread.quitSafely();
             workerThread = null;

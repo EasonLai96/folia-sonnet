@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
 // src/platform/foliaExport.ts
-// 把歌词动画录成视频的 Web 侧入口。原生实现见 android/.../export/。
+// 把歌词动画渲染成视频的 Web 侧入口。原生实现见 android/.../export/。
 //
 // 为什么要有它：「渲染导出」原本只是一个 Folium 模组（mods/sample-transparent-mov-export），
 // 而模组只在桌面端 Electron 上加载 —— 安卓这边 `src/mods/ipc.ts` 没有 bridge 可用，
@@ -10,16 +10,14 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 //
 // 和桌面端那个模组有一个**本质区别**：它导出的是**不透明**的 MP4。
 // 安卓 MediaCodec 的 VP8/VP9/AV1 都不支持 alpha 通道，HEVC alpha / ProRes 也没有，
-// 想保住透明只能往 APK 里塞第三方编码器 —— 不划算。所以录的是屏幕上真实看到的那一幅
-// 画面（主窗口本来就有不透明底色），而不是"抠掉背景"的那一版。
+// 想保住透明只能往 APK 里塞第三方编码器 —— 不划算。
+//
+// 另一处不一样：这一层**不参与画面**。原生那边开一个离屏渲染页（export.html），
+// 自己一帧一帧推时间、自己取帧（见 ExportRenderView）。主应用只负责在开拍之前
+// 把「拍什么」写进 localStorage（见 services/videoExport/exportConfig），
+// 之后全程不碰时钟 —— 所以这里没有「帧请求 / 帧就绪」那套握手。
 
 export type VideoExportListenerHandle = { remove: () => Promise<void> };
-
-/** 原生请求「把画面推到第 index 帧」。 */
-export type VideoExportFrameRequest = {
-    index: number;
-    timeSec: number;
-};
 
 /** 原生回报的进度 / 结果。 */
 export type VideoExportProgress = {
@@ -39,7 +37,7 @@ export type VideoExportSpec = {
     bitrateMbps: number;
     totalFrames: number;
     startSec: number;
-    /** 兜底底色（0xAARRGGBB，按有符号 32 位传）。抓帧失败那一帧会用它补上。 */
+    /** 兜底底色（0xAARRGGBB，按有符号 32 位传）。取帧失败那一帧会用它补上。 */
     backgroundColor: number;
 };
 
@@ -47,11 +45,6 @@ interface FoliaExportPlugin {
     isSupported(): Promise<{ supported: boolean; reason: string }>;
     start(options: VideoExportSpec): Promise<void>;
     cancel(): Promise<void>;
-    notifyFrameReady(options: { index: number }): Promise<void>;
-    addListener(
-        eventName: 'foliaExportFrame',
-        listener: (request: VideoExportFrameRequest) => void,
-    ): Promise<VideoExportListenerHandle>;
     addListener(
         eventName: 'foliaExportProgress',
         listener: (progress: VideoExportProgress) => void,
@@ -68,8 +61,7 @@ export const isVideoExportAvailable = (): boolean => (
 /**
  * 这台机器能不能导出。
  *
- * 主要挡的是安卓 8.0 以下 —— `PixelCopy` 是 API 26 才有的，而 WebView 的内容
- * 只存在于合成后的 Surface 上，`View.draw()` 画不出来，没有替代路径。
+ * 主要挡的是安卓 8.0 以下 —— 拿不到可用的取帧路径（降级那条 PixelCopy 是 API 26 才有）。
  */
 export const checkVideoExportSupport = async (): Promise<{ supported: boolean; reason: string }> => {
     if (!isVideoExportAvailable()) {
@@ -95,21 +87,6 @@ export const cancelVideoExport = async (): Promise<void> => {
         // 已经结束了。
     }
 };
-
-/** 回报「第 index 帧画好了，可以抓了」。 */
-export const notifyExportFrameReady = async (index: number): Promise<void> => {
-    try {
-        await FoliaExport.notifyFrameReady({ index });
-    } catch {
-        // 导出已经结束，这一帧无所谓了。
-    }
-};
-
-export const watchExportFrameRequests = (
-    listener: (request: VideoExportFrameRequest) => void,
-): Promise<VideoExportListenerHandle> => (
-    FoliaExport.addListener('foliaExportFrame', listener)
-);
 
 export const watchExportProgress = (
     listener: (progress: VideoExportProgress) => void,

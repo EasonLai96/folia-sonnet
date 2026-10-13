@@ -232,6 +232,9 @@ export default async function viteConfig(_config: ConfigEnv): Promise<UserConfig
             modExport: 'mod-export.html',
             // 动态壁纸那层 WebView 加载的页面（见 src/entries/wallpaperSurface.ts）。
             wallpaper: 'wallpaper.html',
+            // 安卓离屏导出那层 WebView 加载的渲染页（见 src/entries/exportSurface.ts）。
+            // 它不显示在屏幕上：原生关掉硬件加速后用 View.draw() 逐帧取画面。
+            export: 'export.html',
           },
         output: {
           // Rolldown ignores manualChunks once codeSplitting is set, so every manual split lives here.

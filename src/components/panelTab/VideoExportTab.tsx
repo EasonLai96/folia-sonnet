@@ -2,8 +2,11 @@ import React, { useMemo, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Film, X } from 'lucide-react';
 import { PlayerState } from '../../types';
-import { usePlaybackStore } from '../../stores/usePlaybackStore';
+import type { SongResult, Theme, VisualizerMode } from '../../types';
+import { selectDisplayLyrics, usePlaybackStore } from '../../stores/usePlaybackStore';
+import { useVisualizerSettingsStore } from '../../stores/useVisualizerSettingsStore';
 import { setIsPanelOpen } from '../../stores/useAppViewStore';
+import { collectVisualizerTunings } from '../../components/visualizer/tuningRegistry';
 import {
     beginVideoExport,
     cancelActiveExport,
@@ -12,24 +15,38 @@ import {
     getVideoExportVersion,
     subscribeVideoExport,
 } from '../../services/videoExport/controller';
+import type { ExportRenderConfig } from '../../services/videoExport/exportConfig';
 import { isVideoExportAvailable } from '../../platform/foliaExport';
 
 // src/components/panelTab/VideoExportTab.tsx
-// 「把歌词动画录成视频」这一页。
+// 「把歌词动画渲染成视频」这一页。
 //
 // 它替代的是桌面端那个模组（mods/sample-transparent-mov-export）：模组只在 Electron
 // 上加载，安卓这边 `src/mods/ipc.ts` 没有 bridge，`reloadMods()` 返回空数组 ——
 // 所以这个功能在手机上一直是不存在的，不是没入口，是压根没有实现。
 //
+// 录的是**渲染结果**，不是录屏：原生会开一个离屏渲染页（export.html），那一页上只有
+// 可视化本身，时钟由导出程序一帧一帧往前推（合成时钟，不是真实播放）。抓主窗口是不行的
+// —— 那一屏上有播放条、系统栏、控制面板，抓下来就是录屏。
+//
 // 两个和桌面端不一样的地方，界面上必须说清楚：
 //  · **导出的是不透明的 MP4**。安卓 MediaCodec 的 VP8/VP9/AV1 都不支持 alpha 通道，
 //    想保住透明只能往 APK 里塞第三方编码器 —— 不划算。
-//  · **比实时慢很多**。一帧一次 PixelCopy（抓屏），1080p 上一帧几十毫秒很常见，
-//    30 秒的片段实际要跑好几分钟。所以默认只给 30 秒。
+//  · **比实时慢很多**。一帧要推一次时间 + 等两帧 rAF + 画一遍，1080p 上一帧几十毫秒
+//    很常见，30 秒的片段实际要跑好几分钟。所以默认只给 30 秒。
 
 interface VideoExportTabProps {
     isDaylight: boolean;
-    /** 导出前要先把播放停住：画面得由导出循环推，播放时钟会把它拽回去。 */
+    /** 当前主题。渲染页是另一个 WebView，拿不到 App 里的主题，只能随配置送过去。 */
+    theme: Theme;
+    visualizerMode: VisualizerMode;
+    currentSong: SongResult | null;
+    /**
+     * 导出前要先把播放停住。
+     *
+     * 画面是由导出程序按帧推的，而播放时钟会继续往前走 —— 不停的话两边的时间会打架
+     * （进度条和状态栏歌词照常跑，而片子里的时间是另一条）。
+     */
     onTogglePlay?: () => void;
 }
 
@@ -39,7 +56,9 @@ const MAX_CLIP_SECONDS = 900;
 
 type Resolution = 720 | 1080;
 
-const VideoExportTab: React.FC<VideoExportTabProps> = ({ isDaylight, onTogglePlay }) => {
+const VideoExportTab: React.FC<VideoExportTabProps> = (
+    { isDaylight, theme, visualizerMode, currentSong, onTogglePlay },
+) => {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeVideoExport, getVideoExportVersion);
     const snapshot = getVideoExportSnapshot();
@@ -74,18 +93,42 @@ const VideoExportTab: React.FC<VideoExportTabProps> = ({ isDaylight, onTogglePla
 
     const handleStart = () => {
         /*
-         * 画面必须独占了屏幕才能让 PixelCopy 抓到干净的一帧，所以这里把面板收起来。
-         * 驱动本身挂在 App 上（useVideoExportBridge），面板关掉不影响它在跑。
+         * 面板要收起来：它浮在画面之上，开着会挡住正在渲染的那一屏（降级那条路抓的是
+         * 整个窗口）。驱动本身挂在 App 上（useVideoExportBridge），面板关掉不影响它在跑。
          */
         setIsPanelOpen(false);
         if (playerState === PlayerState.PLAYING) {
             onTogglePlay?.();
         }
-        // 输出按窗口比例：抓帧拿到的是窗口原始尺寸，硬编成固定宽高会把画面拉扁。
+        // 输出按窗口比例：硬编成固定宽高会把画面拉扁。
         const longEdge = resolution;
         const ratio = window.innerWidth / Math.max(1, window.innerHeight);
         const width = ratio >= 1 ? longEdge : Math.round(longEdge * ratio);
         const height = ratio >= 1 ? Math.round(longEdge / ratio) : longEdge;
+
+        /*
+         * 渲染页是另一个 WebView，和主应用之间没有桥 —— 「拍什么」只能经 localStorage
+         * 送过去（见 services/videoExport/exportConfig）。这里读的是**点这一下**的快照，
+         * 不订阅：这一页不需要因为歌词换了一份就重渲染。
+         */
+        const lyrics = selectDisplayLyrics(usePlaybackStore.getState());
+        const settings = useVisualizerSettingsStore.getState();
+        const config: ExportRenderConfig = {
+            lyricData: lyrics ? { lines: lyrics.lines } : null,
+            visualizerMode,
+            visualizerTunings: collectVisualizerTunings(settings as unknown as Record<string, unknown>),
+            theme,
+            songMeta: {
+                title: currentSong?.title ?? undefined,
+                artist: currentSong?.artist ?? undefined,
+            },
+            startSec: 0,
+            // 不透明导出：让渲染页自己铺主题底色，别指望后面再抠。
+            backgroundMode: 'theme',
+            width,
+            height,
+        };
+
         void beginVideoExport({
             width,
             height,
@@ -94,7 +137,7 @@ const VideoExportTab: React.FC<VideoExportTabProps> = ({ isDaylight, onTogglePla
             totalFrames,
             startSec: 0,
             backgroundColor: 0xFF000000 | 0,
-        });
+        }, config);
     };
 
     const optionRow = (label: string, children: React.ReactNode) => (

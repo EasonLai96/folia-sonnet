@@ -3,9 +3,12 @@ package top.izuna.foliamajor.export;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.util.Log;
@@ -21,10 +24,10 @@ import java.io.File;
 import java.io.FileDescriptor;
 
 /**
- * 「把歌词动画录成视频」的桥。原生实现见同目录的 VideoExportSession。
+ * 「把歌词动画渲染成视频」的桥。原生实现见同目录的 VideoExportSession / ExportRenderView。
  *
- * 这一层只管三件事：把输出文件准备好、把会话跑起来、把状态和每帧的请求转给 Web 层。
- * 画面怎么走、时钟怎么推都是 Web 侧的事 —— 那里才有可视化。
+ * 这一层只管四件事：把输出文件准备好、把离屏渲染页拉起来、把会话跑起来、把状态转给 Web 层。
+ * 画面怎么走、时钟怎么推都是渲染页的事 —— 那里才有可视化。
  *
  * 为什么要做成插件而不是模组：模组在安卓上压根加载不了（见 `src/mods/ipc.ts`，
  * 没有 Electron bridge 时 `reloadMods()` 返回空数组），而导出这条能力原本只存在于
@@ -35,19 +38,20 @@ public class FoliaExportPlugin extends Plugin {
 
     private static final String TAG = "FoliaExportPlugin";
 
-    private static final String EVENT_FRAME = "foliaExportFrame";
     private static final String EVENT_PROGRESS = "foliaExportProgress";
 
     /**
      * 导出上限。
      *
-     * 抓帧是「一次 PixelCopy 换一帧」，比实时慢得多（1080p 上一帧几十毫秒很常见），
-     * 不封顶的话用户随手一点就是十几分钟。15 分钟 / 1080p / 60fps 和桌面端那一档对齐。
+     * 一帧要推一次时间 + 等两帧 rAF + 画一遍（1080p 上几十毫秒很常见），
+     * 比实时慢得多。不封顶的话用户随手一点就是十几分钟。15 分钟 / 1080p / 60fps
+     * 和桌面端那一档对齐。
      */
     private static final int MAX_FRAMES = 60 * 60 * 15;
     private static final int MAX_PIXELS = 3840 * 2160;
 
     private VideoExportSession session;
+    private ExportRenderView renderView;
     private ParcelFileDescriptor outputFd;
     private boolean keepScreenOn = false;
 
@@ -65,7 +69,7 @@ public class FoliaExportPlugin extends Plugin {
         out.put("supported", supported);
         out.put("reason", supported
                 ? ""
-                : "抓屏需要安卓 8.0（API 26）以上，这台机器是 " + Build.VERSION.SDK_INT + "。");
+                : "导出需要安卓 8.0（API 26）以上，这台机器是 " + Build.VERSION.SDK_INT + "。");
         call.resolve(out);
     }
 
@@ -76,7 +80,7 @@ public class FoliaExportPlugin extends Plugin {
             call.reject("Activity unavailable; cannot start an export.");
             return;
         }
-        if (session != null) {
+        if (session != null || renderView != null) {
             call.reject("An export is already running.");
             return;
         }
@@ -152,18 +156,13 @@ public class FoliaExportPlugin extends Plugin {
 
         setKeepScreenOn(activity, true);
 
+        final ExportRenderView view = new ExportRenderView(activity, width, height);
+        renderView = view;
+
         VideoExportSession.Spec spec = new VideoExportSession.Spec(
                 width, height, fps, bitrateMbps, totalFrames, startSec, backgroundColor);
-        session = new VideoExportSession(activity.getWindow(), fd, label, spec,
+        session = new VideoExportSession(frameSource, fd, label, spec,
                 new VideoExportSession.Listener() {
-                    @Override
-                    public void onFrameRequested(int index, double timeSec) {
-                        JSObject payload = new JSObject();
-                        payload.put("index", index);
-                        payload.put("timeSec", timeSec);
-                        notifyListeners(EVENT_FRAME, payload);
-                    }
-
                     @Override
                     public void onProgress(int frame, int total) {
                         JSObject payload = new JSObject();
@@ -199,7 +198,31 @@ public class FoliaExportPlugin extends Plugin {
                         stopSession(true);
                     }
                 });
-        session.start();
+
+        /*
+         * 渲染页是**新建的 WebView**，加载 + 等首帧要几十秒的量级，绝不能卡在主线程上
+         * （主线程一卡，页面里的 rAF 就没法跑，`loadAndWait` 自己要等的正是 rAF）。
+         * 所以 attach 在主线程做、等在后台线程做，等到了再回主线程开会话。
+         */
+        final Handler main = new Handler(Looper.getMainLooper());
+        main.post(view::attach);
+        new Thread(() -> {
+            Boolean webglOk = view.loadAndWait();
+            if (webglOk == null) {
+                reportFailure("渲染页面起不来，导出中止。");
+                return;
+            }
+            if (!webglOk) {
+                Log.w(TAG, "软渲染下 WebGL 不可用，降级到可见窗口取帧");
+                view.fallbackToVisible();
+            }
+            main.post(() -> {
+                if (session != null) {
+                    session.start();
+                }
+            });
+        }, "folia-export-prepare").start();
+
         call.resolve();
     }
 
@@ -214,18 +237,51 @@ public class FoliaExportPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Web 侧回报：第 `index` 帧已经画好了，可以抓了。 */
-    @PluginMethod
-    public void notifyFrameReady(PluginCall call) {
-        Integer index = call.getInt("index");
-        if (session != null && index != null) {
-            session.notifyFrameReady(index);
-        }
-        call.resolve();
-    }
-
     private Uri pendingUri;
     private java.io.FileOutputStream rawStream;
+
+    /** 取帧这一路的适配层：离屏优先，画不出来就换可见窗口。 */
+    private final VideoExportSession.FrameSource frameSource = new VideoExportSession.FrameSource() {
+        @Override
+        public Bitmap captureFrame(double timeSec, int index) {
+            ExportRenderView view = renderView;
+            return view == null ? null : view.captureFrame(timeSec, index);
+        }
+
+        @Override
+        public boolean isBlank(Bitmap bitmap) {
+            return ExportRenderView.isBlank(bitmap);
+        }
+
+        @Override
+        public boolean fallback() {
+            ExportRenderView view = renderView;
+            if (view == null || view.isVisibleMode()) {
+                return false;
+            }
+            // 降级那条路是 PixelCopy，API 26 才有。
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                return false;
+            }
+            view.fallbackToVisible();
+            return true;
+        }
+    };
+
+    private void reportFailure(String message) {
+        mainReportFailure(message);
+        stopSession(true);
+    }
+
+    private void mainReportFailure(String message) {
+        Handler main = new Handler(Looper.getMainLooper());
+        main.post(() -> {
+            JSObject payload = new JSObject();
+            payload.put("state", "error");
+            payload.put("message", message);
+            notifyListeners(EVENT_PROGRESS, payload);
+        });
+    }
 
     private void stopSession(boolean discard) {
         VideoExportSession current = session;
@@ -235,6 +291,11 @@ public class FoliaExportPlugin extends Plugin {
             if (discard) {
                 current.cancel();
             }
+        }
+        ExportRenderView view = renderView;
+        renderView = null;
+        if (view != null) {
+            view.release();
         }
         closeOutput(discard);
         Activity activity = getActivity();
@@ -279,8 +340,8 @@ public class FoliaExportPlugin extends Plugin {
     /**
      * 导出期间保持屏幕亮着。
      *
-     * 抓帧要求画面真的在屏幕上；中途息屏的话合成停了，PixelCopy 只会拿到失败或者
-     * 最后一帧 —— 录出来就是后面一整段静止画面。
+     * 页面里的 rAF 必须照常跑才能推帧：中途息屏（或者退到后台）的话帧回调停了，
+     * 推时间那一侧永远等不到"画完了" —— 导出会被超时拖死。
      */
     private void setKeepScreenOn(Activity activity, boolean on) {
         if (keepScreenOn == on) {
