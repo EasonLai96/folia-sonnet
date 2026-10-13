@@ -750,27 +750,56 @@ html[data-folia-ui-scale='compact'] .lattice-tools {
   --wall-tools-panel-chrome: 190px;
 }
 
-/* ④ 播放条那条「悬停展开」用的全宽命中区，在手机横屏下必须交回 pass-through。
+/* ④ 播放条那条「悬停展开」用的全宽命中区，在手机上必须全部交回 pass-through（不止横屏那一档）。
  *
  * 它存在的意义是鼠标：指针落到屏幕下缘任意一点就把胶囊展开。为此它铺满整个定位层宽度
  * （`w-full`），还往下补了 32px padding 一直贴到底边。触屏没有悬停，这条带走不了任何好处，
  * 却把下缘整条变成了播放条的地盘 —— 侧切入面板、右下角工具面板贴在那里的按钮，
  * 点击要么落在这块空盒子上（什么也不发生），要么落进胶囊自己的点击语义里。
  *
- * 面板本身在 z-10 的首页层里、播放条在 z-60，z-index 翻不过去，所以只能让命中区让路：
+ * 原本只对横屏紧凑档（`data-folia-ui-scale='compact'`）让路，因为那档最容易撞；但真正决定它吃不吃到
+ * 右下角的是**容器宽度**，不是高度：
+ *   - 首页视图：外层是 `max-w-[calc(100vw-120px)]`，左右各留 60px，工具按钮（right-16、48 宽）正好躲过去；
+ *   - 其余视图（Lattice / 播放页）：外层换成 `max-w-[min(32rem+extra,100vw)] px-4`，命中区横跨整屏，
+ *     纵向从屏幕底一直到胶囊上沿（约 0–80px），而工具按钮是 bottom 16 + 48 → **整个被盖住**，
+ *     怎么点都是点在这块空盒子上，右下角工具面板 Renderer 完全不出来。
+ *
+ * 于是「在 bravais 里选一首不在播放的歌、点了播放」必定中：那个确定的 switch 是
+ * `shouldNavigateToPlayerOnTrackChange`，播放不是正在播放的那首会按「播放后进入的视图」跳转，
+ * 选成 Lattice 的话人就已经被翻到 Lattice 了 —— 那里的宽度约束没了，按钮就废了。
+ * 而选正在播放的那首只是暂停 / 继续，不做跳转，还在首页视图里，所以一切正常。
+ *
+ * 工具面板本身在 z-10 的那一层里、播放条在 z-60，z-index 翻不过去，所以只能让命中区让路：
  * 定位层与命中盒都设成 none，只有可见的胶囊（含它里面的按钮）收回 auto。
  * 悬停展开不受影响 —— 指针进到胶囊里时，React 仍然会按事件路径给命中盒派发 enter。 */
-html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox-host='true'] {
+html[data-runtime='capacitor-android'] [data-folia-player-bar-hitbox-host='true'] {
   pointer-events: none !important;
 }
 
-html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox='true'],
-html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox='true'] > * {
+html[data-runtime='capacitor-android'] [data-folia-player-bar-hitbox='true'],
+html[data-runtime='capacitor-android'] [data-folia-player-bar-hitbox='true'] > * {
   pointer-events: none;
 }
 
-html[data-folia-ui-scale='compact'] [data-folia-player-bar-hitbox-host='true'] [data-ponder='player-bar'] {
+html[data-runtime='capacitor-android'] [data-folia-player-bar-hitbox-host='true'] [data-ponder='player-bar'] {
   pointer-events: auto;
+}
+
+/* 触屏一律如此（不只是安卓 WebView）： `@media (hover: none)` 的设备没有悬停，
+ * 这条全宽命中区只会吞掉别人贴底控件的点击。 */
+@media (hover: none) {
+  [data-folia-player-bar-hitbox-host='true'] {
+    pointer-events: none !important;
+  }
+
+  [data-folia-player-bar-hitbox='true'],
+  [data-folia-player-bar-hitbox='true'] > * {
+    pointer-events: none;
+  }
+
+  [data-folia-player-bar-hitbox-host='true'] [data-ponder='player-bar'] {
+    pointer-events: auto;
+  }
 }
 
 /* ⑤ 首页网格的左右滑动选卡（Grid3DSlider）：横屏下「高度」是唯一的硬约束。
