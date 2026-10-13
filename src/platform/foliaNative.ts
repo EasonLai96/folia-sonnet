@@ -35,6 +35,14 @@ export type NativeHttpResponse = {
 interface FoliaNativePlugin {
     exitApp(): Promise<void>;
     /**
+     * 可视化歌词页面专用：隐藏系统栏（状态栏 + 导航栏）。
+     *
+     * 传 false 恢复显示。**默认是显示** —— 只有 Web 层明确说「现在是歌词页」时才隐藏，
+     * 首页 / 搜索 / 设置这些页面状态栏一直在（时间、电量、通知图标要看得见）。
+     * 判定在 Web 层做：原生不知道哪个页面算歌词页，这里只负责把结论送过去。
+     */
+    setImmersive(options: { immersive: boolean }): Promise<void>;
+    /**
      * 屏幕常亮开关。
      *
      * 传进来的值必须是**已经算好的结论**（开关 && 正在播放）：原生那边的 FLAG 只有
@@ -72,6 +80,21 @@ interface FoliaNativePlugin {
 }
 
 const FoliaNative = registerPlugin<FoliaNativePlugin>('FoliaNative');
+
+/**
+ * 进出可视化歌词页面时切换系统栏。
+ *
+ * 只有歌词页需要整块屏幕；其余页面状态栏一直显示。
+ * 窗口布局本身始终是边到边（targetSdk 36 强制），这里切的只是**可见性** ——
+ * 栏位该让出的空间由 CSS 的安全区变量负责，不受影响。
+ */
+export const setNativeImmersive = async (immersive: boolean): Promise<void> => {
+    try {
+        await FoliaNative.setImmersive({ immersive });
+    } catch {
+        // 桌面端 / 插件没注册：静默。系统栏可见性不该影响播放本身。
+    }
+};
 
 /**
  * 让屏幕保持常亮（或交还给系统）。

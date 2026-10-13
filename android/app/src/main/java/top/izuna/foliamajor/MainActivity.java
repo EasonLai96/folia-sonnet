@@ -1,5 +1,6 @@
 package top.izuna.foliamajor;
 
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -10,6 +11,7 @@ import android.os.Bundle;
 import android.Manifest;
 import android.graphics.Color;
 import android.provider.OpenableColumns;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebSettings;
@@ -49,6 +51,8 @@ import java.util.Locale;
  */
 public class MainActivity extends BridgeActivity {
 
+    private static final String TAG = "FoliaMainActivity";
+
     /**
      * 播放控制意图由清单注册的 FoliaCommandReceiver 统一接收，不再挂在 Activity 上。
      *
@@ -64,6 +68,42 @@ public class MainActivity extends BridgeActivity {
         ".mp3", ".flac", ".m4a", ".aac", ".alac", ".wav", ".ogg", ".opus",
         ".ape", ".wv", ".tta", ".wma", ".aif", ".aiff", ".caf",
     };
+
+    /**
+     * 系统栏现在**默认显示**，只有可视化歌词页面才隐藏。
+     *
+     * 以前是一进 App 就全沉浸（状态栏 + 导航栏都藏起来）。可除了歌词页之外，用户其实
+     * 一直想看见时间 / 电量 / 通知图标 —— 在首页翻两页完全看不到状态栏是纯亏。
+     * 所以默认改成显示，由 Web 层进出播放页时明确告知（FoliaNativePlugin.setImmersive）。
+     *
+     * 切的是**可见性**而不是布局：窗口始终边到边（`setDecorFitsSystemWindows(false)`，
+     * targetSdk 36 本来也强制），栏位该让出的空间由 CSS 的安全区变量负责，
+     * 跟系统栏显不显示无关 —— 所以显示状态栏不会把界面顶下来一截。
+     */
+    private static volatile boolean immersiveModeEnabled = false;
+
+    /**
+     * 由 Web 层驱动：进入可视化歌词页面时隐藏系统栏，离开就恢复。
+     *
+     * 判定不放在原生（原生不知道「哪个页面算歌词页」），只在这里收一个已经算好的结论。
+     */
+    public static void setImmersiveMode(Activity activity, boolean enabled) {
+        immersiveModeEnabled = enabled;
+        if (!(activity instanceof MainActivity)) {
+            return;
+        }
+        final MainActivity main = (MainActivity) activity;
+        main.runOnUiThread(() -> {
+            try {
+                if (main.isFinishing() || main.isDestroyed()) return;
+                main.applyImmersiveMode();
+                // 栏位一变，系统会把 inset 重新写成 padding，挖孔那套也得跟着重压一次。
+                PhoneFitCutout.apply(main);
+            } catch (Throwable error) {
+                Log.w(TAG, "apply immersive mode failed", error);
+            }
+        });
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -345,20 +385,18 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * 全沉浸：隐藏系统栏，并让 WebView 真正铺满整屏。
+     * 把当前的系统栏状态压一遍。
      *
-     * 两件事必须一起做，只做一半就会出现「栏被隐藏了但那一块是空白」：
+     * 窗口布局这一步**始终**保持边到边：`setDecorFitsSystemWindows(false)` 是关键，
+     * 只做「隐藏」不做它会变成「栏藏了但那一块留着空白带」（正是早先用户看到的）。
+     * 两个栏的背景色也必须透明，有些 ROM 即使隐藏了也会留下底色残留。
      *
-     * 1. `setDecorFitsSystemWindows(false)`：让内容绘制到系统栏区域**之下**。
-     *    这是关键的一步。缺了它，栏虽然被 hide 掉，但窗口仍按「内容避开系统栏」来布局，
-     *    顶部/底部就留下一块背景色的空白带 —— 正是用户看到的「那一栏还是空白的」。
-     * 2. `controller.hide(systemBars())`：把状态栏与导航栏都隐藏。
-     *
-     * 另外要把两个栏的背景色设为透明：有些 ROM 即使隐藏了也会留下底色残留。
+     * 可见性由 {@link #immersiveModeEnabled} 决定：只有可视化歌词页面才隐藏，
+     * 其余页面一律显示（时间 / 电量 / 通知图标是用户要一直看见的）。
      *
      * 不能依赖 web 层的 StatusBar.setOverlaysWebView —— 它走的是已废弃的
      * setSystemUiVisibility(SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)，
-     * 只覆盖状态栏、不覆盖导航栏，而且它在 JS 加载后才执行，会把这里的 hide 结果冲掉。
+     * 只覆盖状态栏、不覆盖导航栏，而且它在 JS 加载后才执行，会把这里压好的状态冲掉。
      */
     private void applyImmersiveMode() {
         View decorView = getWindow().getDecorView();
@@ -378,7 +416,13 @@ public class MainActivity extends BridgeActivity {
                 WindowCompat.getInsetsController(getWindow(), decorView);
         controller.setSystemBarsBehavior(
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-        controller.hide(WindowInsetsCompat.Type.systemBars());
+        if (immersiveModeEnabled) {
+            // 可视化歌词页面：两个栏都收起来，歌词吃掉整块屏幕。
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            // 其余页面：状态栏回来。滑动手势调出导航栏的行为仍由上面的 behavior 管。
+            controller.show(WindowInsetsCompat.Type.systemBars());
+        }
 
         // 栏位变了之后 WebView 常常还按上一次的尺寸画着，顶部就留一条与内容无关的黑带。
         // 这一步必须跟着 setDecorFitsSystemWindows 一起做（照 folia-android 的 AdaptiveLayout）。

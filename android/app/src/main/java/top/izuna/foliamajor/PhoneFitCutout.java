@@ -16,7 +16,6 @@ import android.webkit.WebView;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -33,7 +32,7 @@ import java.util.List;
  * 所以这里做完整的一套：
  * 1. layoutInDisplayCutoutMode = shortEdges，允许窗口覆盖挖孔；
  * 2. FLAG_LAYOUT_NO_LIMITS + setDecorFitsSystemWindows(false)，不再为系统栏留位；
- * 3. 状态栏/导航栏透明并隐藏；
+ * 3. 状态栏/导航栏透明（可见性另归 MainActivity 管）；
  * 4. 给内容根视图挂 inset 监听，把系统栏 inset 从 padding 里清掉（第 4 步才是黑边的直接原因）。
  *
  * 这套适配不跟「手机适配」开关绑定：挖孔是设备固有特征。布局仍由应用内的安全区变量避让。
@@ -46,7 +45,17 @@ final class PhoneFitCutout {
     private PhoneFitCutout() {
     }
 
-    /** 应用完整的铺满屏幕策略；启动、回前台、获焦、开关变化时都会调用。 */
+    /**
+     * 应用「几何上铺满」这一半：启动、回前台、获焦、转屏时都会调用。
+     *
+     * 这里**刻意不动系统栏的可见性** —— 可见性统一由
+     * {@link MainActivity#applyImmersiveMode} 按 Web 层的指令切换。两处都压会打架：
+     * 本方法在布局回填时会被反复调用（见 installDecorPaddingGuard），它若压 hide，
+     * 就会把「离开歌词页后恢复状态栏」直接覆盖掉，状态栏再也回不来。
+     *
+     * 而栏显不显也不影响这一层的测量 —— 用的是 `getInsetsIgnoringVisibility`，
+     * 量的是「它会占多少」而不是「现在占了没」，所以安全区变量不受开关影响。
+     */
     static boolean apply(Activity activity) {
         if (activity == null) {
             return false;
@@ -72,13 +81,6 @@ final class PhoneFitCutout {
             // 系统栏透明，避免顶部出现一条不透明色带。
             window.setStatusBarColor(Color.TRANSPARENT);
             window.setNavigationBarColor(Color.TRANSPARENT);
-            // 直接隐藏系统栏；从边缘划入时临时显示。
-            WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(window, window.getDecorView());
-            controller.hide(WindowInsetsCompat.Type.systemBars());
-            controller.setSystemBarsBehavior(
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            );
 
             View decor = window.getDecorView();
             if (decor != null) {

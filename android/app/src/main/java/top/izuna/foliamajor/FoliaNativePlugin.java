@@ -171,6 +171,25 @@ public class FoliaNativePlugin extends Plugin {
         activity.runOnUiThread(() -> target.notifyListeners(PHONE_INSETS_EVENT, payload));
     }
 
+    /**
+     * 可视化歌词页面专用：隐藏系统栏（状态栏 + 导航栏）。
+     *
+     * 传 false 恢复显示。**默认是显示**，也就是说只有 Web 层明确说「现在是歌词页」时
+     * 才会隐藏 —— 首页 / 搜索 / 设置这些页面状态栏一直在，时间电量通知图标看得见。
+     *
+     * 原生不知道「哪个页面算歌词页」，所以判定交给 Web 层，这里只执行结论。
+     * 切换后会连带重压一次挖孔适配（系统栏一显一隐，inset 会被重写成 padding）。
+     */
+    @PluginMethod
+    public void setImmersive(PluginCall call) {
+        boolean immersive = Boolean.TRUE.equals(call.getBoolean("immersive", false));
+        Activity activity = getActivity();
+        if (activity instanceof MainActivity) {
+            MainActivity.setImmersiveMode(activity, immersive);
+        }
+        call.resolve();
+    }
+
     /** 网页首屏拉取安全区：事件只能覆盖「变了之后」，第一次的值得靠这一下。 */
     @PluginMethod
     public void getPhoneInsets(PluginCall call) {
