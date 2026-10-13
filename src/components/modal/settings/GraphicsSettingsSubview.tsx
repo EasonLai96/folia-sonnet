@@ -49,6 +49,15 @@ const openDocsLinkExternally = (event: React.MouseEvent<HTMLAnchorElement>) => {
 
 const getFrameRateLabel = (frameRate: VisualizerFrameRate) => `${frameRate} FPS`;
 
+/**
+ * 打开开关时落在哪一档。
+ *
+ * 不能给 120：屏幕刷新率最多也就 120，限 120 和不限画出来是一模一样的两份 —— 以前默认给 120，
+ * 于是「打开帧率限制」这一步看不出任何变化，用户只能以为开关坏了。给 60：一开就能看出来，
+ * 想要满帧再往上拉到 120。
+ */
+const DEFAULT_VISUALIZER_FRAME_RATE: VisualizerFrameRate = 60;
+
 /** 壁纸背景四种模式的文案键。列成一张表，加一种模式时只改这一处。 */
 const BACKGROUND_LABEL_KEYS: Record<'cover' | 'color' | 'image' | 'video', string> = {
     cover: 'options.lyricsWallpaperBackgroundCover',
@@ -301,6 +310,7 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     const dividerClass = settingsDividerClassFor(isDaylight);
     const isLinux = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('linux');
     const isVisualizerFrameRateLimiterEnabled = visualizerFrameRate !== 'off';
+    // 关着的时候档位显示 120：那正是「不限」的意思 —— 画到屏幕刷新率为止。
     const selectedVisualizerFrameRate = isVisualizerFrameRateLimiterEnabled ? visualizerFrameRate : 120;
     const selectedVisualizerFrameRateIndex = VISUALIZER_FRAME_RATE_OPTIONS.indexOf(selectedVisualizerFrameRate);
 
@@ -359,7 +369,7 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                         description={t('options.visualizerFrameRateDesc')}
                         control={renderToggle(
                             isVisualizerFrameRateLimiterEnabled,
-                            () => onVisualizerFrameRateChange(isVisualizerFrameRateLimiterEnabled ? 'off' : selectedVisualizerFrameRate),
+                            () => onVisualizerFrameRateChange(isVisualizerFrameRateLimiterEnabled ? 'off' : DEFAULT_VISUALIZER_FRAME_RATE),
                         )}
                         dividerClass={dividerClass}
                     >
@@ -379,11 +389,10 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                 aria-label={t('options.visualizerFrameRateValue')}
                                 disabled={!isVisualizerFrameRateLimiterEnabled}
                             />
-                            <div className="grid grid-cols-3 text-[11px] font-mono opacity-50" style={{ color: 'var(--text-secondary)' }}>
-                                {VISUALIZER_FRAME_RATE_OPTIONS.map((frameRate, index) => (
-                                    <span key={frameRate} className={index === 1 ? 'text-center' : index === 2 ? 'text-right' : ''}>
-                                        {frameRate}
-                                    </span>
+                            {/* 档位数量会变（现在是 30/60/90/120），刻度用两端对齐而不是写死的几列。 */}
+                            <div className="flex justify-between text-[11px] font-mono opacity-50" style={{ color: 'var(--text-secondary)' }}>
+                                {VISUALIZER_FRAME_RATE_OPTIONS.map(frameRate => (
+                                    <span key={frameRate}>{frameRate}</span>
                                 ))}
                             </div>
                         </div>

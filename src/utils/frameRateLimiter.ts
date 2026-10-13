@@ -19,7 +19,10 @@ type WindowWithVisualizerFrameRateLimiter = Window & {
     __foliaNativeCancelAnimationFrame?: CancelAnimationFrameFn;
 };
 
-export const VISUALIZER_FRAME_RATE_OPTIONS = [60, 90, 120] as const satisfies VisualizerFrameRate[];
+// 30 那一档是给「画不动」的设备留的：播放页的可视化常常同时有两三个全屏 WebGL 上下文，
+// 手机 WebView 上单帧就要二三十毫秒，这时候只有真的把每秒帧数压下来才看得出流畅，
+// 60 档在高刷屏上还是嫌多。
+export const VISUALIZER_FRAME_RATE_OPTIONS = [30, 60, 90, 120] as const satisfies VisualizerFrameRate[];
 export const VISUALIZER_FRAME_RATE_STORAGE_KEY = 'visualizer_frame_rate';
 const FRAME_INTERVAL_TOLERANCE_MS = 1;
 
@@ -28,6 +31,7 @@ export const isVisualizerFrameRate = (value: unknown): value is VisualizerFrameR
     || value === 120
     || value === 90
     || value === 60
+    || value === 30
 );
 
 export const parseVisualizerFrameRate = (value: string | null): VisualizerFrameRate => {
@@ -39,18 +43,45 @@ export const parseVisualizerFrameRate = (value: string | null): VisualizerFrameR
     return isVisualizerFrameRate(parsed) ? parsed : 'off';
 };
 
-// Decides whether a RAF tick should run under the configured FPS cap.
+/**
+ * Decides whether a RAF tick should run under the configured FPS cap.
+ *
+ * 判定对象是**下一帧被允许的时刻**，不是「上次放行的实际时刻」：
+ *
+ * 拿上次放行的实际时刻 + 一个间隔来判，在 120Hz 屏上选 90 档会塌到 60fps —— 帧间隔 8.33ms，
+ * 而阈值是 1000/90-1 = 10.11ms，于是必须攒满两帧（16.67ms）才够，档位被压成屏幕刷新率的
+ * 整数分之一。累积推进下一允许时刻才会得到「四帧放行三帧」这种接近 90fps 的节奏。
+ *
+ * `nextAllowedTimestampMs` 为 0 表示还没放行过任何帧（首帧、刚改过档位、或掉帧后重新锚定）。
+ */
 export const shouldProcessFrameAtRate = (
     timestampMs: number,
-    lastProcessedTimestampMs: number,
+    nextAllowedTimestampMs: number,
     frameRate: VisualizerFrameRate,
 ) => {
-    if (frameRate === 'off') {
+    if (frameRate === 'off' || nextAllowedTimestampMs === 0) {
         return true;
     }
 
-    const intervalMs = 1000 / frameRate - FRAME_INTERVAL_TOLERANCE_MS;
-    return lastProcessedTimestampMs === 0 || timestampMs - lastProcessedTimestampMs >= intervalMs;
+    return timestampMs + FRAME_INTERVAL_TOLERANCE_MS >= nextAllowedTimestampMs;
+};
+
+/** 一帧被放行后，下一帧最早允许的时刻。落后超过一个间隔就重新锚定，不追赶欠的帧。 */
+export const nextAllowedFrameTimestamp = (
+    timestampMs: number,
+    previousAllowedTimestampMs: number,
+    frameRate: VisualizerFrameRate,
+): number => {
+    if (frameRate === 'off') {
+        return 0;
+    }
+
+    const intervalMs = 1000 / frameRate;
+    if (previousAllowedTimestampMs === 0 || timestampMs >= previousAllowedTimestampMs + intervalMs) {
+        return timestampMs + intervalMs;
+    }
+
+    return previousAllowedTimestampMs + intervalMs;
 };
 
 const reportAnimationFrameCallbackError = (error: unknown) => {
@@ -69,7 +100,8 @@ export const createFrameRateLimitedRaf = (
     let frameRate = initialFrameRate;
     let nextHandle = 1;
     let nativeFrameHandle: number | null = null;
-    let lastProcessedTimestamp = 0;
+    /** 下一帧被允许的时刻；0 = 还没放行过（首帧 / 刚改档位 / 掉帧后重锚）。 */
+    let nextAllowedTimestamp = 0;
     const callbacks = new Map<number, AnimationFrameCallback>();
 
     const scheduleNativeFrame = () => {
@@ -83,12 +115,12 @@ export const createFrameRateLimitedRaf = (
     const processNativeFrame = (timestamp: number) => {
         nativeFrameHandle = null;
 
-        if (!shouldProcessFrameAtRate(timestamp, lastProcessedTimestamp, frameRate)) {
+        if (!shouldProcessFrameAtRate(timestamp, nextAllowedTimestamp, frameRate)) {
             scheduleNativeFrame();
             return;
         }
 
-        lastProcessedTimestamp = timestamp;
+        nextAllowedTimestamp = nextAllowedFrameTimestamp(timestamp, nextAllowedTimestamp, frameRate);
         const frameHandles = Array.from(callbacks.keys());
 
         for (const handle of frameHandles) {
@@ -123,7 +155,7 @@ export const createFrameRateLimitedRaf = (
         },
         setFrameRate: (nextFrameRate) => {
             frameRate = nextFrameRate;
-            lastProcessedTimestamp = 0;
+            nextAllowedTimestamp = 0;
 
             if (nativeFrameHandle !== null) {
                 nativeCancelAnimationFrame(nativeFrameHandle);
