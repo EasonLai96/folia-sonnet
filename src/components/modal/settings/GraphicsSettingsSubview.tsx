@@ -29,6 +29,7 @@ import {
     openWallpaperOverlaySettings,
     pickWallpaperFont,
     pickWallpaperVideo,
+    resetFloatingLyricsWindow,
 } from '../../../platform/foliaWallpaper';
 import type { WallpaperLockScreenStatus } from '../../../platform/foliaWallpaper';
 
@@ -278,6 +279,16 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
         }, 3000);
     };
 
+    // 「重置悬浮窗」按完之后给个回执：小窗此刻多半不在屏幕上（应用在前台它就不挂），
+    // 点了没反应会让人以为按钮坏了。
+    const [floatingResetDone, setFloatingResetDone] = useState(false);
+
+    const handleResetFloatingLyricsWindow = () => {
+        void resetFloatingLyricsWindow();
+        setFloatingResetDone(true);
+        window.setTimeout(() => setFloatingResetDone(false), 2000);
+    };
+
     // 字体是原生落在私有目录里的文件，应用这边只缓存一个「有没有」用于按钮文案。
     const [hasWallpaperFont, setHasWallpaperFont] = useState(false);
     const [fontNotice, setFontNotice] = useState<'applied' | 'rejected' | null>(null);
@@ -453,7 +464,9 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                         />
                         <SettingsRow
                             title={t('options.lyricsWallpaperStyle')}
-                            description={t('options.lyricsWallpaperStyleDesc')}
+                            description={lyricsWallpaperStyle === 'minimal'
+                                ? t('options.lyricsWallpaperStyleMinimalDesc')
+                                : t('options.lyricsWallpaperStyleDesc')}
                             dividerClass={dividerClass}
                             control={(
                                 <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
@@ -475,6 +488,27 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                 </div>
                             )}
                         />
+                        {/* 精简模式下歌词是那颗可以拖的小窗，拖到角落 / 缩到最小又上了锁之后
+                            光靠手势弄不回来，所以这里给一颗「重置」当出口。 */}
+                        {lyricsWallpaperStyle === 'minimal' && (
+                            <SettingsRow
+                                title={t('options.floatingLyricsWindow')}
+                                description={t('options.floatingLyricsResetDesc')}
+                                dividerClass={dividerClass}
+                                control={(
+                                    <button
+                                        type="button"
+                                        onClick={handleResetFloatingLyricsWindow}
+                                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
+                                        style={{ color: 'var(--text-primary)' }}
+                                    >
+                                        {floatingResetDone
+                                            ? t('options.floatingLyricsResetDone')
+                                            : t('options.floatingLyricsReset')}
+                                    </button>
+                                )}
+                            />
+                        )}
                         {/* 可视化叠层要 SYSTEM_ALERT_WINDOW；没授权时它静默不工作，
                             用户只会看到「壁纸跟以前一样」，所以这里必须给明确入口。 */}
                         <SettingsRow

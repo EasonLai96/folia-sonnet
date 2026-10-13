@@ -134,6 +134,11 @@ interface FoliaWallpaperPlugin {
     /** font 传 null / 空串 = 清除，回落到系统字体。 */
     setFont(options: { font: string | null }): Promise<void>;
     getBackground(): Promise<{ mode: FoliaWallpaperBackgroundMode }>;
+    /**
+     * 把「简易」样式那颗悬浮歌词小窗恢复默认（位置 / 大小 / 锁一起清掉）。
+     * 见 FloatingLyricsOverlay.resetLayout。
+     */
+    resetFloatingLyrics(): Promise<void>;
     clear(): Promise<void>;
     isActive(): Promise<{ active: boolean }>;
     openPicker(): Promise<{ opened: boolean }>;
@@ -224,6 +229,20 @@ export const hasWallpaperFont = async (): Promise<boolean> => {
         return Boolean(result?.font);
     } catch {
         return false;
+    }
+};
+
+/**
+ * 把「简易」样式那颗悬浮歌词小窗恢复默认。
+ *
+ * 小窗是靠角上的把手拖 / 改的：拖到屏幕角落、或者缩到最小又上了锁之后，
+ * 光靠手势很难弄回来（锁只画一个很小的图标，看不出能点），所以设置里要留一颗按钮。
+ */
+export const resetFloatingLyricsWindow = async (): Promise<void> => {
+    try {
+        await FoliaWallpaper.resetFloatingLyrics();
+    } catch {
+        // 同上：桌面端 / 老版本原生没有这个方法，静默即可。
     }
 };
 

@@ -487,7 +487,14 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         if (!tb("wp.hideNativeProgress", false)) {
             drawProgressBar(snapshot);
         }
-        if (!tb("wp.hideNativeLyrics", false)) {
+        /*
+         * 精简样式挂了「悬浮歌词小窗」时，壁纸这层也不画歌词。
+         *
+         * 那一颗小窗画的就是桌面简易那套歌词（见 FloatingLyricsOverlay）；壁纸自己
+         * 还在中间画一整块的话，同一句会同时出现在两个地方 —— 扫光还不同步，看着像重影。
+         * 背景照旧画：用户选的封面 / 渐变还在，中间空出来的那一块正好留给小窗。
+         */
+        if (!tb("wp.hideNativeLyrics", false) && !FloatingLyricsOverlay.shared(context).isShowing()) {
             drawLyrics(snapshot);
         }
     }

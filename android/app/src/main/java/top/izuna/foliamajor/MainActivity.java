@@ -152,6 +152,18 @@ public class MainActivity extends BridgeActivity {
         // 这次启动是不是被「用 Folia 打开这个音频」叫起来的：是就把文件交给插件去拷，
         // Web 层起来后取走再问用户要不要导入（ExternalAudioImportHost）。
         handleIncomingAudioIntent(getIntent());
+        /*
+         * 起「简易悬浮歌词」的巡检。
+         *
+         * 壁纸样式 = 精简（minimal）时挂的那颗小窗：能拖、能改大小、能锁、点一下回应用
+         * （见 FloatingLyricsOverlay）。这里只负责把巡检跑起来 —— 挂不挂由它自己按
+         * 「样式是不是精简 / 在不在播 / 应用在不在前台 / 屏亮不亮 / 有没有悬浮窗权限」判定，
+         * 因为样式是用户在设置里随时改的，不是启动时一次性决定。
+         *
+         * 放在应用进程而不是壁纸服务里：精简模式下用户多半压根没设我们的动态壁纸，
+         * 壁纸服务根本不会被创建，那这一层就再也没人托了。
+         */
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(this).start();
     }
 
     /**
@@ -253,6 +265,8 @@ public class MainActivity extends BridgeActivity {
         // 壁纸叠层要知道「用户现在是在用 App 还是在桌面上」：系统壁纸不是我们的时候，
         // 它没有别的信号可用（壁纸服务压根不会被创建）。见 WallpaperOverlay.setAppForeground。
         top.izuna.foliamajor.wallpaper.WallpaperOverlay.shared(this).setAppForeground(true);
+        // 简易悬浮歌词同理：在应用里它要收起来（播放页自己就有歌词，再盖一层是添乱）。
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(this).setAppForeground(true);
         // 从后台回前台时系统会重新布局，直接 apply 有时会被随后的布局覆盖，
         // 延后一拍再压一次，避免出现一瞬间的状态栏/导航栏残留。
         getWindow().getDecorView().postDelayed(this::applyImmersiveMode, 120);
@@ -388,6 +402,7 @@ public class MainActivity extends BridgeActivity {
     public void onPause() {
         super.onPause();
         top.izuna.foliamajor.wallpaper.WallpaperOverlay.shared(this).setAppForeground(false);
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(this).setAppForeground(false);
     }
 
     /**

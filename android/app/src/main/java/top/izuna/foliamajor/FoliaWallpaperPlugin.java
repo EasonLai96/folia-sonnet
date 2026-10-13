@@ -195,6 +195,9 @@ public class FoliaWallpaperPlugin extends Plugin {
         top.izuna.foliamajor.wallpaper.WallpaperOverlay
                 .shared(getContext())
                 .setAppDriven(overlayEnabled == null || overlayEnabled >= 0.5f);
+        // 这两个模式是互斥的两层：跟随样式走 WebView 叠层，精简走原生小悬浮窗。
+        // 用户在设置里切样式的那一刻就要生效，所以这里顺手催一次，不等 600ms 巡检。
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(getContext()).start();
         call.resolve();
     }
 
@@ -374,6 +377,19 @@ public class FoliaWallpaperPlugin extends Plugin {
         } catch (Throwable error) {
             call.reject("无法打开授权页面");
         }
+    }
+
+    /**
+     * 把「简易悬浮歌词」那颗小窗恢复默认（位置 / 大小 / 锁一起清掉）。
+     *
+     * 设置页那颗按钮走这里。见 FloatingLyricsOverlay.resetLayout 里为什么必须留这个出口。
+     */
+    @PluginMethod
+    public void resetFloatingLyrics(PluginCall call) {
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(getContext())
+                .resetLayout();
+        call.resolve();
     }
 
     /** 当前系统壁纸是不是我们这个。UI 用它决定按钮显示「设置」还是「已启用」。 */

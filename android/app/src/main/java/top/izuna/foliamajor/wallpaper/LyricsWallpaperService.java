@@ -22,6 +22,9 @@ public class LyricsWallpaperService extends WallpaperService {
         super.onCreate();
         // 壁纸可能在应用从未启动过的情况下被系统拉起，先把落盘的歌词读回来。
         WallpaperLyricsState.restore(this);
+        // 简易悬浮歌词同样可能是「系统先拉起了进程、应用还没开过」的情况。
+        // start() 是幂等的，和 MainActivity 那边重复调没关系。
+        FloatingLyricsOverlay.shared(this).start();
     }
 
     @Override
