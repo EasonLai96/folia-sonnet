@@ -43,6 +43,13 @@ final class PhoneFitCutout {
     private static final String DECOR_PADDING_GUARD_TAG = "folia-cutout-decor-padding-guard";
     private static final String CONTENT_PADDING_GUARD_TAG = "folia-cutout-content-padding-guard";
     private static final String CHAIN_GUARD_TAG = "folia-cutout-chain-guard";
+    private static final String CHAIN_ISOLATION_TAG = "folia-cutout-chain-isolation";
+
+    /** 拉锯战的短路窗口：这段窗口里纠正超过上限就停手，宁可留着黑条也不能一直抖。 */
+    private static final long CHAIN_GUARD_WINDOW_MS = 2000L;
+    private static final int CHAIN_GUARD_MAX_ROUNDS = 3;
+    private static volatile long chainGuardWindowStart = 0L;
+    private static volatile int chainGuardRounds = 0;
 
     private PhoneFitCutout() {
     }
@@ -128,6 +135,8 @@ final class PhoneFitCutout {
         installDecorInsetListener(activity, decor);
         // ③ 整条链的强制铺满：ColorOS / OriginOS 会在布局期把 inset 回填成**任意一层**的
         //    padding（不一定重新派发 inset），decor 与内容根两个守卫盖不满全链。
+        //    先断根（isolateChainFromInsets），再挂/续布局守卫（installFullscreenChainGuard）。
+        isolateChainFromInsets(decor);
         installFullscreenChainGuard(activity);
         View root = decor;
         if (decor instanceof ViewGroup) {
@@ -197,6 +206,12 @@ final class PhoneFitCutout {
      * 不如从 WebView 往上一次清干净，再把 WebView 自己的 LayoutParams 压成满幅零边距。
      *
      * 只在确实有偏差时才写，避免监听器自己触发新的布局形成死循环；健康机型上恒为无操作。
+     *
+     * 加了**短路**：只事后清不给源头断根的话，会和系统打拉锯战 —— 我们清完触发重布局，
+     * 系统（fitsSystemWindows 那条路）在布局里又把 inset 写回 padding，下一帧我们再清……
+     * 帧率级别的来回就是用户看到的「抽搐：一会上面没有，一会下面没有」。
+     * 所以一来把源头掐掉（isolateChainFromInsets），二来窗口内纠正超过上限就停手：
+     * 宁可在个别机型上留着黑条，也不能让画面一直抖。
      */
     private static void installFullscreenChainGuard(final Activity activity) {
         View decor = activity == null || activity.getWindow() == null
@@ -206,17 +221,75 @@ final class PhoneFitCutout {
             return;
         }
         decor.setTag(CHAIN_GUARD_TAG.hashCode(), Boolean.TRUE);
-        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> enforceWebViewFullscreen(decor));
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - chainGuardWindowStart > CHAIN_GUARD_WINDOW_MS) {
+                chainGuardWindowStart = now;
+                chainGuardRounds = 0;
+            }
+            if (chainGuardRounds >= CHAIN_GUARD_MAX_ROUNDS) {
+                return;
+            }
+            if (enforceWebViewFullscreen(decor)) {
+                chainGuardRounds += 1;
+            }
+        });
     }
 
-    /** 单次强制：清整链 padding + 把 WebView 压成满幅零边距。有改动才 requestLayout。 */
-    private static void enforceWebViewFullscreen(View decor) {
+    /**
+     * 断根：让 WebView → decor 这条链上的容器**不再自己消费 inset 生成 padding**。
+     *
+     * 前面那些清理都是事后补救，而「系统每逢布局就把 inset 写成 padding」的根子在这里：
+     * `fitsSystemWindows` 为真的 View 会在 dispatchApplyWindowInsets 里领走自己那一份
+     * inset 并落成 padding。把链上每层都关掉、并在派发层把 systemBars 吃掉，
+     * 系统就没有可落的位置了 —— 之后重布局不会再回填，拉锯战自然停。
+     *
+     * decor 自己不在这里动：它的监听（`installDecorInsetListener`）还兼着「inset 变了
+     * 就重新推给网页」这件事，替换掉会让安全区再也不更新。所以这条链走到 decor 为止。
+     */
+    private static void isolateChainFromInsets(View decor) {
         if (decor == null) {
             return;
         }
         WebView webView = findWebView(decor);
+        for (View node = webView; node != null && node != decor; ) {
+            if (node.getTag(CHAIN_ISOLATION_TAG.hashCode()) == null) {
+                node.setTag(CHAIN_ISOLATION_TAG.hashCode(), Boolean.TRUE);
+                node.setFitsSystemWindows(false);
+                ViewCompat.setOnApplyWindowInsetsListener(node, (view, insets) -> {
+                    if (view.getPaddingLeft() != 0
+                        || view.getPaddingTop() != 0
+                        || view.getPaddingRight() != 0
+                        || view.getPaddingBottom() != 0) {
+                        view.setPadding(0, 0, 0, 0);
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        return new WindowInsetsCompat.Builder(insets)
+                            .setInsets(
+                                WindowInsetsCompat.Type.systemBars(),
+                                androidx.core.graphics.Insets.NONE
+                            )
+                            .build();
+                    }
+                    return insets;
+                });
+            }
+            node = node.getParent() instanceof View ? (View) node.getParent() : null;
+        }
+    }
+
+    /**
+     * 单次强制：清整链 padding + 把 WebView 压成满幅零边距。
+     *
+     * @return 是否真的改了东西（= 又和 ROM 打了一回合，给上端做短路计数用）。
+     */
+    private static boolean enforceWebViewFullscreen(View decor) {
+        if (decor == null) {
+            return false;
+        }
+        WebView webView = findWebView(decor);
         if (webView == null) {
-            return;
+            return false;
         }
         boolean changed = false;
         for (View node = webView; node != null; ) {
@@ -249,6 +322,7 @@ final class PhoneFitCutout {
         if (changed) {
             webView.requestLayout();
         }
+        return changed;
     }
 
     /**
