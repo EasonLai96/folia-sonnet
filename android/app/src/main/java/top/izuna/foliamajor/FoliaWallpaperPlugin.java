@@ -216,6 +216,24 @@ public class FoliaWallpaperPlugin extends Plugin {
     @PluginMethod
     public void setFont(PluginCall call) {
         WallpaperLyricsState.setLyricsFont(getContext(), call.getString("font"));
+        // 敲一帧：换字体不产生任何播放 / 动画事件，已经挂着的小窗自己不会重画，
+        // 于是「选了字体没反应」要等窗口重挂才看得到。
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(getContext()).invalidateOverlay();
+        call.resolve();
+    }
+
+    /**
+     * 「跟随播放页」：网页把播放页那个字体的字节托管过来（base64）。传 null = 清除。
+     *
+     * 播放页的字体是网页侧 FontFace 注册的，原生这两层读不到，只能把字节推下来落盘。
+     * 字体几 MB，过一趟桥不便宜 —— 只在「来路」切到跟随、或播放页那个字体真的换了才调。
+     */
+    @PluginMethod
+    public void setFollowFont(PluginCall call) {
+        WallpaperLyricsState.setFollowLyricsFont(getContext(), call.getString("font"));
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(getContext()).invalidateOverlay();
         call.resolve();
     }
 
@@ -262,6 +280,9 @@ public class FoliaWallpaperPlugin extends Plugin {
                 rejected = !picked;
             }
         }
+        // 同上：挑完字体要让已经挂着的那层小窗当场重画一次。
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(getContext()).invalidateOverlay();
         JSObject out = new JSObject();
         out.put("picked", picked);
         out.put("rejected", rejected);

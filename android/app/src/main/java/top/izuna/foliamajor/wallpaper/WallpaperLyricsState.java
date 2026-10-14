@@ -321,6 +321,19 @@ public final class WallpaperLyricsState {
         applyFontKey();
     }
 
+    /**
+     * 「跟随播放页」：网页把播放页那个字体的字节托管过来。
+     *
+     * 播放页的字体是网页侧用 FontFace 注册的（字节在 IndexedDB 里），原生两层
+     * （壁纸渲染器、精简小窗）是自绘的、根本读不到，只能由网页把字节推下来落盘。
+     * 走**另一个文件**（见 WallpaperLyricsFont 的两个槽位），不碰用户自己挑的那份。
+     * 传 null / 空串 = 播放页没有自定义字体，回落系统字体。
+     */
+    public static void setFollowLyricsFont(Context context, String fontBase64) {
+        currentFontKey = WallpaperLyricsFont.storeFollow(context, fontBase64);
+        applyFontKey();
+    }
+
     /** 原生已经把字体文件拷好了（系统文件选择器路径），这里只把新 key 同步进状态。 */
     public static void refreshLyricsFont(Context context) {
         currentFontKey = WallpaperLyricsFont.key(context);

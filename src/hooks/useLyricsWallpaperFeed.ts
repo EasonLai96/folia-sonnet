@@ -1,6 +1,7 @@
 import React from 'react';
 import { isCapacitorAndroid } from '../platform/runtime';
-import { clearLyricsWallpaper, publishLyricsWallpaper, setWallpaperAppearance, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
+import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
+import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
 import { flattenTuning, tuningFieldFor, withGlobalSettings } from '../platform/wallpaperVisualizerTuning';
 import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';
@@ -19,6 +20,40 @@ import type { Line, Theme } from '../types';
 // 播放中只偶尔推一个时间锚点；之后由原生按墙钟自己往前推，JS 停了歌词也照样往下走。
 
 const DEFAULT_ACCENT = '#7c5cff';
+/**
+ * 托管给原生的字体大小上限。
+ *
+ * 几 MB 的中文字体转 base64 过一趟桥已经不便宜了（还要多占 1/3），
+ * 再大就该让用户换个字体文件，而不是在这里把桥堵死。
+ */
+const MAX_PUSHED_FONT_BYTES = 24 * 1024 * 1024;
+
+/**
+ * 原生能不能读这个字体文件。
+ *
+ * Android 的 `Typeface.createFromFile` 只认 TTF / OTF，
+ * **woff / woff2 读不了** —— 那种只能回落系统字体，
+ * 硬推下去的结果是被原生当成坏文件删掉（校验不通过）。
+ */
+const isNativeLoadableFont = (mimeType: string, name: string): boolean => {
+    const lowerName = (name ?? '').toLowerCase();
+    const lowerMime = (mimeType ?? '').toLowerCase();
+    return lowerName.endsWith('.ttf') || lowerName.endsWith('.otf')
+        || lowerMime.includes('font-sfnt') || lowerMime.includes('x-font-ttf')
+        || lowerMime.includes('x-font-otf') || lowerMime.includes('font/ttf')
+        || lowerMime.includes('font/otf') || lowerMime.includes('ms-opentype');
+};
+
+const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        // 原生那边按「可能有 data: 前缀」解，统一去掉更省心。
+        resolve(result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(blob);
+});
 // 壁纸拿封面做两件事：模糊底图，以及**给歌词的高亮取色**。取色需要真实的画面，
 // 256 太小（缩到那个尺寸后颜色已经被插值抹平了），768 才够还原封面的主色分布。
 const COVER_EDGE = 768;
@@ -272,6 +307,8 @@ export const useLyricsWallpaperFeed = ({
     // 歌词字体的来路：跟随播放页 / 单独指定。
     const wallpaperLyricsFontMode = useVisualizerSettingsStore(
         state => state.wallpaperLyricsFontMode);
+    // 「跟随」模式下要托管给原生的那个字体（播放页正在用的自定义歌词字体）。
+    const lyricsCustomFont = useTypographySettingsStore(state => state.lyricsCustomFont);
     const wallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
         state => state.wallpaperFloatingFontSizeMode);
     const wallpaperFloatingFontSize = useVisualizerSettingsStore(
@@ -451,6 +488,43 @@ export const useLyricsWallpaperFeed = ({
     }, [active, lyrics, title, artist, backgroundMode, backgroundImage, wallpaperVisualizer,
         accentColor, backgroundColor, primaryColor, secondaryColor, themeJson, animationIntensity,
         backgroundBlur, showProgress, showTranslation, tuning, durationMs, wallpaperCover]);
+
+    /*
+     * 「跟随播放页」：把播放页那个字体的字节托管到原生。
+     *
+     * 播放页的歌词字体是网页侧用 FontFace 注册的（字节存在 IndexedDB 里），
+     * 原生那两层是自绘的，读不到它 —— 光标个「跟随」没有任何用，
+     * 必须把字节推下去落盘，原生才画得出来。
+     *
+     * 只在**来路切到跟随、或播放页那个字体真的换了**时才推：一个中文字体几 MB，
+     * 转 base64 过一趟桥不便宜，不能跟着每次渲染走。
+     */
+    React.useEffect(() => {
+        if (!active || wallpaperLyricsFontMode !== 'follow') return;
+        let cancelled = false;
+        void (async () => {
+            const stored = await getStoredUploadedLyricsFont();
+            if (cancelled) return;
+            const usable = stored
+                // 存着的字节是不是播放页正在用的那个（换过字体的话 id 会不一样）。
+                && stored.id === lyricsCustomFont?.fontId
+                && isNativeLoadableFont(stored.mimeType, stored.name)
+                && stored.blob.size <= MAX_PUSHED_FONT_BYTES
+                ? stored
+                : null;
+            if (!usable) {
+                // 播放页没设自定义字体、或者那个格式原生读不了 → 回落系统字体。
+                await pushLyricsFontToNative(null);
+                return;
+            }
+            const base64 = await blobToBase64(usable.blob);
+            if (cancelled) return;
+            await pushLyricsFontToNative(base64);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [active, wallpaperLyricsFontMode, lyricsCustomFont]);
 
     // 播放/暂停要立刻通知，否则暂停后原生还在按墙钟往前走。
     React.useEffect(() => {

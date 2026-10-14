@@ -133,6 +133,8 @@ interface FoliaWallpaperPlugin {
     getFont(): Promise<{ font: boolean }>;
     /** font 传 null / 空串 = 清除，回落到系统字体。 */
     setFont(options: { font: string | null }): Promise<void>;
+    /** 「跟随播放页」用：把播放页那个字体的字节（base64）托管给原生。null = 清除。 */
+    setFollowFont(options: { font: string | null }): Promise<void>;
     getBackground(): Promise<{ mode: FoliaWallpaperBackgroundMode }>;
     /**
      * 把「简易」样式那颗悬浮歌词小窗恢复默认（位置 / 大小 / 锁一起清掉）。
@@ -243,6 +245,21 @@ export const resetFloatingLyricsWindow = async (): Promise<void> => {
         await FoliaWallpaper.resetFloatingLyrics();
     } catch {
         // 同上：桌面端 / 老版本原生没有这个方法，静默即可。
+    }
+};
+
+/**
+ * 「跟随播放页」用：把播放页那个字体的字节托管给原生。
+ *
+ * 播放页的歌词字体是网页侧用 FontFace 注册的（字节在 IndexedDB 里），
+ * 原生那两层是自绘的、读不到它 —— 只能由网页把字节推下去落盘。
+ * 传 null 表示「播放页没设自定义字体」，原生回落系统字体。
+ */
+export const pushLyricsFontToNative = async (base64: string | null): Promise<void> => {
+    try {
+        await FoliaWallpaper.setFollowFont({ font: base64 });
+    } catch {
+        // 桌面端 / 老版本原生没有这个方法，静默。
     }
 };
 

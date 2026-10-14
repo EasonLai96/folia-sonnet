@@ -725,6 +725,19 @@ public final class FloatingLyricsOverlay {
                 Math.round(MIN_WIDTH_DP * density), screenW);
     }
 
+    /**
+     * 占满整条时把「拖出来的左右位置」一起清掉。
+     *
+     * 那个比例是在**没占满**的时候拖出来的（那时左右还有余地），
+     * 一旦整条占满就没意义了 —— 留着它，等占满失效（转横屏）的那一刻会被当成
+     * 「用户拖到过那儿」，歌词就不在中间了。清掉之后退回设置里那根「左右位置」。
+     */
+    private void dropDragRatioWhenFilled() {
+        if (fillSafeArea() && prefs.contains(KEY_DRAG_RATIO)) {
+            prefs.edit().remove(KEY_DRAG_RATIO).apply();
+        }
+    }
+
     /** 叠加模式下窗口的左边缘。占满时贴死 0。 */
     private int overlayLeftPx(int width, int screenW) {
         if (fillSafeArea()) return 0;
@@ -755,6 +768,7 @@ public final class FloatingLyricsOverlay {
         runOnUi(() -> {
             if (view != null && added) view.invalidate();
             if (!overSafeArea() || params == null || !added) return;
+            dropDragRatioWhenFilled();
             int screenW = context.getResources().getDisplayMetrics().widthPixels;
             int height = statusBarHeightPx();
             int width = overlayWidthPx(
@@ -961,15 +975,31 @@ public final class FloatingLyricsOverlay {
         private boolean moved = false;
         private long lastFrameAtMs = 0L;
         private boolean framePending = false;
+        /** 当前生效的字体 key（null = 系统默认）。变了就重新 load，见 syncFont。 */
+        private String loadedFontKey = null;
 
         LyricsFloatView(Context ctx) {
             super(ctx);
             appearStartMs = android.os.SystemClock.elapsedRealtime();
             refreshPalette();
-            Typeface face = WallpaperLyricsFont.load(context);
-            if (face != null) {
-                textPaint.setTypeface(face);
-            }
+            loadedFontKey = null;
+            syncFont(WallpaperLyricsState.get().font);
+        }
+
+        /**
+         * 字体变了就重新加载 Typeface。
+         *
+         * 原来只在构造函数里 load 一次 —— 于是「设置里换了字体」在**已经挂着**的这一层上
+         * 永远看不到，得等窗口重新挂一次（换歌 / 息屏再亮）才生效，
+         * 表现就是「选了字体没反应」（用户原话：字体不会自动重载）。
+         *
+         * 判据用状态里那个 key（文件长度 + 修改时间），和壁纸渲染器同一套。
+         * `setTypeface(null)` 就是回落系统默认，所以「清除字体」走同一条路。
+         */
+        private void syncFont(String fontKey) {
+            if (fontKey == null ? loadedFontKey == null : fontKey.equals(loadedFontKey)) return;
+            loadedFontKey = fontKey;
+            textPaint.setTypeface(WallpaperLyricsFont.load(context));
         }
 
         private void refreshPalette() {
@@ -1027,6 +1057,8 @@ public final class FloatingLyricsOverlay {
             } else {
                 syncWordRules();
             }
+            // 换过字体就重新 load（只比一个字符串，没换就直接返回）。
+            syncFont(snapshot.font);
 
             long now = android.os.SystemClock.elapsedRealtime();
             float appear = clamp01((now - appearStartMs) / (float) APPEAR_MS);
@@ -1626,11 +1658,21 @@ public final class FloatingLyricsOverlay {
             applyLayout(x, y, params.width, params.height);
         }
 
-        /** 叠加模式下拖出来的左右位置要自己记住：不然下一次巡检又按设置值把它拽回去。 */
+        /**
+         * 叠加模式下拖出来的左右位置要自己记住：不然下一次巡检又按设置值把它拽回去。
+         *
+         * 占满整条时**不记**：那时 span 是 0，算出来的比例恒为 0 ——
+         * 等关掉占满（比如转横屏），那个 0 会被当成「贴左」，歌词就跑到边上去了
+         * （用户原话：安全区铺满，横屏歌词不在正中间）。没有可挪的余地时，
+         * 「拖过」这件事本身也不成立，删掉比记一个假的 0 诚实。
+         */
         private void persistOffsetRatio(int x, int screenW) {
             int span = Math.max(0, screenW - (params == null ? 0 : params.width));
-            float ratio = span <= 0 ? 0f : x / (float) span;
-            prefs.edit().putFloat(KEY_DRAG_RATIO, clamp01(ratio)).apply();
+            if (span <= 0) {
+                prefs.edit().remove(KEY_DRAG_RATIO).apply();
+                return;
+            }
+            prefs.edit().putFloat(KEY_DRAG_RATIO, clamp01(x / (float) span)).apply();
         }
 
         private void resizeBy(float dx, float dy) {
