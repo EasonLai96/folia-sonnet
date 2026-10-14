@@ -99,6 +99,24 @@ export const WALLPAPER_GLOBAL_KEYS = {
      * 换设备也不会变样。比一半还窄的话每句都要靠横向滚动才看得完，所以下限 0.5。
      */
     floatingWidth: 'wp.floatingWidth',
+    /**
+     * 开关：叠加安全区时直接**占满整条**（左右滑条和宽度滑条都让位）。
+     * 非竖屏时原生那边不认这一条，退回宽度滑条给的宽。
+     */
+    floatingFillSafeArea: 'wp.floatingFillSafeArea',
+    /**
+     * 占满时留出的「避开区域」宽度（占整条宽的比例）。0 = 不避让。
+     *
+     * 挖孔屏 / 刘海屏那条状态栏中间或某一侧有个洞，字压上去就成了「被切了一块」。
+     * 各家 ROM 都不往外报挖孔位置，只能让用户自己指：多宽、在哪边。
+     */
+    floatingAvoidWidth: 'wp.floatingAvoidWidth',
+    /** 避开区域的左右位置（0 = 贴左，1 = 贴右）。 */
+    floatingAvoidOffsetX: 'wp.floatingAvoidOffsetX',
+    /** 字号模式：0 = 动态（跟着窗口高度算），1 = 自定义。 */
+    floatingFontSizeMode: 'wp.floatingFontSizeMode',
+    /** 自定义模式的字号（dp）。只在上面那个开关打开时用。 */
+    floatingFontSize: 'wp.floatingFontSize',
     /** 叠层总开关。关掉就一层都不挂。 */
     overlayEnabled: 'wp.overlayEnabled',
     /** 音乐锁屏：锁屏之上也挂叠层。 */
@@ -164,6 +182,22 @@ export const withGlobalSettings = (
     const floatingWidth = settings.wallpaperFloatingWidth;
     if (typeof floatingWidth === 'number' && Number.isFinite(floatingWidth)) {
         out[WALLPAPER_GLOBAL_KEYS.floatingWidth] = floatingWidth;
+    }
+    out[WALLPAPER_GLOBAL_KEYS.floatingFillSafeArea] =
+        settings.wallpaperFloatingFillSafeArea ? 1 : 0;
+    const floatingAvoidWidth = settings.wallpaperFloatingAvoidWidth;
+    if (typeof floatingAvoidWidth === 'number' && Number.isFinite(floatingAvoidWidth)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingAvoidWidth] = floatingAvoidWidth;
+    }
+    const floatingAvoidOffsetX = settings.wallpaperFloatingAvoidOffsetX;
+    if (typeof floatingAvoidOffsetX === 'number' && Number.isFinite(floatingAvoidOffsetX)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingAvoidOffsetX] = floatingAvoidOffsetX;
+    }
+    out[WALLPAPER_GLOBAL_KEYS.floatingFontSizeMode] =
+        settings.wallpaperFloatingFontSizeMode === 'custom' ? 1 : 0;
+    const floatingFontSize = settings.wallpaperFloatingFontSize;
+    if (typeof floatingFontSize === 'number' && Number.isFinite(floatingFontSize)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingFontSize] = floatingFontSize;
     }
     out[WALLPAPER_GLOBAL_KEYS.overlayEnabled] = settings.wallpaperOverlayEnabled === false ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.showOnLockScreen] = settings.wallpaperOverlayLockScreen ? 1 : 0;

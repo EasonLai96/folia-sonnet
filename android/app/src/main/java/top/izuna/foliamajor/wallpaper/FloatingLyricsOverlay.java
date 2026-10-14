@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -77,6 +78,10 @@ public final class FloatingLyricsOverlay {
     private static final String KEY_OVER_SAFE_AREA = "wp.floatingOverSafeArea";
     /** 叠加模式下窗口占屏幕宽度的比例（0 = 没设）。 */
     private static final String KEY_WIDTH = "wp.floatingWidth";
+    /** 字号模式：0 = 动态（跟着窗口高度算），1 = 自定义。 */
+    private static final String KEY_FONT_SIZE_MODE = "wp.floatingFontSizeMode";
+    /** 自定义模式的字号（dp）。只在上面那个开关打开时用。 */
+    private static final String KEY_FONT_SIZE = "wp.floatingFontSize";
     /**
      * 叠加模式下窗口高度的下限（dp）。
      *
@@ -87,6 +92,22 @@ public final class FloatingLyricsOverlay {
     private static final float MIN_SAFE_AREA_HEIGHT_DP = 26f;
     /** 左右位置：0 = 贴左，1 = 贴右。只有「叠加安全区」开着时才用得上。 */
     private static final String KEY_OFFSET_X = "wp.floatingOffsetX";
+    /**
+     * 开关：叠加模式下直接**占满整条安全区**（左右不再留空，宽度滑条让位）。
+     *
+     * 非竖屏时这一条不生效（见 `fillSafeArea()`）：横屏下状态栏那一条的意义完全不同，
+     * 占满只会糊住一整条。
+     */
+    private static final String KEY_FILL_SAFE_AREA = "wp.floatingFillSafeArea";
+    /**
+     * 占满时留出来的「避开区域」宽度（占整条宽的比例）。0 = 不避让。
+     *
+     * 挖孔屏 / 刘海屏上，状态栏正中或某一侧有个洞，字压上去就成了「字被切了一块」。
+     * 由于各家 ROM 都不往外报挖孔位置，只能让用户自己指：多宽、在哪边。
+     */
+    private static final String KEY_AVOID_WIDTH = "wp.floatingAvoidWidth";
+    /** 避开区域的左右位置：0 = 贴左，1 = 贴右。 */
+    private static final String KEY_AVOID_OFFSET_X = "wp.floatingAvoidOffsetX";
     /** 用户在叠加模式下拖出来的左右位置（0~1）。拖过就以它为准，设置里改了再覆盖。 */
     private static final String KEY_DRAG_RATIO = "drag_ratio";
 
@@ -292,11 +313,16 @@ public final class FloatingLyricsOverlay {
         if (overSafeArea()) {
             // 转屏之后宽度变了，左右比例要按新的屏幕重算一次，不然小窗会跑出去；
             // 高度跟着新的状态栏高度走（横屏时它可能不一样）。
-            int x = clampInt(Math.round((screenW - params.width) * offsetRatio()),
-                    0, Math.max(0, screenW - params.width));
+            float density = context.getResources().getDisplayMetrics().density;
+            int width = overlayWidthPx(screenW, density, params.width);
+            int x = overlayLeftPx(width, screenW);
             int height = statusBarHeightPx();
-            if (x != params.x || params.height != height) {
-                applyLayout(x, params.y, params.width, height);
+            /*
+             * 「占满」在转屏这一刻可能刚失效（横过来）或刚恢复（竖回来），
+             * 所以宽度也要一起比 —— 只比 x 的话横屏下会一直停在整条宽。
+             */
+            if (x != params.x || width != params.width || params.height != height) {
+                applyLayout(x, params.y, width, height);
             }
             // 重新挂过一次之后可能又被系统夹下来了，再顶一遍。
             nudgeIntoCutout();
@@ -472,14 +498,11 @@ public final class FloatingLyricsOverlay {
              *
              * 用比例而不是 dp：这个模式要的就是「占住状态栏这一条的多宽」，
              * 说 30% 比说 120dp 直观，换设备也不会变样。
+             *
+             * 开了「占满」就是整条屏宽 —— 那时这两根滑条都不参与。
              */
-            float ratio = widthRatio();
-            if (ratio > 0f) {
-                width = clampInt(Math.round(screenW * ratio),
-                        Math.round(MIN_WIDTH_DP * density), screenW);
-            }
-            x = clampInt(Math.round((screenW - width) * offsetRatio()),
-                    0, Math.max(0, screenW - width));
+            width = overlayWidthPx(screenW, density, width);
+            x = overlayLeftPx(width, screenW);
             y = 0;
         } else {
             x = prefs.getInt(KEY_X, Integer.MIN_VALUE);
@@ -574,11 +597,19 @@ public final class FloatingLyricsOverlay {
     }
 
     /** 读一个 wp. 开头的数值开关，缺了就用 fallback。 */
-    private static float tuningFloat(String key, float fallback) {
+    /**
+     * 读一个 tuning 浮点值。
+     *
+     * 区间要**逐个 key 传** —— 早先这里写死 `clamp(value, 0.05f, 1f)`，
+     * 于是自定义字号（10~32dp）被夹成 1dp，画出来只有一两个像素高；
+     * 而背景不透明度想调到 0（完全透明）时又被顶回 0.05。
+     * 这些 key 的量纲根本不一样，不能共用一个区间。
+     */
+    private static float tuningFloat(String key, float fallback, float min, float max) {
         java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
         Float value = tuning == null ? null : tuning.get(key);
         if (value == null || !Float.isFinite(value)) return fallback;
-        return clamp(value, 0.05f, 1f);
+        return clamp(value, min, max);
     }
 
     /** 小窗是否直接叠在安全区上面。 */
@@ -587,13 +618,55 @@ public final class FloatingLyricsOverlay {
     }
 
     /**
+     * 现在是不是竖屏。
+     *
+     * 用 `Configuration.orientation` 而不是量宽高：后者在分屏 / 折叠机上会把一个
+     * 明明是竖着的应用窗口判成横屏，而这里要的只是「手机有没有被横过来」。
+     */
+    private boolean portrait() {
+        return context.getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT;
+    }
+
+    /**
+     * 是否「占满整条安全区」。
+     *
+     * 三个条件缺一不可：得先开着叠加安全区、得拨了这个开关、还得是竖屏。
+     * 横屏下退回宽度滑条给的宽 —— 直接按「不占满」处理，用户转回来就又占满了，
+     * 不需要额外记住任何状态。
+     */
+    private boolean fillSafeArea() {
+        return overSafeArea() && tuningFlag(KEY_FILL_SAFE_AREA, false) && portrait();
+    }
+
+    /**
      * 叠加模式下窗口占屏幕宽度的比例（设置里那根「宽度」滑条）。0 = 没设，沿用拖出来的宽度。
      *
      * 50%~100% 才是有意义的范围：比一半还窄的话，一行歌词基本每句都要靠横向滚动才看得完。
      */
     private float widthRatio() {
-        float value = tuningFloat(KEY_WIDTH, 0f);
+        float value = tuningFloat(KEY_WIDTH, 0f, 0f, 1f);
         return value <= 0f ? 0f : clamp(value, 0.2f, 1f);
+    }
+
+    /**
+     * 叠加模式下窗口该多宽。
+     *
+     * 占满时就是整条屏幕宽 —— 那时左右滑条没有意义，宽度滑条也让位。
+     */
+    private int overlayWidthPx(int screenW, float density, int fallbackWidth) {
+        if (fillSafeArea()) return screenW;
+        float ratio = widthRatio();
+        if (ratio <= 0f) return fallbackWidth;
+        return clampInt(Math.round(screenW * ratio),
+                Math.round(MIN_WIDTH_DP * density), screenW);
+    }
+
+    /** 叠加模式下窗口的左边缘。占满时贴死 0。 */
+    private int overlayLeftPx(int width, int screenW) {
+        if (fillSafeArea()) return 0;
+        return clampInt(Math.round((screenW - width) * offsetRatio()),
+                0, Math.max(0, screenW - width));
     }
 
     /**
@@ -617,24 +690,35 @@ public final class FloatingLyricsOverlay {
      */
     public void applyOverlayTuning() {
         runOnUi(() -> {
+            if (view != null && added) view.invalidate();
             if (!overSafeArea() || params == null || !added) return;
             int screenW = context.getResources().getDisplayMetrics().widthPixels;
             int height = statusBarHeightPx();
-            int width = params.width;
-            float ratio = widthRatio();
-            if (ratio > 0f) {
-                width = clampInt(Math.round(screenW * ratio),
-                        Math.round(MIN_WIDTH_DP * context.getResources().getDisplayMetrics().density),
-                        screenW);
-            }
-            int x = clampInt(Math.round((screenW - width) * offsetRatio()),
-                    0, Math.max(0, screenW - width));
+            int width = overlayWidthPx(
+                    screenW, context.getResources().getDisplayMetrics().density, params.width);
+            int x = overlayLeftPx(width, screenW);
             if (x != params.x || width != params.width || height != params.height) {
                 applyLayout(x, params.y, width, height);
             }
             nudgeIntoCutout();
+            // 重摆之后再敲一次：避开区域那两根滑条改的是绘制，不重画就看不出挪了。
             if (view != null) view.invalidate();
         });
+    }
+
+    /**
+     * 自定义模式的字号（像素）。0 = 没设 / 走动态。
+     *
+     * 动态字号是**跟着窗口高度算**的（拖大窗口字就跟着大），对多数人够用；
+     * 但有人就是想要「字小一点、窗口还是那么大」，或者叠加模式下窗口只有状态栏
+     * 那么高、算出来的字号小到看不清 —— 那种情况必须能自己指定。
+     */
+    private float customFontSizePx() {
+        if (!tuningFlag(KEY_FONT_SIZE_MODE, false)) return 0f;
+        float dp = tuningFloat(KEY_FONT_SIZE, 0f, 0f, 64f);
+        return dp <= 0f
+                ? 0f
+                : dp * context.getResources().getDisplayMetrics().density;
     }
 
     /**
@@ -764,6 +848,17 @@ public final class FloatingLyricsOverlay {
          */
         private float scrollOffsetPx = 0f;
 
+        /**
+         * 「避开区域」在视图坐标里的左右边界。只有「占满安全区」开着才有值。
+         *
+         * 每帧在 `onDraw` 开头算一次存这里，而不是每行重算：两根滑条一帧内不会变，
+         * 而 `drawRow` 一帧要跑两趟（焦点行 + 第二行），另外存成字段才能在
+         * `dodgeAvoidZone` 里直接读，不用一路往下传。
+         */
+        private boolean avoidActive = false;
+        private float avoidLeftPx = 0f;
+        private float avoidRightPx = 0f;
+
         private int lastIndex = -1;
         private long transitionStartMs = 0L;
         private long appearStartMs = 0L;
@@ -885,6 +980,9 @@ public final class FloatingLyricsOverlay {
              */
             boolean showControls = !overSafeArea();
 
+            // 避开区域每帧算一次（两根滑条一帧内不会变，而 drawRow 一帧要跑两趟）。
+            updateAvoidZone(width);
+
             long position = snapshot.positionMs();
             int index = snapshot.lines.length == 0 ? -1 : snapshot.indexAt(position);
             if (index < 0) {
@@ -909,6 +1007,16 @@ public final class FloatingLyricsOverlay {
             float focusY = singleRow ? height * 0.5f : padY + rowHeight * 0.5f;
             float secondY = padY + rowHeight * 1.5f;
             float focusSize = singleRow ? rowHeight * 0.82f : rowHeight * 0.62f;
+            /*
+             * 自定义字号覆盖上面那个「按窗口高度算」的动态值。
+             *
+             * 仍然夹一行高之内：给个 40dp 而窗口只有 20dp 的话，字会上下被裁掉，
+             * 看着像坏了 —— 这时候应该去把窗口拖大，而不是让字溢出。
+             */
+            float customSize = customFontSizePx();
+            if (customSize > 0f) {
+                focusSize = Math.min(customSize, singleRow ? rowHeight : rowHeight * 0.95f);
+            }
 
             float transition = clamp01((now - transitionStartMs) / (float) LINE_ENTER_MS);
             float enter = easeOutCubic(transition);
@@ -1013,16 +1121,55 @@ public final class FloatingLyricsOverlay {
              * 只在换了歌 / 换了外观时才变 —— 缓存住的话，用户拖动滑条要等下一首歌才看到效果。
              * 一次 HashMap.get 而已，30fps 下可以忽略。
              */
-            float opacity = tuningFloat("wp.floatingBackgroundOpacity", DEFAULT_BACKGROUND_OPACITY);
-            backgroundPaint.setStyle(Paint.Style.FILL);
-            backgroundPaint.setColor(withAlpha(baseColor, opacity * appear));
-            canvas.drawRoundRect(frame, radius, radius, backgroundPaint);
+            float opacity = tuningFloat("wp.floatingBackgroundOpacity", DEFAULT_BACKGROUND_OPACITY, 0f, 1f);
 
-            // 描边**不跟着一起淡到底**：底色调到很淡时，没有这条边小窗就彻底找不着了。
-            borderPaint.setStyle(Paint.Style.STROKE);
-            borderPaint.setStrokeWidth(Math.max(1f, dp(1)));
-            borderPaint.setColor(withAlpha(accentColor, (0.14f + 0.22f * opacity) * appear));
-            canvas.drawRoundRect(frame, radius, radius, borderPaint);
+            /*
+             * 叠在安全区上时不画描边。
+             *
+             * 那条边的本意是「底色调淡之后还能看见窗口在哪」，但贴到状态栏那一条上时
+             * 它变成了一根横贯屏幕的细线，跟系统状态栏本身抢视觉 —— 用户要的就是
+             * **只有字浮在那儿**。非安全区模式下照旧画（那里还要靠它兜住窗口轮廓）。
+             */
+            boolean overSafeArea = overSafeArea();
+
+            if (opacity > 0f) {
+                backgroundPaint.setStyle(Paint.Style.FILL);
+                backgroundPaint.setColor(withAlpha(baseColor, opacity * appear));
+                canvas.drawRoundRect(frame, radius, radius, backgroundPaint);
+            }
+
+            if (!overSafeArea) {
+                // 描边**不跟着一起淡到底**：底色调到很淡时，没有这条边小窗就彻底找不着了。
+                borderPaint.setStyle(Paint.Style.STROKE);
+                borderPaint.setStrokeWidth(Math.max(1f, dp(1)));
+                borderPaint.setColor(withAlpha(accentColor, (0.14f + 0.22f * opacity) * appear));
+                canvas.drawRoundRect(frame, radius, radius, borderPaint);
+            }
+        }
+
+        /**
+         * 按当前 tuning 重算避开区域。
+         *
+         * 宽度是**整条宽的比例**、位置是「区域在剩下空间里的左右比例」——
+         * 位置乘的是 `width - zoneW` 而不是 `width`，这样拖到最右时区域右边缘正好贴边，
+         * 不会有一半被推出屏幕外。
+         */
+        private void updateAvoidZone(int width) {
+            if (!fillSafeArea()) {
+                avoidActive = false;
+                return;
+            }
+            float ratio = tuningFloat(KEY_AVOID_WIDTH, 0f, 0f, 1f);
+            if (ratio <= 0f) {
+                avoidActive = false;
+                return;
+            }
+            // 留一成：整个屏宽都划成避开区的话就一行字都画不出来了。
+            float zoneW = Math.min(ratio * width, width * 0.9f);
+            float pos = tuningFloat(KEY_AVOID_OFFSET_X, 0.5f, 0f, 1f);
+            avoidLeftPx = clamp(pos * (width - zoneW), 0f, Math.max(0f, width - zoneW));
+            avoidRightPx = avoidLeftPx + zoneW;
+            avoidActive = zoneW > 0f;
         }
 
         /**
@@ -1044,7 +1191,13 @@ public final class FloatingLyricsOverlay {
             textPaint.setTextAlign(Paint.Align.LEFT);
 
             float padX = dp(14);
-            float maxWidth = width - padX * 2f;
+            /*
+             * 避开区域那一段是**从布局里抽掉**的（字绕过去，不是被裁掉），
+             * 所以它占的宽度要从可用宽度里减掉 —— 不然「能不能装下 / 要不要滚」
+             * 都是按没洞的宽度算的，右半截会推出屏幕外。
+             */
+            float holeW = avoidActive ? (avoidRightPx - avoidLeftPx) : 0f;
+            float maxWidth = width - padX * 2f - holeW;
             float measured = textPaint.measureText(text);
             if (measured > maxWidth && measured > 0f) {
                 /*
@@ -1094,21 +1247,70 @@ public final class FloatingLyricsOverlay {
                 scroll = 0f;
             }
 
+            /*
+             * 居中要按**看得见的那一整段**算：洞只是把布局撑宽了 holeW，
+             * 屏上占的地方是 measured + holeW。
+             */
+            float visible = measured + holeW;
             float x = measured <= maxWidth
-                    ? Math.max(padX, (width - measured) / 2f)
+                    ? Math.max(padX, (width - visible) / 2f)
                     : padX - scroll;
             Paint.FontMetrics metrics = textPaint.getFontMetrics();
             float baseline = centerY - (metrics.ascent + metrics.descent) / 2f;
 
             int textAlpha = Math.round(clamp01(alpha) * 255f);
+            float clipTop = centerY - fontSize * 1.2f;
+            float clipBottom = centerY + fontSize * 1.2f;
+
+            if (!avoidActive) {
+                paintRow(canvas, text, x, baseline, fontSize, color, alpha, progress, line,
+                        positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
+                return;
+            }
+
+            /*
+             * 有避开区域：**同一行画两遍，各自裁一半**。
+             *
+             * 左段原地；右段整体右移一个区域宽（x + holeW），于是「本来该落进洞里的那些字」
+             * 正好从洞的右边缘接着出现 —— 接缝处那一个字左半在洞左边、右半在洞右边，
+             * 看着就是字从洞两边绕过去（歌词…歌词 ▌洞▌ 歌词…歌词），一个字都没少。
+             *
+             * 直接在洞的位置挖一刀不画是错的：那样跨在边界上的字会被削掉半边，
+             * 而且每边各削一个，比洞本身还宽。
+             */
+            canvas.save();
+            canvas.clipRect(0f, clipTop, avoidLeftPx, clipBottom);
+            paintRow(canvas, text, x, baseline, fontSize, color, alpha, progress, line,
+                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
+            canvas.restore();
+
+            canvas.save();
+            canvas.clipRect(avoidRightPx, clipTop, width, clipBottom);
+            paintRow(canvas, text, x + holeW, baseline, fontSize, color, alpha, progress, line,
+                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
+            canvas.restore();
+        }
+
+        /**
+         * 把一行真正画上去（主色一遍 + 唱过的那一段再来一遍）。
+         *
+         * 抽成一个方法是因为有避开区域时要**画两遍**（见调用处），
+         * 两遍之间只差起点 x。
+         */
+        private void paintRow(Canvas canvas, String text, float x, float baseline, float fontSize,
+                              int color, float alpha, float progress,
+                              WallpaperLyricsState.TimedLine line, long positionMs,
+                              float measured, int textAlpha,
+                              WallpaperLyricsState.TimedWord[] words,
+                              FloatingWordColors.Segment[] segments,
+                              float clipTop, float clipBottom) {
+            textPaint.setColor(color);
             textPaint.setAlpha(textAlpha);
             // 第一遍：整行的主色（还没唱到的那部分）。
             canvas.drawText(text, x, baseline, textPaint);
 
             if (progress < 0f || line == null) return;
 
-            float clipTop = centerY - fontSize * 1.2f;
-            float clipBottom = centerY + fontSize * 1.2f;
             if (segments == null) {
                 // 没有逐词轴：整行按进度线性推进（老做法）。
                 float swept = measured * clamp01(progress);

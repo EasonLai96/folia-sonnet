@@ -64,8 +64,14 @@ export const readStoredWallpaperFloatingOpacity = () => {
     }
     const saved = localStorage.getItem(WALLPAPER_FLOATING_OPACITY_STORAGE_KEY);
     const parsed = saved ? parseFloat(saved) : 0.62;
-    // 下限 0.05：完全透明 = 一块看不见的窗口，用户只会以为功能没生效。
-    return Number.isFinite(parsed) ? Math.min(1, Math.max(0.05, parsed)) : 0.62;
+    /*
+     * 下限是 **0**，不是 0.05。
+     *
+     * 原来卡在 0.05 是怕「一块看不见的窗口」让人以为功能坏了，但有人要的就是
+     * **只有字、没有底** —— 尤其叠加在安全区上时，那一条本来就该融进状态栏，
+     * 多一块底色反而突兀。想要底的人往上调就是了。
+     */
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.62;
 };
 
 /**
@@ -114,6 +120,84 @@ export const readStoredWallpaperFloatingWidth = () => {
     const saved = localStorage.getItem(WALLPAPER_FLOATING_WIDTH_STORAGE_KEY);
     const parsed = saved ? parseFloat(saved) : 0.8;
     return Number.isFinite(parsed) ? Math.min(1, Math.max(0.5, parsed)) : 0.8;
+};
+
+/**
+ * 叠加安全区时是否**直接占满整条**（左右不再留空）。默认关 ——
+ * 占满会压住整条状态栏，那是比「叠在安全区上」更进一步的选择。
+ *
+ * 非竖屏时原生那边不认这一条：横屏下状态栏那一条的意义完全不同，
+ * 占满只会糊住一整条，所以自动退回宽度滑条给的宽。
+ */
+export const WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY = 'folia.wallpaperFloatingFillSafeArea';
+
+export const readStoredWallpaperFloatingFillSafeArea = () => {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+    return localStorage.getItem(WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY) === 'true';
+};
+
+/**
+ * 占满时留出的「避开区域」宽度（占整条宽的比例）。默认 0.12 ——
+ * 一颗挖孔连着它周围那一圈差不多就是这个比例。0 = 不避让。
+ */
+export const WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY = 'folia.wallpaperFloatingAvoidWidth';
+
+export const readStoredWallpaperFloatingAvoidWidth = () => {
+    if (typeof window === 'undefined') {
+        return 0.12;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 0.12;
+    // 上限 0.5：划掉一半以上就没什么地方画字了。
+    return Number.isFinite(parsed) ? Math.min(0.5, Math.max(0, parsed)) : 0.12;
+};
+
+/**
+ * 避开区域的左右位置（0 = 贴左，1 = 贴右），默认 0.5 = 正中间
+ * （挖孔绝大多数在正中）。
+ */
+export const WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY = 'folia.wallpaperFloatingAvoidOffsetX';
+
+export const readStoredWallpaperFloatingAvoidOffsetX = () => {
+    if (typeof window === 'undefined') {
+        return 0.5;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 0.5;
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.5;
+};
+
+/**
+ * 悬浮小窗的字号模式：'dynamic' = 跟着窗口高度算（拖大窗口字就跟着大），
+ * 'custom' = 自己指定一个字号。
+ *
+ * 为什么要有 custom：叠加模式下窗口只有状态栏那么高，按高度算出来的字号小到看不清 ——
+ * 那种情况必须能自己指定。
+ */
+export const WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY = 'folia.wallpaperFloatingFontSizeMode';
+
+export const readStoredWallpaperFloatingFontSizeMode = (): 'dynamic' | 'custom' => {
+    if (typeof window === 'undefined') {
+        return 'dynamic';
+    }
+    return localStorage.getItem(WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY) === 'custom'
+        ? 'custom'
+        : 'dynamic';
+};
+
+/** 自定义模式的字号（dp）。默认 14 —— 一行歌词挂在小窗里这个大小看着最舒服。 */
+export const WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY = 'folia.wallpaperFloatingFontSize';
+
+export const readStoredWallpaperFloatingFontSize = () => {
+    if (typeof window === 'undefined') {
+        return 14;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 14;
+    // 10~32dp：再小看不清，再大一行就装不下了。
+    return Number.isFinite(parsed) ? Math.min(32, Math.max(10, parsed)) : 14;
 };
 
 /**

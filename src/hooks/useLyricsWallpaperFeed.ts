@@ -259,6 +259,17 @@ export const useLyricsWallpaperFeed = ({
         state => state.wallpaperFloatingOffsetX);
     const wallpaperFloatingWidth = useVisualizerSettingsStore(
         state => state.wallpaperFloatingWidth);
+    // 占满整条安全区 + 避开区域（宽度 / 左右位置）。
+    const wallpaperFloatingFillSafeArea = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFillSafeArea);
+    const wallpaperFloatingAvoidWidth = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingAvoidWidth);
+    const wallpaperFloatingAvoidOffsetX = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingAvoidOffsetX);
+    const wallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFontSizeMode);
+    const wallpaperFloatingFontSize = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFontSize);
     const wallpaperOverlayEnabled = useVisualizerSettingsStore(state => state.wallpaperOverlayEnabled);
     const wallpaperOverlayLockScreen = useVisualizerSettingsStore(state => state.wallpaperOverlayLockScreen);
     const wallpaperOverlayLockScreenOnly = useVisualizerSettingsStore(
@@ -289,6 +300,11 @@ export const useLyricsWallpaperFeed = ({
             wallpaperFloatingOverSafeArea,
             wallpaperFloatingOffsetX,
             wallpaperFloatingWidth,
+            wallpaperFloatingFillSafeArea,
+            wallpaperFloatingAvoidWidth,
+            wallpaperFloatingAvoidOffsetX,
+            wallpaperFloatingFontSizeMode,
+            wallpaperFloatingFontSize,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen,
             wallpaperOverlayLockScreenOnly,
@@ -303,6 +319,9 @@ export const useLyricsWallpaperFeed = ({
         [rawTuning, backgroundOpacity, disableVisualizerVignette,
             disableVisualizerGeometricBackground, wallpaperOverlayOpacity, wallpaperFloatingOpacity,
             wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX, wallpaperFloatingWidth,
+            wallpaperFloatingFillSafeArea, wallpaperFloatingAvoidWidth,
+            wallpaperFloatingAvoidOffsetX,
+            wallpaperFloatingFontSizeMode, wallpaperFloatingFontSize,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen, wallpaperOverlayLockScreenOnly, wallpaperOverlayAllApps,
             wallpaperOverlayHideNativeLyrics, wallpaperOverlayHideNativeProgress,

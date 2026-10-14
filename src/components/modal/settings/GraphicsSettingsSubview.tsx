@@ -141,6 +141,28 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
         state => state.wallpaperFloatingWidth);
     const onSetWallpaperFloatingWidth = useVisualizerSettingsStore(
         state => state.handleSetWallpaperFloatingWidth);
+    // 占满整条安全区 + 避开区域（宽度 / 左右位置）。
+    const wallpaperFloatingFillSafeArea = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFillSafeArea);
+    const onToggleWallpaperFloatingFillSafeArea = useVisualizerSettingsStore(
+        state => state.handleToggleWallpaperFloatingFillSafeArea);
+    const wallpaperFloatingAvoidWidth = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingAvoidWidth);
+    const onSetWallpaperFloatingAvoidWidth = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingAvoidWidth);
+    const wallpaperFloatingAvoidOffsetX = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingAvoidOffsetX);
+    const onSetWallpaperFloatingAvoidOffsetX = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingAvoidOffsetX);
+    // 字号：动态（跟着窗口高度算）/ 自定义（自己指定 dp）。
+    const wallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFontSizeMode);
+    const onSetWallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingFontSizeMode);
+    const wallpaperFloatingFontSize = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingFontSize);
+    const onSetWallpaperFloatingFontSize = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingFontSize);
     const wallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.wallpaperOverlayAllApps);
     const onToggleWallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayAllApps);
     const wallpaperOverlayHideNativeLyrics = useVisualizerSettingsStore(state => state.wallpaperOverlayHideNativeLyrics);
@@ -516,9 +538,10 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                     dividerClass={dividerClass}
                                     control={(
                                         <div className="flex items-center gap-2">
+                                            {/* 下限 0：要的就是「只有字、没有底」，尤其叠在安全区上时。 */}
                                             <input
                                                 type="range"
-                                                min={5}
+                                                min={0}
                                                 max={100}
                                                 step={5}
                                                 value={Math.round(wallpaperFloatingOpacity * 100)}
@@ -548,8 +571,9 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                         </button>
                                     )}
                                 />
-                                {/* 叠加模式下的左右位置。只给初值：原生那边拖过之后以拖出来的为准。 */}
-                                {wallpaperFloatingOverSafeArea && (
+                                {/* 叠加模式下的左右位置。只给初值：原生那边拖过之后以拖出来的为准。
+                                    占满整条时没有「左右」可言，那两根一起收起来。 */}
+                                {wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea && (
                                     <SettingsRow
                                         title={t('options.floatingLyricsOffsetX')}
                                         description={t('options.floatingLyricsOffsetXDesc')}
@@ -573,8 +597,8 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                     />
                                 )}
                                 {/* 宽度：占屏幕宽度的比例。和左右位置那根一样，
-                                    每次拖动都会立刻下发，小窗当场跟着变。 */}
-                                {wallpaperFloatingOverSafeArea && (
+                                    每次拖动都会立刻下发，小窗当场跟着变。占满时不参与。 */}
+                                {wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea && (
                                     <SettingsRow
                                         title={t('options.floatingLyricsWidth')}
                                         description={t('options.floatingLyricsWidthDesc')}
@@ -592,6 +616,121 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                                 />
                                                 <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
                                                     {Math.round(wallpaperFloatingWidth * 100)}%
+                                                </span>
+                                            </div>
+                                        )}
+                                    />
+                                )}
+                                {/* 占满整条安全区：左右不再留空，宽度滑条也让位。
+                                    横屏下原生那边不认这一条，自动退回宽度滑条给的宽。 */}
+                                {wallpaperFloatingOverSafeArea && (
+                                    <SettingsRow
+                                        title={t('options.floatingLyricsFillSafeArea')}
+                                        description={t('options.floatingLyricsFillSafeAreaDesc')}
+                                        dividerClass={dividerClass}
+                                        control={(
+                                            <button
+                                                type="button"
+                                                onClick={() => onToggleWallpaperFloatingFillSafeArea(!wallpaperFloatingFillSafeArea)}
+                                                className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperFloatingFillSafeArea ? toggleOffBackgroundClass : ''}`}
+                                                style={{ backgroundColor: wallpaperFloatingFillSafeArea ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                                            >
+                                                <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperFloatingFillSafeArea ? 'translate-x-6' : 'translate-x-0'}`} />
+                                            </button>
+                                        )}
+                                    />
+                                )}
+                                {/* 避开区域：挖孔 / 刘海那一块。字从它两边绕过去，不是被裁掉。 */}
+                                {wallpaperFloatingOverSafeArea && wallpaperFloatingFillSafeArea && (
+                                    <>
+                                        <SettingsRow
+                                            title={t('options.floatingLyricsAvoidWidth')}
+                                            description={t('options.floatingLyricsAvoidWidthDesc')}
+                                            dividerClass={dividerClass}
+                                            control={(
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="range"
+                                                        min={0}
+                                                        max={50}
+                                                        step={2}
+                                                        value={Math.round(wallpaperFloatingAvoidWidth * 100)}
+                                                        onChange={(event) => onSetWallpaperFloatingAvoidWidth(Number(event.target.value) / 100)}
+                                                        className="h-1 w-28 cursor-pointer accent-white"
+                                                    />
+                                                    <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                        {Math.round(wallpaperFloatingAvoidWidth * 100)}%
+                                                    </span>
+                                                </div>
+                                            )}
+                                        />
+                                        <SettingsRow
+                                            title={t('options.floatingLyricsAvoidOffsetX')}
+                                            description={t('options.floatingLyricsAvoidOffsetXDesc')}
+                                            dividerClass={dividerClass}
+                                            control={(
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="range"
+                                                        min={0}
+                                                        max={100}
+                                                        step={2}
+                                                        value={Math.round(wallpaperFloatingAvoidOffsetX * 100)}
+                                                        onChange={(event) => onSetWallpaperFloatingAvoidOffsetX(Number(event.target.value) / 100)}
+                                                        className="h-1 w-28 cursor-pointer accent-white"
+                                                    />
+                                                    <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                        {Math.round(wallpaperFloatingAvoidOffsetX * 100)}%
+                                                    </span>
+                                                </div>
+                                            )}
+                                        />
+                                    </>
+                                )}
+                                {/* 字号：动态 = 跟着窗口高度算（拖大窗口字就跟着大）；
+                                    自定义 = 自己指定。默认动态。 */}
+                                <SettingsRow
+                                    title={t('options.floatingLyricsFontSize')}
+                                    description={t('options.floatingLyricsFontSizeDesc')}
+                                    dividerClass={dividerClass}
+                                    control={(
+                                        <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
+                                            {(['dynamic', 'custom'] as const).map((mode) => (
+                                                <button
+                                                    key={mode}
+                                                    type="button"
+                                                    onClick={() => onSetWallpaperFloatingFontSizeMode(mode)}
+                                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${wallpaperFloatingFontSizeMode === mode ? '' : 'opacity-60'}`}
+                                                    style={wallpaperFloatingFontSizeMode === mode
+                                                        ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
+                                                        : { color: 'var(--text-primary)' }}
+                                                >
+                                                    {mode === 'dynamic'
+                                                        ? t('options.floatingLyricsFontSizeDynamic')
+                                                        : t('options.floatingLyricsFontSizeCustom')}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                />
+                                {wallpaperFloatingFontSizeMode === 'custom' && (
+                                    <SettingsRow
+                                        title={t('options.floatingLyricsFontSizeCustom')}
+                                        description={t('options.floatingLyricsFontSizeCustomDesc')}
+                                        dividerClass={dividerClass}
+                                        control={(
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="range"
+                                                    min={10}
+                                                    max={32}
+                                                    step={1}
+                                                    value={Math.round(wallpaperFloatingFontSize)}
+                                                    onChange={(event) => onSetWallpaperFloatingFontSize(Number(event.target.value))}
+                                                    className="h-1 w-28 cursor-pointer accent-white"
+                                                />
+                                                <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                    {Math.round(wallpaperFloatingFontSize)}
                                                 </span>
                                             </div>
                                         )}
