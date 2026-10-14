@@ -1,37 +1,26 @@
 import { create } from 'zustand';
 import { getStoredBoolean, setStoredBoolean } from './storagePrimitives';
-import { getLyriconStatus, setLyriconEnabled, setLyriconLinkEnabled } from '../platform/foliaLyricon';
+import { getLyriconStatus, setLyriconEnabled } from '../platform/foliaLyricon';
 
 // src/stores/useLyriconStore.ts
-// 状态栏歌词（folia状态栏）的开关与连接状态。
+// 状态栏歌词（Lyricon）的开关与连接状态。
 //
 // 开关本身落在 localStorage：它是个用户偏好，跟账号无关，也不该每次启动都被重置。
 // 「有没有连上」是运行时状态，只有真正去注册一次才知道，所以另外存一份。
 
 const LYRICON_ENABLED_STORAGE_KEY = 'folia.lyriconEnabled';
-const LYRICON_LINK_STORAGE_KEY = 'folia.lyriconLink';
 
 type LyriconState = {
     enabled: boolean;
-    /**
-     * 免 Root 直连的独立开关（**默认关**）。
-     *
-     * 这是「额外的开关」：关着时走原来那条通道（中心服务由注入 System UI 提供，
-     * 即 root 方案），行为跟加这个开关之前完全一致；打开才切到免 Root 的中心服务
-     * 并启用双向握手。默认关，就是为了不把已经在用的老方案改坏。
-     */
-    link: boolean;
-    /** 中心服务是否真的连上了。false 多半意味着设备上没装 folia状态栏。 */
+    /** 中心服务是否真的连上了。false 多半意味着设备上没装 Lyricon。 */
     connected: boolean;
     handleToggleLyricon: (enable: boolean) => void;
-    handleToggleLyriconLink: (enable: boolean) => void;
     /** 启动时把开关同步给原生，并问一次连接状态。 */
     syncLyriconStatus: () => void;
 };
 
 export const useLyriconStore = create<LyriconState>((set, get) => ({
     enabled: getStoredBoolean(LYRICON_ENABLED_STORAGE_KEY, false),
-    link: getStoredBoolean(LYRICON_LINK_STORAGE_KEY, false),
     connected: false,
     handleToggleLyricon: (enable) => {
         setStoredBoolean(LYRICON_ENABLED_STORAGE_KEY, enable);
@@ -46,23 +35,13 @@ export const useLyriconStore = create<LyriconState>((set, get) => ({
             set({ connected: result.connected });
         });
     },
-    handleToggleLyriconLink: (enable) => {
-        setStoredBoolean(LYRICON_LINK_STORAGE_KEY, enable);
-        set({ link: enable });
-        void setLyriconLinkEnabled(enable).then((result) => {
-            set({ connected: result.connected });
-        });
-    },
     syncLyriconStatus: () => {
         const enabled = get().enabled;
         void setLyriconEnabled(enabled).then((result) => {
             set({ connected: result.connected });
         });
-        void setLyriconLinkEnabled(get().link).then((result) => {
-            set({ connected: result.connected });
-        });
         void getLyriconStatus().then((result) => {
-            set({ connected: result.connected, link: result.link });
+            set({ connected: result.connected });
         });
     },
 }));

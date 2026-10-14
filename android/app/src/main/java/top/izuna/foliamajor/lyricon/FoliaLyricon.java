@@ -1,14 +1,10 @@
 package top.izuna.foliamajor.lyricon;
 
 import android.app.Application;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.media.session.PlaybackState;
 import android.os.Build;
-import android.os.Build.VERSION_CODES;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -40,35 +36,8 @@ public final class FoliaLyricon {
     private static final String TAG = "FoliaLyricon";
     private static final String PREFS = "folia_lyricon";
     private static final String KEY_ENABLED = "enabled";
-    /** 免 Root 直连握手的独立开关（默认开）。 */
-    private static final String KEY_LINK = "link";
-
-    /**
-     * 直连握手：**folia -> 状态栏**「你在吗」。
-     *
-     * 两边都改得了源码，所以连接不必再靠单方面的注册广播碰运气 —— 先问一句，
-     * 对方起来了再正式注册。动作名是新包名前缀：这条管线是这个应用专用的。
-     */
-    private static final String ACTION_LINK_PROBE = "top.izuna.foliastatusbar.link.PROBE";
-
-    /** 直连握手：**状态栏 -> folia**「我在了，来注册」。 */
-    private static final String ACTION_LINK_READY = "top.izuna.foliastatusbar.link.READY";
-
-    /** 握手广播里带发送方包名的字段。 */
-    private static final String EXTRA_LINK_PACKAGE = "package_name";
-    /**
-     * 中心服务的包名：**按开关在两条通道之间选**，不是一刀切。
-     *
-     * 注册广播是一条 `setPackage(...)` 的显式广播 —— 写错包名就等于发给了一个
-     * 根本没人接收的进程，表现是「歌词来源一直为空」，而且**不打任何日志**。
-     *
-     * 两条通道都还得能用：
-     * - 关（默认）：`com.android.systemui`，即**原来那套**：中心服务由 Xposed 注入
-     *   System UI，root 用户一直走的就是这条路；
-     * - 开：`top.izuna.foliastatusbar`，免 Root 版本的中心服务跑在它自己的进程里。
-     */
-    private static final String CENTRAL_PACKAGE_SYSTEM_UI = "com.android.systemui";
-    private static final String CENTRAL_PACKAGE_ROOTLESS = "top.izuna.foliastatusbar";
+    /** Lyricon 中心服务的包名，SDK 自己的默认值。 */
+    private static final String CENTRAL_PACKAGE = "com.android.systemui";
 
     /** 位置推进容差（毫秒）：比这更小的前进不值得单独过桥一次。 */
     private static final long POSITION_EPSILON_MS = 200L;
@@ -98,9 +67,6 @@ public final class FoliaLyricon {
     private static volatile boolean registered;
     /** 建过一次失败就不再反复重试：中心服务不在就是不在，重试只会白耗一次绑定。 */
     private static volatile boolean unavailable;
-
-    /** 「状态栏已就绪」广播是否已注册过。 */
-    private static volatile boolean linkReceiverRegistered;
 
     /**
      * 上一次真正推给中心服务的播放状态与位置。
@@ -161,48 +127,6 @@ public final class FoliaLyricon {
         if (context == null) return false;
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_ENABLED, false);
-    }
-
-    /**
-     * 免 Root 直连是否开启（**默认关**，保持原来那套 System UI 通道不动）。
-     *
-     * 这一条是「额外的开关」：打开才切到免 Root 的中心服务，并启用双向握手；
-     * 关着的时候行为跟改动之前完全一致，root / 注入 System UI 的老方案不受影响。
-     */
-    public static boolean isLinkEnabled(Context context) {
-        if (context == null) return false;
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_LINK, false);
-    }
-
-    /** 注册广播该发给谁：见 [CENTRAL_PACKAGE_SYSTEM_UI] 与 [CENTRAL_PACKAGE_ROOTLESS]。 */
-    private static String centralPackage(Context context) {
-        return isLinkEnabled(context) ? CENTRAL_PACKAGE_ROOTLESS : CENTRAL_PACKAGE_SYSTEM_UI;
-    }
-
-    /**
-     * 直连开关。
-     *
-     * **切换必须拆掉重连**：provider 是在 `createProvider` 那一刻把目标包名定死的，
-     * 不重建的话开关拨了也还是往老地址发。
-     */
-    public static synchronized boolean setLinkEnabled(Context context, boolean enabled) {
-        if (context == null) return false;
-        Context appContext = context.getApplicationContext();
-        boolean changed = isLinkEnabled(appContext) != enabled;
-        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(KEY_LINK, enabled)
-                .apply();
-        if (changed) {
-            teardown();
-        }
-        if (!enabled) {
-            // 回到 System UI 通道：那边没起服务就是没起，不打扰。
-            return ensureRegistered(appContext);
-        }
-        sendProbe(appContext);
-        return ensureRegistered(appContext);
     }
 
     /** 中心服务在不在。只有真正注册成功之后才敢说「在」。 */
@@ -597,71 +521,10 @@ public final class FoliaLyricon {
         }
     }
 
-    /** 收到「我在了」之后重新走一遍注册。回调在进程主线程，注册本身是同步的。 */
-    private static final BroadcastReceiver linkReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null || !ACTION_LINK_READY.equals(intent.getAction())) return;
-            Context appContext = context.getApplicationContext();
-            synchronized (FoliaLyricon.class) {
-                runCatching(appContext);
-            }
-        }
-
-        private void runCatching(Context appContext) {
-            try {
-                ensureRegistered(appContext);
-            } catch (Throwable error) {
-                Log.w(TAG, "收到就绪广播后注册失败", error);
-            }
-        }
-    };
-
-    /**
-     * 监听「状态栏已就绪」广播。幂等，只注册一次。
-     *
-     * **必须显式声明 exported**：这条广播是另一个应用发过来的，不导出的接收器
-     * 收不到跨应用的广播，握手就永远等不到回音。
-     */
-    private static void ensureLinkReceiver(Context context) {
-        if (linkReceiverRegistered || !isLinkEnabled(context)) return;
-        try {
-            IntentFilter filter = new IntentFilter(ACTION_LINK_READY);
-            Context appContext = context.getApplicationContext();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                appContext.registerReceiver(linkReceiver, filter, Context.RECEIVER_EXPORTED);
-            } else {
-                appContext.registerReceiver(linkReceiver, filter);
-            }
-            linkReceiverRegistered = true;
-        } catch (Throwable error) {
-            Log.w(TAG, "注册就绪广播接收器失败", error);
-        }
-    }
-
-    /**
-     * 主动问一句「你在吗」。
-     *
-     * 注册广播是单向的：对方还没起来时发出去就石沉大海，而 SDK 那边的重试退避
-     * 最长会拉到 30 秒。有了这一条，对方一被拉起来就会回一句 READY，我们立刻注册。
-     */
-    private static void sendProbe(Context context) {
-        if (!isLinkEnabled(context)) return;
-        try {
-            context.sendBroadcast(
-                    new Intent(ACTION_LINK_PROBE)
-                            .setPackage(centralPackage(context))
-                            .putExtra(EXTRA_LINK_PACKAGE, context.getPackageName()));
-        } catch (Throwable error) {
-            Log.w(TAG, "发送直连探测失败", error);
-        }
-    }
-
     private static boolean ensureRegistered(Context context) {
         if (registered && player != null) return true;
         if (unavailable) return false;
         try {
-            ensureLinkReceiver(context);
             if (provider == null) {
                 String packageName = context.getPackageName();
                 provider = LyriconFactory.INSTANCE.createProvider(
@@ -672,7 +535,7 @@ public final class FoliaLyricon {
                         null,
                         processName(context),
                         null,
-                        centralPackage(context));
+                        CENTRAL_PACKAGE);
             }
             if (provider == null) {
                 // API 27 以下 SDK 返回空实现；那不是故障，只是不可用。
@@ -683,8 +546,6 @@ public final class FoliaLyricon {
             player = provider.getPlayer();
             registered = provider.register();
             if (!registered) {
-                // 多半是对方还没起来：主动问一句，它起来后会回 READY。
-                sendProbe(context);
                 Log.w(TAG, "Lyricon refused the registration; is the central service installed?");
                 return false;
             }

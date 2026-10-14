@@ -173,8 +173,6 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
     const lyriconEnabled = useLyriconStore(state => state.enabled);
     const lyriconConnected = useLyriconStore(state => state.connected);
     const onToggleLyricon = useLyriconStore(state => state.handleToggleLyricon);
-    const lyriconLink = useLyriconStore(state => state.link);
-    const onToggleLyriconLink = useLyriconStore(state => state.handleToggleLyriconLink);
     // ColorOS 原生锁屏歌词没有开关：开不开由原生的 ROM 探测决定，这里只回显结果，
     // 好让用户（和我们）在真机上确认「这台机器到底有没有被认出来」。
     const [colorOsSupport, setColorOsSupport] = useState<{ supported: boolean; colorOsMajor: number } | null>(null);
@@ -463,35 +461,13 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                                 <span className={`px-2 py-1 rounded-full text-[10px] ${lyriconConnected ? successBgColor : errorBgColor} ${lyriconConnected ? successTextColor : errorTextColor}`}>
                                     {lyriconConnected
                                         ? t('status.connected')
-                                        : t('options.lyriconNotConnected') || '未连接（folia状态栏）'}
+                                        : t('options.lyriconNotConnected') || 'Lyricon not found'}
                                 </span>
                                 {!lyriconConnected && (
                                     <span className="text-[10px] opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                        {t('options.lyriconNotConnectedDesc') || '请安装「folia状态栏」并确认它的中心服务在运行。'}
+                                        {t('options.lyriconNotConnectedDesc') || 'Install Lyricon and make sure its centre service is running.'}
                                     </span>
                                 )}
-                            </div>
-                        )}
-
-                        {lyriconEnabled && (
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="space-y-1">
-                                    <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                                        {t('options.lyriconLink') || '免 Root 直连'}
-                                    </div>
-                                    <div className="text-[10px] opacity-40 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
-                                        {t('options.lyriconLinkDesc') || '关闭时走原来的 System UI 通道；打开后连到「folia状态栏」自己的中心服务，并在连不上时主动握手'}
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => onToggleLyriconLink(!lyriconLink)}
-                                    className={`w-12 h-6 rounded-full p-1 transition-colors ${!lyriconLink ? toggleOffBackgroundClass : ''}`}
-                                    style={{ backgroundColor: lyriconLink ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                                    aria-label={t('options.lyriconLink') || '免 Root 直连'}
-                                >
-                                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${lyriconLink ? 'translate-x-6' : 'translate-x-0'}`} />
-                                </button>
                             </div>
                         )}
                     </div>

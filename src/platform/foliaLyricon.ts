@@ -31,8 +31,7 @@ export interface LyriconSongPayload {
 
 interface FoliaLyriconPlugin {
     setEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean; connected: boolean }>;
-    setLinkEnabled(options: { enabled: boolean }): Promise<{ link: boolean; connected: boolean }>;
-    getStatus(): Promise<{ enabled: boolean; link: boolean; connected: boolean }>;
+    getStatus(): Promise<{ enabled: boolean; connected: boolean }>;
     publish(payload: LyriconSongPayload): Promise<{ ok: boolean; connected: boolean }>;
     /**
      * `continuous`：这次位置只是**正常播放的延续**（重锚 / 段内推进），不是跳转。
@@ -56,34 +55,12 @@ export const setLyriconEnabled = async (enabled: boolean): Promise<{ enabled: bo
     }
 };
 
-export const getLyriconStatus = async (): Promise<{ enabled: boolean; link: boolean; connected: boolean }> => {
+export const getLyriconStatus = async (): Promise<{ enabled: boolean; connected: boolean }> => {
     try {
         const result = await FoliaLyricon.getStatus();
-        return {
-            enabled: Boolean(result?.enabled),
-            link: result?.link !== false,
-            connected: Boolean(result?.connected),
-        };
+        return { enabled: Boolean(result?.enabled), connected: Boolean(result?.connected) };
     } catch {
-        return { enabled: false, link: true, connected: false };
-    }
-};
-
-/**
- * 免 Root 直连握手的独立开关。
- *
- * SDK 那套注册是单向的：状态栏没起来时广播就石沉大海，只能靠退避重试去碰（最长
- * 30 秒）。开了这一条，注册失败时会主动发一次「你在吗」，对方起来后回一句
- * 「我在了」，我们立刻补注册 —— 不用等退避。
- */
-export const setLyriconLinkEnabled = async (
-    enabled: boolean,
-): Promise<{ link: boolean; connected: boolean }> => {
-    try {
-        const result = await FoliaLyricon.setLinkEnabled({ enabled });
-        return { link: result?.link !== false, connected: Boolean(result?.connected) };
-    } catch {
-        return { link: false, connected: false };
+        return { enabled: false, connected: false };
     }
 };
 
