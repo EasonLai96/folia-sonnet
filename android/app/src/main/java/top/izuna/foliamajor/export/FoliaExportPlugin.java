@@ -156,7 +156,7 @@ public class FoliaExportPlugin extends Plugin {
 
         setKeepScreenOn(activity, true);
 
-        final ExportRenderView view = new ExportRenderView(activity, width, height);
+        final ExportRenderView view = new ExportRenderView(activity, getBridge(), width, height);
         renderView = view;
 
         VideoExportSession.Spec spec = new VideoExportSession.Spec(
@@ -209,7 +209,7 @@ public class FoliaExportPlugin extends Plugin {
         new Thread(() -> {
             Boolean webglOk = view.loadAndWait();
             if (webglOk == null) {
-                reportFailure("渲染页面起不来，导出中止。");
+                reportFailure(describeLoadFailure(view));
                 return;
             }
             if (!webglOk) {
@@ -267,6 +267,20 @@ public class FoliaExportPlugin extends Plugin {
             return true;
         }
     };
+
+    /**
+     * 渲染页为什么没起来。
+     *
+     * 能拿到具体原因的时候一定要给出来：统一说一句「渲染页面起不来」，看的人既不知道
+     * 是该重新出包、也不知道是不是机器不行，只能来回问。
+     */
+    private static String describeLoadFailure(ExportRenderView view) {
+        String detail = view.takeFailure();
+        if (detail != null) {
+            return detail + "，导出中止。";
+        }
+        return "渲染页面起不来（20 秒没等到就绪信号），导出中止。";
+    }
 
     private void reportFailure(String message) {
         mainReportFailure(message);

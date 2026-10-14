@@ -3,6 +3,7 @@ package top.izuna.foliamajor.export;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,10 +12,19 @@ import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.webkit.MimeTypeMap;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import com.getcapacitor.Bridge;
+
+import java.io.InputStream;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -55,18 +65,21 @@ public final class ExportRenderView {
     private static final long POLL_INTERVAL_MS = 8;
 
     private final Activity activity;
+    private final Bridge bridge;
     private final int width;
     private final int height;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private FrameLayout host;
     private WebView webView;
+    private LocalAssetClient assetClient;
     private Bitmap scratch;
     private boolean visibleMode = false;
     private boolean released = false;
 
-    public ExportRenderView(Activity activity, int width, int height) {
+    public ExportRenderView(Activity activity, Bridge bridge, int width, int height) {
         this.activity = activity;
+        this.bridge = bridge;
         this.width = width;
         this.height = height;
     }
@@ -99,6 +112,9 @@ public final class ExportRenderView {
         // 1×1：够让它挂在窗口上、拿到正常的生命周期，又小到用户注意不到。
         decor.addView(host, new ViewGroup.LayoutParams(1, 1));
         host.addView(webView, new ViewGroup.LayoutParams(1, 1));
+
+        assetClient = new LocalAssetClient(activity, bridge);
+        webView.setWebViewClient(assetClient);
     }
 
     /**
@@ -116,6 +132,10 @@ public final class ExportRenderView {
         final long deadline = System.currentTimeMillis() + LOAD_TIMEOUT_MS;
         boolean ready = false;
         while (System.currentTimeMillis() < deadline) {
+            // 主资源已经报错就别再干等了（默认要等满 20 秒才报，用户只会以为卡死）。
+            if (assetClient != null && assetClient.takeFailure() != null) {
+                break;
+            }
             if (Boolean.TRUE.equals(evalBoolean("!!(window.__foliaExportReady && window.__foliaExport)"))) {
                 ready = true;
                 break;
@@ -290,6 +310,16 @@ public final class ExportRenderView {
         return visibleMode;
     }
 
+    /**
+     * 渲染页为什么没起来。没有就返回 null。
+     *
+     * 这一句是要直接给用户看的，所以必须具体到能照着改：以前统一报「渲染页面起不来」，
+     * 看的人根本不知道是该重新出包、还是机器不行。
+     */
+    public String takeFailure() {
+        return assetClient == null ? null : assetClient.takeFailure();
+    }
+
     /** 这一帧是不是空的（全透明）。用来判断画面到底有没有画出来。 */
     public static boolean isBlank(Bitmap bitmap) {
         if (bitmap == null) return true;
@@ -302,6 +332,128 @@ public final class ExportRenderView {
             }
         }
         return true;
+    }
+
+    /**
+     * 本地资源服务。**整套导出能不能跑起来就看这一层。**
+     *
+     * `https://localhost/*` 不是一个真的服务器 —— 它是 Capacitor 在自己那个
+     * `BridgeWebViewClient.shouldInterceptRequest` 里用 `WebViewLocalServer` 假出来的
+     * （见 com/getcapacitor/BridgeWebViewClient.java）。主 WebView 自带这个 client，
+     * 所以那里一切正常；而我们 `new` 出来的这个 WebView 默认是**空 client**，它会真的
+     * 往 localhost:443 发请求 —— 本机没有这个服务，直接 ERR_CONNECTION_REFUSED，
+     * 页面永远到不了 ready，导出停在「渲染页面起不来」上。
+     *
+     * 所以这里把同一个 `WebViewLocalServer` 接过来。另外留了第二条路（直接读
+     * assets/public）：万一 Capacitor 换了 `hostname` / `androidScheme`、或者某个请求
+     * 它不认，还能从打包进去的那份资源里取到。
+     */
+    private static final class LocalAssetClient extends WebViewClient {
+
+        private final Activity activity;
+        private final Bridge bridge;
+        private final AtomicReference<String> failure = new AtomicReference<>(null);
+
+        LocalAssetClient(Activity activity, Bridge bridge) {
+            this.activity = activity;
+            this.bridge = bridge;
+        }
+
+        String takeFailure() {
+            return failure.get();
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            WebResourceResponse served = null;
+            if (bridge != null) {
+                try {
+                    served = bridge.getLocalServer().shouldInterceptRequest(request);
+                } catch (Throwable error) {
+                    Log.w(TAG, "本地资源服务没能处理这个请求", error);
+                }
+            }
+            if (served != null) {
+                return served;
+            }
+            return readFromAssets(request);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            Log.d(TAG, "渲染页加载完成：" + url);
+        }
+
+        @Override
+        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+            super.onReceivedError(view, request, error);
+            if (!request.isForMainFrame()) return;
+            String detail = error != null
+                    ? (error.getErrorCode() + " " + error.getDescription())
+                    : "unknown";
+            Log.w(TAG, "渲染页主资源加载失败：" + detail + " " + request.getUrl());
+            failure.compareAndSet(null, "渲染页加载失败（" + detail + "）");
+        }
+
+        @Override
+        public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                        WebResourceResponse errorResponse) {
+            super.onReceivedHttpError(view, request, errorResponse);
+            int status = errorResponse != null ? errorResponse.getStatusCode() : 0;
+            Log.w(TAG, "渲染页资源 " + status + "：" + request.getUrl());
+            if (!request.isForMainFrame() || status == 0) return;
+            // 主资源 404 基本只有一种可能：包里的 web 资源是旧的（没有 export.html）。
+            failure.compareAndSet(null, status == 404
+                    ? "安装包里没有 export.html（" + status + "）：这一版前端资源是旧的，重新构建再出包试试。"
+                    : "渲染页加载失败（HTTP " + status + "）");
+        }
+
+        private WebResourceResponse readFromAssets(WebResourceRequest request) {
+            String path = request.getUrl().getPath();
+            if (path == null || path.isEmpty() || "/".equals(path)) {
+                path = "/index.html";
+            }
+            try {
+                InputStream stream = activity.getAssets().open("public" + path);
+                return new WebResourceResponse(guessMimeType(path), "UTF-8", stream);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * 猜 MIME。
+     *
+     * 这一环错了也会被 mute 掉：Chromium 对 ES module 做严格 MIME 检查，
+     * `.js` 给成 `application/octet-stream` 的话整个渲染页一行 JS 都不会执行，
+     * 表现和"页面没起来"一模一样。
+     */
+    private static String guessMimeType(String path) {
+        String extension = MimeTypeMap.getFileExtensionFromUrl(path);
+        String type = extension != null
+                ? MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                : null;
+        if (type != null) return type;
+        int dot = path.lastIndexOf('.');
+        String suffix = dot >= 0 ? path.substring(dot + 1).toLowerCase(Locale.US) : "";
+        switch (suffix) {
+            case "js":
+            case "mjs":
+                return "text/javascript";
+            case "css":
+                return "text/css";
+            case "json":
+            case "map":
+                return "application/json";
+            case "svg":
+                return "image/svg+xml";
+            case "wasm":
+                return "application/wasm";
+            default:
+                return "application/octet-stream";
+        }
     }
 
     private static boolean sleepQuietly(long ms) {
@@ -369,6 +521,7 @@ public final class ExportRenderView {
                 }
                 webView = null;
             }
+            assetClient = null;
             if (host != null && host.getParent() instanceof ViewGroup) {
                 ((ViewGroup) host.getParent()).removeView(host);
                 host = null;
