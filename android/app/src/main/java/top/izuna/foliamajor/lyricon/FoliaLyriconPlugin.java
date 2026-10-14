@@ -42,7 +42,23 @@ public class FoliaLyriconPlugin extends Plugin {
     public void getStatus(PluginCall call) {
         JSObject result = new JSObject();
         result.put("enabled", FoliaLyricon.isEnabled(getContext()));
+        result.put("link", FoliaLyricon.isLinkEnabled(getContext()));
         result.put("connected", FoliaLyricon.isConnected());
+        call.resolve(result);
+    }
+
+    /** 免 Root 直连握手的独立开关：打开时会主动向状态栏发一次探测。 */
+    @PluginMethod
+    public void setLinkEnabled(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled");
+        if (enabled == null) {
+            call.reject("enabled is required");
+            return;
+        }
+        boolean ok = FoliaLyricon.setLinkEnabled(getContext(), enabled);
+        JSObject result = new JSObject();
+        result.put("link", FoliaLyricon.isLinkEnabled(getContext()));
+        result.put("connected", ok && FoliaLyricon.isConnected());
         call.resolve(result);
     }
 
