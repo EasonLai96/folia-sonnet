@@ -14,9 +14,11 @@ const LYRICON_LINK_STORAGE_KEY = 'folia.lyriconLink';
 type LyriconState = {
     enabled: boolean;
     /**
-     * 免 Root 直连握手的独立开关（默认开）。
+     * 免 Root 直连的独立开关（**默认关**）。
      *
-     * 关掉就只剩 SDK 单向的注册广播：能连上就连，连不上也不会去主动问。
+     * 这是「额外的开关」：关着时走原来那条通道（中心服务由注入 System UI 提供，
+     * 即 root 方案），行为跟加这个开关之前完全一致；打开才切到免 Root 的中心服务
+     * 并启用双向握手。默认关，就是为了不把已经在用的老方案改坏。
      */
     link: boolean;
     /** 中心服务是否真的连上了。false 多半意味着设备上没装 folia状态栏。 */
@@ -29,7 +31,7 @@ type LyriconState = {
 
 export const useLyriconStore = create<LyriconState>((set, get) => ({
     enabled: getStoredBoolean(LYRICON_ENABLED_STORAGE_KEY, false),
-    link: getStoredBoolean(LYRICON_LINK_STORAGE_KEY, true),
+    link: getStoredBoolean(LYRICON_LINK_STORAGE_KEY, false),
     connected: false,
     handleToggleLyricon: (enable) => {
         setStoredBoolean(LYRICON_ENABLED_STORAGE_KEY, enable);

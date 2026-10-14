@@ -57,14 +57,18 @@ public final class FoliaLyricon {
     /** 握手广播里带发送方包名的字段。 */
     private static final String EXTRA_LINK_PACKAGE = "package_name";
     /**
-     * 中心服务的包名。
+     * 中心服务的包名：**按开关在两条通道之间选**，不是一刀切。
      *
      * 注册广播是一条 `setPackage(...)` 的显式广播 —— 写错包名就等于发给了一个
      * 根本没人接收的进程，表现是「歌词来源一直为空」，而且**不打任何日志**。
-     * 免 Root 之后中心服务不再注入 System UI，跑在「folia状态栏」自己的进程里，
-     * 所以这里必须指向它，而不是 SDK 早期默认的 `com.android.systemui`。
+     *
+     * 两条通道都还得能用：
+     * - 关（默认）：`com.android.systemui`，即**原来那套**：中心服务由 Xposed 注入
+     *   System UI，root 用户一直走的就是这条路；
+     * - 开：`top.izuna.foliastatusbar`，免 Root 版本的中心服务跑在它自己的进程里。
      */
-    private static final String CENTRAL_PACKAGE = "top.izuna.foliastatusbar";
+    private static final String CENTRAL_PACKAGE_SYSTEM_UI = "com.android.systemui";
+    private static final String CENTRAL_PACKAGE_ROOTLESS = "top.izuna.foliastatusbar";
 
     /** 位置推进容差（毫秒）：比这更小的前进不值得单独过桥一次。 */
     private static final long POSITION_EPSILON_MS = 200L;
@@ -160,25 +164,43 @@ public final class FoliaLyricon {
     }
 
     /**
-     * 免 Root 直连握手是否开启（默认开）。
+     * 免 Root 直连是否开启（**默认关**，保持原来那套 System UI 通道不动）。
      *
-     * 关掉之后就只剩 SDK 自己的注册广播：能连上就连，连不上也不会去主动问。
+     * 这一条是「额外的开关」：打开才切到免 Root 的中心服务，并启用双向握手；
+     * 关着的时候行为跟改动之前完全一致，root / 注入 System UI 的老方案不受影响。
      */
     public static boolean isLinkEnabled(Context context) {
         if (context == null) return false;
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_LINK, true);
+                .getBoolean(KEY_LINK, false);
     }
 
-    /** 直连握手开关。打开时立刻发一次探测。 */
+    /** 注册广播该发给谁：见 [CENTRAL_PACKAGE_SYSTEM_UI] 与 [CENTRAL_PACKAGE_ROOTLESS]。 */
+    private static String centralPackage(Context context) {
+        return isLinkEnabled(context) ? CENTRAL_PACKAGE_ROOTLESS : CENTRAL_PACKAGE_SYSTEM_UI;
+    }
+
+    /**
+     * 直连开关。
+     *
+     * **切换必须拆掉重连**：provider 是在 `createProvider` 那一刻把目标包名定死的，
+     * 不重建的话开关拨了也还是往老地址发。
+     */
     public static synchronized boolean setLinkEnabled(Context context, boolean enabled) {
         if (context == null) return false;
         Context appContext = context.getApplicationContext();
+        boolean changed = isLinkEnabled(appContext) != enabled;
         appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_LINK, enabled)
                 .apply();
-        if (!enabled) return true;
+        if (changed) {
+            teardown();
+        }
+        if (!enabled) {
+            // 回到 System UI 通道：那边没起服务就是没起，不打扰。
+            return ensureRegistered(appContext);
+        }
         sendProbe(appContext);
         return ensureRegistered(appContext);
     }
@@ -628,7 +650,7 @@ public final class FoliaLyricon {
         try {
             context.sendBroadcast(
                     new Intent(ACTION_LINK_PROBE)
-                            .setPackage(CENTRAL_PACKAGE)
+                            .setPackage(centralPackage(context))
                             .putExtra(EXTRA_LINK_PACKAGE, context.getPackageName()));
         } catch (Throwable error) {
             Log.w(TAG, "发送直连探测失败", error);
@@ -650,7 +672,7 @@ public final class FoliaLyricon {
                         null,
                         processName(context),
                         null,
-                        CENTRAL_PACKAGE);
+                        centralPackage(context));
             }
             if (provider == null) {
                 // API 27 以下 SDK 返回空实现；那不是故障，只是不可用。

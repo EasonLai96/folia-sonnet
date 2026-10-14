@@ -463,11 +463,11 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                                 <span className={`px-2 py-1 rounded-full text-[10px] ${lyriconConnected ? successBgColor : errorBgColor} ${lyriconConnected ? successTextColor : errorTextColor}`}>
                                     {lyriconConnected
                                         ? t('status.connected')
-                                        : t('options.lyriconNotConnected') || 'Lyricon not found'}
+                                        : t('options.lyriconNotConnected') || '未连接（folia状态栏）'}
                                 </span>
                                 {!lyriconConnected && (
                                     <span className="text-[10px] opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                        {t('options.lyriconNotConnectedDesc') || 'Install Lyricon and make sure its centre service is running.'}
+                                        {t('options.lyriconNotConnectedDesc') || '请安装「folia状态栏」并确认它的中心服务在运行。'}
                                     </span>
                                 )}
                             </div>
@@ -480,7 +480,7 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                                         {t('options.lyriconLink') || '免 Root 直连'}
                                     </div>
                                     <div className="text-[10px] opacity-40 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
-                                        {t('options.lyriconLinkDesc') || '连不上时主动问一句「你在吗」，对方起来后立刻补注册，不用等重试退避'}
+                                        {t('options.lyriconLinkDesc') || '关闭时走原来的 System UI 通道；打开后连到「folia状态栏」自己的中心服务，并在连不上时主动握手'}
                                     </div>
                                 </div>
                                 <button
