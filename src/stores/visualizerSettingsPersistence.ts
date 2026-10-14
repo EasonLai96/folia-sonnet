@@ -99,6 +99,24 @@ export const readStoredWallpaperFloatingOffsetX = () => {
 };
 
 /**
+ * 叠加安全区时小窗占屏幕宽度的比例，默认 0.8。
+ *
+ * 它是**屏幕宽度的比例**而不是像素：这个模式要的是「占住状态栏这一条的多宽」，
+ * 百分比比像素直观，换台设备也不会变样。下限 0.5 —— 再窄的话一行歌词基本每句
+ * 都要靠横向滚动才看得完。
+ */
+export const WALLPAPER_FLOATING_WIDTH_STORAGE_KEY = 'folia.wallpaperFloatingWidth';
+
+export const readStoredWallpaperFloatingWidth = () => {
+    if (typeof window === 'undefined') {
+        return 0.8;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_WIDTH_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 0.8;
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0.5, parsed)) : 0.8;
+};
+
+/**
  * 叠层总开关。
  *
  * 关掉之后一层都不挂（原生那层歌词照旧）。它同时也是「叠层由应用进程托管」的开关 ——

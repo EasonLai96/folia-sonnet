@@ -137,6 +137,10 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
         state => state.wallpaperFloatingOffsetX);
     const onSetWallpaperFloatingOffsetX = useVisualizerSettingsStore(
         state => state.handleSetWallpaperFloatingOffsetX);
+    const wallpaperFloatingWidth = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingWidth);
+    const onSetWallpaperFloatingWidth = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingWidth);
     const wallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.wallpaperOverlayAllApps);
     const onToggleWallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayAllApps);
     const wallpaperOverlayHideNativeLyrics = useVisualizerSettingsStore(state => state.wallpaperOverlayHideNativeLyrics);
@@ -563,6 +567,31 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                                 />
                                                 <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
                                                     {Math.round(wallpaperFloatingOffsetX * 100)}%
+                                                </span>
+                                            </div>
+                                        )}
+                                    />
+                                )}
+                                {/* 宽度：占屏幕宽度的比例。和左右位置那根一样，
+                                    每次拖动都会立刻下发，小窗当场跟着变。 */}
+                                {wallpaperFloatingOverSafeArea && (
+                                    <SettingsRow
+                                        title={t('options.floatingLyricsWidth')}
+                                        description={t('options.floatingLyricsWidthDesc')}
+                                        dividerClass={dividerClass}
+                                        control={(
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="range"
+                                                    min={50}
+                                                    max={100}
+                                                    step={5}
+                                                    value={Math.round(wallpaperFloatingWidth * 100)}
+                                                    onChange={(event) => onSetWallpaperFloatingWidth(Number(event.target.value) / 100)}
+                                                    className="h-1 w-28 cursor-pointer accent-white"
+                                                />
+                                                <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                    {Math.round(wallpaperFloatingWidth * 100)}%
                                                 </span>
                                             </div>
                                         )}

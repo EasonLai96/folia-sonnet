@@ -257,6 +257,8 @@ export const useLyricsWallpaperFeed = ({
         state => state.wallpaperFloatingOverSafeArea);
     const wallpaperFloatingOffsetX = useVisualizerSettingsStore(
         state => state.wallpaperFloatingOffsetX);
+    const wallpaperFloatingWidth = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingWidth);
     const wallpaperOverlayEnabled = useVisualizerSettingsStore(state => state.wallpaperOverlayEnabled);
     const wallpaperOverlayLockScreen = useVisualizerSettingsStore(state => state.wallpaperOverlayLockScreen);
     const wallpaperOverlayLockScreenOnly = useVisualizerSettingsStore(
@@ -286,6 +288,7 @@ export const useLyricsWallpaperFeed = ({
             wallpaperFloatingOpacity,
             wallpaperFloatingOverSafeArea,
             wallpaperFloatingOffsetX,
+            wallpaperFloatingWidth,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen,
             wallpaperOverlayLockScreenOnly,
@@ -299,7 +302,7 @@ export const useLyricsWallpaperFeed = ({
         }),
         [rawTuning, backgroundOpacity, disableVisualizerVignette,
             disableVisualizerGeometricBackground, wallpaperOverlayOpacity, wallpaperFloatingOpacity,
-            wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX,
+            wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX, wallpaperFloatingWidth,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen, wallpaperOverlayLockScreenOnly, wallpaperOverlayAllApps,
             wallpaperOverlayHideNativeLyrics, wallpaperOverlayHideNativeProgress,

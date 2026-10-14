@@ -18,7 +18,7 @@ import { buildStoredMonetBackgroundImage, clearMonetBackgroundImage, isSupported
 import { buildStoredMonetPortraitImage, clearMonetPortraitImage, isSupportedMonetPortraitFile, saveMonetPortraitImage } from '../services/monetPortraitImage';
 import { setStatusMessage } from './useStatusMessageStore';
 import { WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY } from './visualizerSettingsPersistence';
-import { LUMIERE_TUNING_STORAGE_KEY, VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, clampCladdaghEllipseTiltDeg, clampCladdaghFocusScaleRatio, clampCladdaghLetterSpacingOffset, clampCladdaghRadiusScale, clampClassicBreathingFloatMultiplier, clampClassicWordSpacing, clampFumeBackgroundObjectOpacity, clampFumeCameraSpeed, clampFumeGlowIntensity, clampFumeHeroScale, clampFumeTextHoldRatio, clampPartitaStagger, clampUnit, readStoredBackgroundOpacity, readStoredCadenzaTuning, readStoredCappellaTuning, readStoredCladdaghTuning, readStoredClassicTuning, readStoredDioramaTuning, readStoredFumeTuning, readStoredLatentBackgroundTuning, readStoredLumiereTuning, readStoredMonetBackgroundTuning, readStoredMonetTuning, readStoredNomandBackgroundTuning, readStoredPartitaTuning, readStoredPendoloTuning, readStoredSonnetTuning, readStoredSoraBackgroundTuning, readStoredTemperaTuning, readStoredTiltTuning, readStoredUrlBackgroundList, readStoredUrlBackgroundSelectedId, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOffsetX,
+import { LUMIERE_TUNING_STORAGE_KEY, VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, clampCladdaghEllipseTiltDeg, clampCladdaghFocusScaleRatio, clampCladdaghLetterSpacingOffset, clampCladdaghRadiusScale, clampClassicBreathingFloatMultiplier, clampClassicWordSpacing, clampFumeBackgroundObjectOpacity, clampFumeCameraSpeed, clampFumeGlowIntensity, clampFumeHeroScale, clampFumeTextHoldRatio, clampPartitaStagger, clampUnit, readStoredBackgroundOpacity, readStoredCadenzaTuning, readStoredCappellaTuning, readStoredCladdaghTuning, readStoredClassicTuning, readStoredDioramaTuning, readStoredFumeTuning, readStoredLatentBackgroundTuning, readStoredLumiereTuning, readStoredMonetBackgroundTuning, readStoredMonetTuning, readStoredNomandBackgroundTuning, readStoredPartitaTuning, readStoredPendoloTuning, readStoredSonnetTuning, readStoredSoraBackgroundTuning, readStoredTemperaTuning, readStoredTiltTuning, readStoredUrlBackgroundList, readStoredUrlBackgroundSelectedId, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingWidth,
 readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, resolveCappellaAvatarSource, resolveFumeCameraTrackingMode, resolvePendoloNumber, resolveStoredDioramaTuning, resolveStoredLatentBackgroundTuning, resolveStoredMonetBackgroundTuning, resolveStoredMonetTuning, resolveStoredNomandBackgroundTuning, resolveStoredSoraBackgroundTuning, sanitizeTemperaLayerImages } from './visualizerSettingsPersistence';
 import { getStoredBoolean, getStoredString, setStoredBoolean, setStoredString } from './storagePrimitives';
 
@@ -113,6 +113,13 @@ export type VisualizerSettingsState = {
      * 这里再改一次会覆盖回去（原生拿它当设置值而不是当前值）。
      */
     wallpaperFloatingOffsetX: number;
+    /**
+     * 叠加安全区时小窗占屏幕宽度的比例，0.5..1。
+     *
+     * 它是屏幕宽度的比例而不是像素：这个模式要的是「占住状态栏这一条的多宽」，
+     * 百分比比像素直观，换台设备也不会变样。
+     */
+    wallpaperFloatingWidth: number;
     /** 叠层是否在所有应用之上显示。关掉时只在桌面（壁纸可见）时挂着。 */
     wallpaperOverlayAllApps: boolean;
     /** 跟随 + 叠层时，隐藏原生那层歌词，避免和可视化的歌词叠在一起。 */
@@ -177,6 +184,8 @@ export type VisualizerSettingsState = {
     handleToggleWallpaperFloatingOverSafeArea: (enable: boolean) => void;
     /** 叠加模式下小窗的左右位置。见 wallpaperFloatingOffsetX 的说明。 */
     handleSetWallpaperFloatingOffsetX: (value: number) => void;
+    /** 叠加模式下小窗的宽度（屏幕宽度比例）。见 wallpaperFloatingWidth 的说明。 */
+    handleSetWallpaperFloatingWidth: (value: number) => void;
     handleToggleWallpaperOverlayEnabled: (enable: boolean) => void;
     handleToggleWallpaperOverlayLockScreen: (enable: boolean) => void;
     handleToggleWallpaperOverlayLockScreenOnly: (enable: boolean) => void;
@@ -261,6 +270,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     wallpaperFloatingOpacity: readStoredWallpaperFloatingOpacity(),
     wallpaperFloatingOverSafeArea: readStoredWallpaperFloatingOverSafeArea(),
     wallpaperFloatingOffsetX: readStoredWallpaperFloatingOffsetX(),
+    wallpaperFloatingWidth: readStoredWallpaperFloatingWidth(),
     wallpaperOverlayAllApps: readStoredWallpaperOverlayAllApps(),
     wallpaperOverlayHideNativeLyrics: readStoredWallpaperOverlayHideNativeLyrics(),
     wallpaperOverlayHideNativeProgress: readStoredWallpaperOverlayHideNativeProgress(),
@@ -475,6 +485,12 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.5;
         localStorage.setItem(WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, String(clamped));
         set({ wallpaperFloatingOffsetX: clamped });
+    },
+    handleSetWallpaperFloatingWidth: (value) => {
+        // 下限 0.5：再窄的话一行歌词基本每句都要靠横向滚动才看得完。
+        const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0.5, value)) : 0.8;
+        localStorage.setItem(WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, String(clamped));
+        set({ wallpaperFloatingWidth: clamped });
     },
     handleToggleWallpaperOverlayEnabled: (enable) => {
         localStorage.setItem(WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, enable ? 'true' : 'false');

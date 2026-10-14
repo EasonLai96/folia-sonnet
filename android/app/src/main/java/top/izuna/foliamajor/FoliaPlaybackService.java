@@ -159,6 +159,21 @@ public class FoliaPlaybackService extends android.app.Service {
             @Override
             public void onSeekTo(long pos) {
                 sendCommand("seek", pos);
+                /*
+                 * 壁纸 / 悬浮窗那边的锚点**这里就对齐**，不等 Web 层回话。
+                 *
+                 * 不能指望 Web 层那条 seek 检测（`useLyricsWallpaperFeed` 里的轮询）：
+                 * App 退到后台之后 WebView 的 JS 定时器会被系统挂起，而拖通知栏进度条
+                 * 恰恰就是在后台发生的 —— 那条路一挂，锚点永远不更新，歌词就停在原地。
+                 *
+                 * 更糟的是原生这边还在按**旧**锚点往前外推：拖回开头之后它还会一路
+                 * 算到歌曲末尾，于是整句被判成唱完、整行颜色一下填满，
+                 * 等 Web 层终于推来一次锚点才弹回去 —— 就是那个「闪一下」。
+                 */
+                boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
+                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(pos, playing);
+                top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                        .shared(FoliaPlaybackService.this).invalidateOverlay();
             }
 
             @Override

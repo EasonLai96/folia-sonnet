@@ -2004,6 +2004,8 @@ export default {
     "floatingLyricsOverSafeAreaDesc": "Kalau aktif, jendela menempel di strip paling atas layar (menutupi bilah status). Tingginya tidak lagi berpengaruh — yang diatur hanya kiri dan kanan. Aktifkan kalau mau dipakai sebagai lirik bilah status.",
     "floatingLyricsOffsetX": "Posisi horizontal jendela",
     "floatingLyricsOffsetXDesc": "0% menempel kiri, 100% menempel kanan. Ini hanya nilai awal — setelah jendela digeser, hasil geseran yang dipakai; ubah di sini untuk menariknya kembali.",
+    "floatingLyricsWidth": "Lebar jendela",
+    "floatingLyricsWidthDesc": "Porsi lebar layar. Kalau lebih sempit dari setengah, hampir setiap baris harus digulir menyamping supaya terbaca, jadi batas bawahnya 50%.",
     "floatingLyricsReset": "Setel ulang",
     "floatingLyricsResetDone": "Disetel ulang",
     "floatingLyricsResetDesc": "Pakai ini kalau jendelanya terdorong ke pojok, atau mengecil lalu terkunci. Saat terkunci, sentuhan tembus ke bawahnya — hanya ikon gembok di pojok kanan atas yang masih merespons.",

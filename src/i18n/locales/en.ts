@@ -2012,6 +2012,8 @@ export default {
     "floatingLyricsOverSafeAreaDesc": "When on, the window sits against the very top strip (covering the status bar). Height stops mattering then — only left and right do. Turn it on to use the window as a status-bar lyric.",
     "floatingLyricsOffsetX": "Window horizontal position",
     "floatingLyricsOffsetXDesc": "0% hugs the left edge, 100% the right. It is only a starting value — once you drag the window, your drag wins; change it here to pull the window back.",
+    "floatingLyricsWidth": "Window width",
+    "floatingLyricsWidthDesc": "Share of the screen width. Narrower than half and almost every line has to scroll sideways to be read, so the floor is 50%.",
     "floatingLyricsReset": "Reset",
     "floatingLyricsResetDone": "Reset",
     "floatingLyricsResetDesc": "Use it when the window ended up in a corner, or was shrunk to the minimum and locked. Once locked, touches pass straight through — only the padlock in the top-right corner still responds.",

@@ -92,6 +92,13 @@ export const WALLPAPER_GLOBAL_KEYS = {
     floatingOverSafeArea: 'wp.floatingOverSafeArea',
     /** 叠加模式下小窗的左右位置（0 = 贴左，1 = 贴右）。只在这个开关打开时生效。 */
     floatingOffsetX: 'wp.floatingOffsetX',
+    /**
+     * 叠加模式下小窗占屏幕宽度的比例。
+     *
+     * 用比例而不是 dp：这个模式要的是「占住状态栏这一条的多宽」，说百分比比说像素直观，
+     * 换设备也不会变样。比一半还窄的话每句都要靠横向滚动才看得完，所以下限 0.5。
+     */
+    floatingWidth: 'wp.floatingWidth',
     /** 叠层总开关。关掉就一层都不挂。 */
     overlayEnabled: 'wp.overlayEnabled',
     /** 音乐锁屏：锁屏之上也挂叠层。 */
@@ -153,6 +160,10 @@ export const withGlobalSettings = (
     const floatingOffsetX = settings.wallpaperFloatingOffsetX;
     if (typeof floatingOffsetX === 'number' && Number.isFinite(floatingOffsetX)) {
         out[WALLPAPER_GLOBAL_KEYS.floatingOffsetX] = floatingOffsetX;
+    }
+    const floatingWidth = settings.wallpaperFloatingWidth;
+    if (typeof floatingWidth === 'number' && Number.isFinite(floatingWidth)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingWidth] = floatingWidth;
     }
     out[WALLPAPER_GLOBAL_KEYS.overlayEnabled] = settings.wallpaperOverlayEnabled === false ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.showOnLockScreen] = settings.wallpaperOverlayLockScreen ? 1 : 0;

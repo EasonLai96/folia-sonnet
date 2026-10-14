@@ -75,6 +75,8 @@ public final class FloatingLyricsOverlay {
 
     /** 开关：小窗直接叠在安全区（状态栏那一条）上面，而不是摆在屏幕里。 */
     private static final String KEY_OVER_SAFE_AREA = "wp.floatingOverSafeArea";
+    /** 叠加模式下窗口占屏幕宽度的比例（0 = 没设）。 */
+    private static final String KEY_WIDTH = "wp.floatingWidth";
     /**
      * 叠加模式下窗口高度的下限（dp）。
      *
@@ -465,7 +467,19 @@ public final class FloatingLyricsOverlay {
              * 让用户把它拖成三行高就等于把状态栏整条糊住了。宽度仍然可调（左右大小）。
              */
             height = statusBarHeightPx();
-            x = Math.round((screenW - width) * offsetRatio());
+            /*
+             * 宽度优先听设置里那根「宽度」滑条（屏幕宽的比例）。
+             *
+             * 用比例而不是 dp：这个模式要的就是「占住状态栏这一条的多宽」，
+             * 说 30% 比说 120dp 直观，换设备也不会变样。
+             */
+            float ratio = widthRatio();
+            if (ratio > 0f) {
+                width = clampInt(Math.round(screenW * ratio),
+                        Math.round(MIN_WIDTH_DP * density), screenW);
+            }
+            x = clampInt(Math.round((screenW - width) * offsetRatio()),
+                    0, Math.max(0, screenW - width));
             y = 0;
         } else {
             x = prefs.getInt(KEY_X, Integer.MIN_VALUE);
@@ -570,6 +584,57 @@ public final class FloatingLyricsOverlay {
     /** 小窗是否直接叠在安全区上面。 */
     private static boolean overSafeArea() {
         return tuningFlag(KEY_OVER_SAFE_AREA, false);
+    }
+
+    /**
+     * 叠加模式下窗口占屏幕宽度的比例（设置里那根「宽度」滑条）。0 = 没设，沿用拖出来的宽度。
+     *
+     * 50%~100% 才是有意义的范围：比一半还窄的话，一行歌词基本每句都要靠横向滚动才看得完。
+     */
+    private float widthRatio() {
+        float value = tuningFloat(KEY_WIDTH, 0f);
+        return value <= 0f ? 0f : clamp(value, 0.2f, 1f);
+    }
+
+    /**
+     * 让小窗立刻重画一帧。
+     *
+     * 自绘那套只在「还在播 / 动画没走完」时才排下一帧（省电），所以**暂停时**改了
+     * 状态（比如从通知栏拖了进度条）不会自己重画 —— 得有人敲一下。
+     */
+    public void invalidateOverlay() {
+        runOnUi(() -> {
+            if (view != null && added) view.invalidate();
+        });
+    }
+
+    /**
+     * 设置里的「左右 / 宽度」改了之后立刻重新摆一次。
+     *
+     * 为什么必须显式调：tuning 表更新本身不会触发任何布局动作 —— 位置是在
+     * `buildParams()` 里算的，而它只在挂窗口和转屏时走。少了这一下，
+     * 滑条拖得再欢小窗也一动不动（正是「左右选项没用」）。
+     */
+    public void applyOverlayTuning() {
+        runOnUi(() -> {
+            if (!overSafeArea() || params == null || !added) return;
+            int screenW = context.getResources().getDisplayMetrics().widthPixels;
+            int height = statusBarHeightPx();
+            int width = params.width;
+            float ratio = widthRatio();
+            if (ratio > 0f) {
+                width = clampInt(Math.round(screenW * ratio),
+                        Math.round(MIN_WIDTH_DP * context.getResources().getDisplayMetrics().density),
+                        screenW);
+            }
+            int x = clampInt(Math.round((screenW - width) * offsetRatio()),
+                    0, Math.max(0, screenW - width));
+            if (x != params.x || width != params.width || height != params.height) {
+                applyLayout(x, params.y, width, height);
+            }
+            nudgeIntoCutout();
+            if (view != null) view.invalidate();
+        });
     }
 
     /**
@@ -811,10 +876,21 @@ public final class FloatingLyricsOverlay {
 
             drawBackground(canvas, width, height, appear);
 
+            /*
+             * 叠加模式下不画那两颗控件。
+             *
+             * 窗口只有状态栏那么高，锁那一颗（圆心 13dp、半径 9dp）会占掉整条的一大半
+             * 并压在歌词上。而这个模式本来也不需要拖 / 改大小 / 上锁 ——
+             * 左右位置和宽度都在设置里调，手势在这里反而是负担。
+             */
+            boolean showControls = !overSafeArea();
+
             long position = snapshot.positionMs();
             int index = snapshot.lines.length == 0 ? -1 : snapshot.indexAt(position);
             if (index < 0) {
-                drawControls(canvas, width, height, appear);
+                if (showControls) {
+                    drawControls(canvas, width, height, appear);
+                }
                 return;
             }
             int previous = lastIndex;
@@ -865,7 +941,9 @@ public final class FloatingLyricsOverlay {
                     secondY + inShift, focusSize, appear * inAlpha, progress,
                     breath, position, singleRow);
 
-            drawControls(canvas, width, height, appear);
+            if (showControls) {
+                drawControls(canvas, width, height, appear);
+            }
 
             // 还在播、或者动画还没走完，就再要一帧。停了就别空转烧 CPU。
             // 限到 ~30fps：这是叠在所有窗口之上的一层，每帧都要系统重新合成一次，

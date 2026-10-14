@@ -2011,6 +2011,8 @@ export default {
     "floatingLyricsOverSafeAreaDesc": "打开后小窗贴到屏幕最顶上那一条（盖住状态栏），高度方向不再参与摆放，只给左右。想让它当状态栏歌词用就打开。",
     "floatingLyricsOffsetX": "小窗左右位置",
     "floatingLyricsOffsetXDesc": "0% 贴左、100% 贴右。它只是初值 —— 上手拖过之后以拖出来的为准，改这里可以把它拽回来。",
+    "floatingLyricsWidth": "小窗宽度",
+    "floatingLyricsWidthDesc": "占屏幕宽度的比例。太窄的话一行歌词基本每句都要靠横向滚动才看得完，所以最低 50%。",
     "floatingLyricsReset": "重置",
     "floatingLyricsResetDone": "已重置",
     "floatingLyricsResetDesc": "把它拖到角落、或者缩到最小又上了锁之后，用它恢复到默认的位置和大小。锁定后整层触摸会穿透，只有右上角那颗锁还能点。",

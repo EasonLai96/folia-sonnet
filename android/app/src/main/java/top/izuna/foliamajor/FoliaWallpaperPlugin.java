@@ -197,7 +197,15 @@ public class FoliaWallpaperPlugin extends Plugin {
                 .setAppDriven(overlayEnabled == null || overlayEnabled >= 0.5f);
         // 这两个模式是互斥的两层：跟随样式走 WebView 叠层，精简走原生小悬浮窗。
         // 用户在设置里切样式的那一刻就要生效，所以这里顺手催一次，不等 600ms 巡检。
-        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(getContext()).start();
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay overlay =
+                top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay.shared(getContext());
+        overlay.start();
+        /*
+         * 叠加模式下「左右 / 宽度」是设置里的滑条管的，而位置只在挂窗口和转屏时才算 ——
+         * 少了这一下，滑条拖到头小窗也一动不动。这里每次外观下发都重新摆一次，
+         * 滑条边拖边看得到（这就是设置里那几根条要的「实时预览」）。
+         */
+        overlay.applyOverlayTuning();
         call.resolve();
     }
 
