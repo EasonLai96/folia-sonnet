@@ -2375,17 +2375,14 @@ public final class WallpaperOverlay {
             webView.evaluateJavascript(PAGE_STATE_EXPR, value -> {
                 if (value == null) return;
                 String raw = value.trim();
-                // evaluateJavascript 返回的是 JSON 字符串：外层引号要剥掉。
-                if (raw.length() >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
-                    raw = raw.substring(1, raw.length() - 1);
-                }
                 boolean mismatch = false;
                 // 对不上的**具体一条**（写进流水）。只说「对不上」是查不出东西的：
                 // 三条判据的成因完全不同，位置漂移这条还可能是页面被系统按下去之后的必然结果。
                 String mismatchWhy = null;
                 try {
-                    org.json.JSONObject page = new org.json.JSONObject(raw);
-                    String pageTitle = page.optString("t", "");                    int pageLineCount = page.optInt("n", -1);
+                    org.json.JSONObject page = decodeEvaluatedJson(raw);
+                    String pageTitle = page.optString("t", "");
+                    int pageLineCount = page.optInt("n", -1);
                     String pageFirstLine = page.optString("f", "");
                     long pagePositionMs = page.optLong("p", -1L);
                     if (!pageTitle.equals(expectedTitle)) {
@@ -2417,8 +2414,12 @@ public final class WallpaperOverlay {
                     }
                 } catch (Throwable parseError) {
                     // 页面表达式返回了意料外的东西：当作对不上，补推一次最安全。
+                    // 把原文截一段带上 —— 上一轮就是卡在这一条上：只知道「读不出来」，
+                    // 看不出拿到的到底是什么形态，白查了很久。
+                    String excerpt = raw.length() > 80 ? raw.substring(0, 80) + "…" : raw;
                     mismatch = true;
-                    mismatchWhy = "页面状态读不出来（" + parseError.getClass().getSimpleName() + "）";
+                    mismatchWhy = "页面状态读不出来（" + parseError.getClass().getSimpleName()
+                            + "；原文「" + excerpt.replace('\n', ' ').replace('\r', ' ') + "」）";
                 }
                 if (!mismatch) {
                     contentMismatchStreak = 0;
@@ -2455,12 +2456,48 @@ public final class WallpaperOverlay {
      */
     private static final String PAGE_STATE_EXPR =
             "(function(){var l=window.__foliaWallpaperLatest;if(!l)"
-                    + "return JSON.stringify({t:'',n:-1,p:-1});"
+                    /*
+                     * 直接返回**对象**，不要 JSON.stringify 成字符串。
+                     *
+                     * evaluateJavascript 的回调给的是 JS 返回值的 JSON 编码：返回字符串时拿到的是
+                     * 「外层一对引号 + 内部 \" 全部转义」的字符串字面量，Java 侧只剥首尾引号是
+                     * 剥不干净的，解析必炸（见 decodeEvaluatedJson）。返回对象时回调拿到的
+                     * 本身就是合法 JSON，省掉这一层来回。
+                     */
+                    + "return {t:'',n:-1,p:-1};"
                     + "var ls=l.lines||[];"
                     + "var pos=l.playing?(l.positionMs+(performance.now()"
                     + "-window.__foliaWallpaperReceivedAt)):l.positionMs;"
-                    + "return JSON.stringify({t:(l.title||''),n:ls.length,"
-                    + "f:(ls.length?(ls[0].text||''):''),p:Math.round(pos)});})()";
+                    + "return {t:(l.title||''),n:ls.length,"
+                    + "f:(ls.length?(ls[0].text||''):''),p:Math.round(pos)};})()";
+
+    /**
+     * 把 evaluateJavascript 回调里的值解成 JSON 对象。
+     *
+     * 回调给的是 JS 返回值的 **JSON 编码**，不是原样字符串。这里踩过一次实打实的坑：
+     * 表达式原本返回 `JSON.stringify(...)`，于是拿到的是 `"{\"t\":\"歌名\",...}"` ——
+     * 外层引号可以剥，**内部的 \" 转义剥不掉**，JSONObject 每次都抛 JSONException。
+     * 后果是每一轮核对都被判成「页面状态读不出来」，连续 4 次就重载一份页面，
+     * 用户看到的就是叠层每隔半分钟左右消失一次再淡入（重载被 30s 节流挡着，
+     * 所以闪的节奏是 ~36 秒一次，正好卡在节流窗口刚过）。
+     *
+     * 表达式改成返回对象之后，第一遍就能解开；这里仍然保留一层兼容 ——
+     * 万一某家 WebView 给的是字符串形态，按 JSON 字面量再解一次也能认出来，
+     * 而不是退化成「每次都对不上」。
+     */
+    private static org.json.JSONObject decodeEvaluatedJson(String raw) throws org.json.JSONException {
+        org.json.JSONException firstPass;
+        try {
+            return new org.json.JSONObject(raw);
+        } catch (org.json.JSONException error) {
+            firstPass = error;
+        }
+        Object decoded = new org.json.JSONTokener(raw).nextValue();
+        if (!(decoded instanceof String)) {
+            throw firstPass;
+        }
+        return new org.json.JSONObject((String) decoded);
+    }
 
     /**
      * 位置核对的容差。两边都是「锚点 + 各自的墙钟」外推，正常漂移不到一秒；
