@@ -1,7 +1,7 @@
 import React from 'react';
 import { PANEL_SLIDE_CLAMP_PX, PANEL_SLIDE_TRACK_BASE_PX, PANEL_SLIDE_TRACK_FULL_PX, PANEL_SLIDE_TRIGGER_PX } from '../utils/panelSlideGesture';
 import { motion, AnimatePresence, useTransform } from 'framer-motion';
-import { Settings, Settings2, X, Disc, SlidersHorizontal, ListMusic, User as UserIcon, Home as HomeIcon, FileAudio, FileText, Radio, Cloud, Star, Command, ChevronLeft, MirrorRectangular, Puzzle, Sparkles, Film } from 'lucide-react';
+import { Settings, Settings2, X, Disc, SlidersHorizontal, ListMusic, User as UserIcon, Home as HomeIcon, FileAudio, FileText, Radio, Cloud, Star, Command, ChevronLeft, MirrorRectangular, Puzzle, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Album, Artist, SongResult, Theme, PlayerState, ReplayGainMode, ThemeMode, VisualizerMode } from '../types';
 import type { ProviderUser } from '../types/onlineMusic';
@@ -9,7 +9,7 @@ import type { LibraryAccountController } from '../library/core/contracts/account
 import CoverTab from './panelTab/CoverTab';
 import ControlsTab from './panelTab/ControlsTab';
 import AiDirectorTab from './panelTab/AiDirectorTab';
-import VideoExportTab from './panelTab/VideoExportTab';
+
 import QueueTab from './panelTab/QueueTab';
 import AccountTab from './panelTab/AccountTab';
 import LocalTab from './panelTab/LocalTab';
@@ -31,7 +31,7 @@ import { countRender } from '../dev/renderCount';
 
 const TOUCH_GUIDE_DISPLAY_MS = 1400;
 
-export type PanelTab = 'cover' | 'controls' | 'queue' | 'account' | 'local' | 'navi' | 'onlineLyrics' | 'aiDirector' | 'videoExport'
+export type PanelTab = 'cover' | 'controls' | 'queue' | 'account' | 'local' | 'navi' | 'onlineLyrics' | 'aiDirector'
     // Tabs registered by Folium mods (registries.playerPanelTabs).
     | `folium:${string}`;
 
@@ -280,7 +280,6 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
         // 内置功能（不是模组）：安卓包加载不了模组，这个入口在任何端都在这里。
         { id: 'aiDirector' as PanelTab, label: t('panel.aiDirector'), icon: Sparkles },
         // 同上：歌词动画录成视频。模组只在桌面端加载，这里是安卓上的那条路。
-        { id: 'videoExport' as PanelTab, label: t('panel.videoExport'), icon: Film },
     ];
 
     if (isLocal) {
@@ -916,15 +915,6 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
                                         <AiDirectorTab
                                             isDaylight={isDaylight}
                                             onOpenSettings={onOpenSettings}
-                                        />
-                                    )}
-                                    {currentTab === 'videoExport' && (
-                                        <VideoExportTab
-                                            isDaylight={isDaylight}
-                                            theme={theme}
-                                            visualizerMode={visualizerMode}
-                                            currentSong={currentSong}
-                                            onTogglePlay={onTogglePlay}
                                         />
                                     )}
                                     {currentTab === 'local' && isLocal && (
