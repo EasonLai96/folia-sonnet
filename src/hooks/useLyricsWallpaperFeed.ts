@@ -501,4 +501,39 @@ export const useLyricsWallpaperFeed = ({
         }, TICK_MS);
         return () => window.clearInterval(timer);
     }, [active]);
+
+    /*
+     * 切到后台之前，把最后的状态推一次。
+     *
+     * 后台时 WebView 的 JS 定时器会被系统挂起 —— 上面那几个 effect 全都不再跑，
+     * 于是「AI 主题（含 wordColors 的字级高亮）」和播放位置就永远停在挂起前那一刻，
+     * 桌面小窗 / 壁纸上看到的是上一次的状态。`visibilitychange` 在真正挂起之前
+     * 一定会触发一次，所以在这里补最后一遍。
+     *
+     * 用 ref 拿最新的闭包：写成 effect 的依赖会把上面那一长串全部拖进来，
+     * 每改一个值就重新挂一次监听，反而更容易漏。
+     */
+    const flushToNative = React.useRef<() => void>(() => {});
+    flushToNative.current = () => {
+        void publishLyricsWallpaper({
+            // 主题要带：AI 主题的字级高亮（wordColors）就在这一份里，
+            // 只推四个颜色的话小窗那边一点效果都没有。
+            themeJson: themeJson || undefined,
+            positionMs: Math.round(getCurrentTime() * 1000),
+            playing: latest.current.playing,
+        });
+    };
+    React.useEffect(() => {
+        if (!active) return;
+        const flush = () => flushToNative.current();
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') flush();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        window.addEventListener('pagehide', flush);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            window.removeEventListener('pagehide', flush);
+        };
+    }, [active]);
 };
