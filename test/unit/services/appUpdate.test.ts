@@ -13,13 +13,18 @@ import {
 
 describe('parseAppVersion', () => {
   it('认 v 前缀与三段版本号', () => {
-    expect(parseAppVersion('v0.7.19')).toEqual({ numbers: [0, 7, 19], prerelease: null });
-    expect(parseAppVersion('0.7.19')).toEqual({ numbers: [0, 7, 19], prerelease: null });
+    expect(parseAppVersion('v0.7.19')).toEqual({ numbers: [0, 7, 19, 0], prerelease: null });
+    expect(parseAppVersion('0.7.19')).toEqual({ numbers: [0, 7, 19, 0], prerelease: null });
   });
 
   it('缺段按 0 补齐', () => {
-    expect(parseAppVersion('0.7')?.numbers).toEqual([0, 7, 0]);
-    expect(parseAppVersion('1')?.numbers).toEqual([1, 0, 0]);
+    expect(parseAppVersion('0.7')?.numbers).toEqual([0, 7, 0, 0]);
+    expect(parseAppVersion('1')?.numbers).toEqual([1, 0, 0, 0]);
+  });
+
+  it('认四位版本号（0.7.19.1）', () => {
+    expect(parseAppVersion('0.7.19.1')).toEqual({ numbers: [0, 7, 19, 1], prerelease: null });
+    expect(parseAppVersion('v0.7.19.1')?.numbers).toEqual([0, 7, 19, 1]);
   });
 
   it('带预发布标识', () => {
@@ -28,7 +33,7 @@ describe('parseAppVersion', () => {
   });
 
   it('build 元数据不进预发布标识', () => {
-    expect(parseAppVersion('v0.7.19+build.7')).toEqual({ numbers: [0, 7, 19], prerelease: null });
+    expect(parseAppVersion('v0.7.19+build.7')).toEqual({ numbers: [0, 7, 19, 0], prerelease: null });
     expect(parseAppVersion('v0.7.19-beta.1+build.7')?.prerelease).toBe('beta.1');
   });
 
@@ -58,6 +63,14 @@ describe('compareAppVersions', () => {
     expect(compareAppVersions('0.7.19-beta.1', '0.7.19')).toBeLessThan(0);
     expect(compareAppVersions('0.7.19-beta.2', '0.7.19-beta.1')).toBeGreaterThan(0);
     expect(compareAppVersions('0.7.19-beta', '0.7.19-beta.1')).toBeLessThan(0);
+  });
+
+  it('第四段参与比较：0.7.19.1 比 0.7.19 新，但仍旧不如 0.7.20', () => {
+    expect(compareAppVersions('0.7.19.1', '0.7.19')).toBeGreaterThan(0);
+    expect(compareAppVersions('0.7.19', '0.7.19.1')).toBeLessThan(0);
+    expect(compareAppVersions('0.7.20', '0.7.19.1')).toBeGreaterThan(0);
+    // 位数不同时不能按字符串比（"0.7.9" > "0.7.19" 只在字符串下成立）。
+    expect(compareAppVersions('0.7.19', '0.7.9')).toBeGreaterThan(0);
   });
 
   it('候选解析不出来时退回字符串比较，不抛异常', () => {

@@ -92,28 +92,35 @@ export const getCurrentAppVersion = (): string => (
 );
 
 type ParsedVersion = {
-  /** 主版本号三段，缺失的按 0 补齐。 */
-  numbers: [number, number, number];
+  /**
+   * 版本号数字段，缺失的按 0 补齐。
+   *
+   * 第四段是给 `0.7.19.1` 这种**四位版本号**留的（strict semver 只认三段，但
+   * 应用侧一直在用四位）。只认三段的话它会被判成「解析不了」而退回字符串比较 ——
+   * 字符串比较在 `0.7.9` vs `0.7.19` 这种位数不同的地方就会比错方向。
+   */
+  numbers: [number, number, number, number];
   /** 预发布标识（`-beta.1` 里的 `beta.1`）；正式版为 null。 */
   prerelease: string | null;
 };
 
 /**
- * 解析版本号。只认 `[v]X.Y.Z[-pre][+build]` 这种形状：包里的版本和 CI 打的标签都是它。
+ * 解析版本号。认 `[v]X[.Y][.Z][.W][-pre][+build]` 这种形状。
  * build 元数据（`+build.7`）直接丢掉 —— 它不参与比较，而 semver 规定带它的版本
  * 与不带它的**相等**，当成预发布标识会让「0.7.19+build.7」被误判成比 0.7.19 旧。
  */
 export const parseAppVersion = (value: string): ParsedVersion | null => {
   const trimmed = value.trim().replace(/^v/i, '');
-  const matched = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(trimmed);
+  const matched = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(trimmed);
   if (!matched) return null;
   return {
     numbers: [
       Number(matched[1] ?? 0),
       Number(matched[2] ?? 0),
       Number(matched[3] ?? 0),
+      Number(matched[4] ?? 0),
     ],
-    prerelease: matched[4] ?? null,
+    prerelease: matched[5] ?? null,
   };
 };
 
@@ -133,7 +140,7 @@ export const compareAppVersions = (a: string, b: string): number => {
     return a === b ? 0 : a > b ? 1 : -1;
   }
 
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 0; index < left.numbers.length; index += 1) {
     if (left.numbers[index] !== right.numbers[index]) {
       return left.numbers[index] - right.numbers[index];
     }
