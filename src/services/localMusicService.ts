@@ -11,7 +11,7 @@ import { resolveExplicitFileTimedLyricFormat, type ExplicitFileTimedLyricFormat 
 import { applyMatchedMetadata } from './localLibraryCatalogService';
 import { buildLyricSearchQuery } from '../utils/lyrics/searchQuery';
 import { buildLocalSongLyricMatchContext, shouldRefreshLocalSongLyricsFromMetadata } from '../utils/lyrics/localSongMatchContext';
-import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
+import { buildImportedMetadataSnapshot, extractMetadataFromFilename } from '../utils/localSongMetadata';
 import { getLocalLibraryCatalogSnapshot } from './localLibraryEntityRepository';
 import { resolveLocalSongMetadata } from './playbackAdapters';
 import { removeCachedCover } from './coverCache';
@@ -53,7 +53,14 @@ import {
 
 type EmbeddedMetadata = EmbeddedMetadataResult;
 
-export const EMBEDDED_METADATA_VERSION = 7;
+/**
+ * 8：给已入库的歌补一次歌手。
+ *
+ * 之前只有内嵌标签与 MediaStore 给了歌手才算有，两者都空（很常见）这首歌就永远没有歌手。
+ * 现在 `buildImportedMetadataSnapshot` 会再退一步从文件名认，已经进库的歌得重抽一遍
+ * 才吃得到 —— 版本号一变，扫描时 `embeddedMetadataVersion` 对不上就会重跑元数据。
+ */
+export const EMBEDDED_METADATA_VERSION = 8;
 
 interface ImportPreparationMetrics {
     getFileMs: number;
@@ -255,42 +262,9 @@ function generateId(): string {
 
 // Extract basic metadata from filename.
 // Expected format: "Artist - Title.mp3", "Artist-Title.mp3", or "Title.mp3".
-export function extractMetadataFromFilename(fileName: string): { title?: string; artist?: string; } {
-    // 去掉扩展名
-    let nameWithoutExt = fileName.replace(KNOWN_AUDIO_EXTENSIONS, '');
-
-    // 去掉开头的cue切分产生的序号 "01. ", "01 - ", or "1-01 " 
-    nameWithoutExt = nameWithoutExt.replace(/^\d{1,3}(?:[-.]\d{1,3})?(?:\s*[-.]\s*|\s+)/, '');
-
-    // 分割艺术家和标题 - 尝试 " - " (带空格)
-    let parts = nameWithoutExt.split(' - ');
-    if (parts.length === 2) {
-        return {
-            artist: parts[0].trim(),
-            title: parts[1].trim()
-        };
-    }
-
-    // 尝试 "-" (不带空格) - 但要确保不是单词中间的连字符
-    // 我们检查最后一个"-"是否可能是分隔符
-    const lastDashIndex = nameWithoutExt.lastIndexOf('-');
-    if (lastDashIndex > 0 && lastDashIndex < nameWithoutExt.length - 1) {
-        const potentialTitle = nameWithoutExt.substring(0, lastDashIndex).trim();
-        const potentialArtist = nameWithoutExt.substring(lastDashIndex + 1).trim();
-
-        // 如果分割后的两部分都有内容，使用这个分割
-        if (potentialTitle && potentialArtist) {
-            return {
-                artist: potentialArtist,
-                title: potentialTitle
-            };
-        }
-    }
-
-    return {
-        title: nameWithoutExt.trim()
-    };
-}
+// The implementation lives in utils/localSongMetadata so every ingest path shares it; re-exported
+// here because callers inside this file (and anything that imported it from here) keep the name.
+export { extractMetadataFromFilename };
 
 // Get audio duration from file
 async function getAudioDuration(file: File): Promise<number> {
