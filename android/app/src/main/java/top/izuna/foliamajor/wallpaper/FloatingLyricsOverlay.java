@@ -616,6 +616,29 @@ public final class FloatingLyricsOverlay {
          * 是 GLES 且本来就在全屏刷。
          */
         private static final long FRAME_INTERVAL_MS = 33L;
+        /**
+         * 长句缩字号的**下限**（原字号的比例）。
+         *
+         * 缩到 0.5 的老做法对长句等于把字压成一团，还不如让它横向滚 —— 所以缩到
+         * 0.72 就收手，剩下的宽度交给滚动跟随。
+         */
+        private static final float MIN_TEXT_SHRINK = 0.72f;
+        /**
+         * 滚动的提前量：把正在唱的那个字顶到可视区宽度的这个比例处。
+         *
+         * 0.35 = 唱的位置大致停在靠前三分之一，右边留着一大截还没唱到的 ——
+         * 既不会等到字撞边才动，也不会把后面整句都推出去。
+         */
+        private static final float SCROLL_LEAD = 0.35f;
+        /** 每帧朝滚动目标靠近的比例：直接落位会是一跳，慢慢跟才像滚。 */
+        private static final float SCROLL_EASE = 0.16f;
+
+        /**
+         * 当前横向滚动了多少像素（句子比可视区宽时才有值）。
+         *
+         * 存在这里而不是每帧重算：滚动要**平滑**，一帧跳到目标位置看着就是「猛地一拽」。
+         */
+        private float scrollOffsetPx = 0f;
 
         private int lastIndex = -1;
         private long transitionStartMs = 0L;
@@ -815,20 +838,22 @@ public final class FloatingLyricsOverlay {
             if (index < 0 || index >= snapshot.lines.length || alpha <= 0.004f) return;
 
             // 焦点行：逐字（逐词）扫光 + 呼吸。
+            // 只有焦点行推进滚动状态：退场那格（progress < 0）跟着动的话，
+            // 两格会各自去更新同一个 scrollOffsetPx，滚出来就是互相打架。
             drawRow(canvas, snapshot.lines[index].text, width, focusY, focusSize,
                     primaryColor, alpha * breath,
-                    progress, snapshot.lines[index], position);
+                    progress, snapshot.lines[index], position, progress >= 0f);
 
             // 第二行：有翻译且开了就显示翻译，否则显示下一句。
             String translation = snapshot.showTranslation ? snapshot.lines[index].translation : null;
             if (translation != null && !translation.trim().isEmpty()) {
                 drawRow(canvas, translation, width, secondY,
                         focusSize * TRANSLATION_FONT_RATIO, secondaryColor,
-                        alpha * 0.86f, -1f, null, 0L);
+                        alpha * 0.86f, -1f, null, 0L, false);
             } else if (index + 1 < snapshot.lines.length) {
                 drawRow(canvas, snapshot.lines[index + 1].text, width, secondY,
                         focusSize * NEXT_FONT_RATIO, secondaryColor,
-                        alpha * 0.62f, -1f, null, 0L);
+                        alpha * 0.62f, -1f, null, 0L, false);
             }
         }
 
@@ -864,22 +889,68 @@ public final class FloatingLyricsOverlay {
          */
         private void drawRow(Canvas canvas, String text, int width, float centerY, float fontSize,
                              int color, float alpha, float progress,
-                             WallpaperLyricsState.TimedLine line, long positionMs) {
+                             WallpaperLyricsState.TimedLine line, long positionMs,
+                             boolean allowScroll) {
             if (text == null || text.isEmpty() || alpha <= 0.004f) return;
 
             textPaint.setColor(color);
             textPaint.setTextSize(fontSize);
             textPaint.setTextAlign(Paint.Align.LEFT);
 
-            float maxWidth = width - dp(28);
+            float padX = dp(14);
+            float maxWidth = width - padX * 2f;
             float measured = textPaint.measureText(text);
             if (measured > maxWidth && measured > 0f) {
-                // 太长的句子缩字号，别撑出窗口（拖小之后尤其常见）。
-                fontSize = Math.max(fontSize * 0.5f, fontSize * (maxWidth / measured));
+                /*
+                 * 太长的句子先缩字号，但**不缩到看不清**（下限 MIN_TEXT_SHRINK）。
+                 * 一直缩到能塞下为止的话，长句会被压成一团蚂蚁，远不如让它横向滚。
+                 * 缩到底还是超出，就交给下面的滚动跟随。
+                 */
+                fontSize = Math.max(fontSize * MIN_TEXT_SHRINK, fontSize * (maxWidth / measured));
                 textPaint.setTextSize(fontSize);
                 measured = textPaint.measureText(text);
             }
-            float x = Math.max(dp(14), (width - measured) / 2f);
+
+            WallpaperLyricsState.TimedWord[] words = line == null ? null : line.words;
+            FloatingWordColors.Segment[] segments =
+                    (words != null && words.length > 0) ? segmentsFor(line) : null;
+
+            /*
+             * 横向滚动跟随：句子比可视区宽时，跟着唱到的位置往左推。
+             *
+             * 「提前一点」是关键（SCROLL_LEAD）：目标是把**正在唱的那个字**顶到可视区
+             * 靠前 35% 的位置，而不是等它撞到右边界才动 —— 后者看起来就是字先跑出去
+             * 半截、然后整行猛地一跳。
+             */
+            float scroll = scrollOffsetPx;
+            if (measured > maxWidth && segments != null && allowScroll) {
+                float sungX = measured;
+                for (int i = 0; i < words.length; i += 1) {
+                    WallpaperLyricsState.TimedWord word = words[i];
+                    if (word == null) continue;
+                    FloatingWordColors.Segment segment = segments[i];
+                    if (segment == null || segment.endOffset <= segment.startOffset) continue;
+                    float ratio = sungRatio(word, positionMs);
+                    if (ratio >= 1f) continue;
+                    float head = textPaint.measureText(text, 0, segment.startOffset);
+                    float span = textPaint.measureText(text, segment.startOffset, segment.endOffset);
+                    sungX = head + span * ratio;
+                    break;
+                }
+                float target = clamp(sungX - maxWidth * SCROLL_LEAD, 0f, measured - maxWidth);
+                // 每帧朝目标靠近一点，别瞬移；差得太远（换句 / 拖进度跳走）就直接落位。
+                scroll = Math.abs(target - scrollOffsetPx) > maxWidth
+                        ? target
+                        : scrollOffsetPx + (target - scrollOffsetPx) * SCROLL_EASE;
+                scrollOffsetPx = scroll;
+            } else if (measured <= maxWidth) {
+                scrollOffsetPx = 0f;
+                scroll = 0f;
+            }
+
+            float x = measured <= maxWidth
+                    ? Math.max(padX, (width - measured) / 2f)
+                    : padX - scroll;
             Paint.FontMetrics metrics = textPaint.getFontMetrics();
             float baseline = centerY - (metrics.ascent + metrics.descent) / 2f;
 
@@ -892,8 +963,7 @@ public final class FloatingLyricsOverlay {
 
             float clipTop = centerY - fontSize * 1.2f;
             float clipBottom = centerY + fontSize * 1.2f;
-            WallpaperLyricsState.TimedWord[] words = line.words;
-            if (words == null || words.length == 0) {
+            if (segments == null) {
                 // 没有逐词轴：整行按进度线性推进（老做法）。
                 float swept = measured * clamp01(progress);
                 if (swept <= 0.5f) return;
@@ -913,10 +983,11 @@ public final class FloatingLyricsOverlay {
              * 那些词唱过去时要用它自己的颜色（播放页也是这么做的），
              * 一整行只能有一个颜色，做不到。
              *
-             * 每个词都画**整行**再裁到它自己那一小段：直接只画词自己的文本会丢掉
-             * 整行里相邻字符之间的 shaping（西文尤其明显），位置也会和第一遍错开。
+             * 每个词画的都是**整行**再裁到它在整行里的那一小段 —— 两者必须对齐到同一个
+             * 坐标系（起点都是 x）。写成 drawText(text, wordX, …) 的话整行被整体平移了，
+             * 裁出来的就永远是「整行的开头」，也就是第一个字 —— 表现是每个词都把第一个
+             * 字重画一遍、往后推。
              */
-            FloatingWordColors.Segment[] segments = segmentsFor(line);
             for (int i = 0; i < words.length; i += 1) {
                 WallpaperLyricsState.TimedWord word = words[i];
                 if (word == null || word.text == null || word.text.isEmpty()) continue;
@@ -924,8 +995,11 @@ public final class FloatingLyricsOverlay {
                 if (ratio <= 0f) continue;
                 FloatingWordColors.Segment segment = segments[i];
                 if (segment == null || segment.endOffset <= segment.startOffset) continue;
-                float wordX = x + textPaint.measureText(text, 0, segment.startOffset);
-                float wordWidth = textPaint.measureText(text, segment.startOffset, segment.endOffset);
+                int start = Math.min(segment.startOffset, text.length());
+                int end = Math.min(segment.endOffset, text.length());
+                if (end <= start) continue;
+                float wordX = x + textPaint.measureText(text, 0, start);
+                float wordWidth = textPaint.measureText(text, start, end);
                 if (wordWidth <= 0f) continue;
                 float swept = ratio >= 1f ? wordWidth : wordWidth * ratio;
                 canvas.save();
@@ -934,7 +1008,7 @@ public final class FloatingLyricsOverlay {
                         ? accentColor
                         : segment.color);
                 textPaint.setAlpha(textAlpha);
-                canvas.drawText(text, wordX, baseline, textPaint);
+                canvas.drawText(text, x, baseline, textPaint);
                 canvas.restore();
             }
         }

@@ -184,9 +184,19 @@ public final class FloatingWordColors {
                         NO_COLOR);
                 continue;
             }
-            int end = start + token.length();
+            /*
+             * 一律夹回行文本的长度内。
+             *
+             * 这不是防御性冗余：下游要拿这两个下标去 `measureText(text, start, end)`，
+             * 越界会抛 StringIndexOutOfBoundsException —— 而它是在 `onDraw` 里抛的，
+             * 后果是**这一帧后半段全画不出来**（锁图标、拉伸把手一起消失），
+             * 屏幕上只留下半句歌词。词表与整行文本对不上时（行被改过 / 词来自另一处）
+             * 真的会越界。
+             */
+            int end = Math.min(start + token.length(), lineText.length());
             cursor = end;
-            out[i] = new Segment(start, end, colored ? colorAt(ranges, start, end) : NO_COLOR);
+            out[i] = new Segment(start, Math.max(start, end),
+                    colored ? colorAt(ranges, start, end) : NO_COLOR);
         }
         return out;
     }
