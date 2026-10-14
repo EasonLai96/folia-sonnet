@@ -36,8 +36,16 @@ public final class FoliaLyricon {
     private static final String TAG = "FoliaLyricon";
     private static final String PREFS = "folia_lyricon";
     private static final String KEY_ENABLED = "enabled";
-    /** Lyricon 中心服务的包名，SDK 自己的默认值。 */
-    private static final String CENTRAL_PACKAGE = "com.android.systemui";
+    /**
+     * Lyricon 中心服务的包名。
+     *
+     * 免 Root 版本下中心服务（BridgeCentral）**不再注入 System UI**，而是跑在 Lyricon
+     * 主体应用进程里。注册广播是一条 `setPackage(...)` 的显式广播 —— 写错包名就等于
+     * 发给了一个根本没人接收的进程，表现是「状态栏/悬浮窗歌词来源一直为空」。
+     *
+     * 所以这里必须指向 Lyricon 主体应用，而不是 SDK 早期默认的 `com.android.systemui`。
+     */
+    private static final String CENTRAL_PACKAGE = "io.github.maimai993.lyricon";
 
     /** 位置推进容差（毫秒）：比这更小的前进不值得单独过桥一次。 */
     private static final long POSITION_EPSILON_MS = 200L;
