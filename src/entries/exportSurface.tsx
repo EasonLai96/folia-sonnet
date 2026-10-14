@@ -104,6 +104,46 @@ const probeWebgl = (): boolean => {
     }
 };
 
+const reportExportError = (where: string, error: unknown): void => {
+    const detail = error instanceof Error
+        ? (error.stack || error.message)
+        : String(error);
+    const sink = (window as unknown as Record<string, string[] | undefined>).__foliaExportErrors;
+    const entry = where + ': ' + detail;
+    if (Array.isArray(sink)) {
+        sink.push(entry);
+    }
+};
+
+/**
+ * 渲染期的崩溃也要能带出来。
+ *
+ * 可视化是第三方画布 / WebGL 代码，`entry.render()` 里抛一点东西 React 会把整棵树卸掉 ——
+ * 页面上什么都不显示，而 printable 那一侧只看到"没就绪"。这个边界把错误记进
+ * `__foliaExportErrors`，原生报错时会连同它一起回传。
+ */
+class ExportErrorBoundary extends React.Component<
+    { children: React.ReactNode },
+    { crashed: boolean }
+> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { crashed: false };
+    }
+
+    static getDerivedStateFromError() {
+        return { crashed: true };
+    }
+
+    componentDidCatch(error: unknown) {
+        reportExportError('render', error);
+    }
+
+    render() {
+        return this.state.crashed ? null : this.props.children;
+    }
+}
+
 const pinToNativeSize = (element: HTMLElement): { width: string; height: string } => {
     const params = new URLSearchParams(window.location.search);
     const width = Number(params.get('w'));
@@ -169,8 +209,24 @@ const forceCanvasChainToFill = (): void => {
 // 「歌词改为纯色扁平」在这个页面上同样只认**本页** <html> 上的 data-lyric-flat
 // （CSS 在 index.css 里，canvas 侧读 utils/lyricFlat，两边只看这个属性）。
 // 它是另一个 document，主窗口那份属性过不来 —— 不在这里挂一份，导出的片和 App 里不一致。
-syncLyricFlatAttribute(useLyricFlatSettingsStore.getState().flatLyrics);
-useLyricFlatSettingsStore.subscribe(state => syncLyricFlatAttribute(state.flatLyrics));
+// 放在组件里而不是模块顶层：顶层一抛这里是整棵树都没有，连 __foliaExport 都挂不上。
+const useLyricFlatMirror = (): void => {
+    useEffect(() => {
+        try {
+            syncLyricFlatAttribute(useLyricFlatSettingsStore.getState().flatLyrics);
+        } catch (error) {
+            reportExportError('lyricFlat', error);
+        }
+        try {
+            return useLyricFlatSettingsStore.subscribe(
+                state => syncLyricFlatAttribute(state.flatLyrics),
+            );
+        } catch (error) {
+            reportExportError('lyricFlat.subscribe', error);
+            return undefined;
+        }
+    }, []);
+};
 
 type ExportSurfaceProps = {
     /** 原生经 URL 传进来的导出尺寸（CSS 像素）。 */
@@ -204,14 +260,30 @@ const ExportSurface: React.FC<ExportSurfaceProps> = ({ size }) => {
         }));
     }, [applyLineIndex]);
 
-    useEffect(() => {
-        const next = readExportRenderConfig();
-        linesRef.current = next?.lyricData?.lines ?? [];
-        setConfig(next);
-        applyLineIndex(Number(next?.startSec ?? 0));
+    useLyricFlatMirror();
 
+    useEffect(() => {
+        try {
+            const next = readExportRenderConfig();
+            linesRef.current = next?.lyricData?.lines ?? [];
+            setConfig(next);
+            applyLineIndex(Number(next?.startSec ?? 0));
+        } catch (error) {
+            reportExportError('init', error);
+        }
+
+        /*
+         * 无论前面出了什么事，这一句都必须跑到：它是原生判断"页面活了没有"的唯一依据。
+         * 挂在 try 外面，哪怕配置没读出来也照样给原生一个可用的入口。
+         */
+        let webglOk = false;
+        try {
+            webglOk = probeWebgl();
+        } catch (error) {
+            reportExportError('probeWebgl', error);
+        }
         (window as unknown as Record<string, unknown>).__foliaExportFrameStamp = 0;
-        (window as unknown as Record<string, unknown>).__foliaExportWebglOk = probeWebgl();
+        (window as unknown as Record<string, unknown>).__foliaExportWebglOk = webglOk;
         (window as unknown as Record<string, unknown>).__foliaExport = {
             renderFrame: (tSec: number, index: number) => renderFrame(tSec, index),
         };
@@ -263,32 +335,55 @@ const ExportSurface: React.FC<ExportSurfaceProps> = ({ size }) => {
         };
     }, [config]);
 
-    const mode = config?.visualizerMode ?? 'classic';
-    const effectiveMode: VisualizerMode = hasVisualizerMode(mode) ? mode : 'classic';
-    const entry = getVisualizerRegistryEntry(effectiveMode);
-    const lines = config?.lyricData?.lines ?? NO_LYRIC_LINES;
-    const theme = config?.theme ?? DEFAULT_THEME;
+    /*
+     * 可视化这一整段都包进 try：`entry.render()` 是同步求值的，它一抛（不是它渲染的
+     * 子组件抛）React 会把整棵树卸掉 —— 页面全白，而错误一个字都传不出来。
+     * ErrorBoundary 只接得住"渲染期间"的错误，接不住这里构造 element 时抛的。
+     */
+    let rendered: React.ReactNode = <div />;
+    let containerBackground = 'transparent';
+    let textPrimary = '#ffffff';
+    let textSecondary = '#ffffff';
+    try {
+        const mode = config?.visualizerMode ?? 'classic';
+        const effectiveMode: VisualizerMode = hasVisualizerMode(mode) ? mode : 'classic';
+        const entry = getVisualizerRegistryEntry(effectiveMode);
+        const lines = config?.lyricData?.lines ?? NO_LYRIC_LINES;
+        const theme = config?.theme ?? DEFAULT_THEME;
 
-    const resolvedProps = applyVisualizerTuning(effectiveMode, {
-        currentTime: currentTimeRef.current,
-        currentLineIndex,
-        lines,
-        theme,
-        audioPower: audioPowerRef.current,
-        audioBands: STATIC_AUDIO_BANDS,
-        showText: true,
-        songTitle: config?.songMeta?.title ?? null,
-        songArtist: config?.songMeta?.artist ?? null,
-        paused: false,
-        visualizerOpacity: 1,
-        background: config?.backgroundMode === 'theme'
-            ? undefined
-            : { transparent: true, common: { disableGeometricBackground: true, disableVignette: true } },
-    }, config?.visualizerTunings ?? undefined);
+        const resolvedProps = applyVisualizerTuning(effectiveMode, {
+            currentTime: currentTimeRef.current,
+            currentLineIndex,
+            lines,
+            theme,
+            audioPower: audioPowerRef.current,
+            audioBands: STATIC_AUDIO_BANDS,
+            showText: true,
+            songTitle: config?.songMeta?.title ?? null,
+            songArtist: config?.songMeta?.artist ?? null,
+            paused: false,
+            visualizerOpacity: 1,
+            background: config?.backgroundMode === 'theme'
+                ? undefined
+                : { transparent: true, common: { disableGeometricBackground: true, disableVignette: true } },
+        }, config?.visualizerTunings ?? undefined);
 
-    const containerBackground = config?.backgroundMode === 'theme'
-        ? (theme.backgroundColor ?? '#09090b')
-        : 'transparent';
+        containerBackground = config?.backgroundMode === 'theme'
+            ? (theme.backgroundColor ?? '#09090b')
+            : 'transparent';
+        textPrimary = theme.primaryColor ?? '#ffffff';
+        textSecondary = theme.secondaryColor ?? '#ffffff';
+
+        rendered = config ? (
+            <Suspense fallback={null}>
+                <ExportErrorBoundary>
+                    {entry.render(resolvedProps)}
+                </ExportErrorBoundary>
+            </Suspense>
+        ) : <div />;
+    } catch (error) {
+        reportExportError('prepare', error);
+    }
 
     return (
         <div
@@ -302,15 +397,11 @@ const ExportSurface: React.FC<ExportSurfaceProps> = ({ size }) => {
                 backgroundColor: containerBackground,
                 // 这两个变量是 App 写在根上的（见 App.tsx 的 appStyle），这里是另一个 document，
                 // 拿不到 —— 不补的话扁平歌词那套规则会填到 initial（黑），歌词糊成一团。
-                ['--text-primary' as string]: theme.primaryColor,
-                ['--text-secondary' as string]: theme.secondaryColor,
+                ['--text-primary' as string]: textPrimary,
+                ['--text-secondary' as string]: textSecondary,
             }}
         >
-            {config ? (
-                <Suspense fallback={null}>{entry.render(resolvedProps)}</Suspense>
-            ) : (
-                <div />
-            )}
+            {rendered}
         </div>
     );
 };

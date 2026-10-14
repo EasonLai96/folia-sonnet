@@ -3,7 +3,6 @@ package top.izuna.foliamajor.export;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -22,6 +21,9 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
 import com.getcapacitor.Bridge;
+
+import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.io.InputStream;
 import java.util.Locale;
@@ -42,15 +44,18 @@ import java.util.concurrent.atomic.AtomicReference;
  * 「不需要可见就能拿到 WebGL 画面」的路 —— `PixelCopy` 只认已经合成过的窗口，
  * 看不见的 View 它抓不到空白，而硬件加速开着时 `View.draw()` 也拿不到 Surface 上的内容。
  *
- * 但软件渲染这条路有两个不确定，所以都留了降级：
+ * 这条路有两个不确定，所以都留了降级：
  *
- *  1. **WebGL 可能建不出上下文**：软渲染下 WebGL 走 SwiftShader（CPU），多数机器能用
+ *  1. **JS 通道 / rAF 可能会停**：这一页必须挂在窗口上才有正常生命周期，但一旦被判定
+ *     不可见，Chromium 会掐掉 rAF、节流 renderer —— 那样推帧永远得不到回应。
+ *     所以宿主是 **1×1 + VISIBLE + alpha 0**：既要 `onWindowVisibilityChanged(VISIBLE)`，
+ *     又要用 alpha 让它看不见。（早先用 `setVisibility(INVISIBLE)` 是错的：那样 WebView
+ *     直接收到 INVISIBLE，`document.hidden` 为真，rAF 停摆。）
+ *     这两项都在 `loadAndWait()` 里**实测**，不靠猜。
+ *  2. **WebGL 可能建不出上下文**：软渲染下 WebGL 走 SwiftShader（CPU），多数机器能用
  *     但不是必然。页面里会真的画一笔并读回像素来确认，不是"建出来就算数"。
- *  2. **页面可能被判定为不可见而停止 rAF**：不挂到窗口上的 WebView 有可能收不到
- *     帧回调，那样画面根本不会更新。所以这里不是"完全不挂载"，而是挂一个 1×1 的
- *     隐藏容器 —— 生命周期照常（rAF 照跑），用户又看不见。
  *
- * 两条都不确定的时候降级到 `fallbackToVisible()`：同一个页面改成全屏可见 +
+ * 两条都不行的时候降级到 `fallbackToVisible()`：同一个页面改成全屏可见 +
  * 硬件加速，改用 PixelCopy 抓主窗口。功能不丢，只是用户会看到一个"渲染中"的页面。
  */
 public final class ExportRenderView {
@@ -74,6 +79,7 @@ public final class ExportRenderView {
     private WebView webView;
     private LocalAssetClient assetClient;
     private Bitmap scratch;
+    private String failure;
     private boolean visibleMode = false;
     private boolean released = false;
 
@@ -90,7 +96,16 @@ public final class ExportRenderView {
             return;
         }
         host = new FrameLayout(activity);
-        host.setVisibility(View.INVISIBLE);
+        /*
+         * **这里必须是 VISIBLE，不能是 INVISIBLE。**
+         *
+         * `setVisibility(INVISIBLE)` 会让 WebView 收到 INVISIBLE，`document.hidden` 变成
+         * true，Chromium 顺势掐掉 rAF 并节流 renderer —— 页面照样能加载到 complete，
+         * 但之后的推帧一步都走不动，最后报「没等到就绪信号」。
+         * 要"看不见"应该靠 alpha，而不是靠 visibility：alpha 是 View 合成层的属性，
+         * 不影响页面自己的可见性判定。
+         */
+        host.setVisibility(View.VISIBLE);
         host.setAlpha(0f);
 
         webView = new WebView(activity);
@@ -109,32 +124,51 @@ public final class ExportRenderView {
         settings.setMediaPlaybackRequiresUserGesture(false);
 
         ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
-        // 1×1：够让它挂在窗口上、拿到正常的生命周期，又小到用户注意不到。
+        // 1×1：够让它挂在窗口上、拿到正常的生命周期，又小到看不见也点不到。
         decor.addView(host, new ViewGroup.LayoutParams(1, 1));
         host.addView(webView, new ViewGroup.LayoutParams(1, 1));
 
-        assetClient = new LocalAssetClient(activity, bridge);
+        assetClient = new LocalAssetClient();
         webView.setWebViewClient(assetClient);
     }
 
     /**
      * 加载页面并等它就绪。
      *
-     * 返回 WebGL 是不是真的能用；页面起不来返回 null（调用方据此报错）。
-     * 这个方法会**阻塞**（最多 LOAD_TIMEOUT_MS + PAINT_TIMEOUT_MS），别在主线程调。
+     * 返回 WebGL 是不是真的能用；页面起不来返回 null（调用方据此报错，详情取
+     * `takeFailure()`）。这个方法会**阻塞**，别在主线程调。
      */
     public Boolean loadAndWait() {
         if (webView == null) {
             return null;
         }
         mainHandler.post(() -> webView.loadUrl(PAGE + "?w=" + width + "&h=" + height));
+        sleepQuietly(800);
+
+        /*
+         * 先确认 evaluateJavascript 这条路是通的。
+         *
+         * 取不到值就不能往下走了：后面所有判断（就绪、画完没有、WebGL 能不能用）
+         * 全靠它，通了才有意义；不通说明这个 WebView 不愿意在不显示的时候跑 JS。
+         */
+        if (evalString("String(1)") == null) {
+            Log.w(TAG, "离屏状态下 JS 通道没回音，改走可见窗口再试");
+            fallbackToVisible();
+            sleepQuietly(1000);
+            if (evalString("String(1)") == null) {
+                noteFailure("WebView 的 JS 通道不通（离屏、可见两种状态下都取不到值）。诊断："
+                        + buildDiagnostic());
+                return null;
+            }
+        }
 
         final long deadline = System.currentTimeMillis() + LOAD_TIMEOUT_MS;
         boolean ready = false;
         while (System.currentTimeMillis() < deadline) {
             // 主资源已经报错就别再干等了（默认要等满 20 秒才报，用户只会以为卡死）。
             if (assetClient != null && assetClient.takeFailure() != null) {
-                break;
+                noteFailure(assetClient.takeFailure());
+                return null;
             }
             if (Boolean.TRUE.equals(evalBoolean("!!(window.__foliaExportReady && window.__foliaExport)"))) {
                 ready = true;
@@ -146,8 +180,17 @@ public final class ExportRenderView {
         }
         if (!ready) {
             Log.w(TAG, "渲染页在 " + LOAD_TIMEOUT_MS + "ms 内没有就绪");
+            noteFailure("渲染页 " + (LOAD_TIMEOUT_MS / 1000) + " 秒没等到就绪信号。诊断："
+                    + buildDiagnostic());
             return null;
         }
+
+        if (!awaitRafAlive()) {
+            noteFailure("渲染页的 rAF 没有在推进（页面大概率被判定为不可见）。诊断："
+                    + buildDiagnostic());
+            return null;
+        }
+
         /*
          * 再等「内容真的画出来了」：可视化是动态 import 的，页面就绪 ≠ 画面有了。
          * 等不到不直接失败 —— 后面连续空帧那道闸会兜住（最终降级 / 报错）。
@@ -162,6 +205,31 @@ public final class ExportRenderView {
             }
         }
         return evalBoolean("!!window.__foliaExportWebglOk");
+    }
+
+    /**
+     * rAF 有没有真的在跑。
+     *
+     * 页面里有一个每帧自增的心跳计数器（见 export.html）。推帧、以及整个
+     * "画完了没有"的判定都建立在 rAF 之上 —— 它不动，后面全是死等。
+     */
+    private boolean awaitRafAlive() {
+        Integer before = evalInt("Number(window.__foliaExportRafTicks || 0)");
+        sleepQuietly(500);
+        Integer after = evalInt("Number(window.__foliaExportRafTicks || 0)");
+        if (before != null && after != null && after > before) {
+            return true;
+        }
+        if (visibleMode) {
+            return false;
+        }
+        Log.w(TAG, "离屏状态下 rAF 没有推进，降级到可见窗口再试");
+        fallbackToVisible();
+        sleepQuietly(1000);
+        before = evalInt("Number(window.__foliaExportRafTicks || 0)");
+        sleepQuietly(500);
+        after = evalInt("Number(window.__foliaExportRafTicks || 0)");
+        return before != null && after != null && after > before;
     }
 
     /**
@@ -276,8 +344,8 @@ public final class ExportRenderView {
     /**
      * 降级：同一个页面改成全屏可见 + 硬件加速，改用抓窗口取帧。
      *
-     * 什么时候需要：软渲染下 WebGL 建不出上下文，或者页面被判定为不可见、画面根本
-     * 没更新（连续几帧全透明）。代价是用户会看到一个"渲染中"的页面，且拿不到 alpha。
+     * 什么时候需要：软渲染下 WebGL 建不出上下文、离屏时 JS 通道或 rAF 不动、
+     * 或者连续几帧全透明。代价是用户会看到一个"渲染中"的页面，且拿不到 alpha。
      */
     public void fallbackToVisible() {
         if (webView == null || released || visibleMode) {
@@ -288,7 +356,6 @@ public final class ExportRenderView {
             if (released || webView == null) return;
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             if (host != null) {
-                host.setVisibility(View.VISIBLE);
                 host.setAlpha(1f);
                 ViewGroup.LayoutParams params = host.getLayoutParams();
                 params.width = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -313,11 +380,61 @@ public final class ExportRenderView {
     /**
      * 渲染页为什么没起来。没有就返回 null。
      *
-     * 这一句是要直接给用户看的，所以必须具体到能照着改：以前统一报「渲染页面起不来」，
-     * 看的人根本不知道是该重新出包、还是机器不行。
+     * 这一句是要直接给用户看的，所以必须具体到能照着改：统一说一句「渲染页面起不来」，
+     * 看的人既不知道是该重新出包、也不知道是不是机器不行，只能来回问。
      */
     public String takeFailure() {
-        return assetClient == null ? null : assetClient.takeFailure();
+        return failure;
+    }
+
+    private void noteFailure(String message) {
+        if (failure == null) {
+            failure = message;
+        }
+        Log.w(TAG, "渲染页不可用：" + message);
+    }
+
+    /**
+     * 把页面端的自检信息（见 export.html 里的 `__foliaExportDiag`）拉回来，压成一句话。
+     *
+     * 这一页离屏，logcat 常常拿不到、console 更看不见 —— 唯一能带出来的渠道就是
+     * 这条错误消息本身。所以宁可啰嗦也不能漏：URL、可见性、有没有挂载上 API、
+     * 脚本清单、JS 错误全带上。
+     */
+    private String buildDiagnostic() {
+        String raw = evalString("(window.__foliaExportDiag ? window.__foliaExportDiag() : '{}')");
+        if (raw == null) {
+            return "（连自检都拉不回来：evaluateJavascript 没有回音）";
+        }
+        try {
+            Object decoded = new JSONTokener(raw).nextValue();
+            String json = decoded instanceof String ? (String) decoded : raw;
+            JSONObject data = new JSONObject(json);
+            StringBuilder out = new StringBuilder();
+            out.append("url=").append(data.optString("url", "?"));
+            out.append(" readyState=").append(data.optString("readyState", "?"));
+            out.append(" visibility=").append(data.optString("visibility", "?"));
+            out.append(" api=").append(data.optBoolean("hasApi", false));
+            out.append(" ready=").append(data.optBoolean("hasReady", false));
+            out.append(" painted=").append(data.optBoolean("hasPainted", false));
+            out.append(" root=").append(data.optBoolean("hasRoot", false));
+            out.append(" config=").append(data.optBoolean("hasConfig", false));
+            out.append(" raf=").append(data.optInt("raf", 0));
+            String scripts = data.optJSONArray("scripts") == null
+                    ? "" : data.optJSONArray("scripts").toString();
+            out.append(" scripts=").append(cut(scripts, 160));
+            String errors = data.optJSONArray("errors") == null
+                    ? "" : data.optJSONArray("errors").toString();
+            out.append(" errors=").append(cut(errors, 300));
+            String diagError = data.optString("diagError", "");
+            if (!diagError.isEmpty()) {
+                out.append(" diagError=").append(cut(diagError, 120));
+            }
+            return out.toString();
+        } catch (Throwable error) {
+            Log.w(TAG, "自检信息解析失败", error);
+            return "（自检信息解析失败：" + cut(String.valueOf(raw), 200) + "）";
+        }
     }
 
     /** 这一帧是不是空的（全透明）。用来判断画面到底有没有画出来。 */
@@ -334,30 +451,27 @@ public final class ExportRenderView {
         return true;
     }
 
+    private static String cut(String value, int max) {
+        if (value == null) return "";
+        return value.length() <= max ? value : value.substring(0, max) + "...";
+    }
+
     /**
-     * 本地资源服务。**整套导出能不能跑起来就看这一层。**
+     * 本地资源服务。**页面能不能加载出来就看这一层。**
      *
      * `https://localhost/*` 不是一个真的服务器 —— 它是 Capacitor 在自己那个
      * `BridgeWebViewClient.shouldInterceptRequest` 里用 `WebViewLocalServer` 假出来的
      * （见 com/getcapacitor/BridgeWebViewClient.java）。主 WebView 自带这个 client，
      * 所以那里一切正常；而我们 `new` 出来的这个 WebView 默认是**空 client**，它会真的
-     * 往 localhost:443 发请求 —— 本机没有这个服务，直接 ERR_CONNECTION_REFUSED，
-     * 页面永远到不了 ready，导出停在「渲染页面起不来」上。
+     * 往 localhost:443 发请求 —— 本机没有这个服务，直接 ERR_CONNECTION_REFUSED。
      *
      * 所以这里把同一个 `WebViewLocalServer` 接过来。另外留了第二条路（直接读
      * assets/public）：万一 Capacitor 换了 `hostname` / `androidScheme`、或者某个请求
      * 它不认，还能从打包进去的那份资源里取到。
      */
-    private static final class LocalAssetClient extends WebViewClient {
+    private class LocalAssetClient extends WebViewClient {
 
-        private final Activity activity;
-        private final Bridge bridge;
         private final AtomicReference<String> failure = new AtomicReference<>(null);
-
-        LocalAssetClient(Activity activity, Bridge bridge) {
-            this.activity = activity;
-            this.bridge = bridge;
-        }
 
         String takeFailure() {
             return failure.get();
@@ -469,7 +583,7 @@ public final class ExportRenderView {
     private Boolean evalBoolean(String script) {
         String raw = evalString(script);
         if (raw == null) return null;
-        return "true".equals(raw.replace("\"", ""));
+        return "true".equals(raw.replace("\"", "").trim()) ? Boolean.TRUE : Boolean.FALSE;
     }
 
     private Integer evalInt(String script) {
@@ -504,7 +618,15 @@ public final class ExportRenderView {
             Thread.currentThread().interrupt();
             return null;
         }
-        return result.get();
+        String raw = result.get();
+        // evaluateJavascript 给不了值时会回调 "null"（或者干脆不回调），两种都算不通。
+        if (raw == null || "null".equals(raw)) return null;
+        try {
+            Object decoded = new JSONTokener(raw).nextValue();
+            return decoded instanceof String ? (String) decoded : String.valueOf(decoded);
+        } catch (Throwable error) {
+            return raw;
+        }
     }
 
     /** 收摊。可以在任意线程调（内部回主线程）。 */
