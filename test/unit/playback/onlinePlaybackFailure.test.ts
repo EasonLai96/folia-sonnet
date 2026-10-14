@@ -48,6 +48,42 @@ describe('classifyPlaybackError: auth-required', () => {
     });
 });
 
+/*
+ * 「只给试听」不是登录态的证据 —— 这一组是整个分类里最容易酿祸的一条。
+ *
+ * 试听绝大多数是版权 / 会员判定：这个账号对这首曲子没有完整播放权，登不登录都一样。
+ * 曾经拿 signInMayHelp + 账号快照反推登录态，结果刚登录完的波点账号拿到一首要会员的歌
+ * 就被判成 session-expired，上层顺手把账号清掉 —— 用户看到的是「刚登录就被踢下线」，
+ * 而他的凭据一直是好的。而且反推也推不准：账号快照是缓存的，cookie 真过期时它照样
+ * 写着 authenticated。所以这里只认**证据**（适配器明说 / 上次已判定），不认推断。
+ */
+describe('classifyPlaybackError: preview-only', () => {
+    it('never reads a preview as an auth failure, even when the provider hints that signing in may help', () => {
+        const error = providerError('preview-only', { details: { signInMayHelp: true } });
+        expect(classifyPlaybackError(error, { ...ctx, account: { status: 'authenticated' } }).reason).toBe('preview-only');
+        expect(classifyPlaybackError(error, { ...ctx, account: { status: 'anonymous' } }).reason).toBe('preview-only');
+        expect(classifyPlaybackError(error, { ...ctx, account: { status: 'unknown' } }).reason).toBe('preview-only');
+        expect(classifyPlaybackError(error, ctx).reason).toBe('preview-only');
+    });
+
+    it('keeps the "signing in may help" hint without turning it into a login failure', () => {
+        const error = providerError('preview-only', { details: { signInMayHelp: true } });
+        expect(classifyPlaybackError(error, ctx)).toMatchObject({ reason: 'preview-only', hint: 'sign-in-may-help' });
+    });
+
+    it.each([
+        ['signed-out', 'not-signed-in'],
+        ['expired', 'session-expired'],
+    ] as const)('trusts details.auth %s — the adapter states it, we do not infer it', (auth, reason) => {
+        expect(classifyPlaybackError(providerError('preview-only', { details: { auth } }), ctx).reason).toBe(reason);
+    });
+
+    it('reads a preview as expired only once this provider was already marked as such', () => {
+        // 账号早就被清过了，这里不会再踢一次 —— 只是让提示说到点子上。
+        expect(classifyPlaybackError(providerError('preview-only'), { ...ctx, account: { status: 'anonymous', error: 'auth-required' } }).reason).toBe('session-expired');
+    });
+});
+
 describe('classifyPlaybackError: provider codes', () => {
     it.each<[string, OnlineProviderError, PlaybackFailureReason]>([
         ['network with HTTP 429', providerError('network', { httpStatus: 429 }), 'rate-limited'],

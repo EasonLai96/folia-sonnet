@@ -77,19 +77,19 @@ export const bodianProvider: OnlineMusicProvider = {
             });
             // Full-track caches and timing must never ingest a 30-second preview as the complete song.
             /*
-             * 波点在**会话失效**时的表现不是报鉴权错误，而是默默把音源换成 30 秒试听 ——
-             * 用户那边只看到「仅可试听」，看不出是 cookie 过期了。
-             * signInMayHelp 把这个信号带出去，播放失败分类据此归到「登录已过期 / 未登录」。
+             * 这里**不要**挂 signInMayHelp / 任何登录态信号。
+             *
+             * 走查过传输层：`checkRight` 回 `status === 3` 才给这段试听，这是**版权 / 会员**
+             * 判定 —— 账号对这个曲目没有完整播放权，跟他登没登录没关系。真正没会话时桥自己
+             * 会抛 auth-required（`status 7` / `status` 缺失且 getSession() 为空），
+             * token 过期则是 HTTP 401 或 code 11012，同样归一成 auth-required。
+             *
+             * 也就是**传输层已经把两件事分开了**。曾经在这里补过 signInMayHelp，想让
+             * 「只给试听」也能读出 cookie 过期，结果刚登录的账号拿到一首要会员的歌就被判成
+             * 过期、账号被清掉 —— 用户看到的是「刚登录就被踢下线」，而他的凭据一直是好的。
+             * 试听不是登录态的证据，别再往这个 code 上挂登录含义。
              */
-            if (audio.preview) {
-                throw new OnlineProviderError(
-                    'preview-only',
-                    'Bodian only offers a preview; sign in with an eligible account',
-                    'bodian',
-                    undefined, undefined, undefined,
-                    { signInMayHelp: true },
-                );
-            }
+            if (audio.preview) throw new OnlineProviderError('preview-only', 'Bodian only offers a preview; sign in with an eligible account', 'bodian');
             // 波点的直链挂在 Kuwo 的 CDN 上，不下发 CORS 头，而 <audio> 带 crossOrigin="anonymous"
             // —— 直连时字节被同源检查挡掉，报出来却只是一句 Format error。真机上换成
             // 本地回环服务代转（回包带 ACAO），别的平台原样返回。

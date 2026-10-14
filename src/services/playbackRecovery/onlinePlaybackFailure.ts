@@ -42,30 +42,29 @@ const resolveAuthReason = (
 };
 
 /**
- * 只有试听片段，但**原因是登录态不行**。
+ * 「只有试听片段」要不要报成登录问题。
  *
- * 波点和网易云在会话失效时的表现不是报鉴权错误，而是默默把音源降级成 30 秒试听 ——
- * 分类到 'preview-only' 后用户只看到「当前账号仅可试听」，既看不出是哪个平台、
- * 也看不出是 cookie 过期了，只会以为这首歌本来就没完整版。
+ * **默认是不报** —— 试听本身不是登录态的证据。给试听的原因绝大多数是版权 / 会员：
+ * 这个账号对这首曲子没有完整播放权，登不登录都一样。曾经按「账号快照 + signInMayHelp」
+ * 反推过登录态，结果刚刚登录完的账号拿到一首要会员的歌，被判成 session-expired，
+ * 上层顺手把账号清掉 —— 用户看到的是「刚登录就被踢下线」，而凭据一直是好的。
  *
- * 两种信号都收：provider 显式给的 `signInMayHelp`，以及请求前账号快照显示根本没登录
- * / 已经过期。反过来，账号明明是正常的（status=authenticated）就还是按「只有试听」报 ——
- * 那种情况多半是真的要会员，报登录过期会把人引到错误的方向。
+ * 而且这么推也推不准：账号快照是缓存的，cookie 真过期时它照样写着 authenticated，
+ * 拿它当判据两个方向都是错的。
+ *
+ * 真正该报登录问题的只有两种情况，都是**证据**而不是推断：
+ *
+ * · 适配器自己明说了登录态（details.auth）；
+ * · 这个平台上一次就已经被判定过鉴权失效（account.error === 'auth-required'）——
+ *   此时账号早就清过了，这里只是让提示说到点子上，不会再把人踢一次。
  */
 const resolvePreviewOnlyReason = (
     error: OnlineProviderError,
     account: PlaybackFailureClassifyContext['account'],
 ): PlaybackFailureReason => {
-    if (error.details?.signInMayHelp) {
-        return resolveAuthReason(error, account);
-    }
-    /*
-     * 只认**明确**的未登录 / 已过期，不看 'unknown'：那多半是刚启动还没查过登录状态，
-     * 此时一首本来就要会员的歌被判成「未登录」会误导用户 —— 他登录了照样听不了。
-     */
-    if (account?.status === 'anonymous' || account?.error === 'auth-required') {
-        return resolveAuthReason(error, account);
-    }
+    if (error.details?.auth === 'signed-out') return 'not-signed-in';
+    if (error.details?.auth === 'expired') return 'session-expired';
+    if (account?.error === 'auth-required') return 'session-expired';
     return 'preview-only';
 };
 

@@ -144,6 +144,18 @@ describe('Bodian provider', () => {
         expect(request).toHaveBeenCalledTimes(1);
     });
 
+    it('does not dress a rights-only audition up as an auth problem', async () => {
+        /*
+         * checkRight 回 status 3 是版权 / 会员判定，跟登录态无关；真正的会话问题是
+         * HTTP 401 / code 11012，归一成 auth-required。给试听挂登录含义（signInMayHelp）
+         * 会让刚登录的账号拿到一首要会员的歌就被判成过期、账号被清掉。
+         */
+        request.mockResolvedValue({ url: 'https://audio.example.test/preview.mp3', preview: { startTime: 0, endTime: 29 } });
+        const error = await bodianProvider.playback!.getAudioSource(normalizeBodianSong(track), 'high').catch(caught => caught);
+        expect(error).toMatchObject({ code: 'preview-only' });
+        expect(error.details?.signInMayHelp).toBeUndefined();
+    });
+
     it.each([
         ['offline', { offline: true }, { state: 'unavailable', reason: 'taken-down' }],
         ['online 0', { online: 0 }, { state: 'unavailable', reason: 'taken-down' }],
