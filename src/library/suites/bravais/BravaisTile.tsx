@@ -296,7 +296,9 @@ function BravaisTile({
     const tone = useBravaisArtistTone(display?.coverUrl, portraitWanted);
     const drawsPortrait = portraitWanted && tone !== false;
     // 专辑墙（has-album-wall）：整面墙拼成的那一块，或从封面上切下来的碎片（bravaisAlbumWall）。聚焦卡画整张封面。
-    const art = display && !face.seeThrough && !isExpanded ? display.coverArt : undefined;
+    // 性能优先时不画：它是纯装饰，而且拼贴档 CSS 会把磁贴自己的封面压掉（.bravais-tile-face[data-bravais-art="mosaic"]），
+    // 这里不为 undefined 磁贴就只剩空板 —— 所以是连 data-bravais-art 一起不写，让它回落成整张封面，大图也不去取。
+    const art = !performanceMode && display && !face.seeThrough && !isExpanded ? display.coverArt : undefined;
     const artSpots = useBravaisCoverSpots(art?.mode === 'shard' ? art.url : undefined);
     const artUrl = useWallPosterArtwork(
         art?.url,
