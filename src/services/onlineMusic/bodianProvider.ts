@@ -76,7 +76,20 @@ export const bodianProvider: OnlineMusicProvider = {
                 id: source.mediaId, quality, freeSign: typeof source.providerData?.freeSign === 'string' ? source.providerData.freeSign : '',
             });
             // Full-track caches and timing must never ingest a 30-second preview as the complete song.
-            if (audio.preview) throw new OnlineProviderError('preview-only', 'Bodian only offers a preview; sign in with an eligible account', 'bodian');
+            /*
+             * 波点在**会话失效**时的表现不是报鉴权错误，而是默默把音源换成 30 秒试听 ——
+             * 用户那边只看到「仅可试听」，看不出是 cookie 过期了。
+             * signInMayHelp 把这个信号带出去，播放失败分类据此归到「登录已过期 / 未登录」。
+             */
+            if (audio.preview) {
+                throw new OnlineProviderError(
+                    'preview-only',
+                    'Bodian only offers a preview; sign in with an eligible account',
+                    'bodian',
+                    undefined, undefined, undefined,
+                    { signInMayHelp: true },
+                );
+            }
             // 波点的直链挂在 Kuwo 的 CDN 上，不下发 CORS 头，而 <audio> 带 crossOrigin="anonymous"
             // —— 直连时字节被同源检查挡掉，报出来却只是一句 Format error。真机上换成
             // 本地回环服务代转（回包带 ACAO），别的平台原样返回。

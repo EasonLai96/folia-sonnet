@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
 import type { HomeViewTab, LocalSong, SongResult, UnifiedSong } from '../types';
-import type { OnlineProviderId } from '../types/onlineMusic';
+import { OnlineProviderError, type OnlineProviderId } from '../types/onlineMusic';
+import { noteProviderAuthExpired } from '../services/onlineMusic/authExpiry';
 import {
     applyLocalLibraryEntityDisplay,
     buildUnifiedLocalSong,
@@ -45,6 +46,14 @@ interface SearchNavigationState {
     isSearching: boolean;
     isLoadingMore: boolean;
     searchError: string | null;
+    /**
+     * 搜索撞到“登录态失效”的那个平台。
+     *
+     * `searchError` 存的是 provider 抛出来的英文原话（"FeiNiu is not signed in"），
+     * 直接摆到界面上没人看得懂；而这里要的是**能点名平台**的中文提示，
+     * 那是展示层（能拿到 i18n 和平台显示名）的事，store 只负责把事实记下来。
+     */
+    searchAuthExpiredProvider: OnlineProviderId | null;
     requestId: number;
     offset: number;
     limit: number;
@@ -72,6 +81,12 @@ export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSour
     }
     if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio') return tab as OnlineProviderId;
     return 'netease';
+};
+
+/** 这条搜索来源对应的在线平台；本地 / Navidrome 没有平台，返回 null。 */
+const providerIdOf = (tab: SearchSource): OnlineProviderId | null => {
+    const resolved = resolveSearchSource(tab);
+    return resolved === 'local' || resolved === 'navidrome' ? null : resolved;
 };
 
 export const resolveCommandPaletteSearchSource = (
@@ -191,6 +206,7 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
     isSearching: false,
     isLoadingMore: false,
     searchError: null,
+    searchAuthExpiredProvider: null,
     requestId: 0,
     offset: 0,
     limit: DEFAULT_SEARCH_LIMIT,
@@ -229,6 +245,7 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             hasMore: cached?.hasMore ?? false,
             scrollTop: cached?.scrollTop ?? 0,
             searchError: null,
+            searchAuthExpiredProvider: null,
             isSearching: false,
             isLoadingMore: false,
             isSearchOpen: true,
@@ -244,6 +261,7 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
         isSearching: false,
         isLoadingMore: false,
         searchError: null,
+        searchAuthExpiredProvider: null,
         requestId: state.requestId + 1,
         offset: 0,
         hasMore: false,
@@ -273,6 +291,7 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             isSearching: true,
             isLoadingMore: false,
             searchError: null,
+            searchAuthExpiredProvider: null,
             requestId,
             searchResults: null,
             offset: 0,
@@ -306,12 +325,26 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             if (get().requestId !== requestId) {
                 return true;
             }
+            /*
+             * 登录态失效是最该被看见的一类失败：它就发生在搜索这一下，
+             * 界面上却是干干净净的「没有结果」—— 用户只会以为这首歌搜不到。
+             * 记下平台，顺手把账号标成过期（首页和账户面板那套「登录已过期」会亮起来），
+             * 展示层再据此把提示换成能点名平台的那一句。
+             */
+            const authProviderId = error instanceof OnlineProviderError
+                && error.code === 'auth-required'
+                ? (error.providerId ?? providerIdOf(sourceTab))
+                : null;
+            if (authProviderId) {
+                noteProviderAuthExpired(authProviderId);
+            }
             set({
                 searchResults: [],
                 hasMore: false,
                 offset: 0,
                 isSearching: false,
                 searchError: error instanceof Error ? error.message : 'search_failed',
+                searchAuthExpiredProvider: authProviderId,
             });
             return true;
         }

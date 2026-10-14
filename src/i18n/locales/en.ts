@@ -372,6 +372,8 @@ export default {
     "dataSynced": "Data synced successfully",
     "syncFailed": "Sync failed",
     "loginExpired": "Login expired. Please sign in again",
+    "providerLoginExpired": "{{provider}} login expired. Please sign in again",
+    "songLoginRequiredForProvider": "Sign in to {{provider}} to play the full track",
     "songPreviewOnly": "Only a preview is available. Sign in with an account that can play the full track.",
     "songRegionRestricted": "Playback is limited to mainland China. Please check your network connection.",
     "songTemporarilyUnavailable": "Can't play this song right now",

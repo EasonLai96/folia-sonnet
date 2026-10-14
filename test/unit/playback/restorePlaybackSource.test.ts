@@ -16,7 +16,12 @@ vi.mock('@/services/onlinePlayback', () => ({
     applyOnlineAudioSourceMetadata: (song: unknown) => song,
 }));
 vi.mock('@/services/onlineMusic/omni', () => ({
-    omni: { canPlaySong: canPlaySongMock, getLyrics: getLyricsMock },
+    // getProviderLabel：恢复失败那句文案要带平台名（登录过期 / 未登录）。
+    omni: {
+        canPlaySong: canPlaySongMock,
+        getLyrics: getLyricsMock,
+        getProviderLabel: (providerId: string) => providerId,
+    },
 }));
 vi.mock('@/stores/usePlaybackStore', () => ({
     usePlaybackStore: { getState: () => playbackState },

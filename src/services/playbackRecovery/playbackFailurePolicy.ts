@@ -98,6 +98,18 @@ export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, Pla
 export const getPlaybackFailureMessage = (
     failure: PlaybackFailure,
 ): { key: PlaybackFailureMessageKey; params?: { seconds: number } } => {
+    /*
+     * 登录相关的两条优先用带平台名的版本。
+     *
+     * 手机上一首歌可能来自任意一个平台，「登录已失效，请重新登录」不点名的话，用户
+     * 只能挨个平台试。providerId 有就带上（{{provider}} 由展示层补成平台显示名）。
+     */
+    if (failure.providerId && failure.reason === 'session-expired') {
+        return { key: 'status.providerLoginExpired' };
+    }
+    if (failure.providerId && failure.reason === 'not-signed-in') {
+        return { key: 'status.songLoginRequiredForProvider' };
+    }
     switch (failure.reason) {
         case 'rate-limited':
             if (typeof failure.retryAfterMs === 'number' && failure.retryAfterMs > 0) {
@@ -149,6 +161,8 @@ export const PLAYBACK_RETRYING_MESSAGE_KEY = 'status.songRetrying';
 const MESSAGE_KEY_REGISTRY: Record<PlaybackFailureMessageKey, true> = {
     'status.songLoginRequired': true,
     'status.loginExpired': true,
+    'status.songLoginRequiredForProvider': true,
+    'status.providerLoginExpired': true,
     'status.songMembershipRequired': true,
     'status.songPurchaseRequired': true,
     'status.songEntitlementRequired': true,
@@ -163,6 +177,26 @@ const MESSAGE_KEY_REGISTRY: Record<PlaybackFailureMessageKey, true> = {
     'status.songRateLimitedNoWait': true,
     'status.songTemporarilyUnavailable': true,
     'status.songTemporarilyUnavailableSignInHint': true,
+};
+
+/**
+ * 只有这两条文案需要 {{provider}}。
+ *
+ * 平台名只对「登录」那两条有意义 —— 别的文案塞进去只是噪音（i18next 会静默忽略，
+ * 但会让文案参数看起来莫名其妙，测试也会跟着乱）。
+ */
+const PROVIDER_LABEL_MESSAGE_KEYS: ReadonlySet<PlaybackFailureMessageKey> = new Set<PlaybackFailureMessageKey>([
+    'status.songLoginRequiredForProvider',
+    'status.providerLoginExpired',
+]);
+
+/** 需要平台名的文案才补上 {{provider}}；其余原样返回策略自己的参数。 */
+export const withProviderLabel = (
+    message: { key: PlaybackFailureMessageKey; params?: { seconds: number } },
+    providerLabel: string | undefined,
+): Record<string, unknown> | undefined => {
+    if (!providerLabel || !PROVIDER_LABEL_MESSAGE_KEYS.has(message.key)) return message.params;
+    return { provider: providerLabel, ...(message.params ?? {}) };
 };
 
 /** 全部 messageKey（含变体）、倒计时 key 和重试中提示；供文案覆盖测试使用。 */
@@ -196,8 +230,11 @@ export const buildPlaybackFailureStatus = (
     policy: PlaybackFailurePolicy,
     t: (key: string, options?: Record<string, unknown>) => string,
     handlers: { retry?: () => void; skip?: () => void; dismiss: () => void },
+    /** 额外插值（目前只有 {{provider}}：平台显示名）。策略自己带的 params 优先。 */
+    extraParams?: Record<string, unknown>,
 ): StatusMessage => {
-    const text = policy.messageParams ? t(policy.messageKey, policy.messageParams) : t(policy.messageKey);
+    const params = { ...(extraParams ?? {}), ...(policy.messageParams ?? {}) };
+    const text = Object.keys(params).length > 0 ? t(policy.messageKey, params) : t(policy.messageKey);
     const actions = policy.actions.filter(action => Boolean(handlers[action]));
     if (actions.length === 0) return { type: 'error', text };
 

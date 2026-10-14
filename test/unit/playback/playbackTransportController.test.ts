@@ -142,8 +142,19 @@ describe('transport failure reasons', () => {
             status: 'failed', failure: { reason: 'session-expired', stage: 'refresh', providerId: 'qq' },
         });
         await act(async () => { await expect(host.actions().resumePlayback()).rejects.toBe(playError); });
-        expect(useStatusMessageStore.getState().message).toEqual({ type: 'error', text: 'status.loginExpired' });
+        // 带平台名：手机上挂着好几个平台，「登录已失效」不点名用户不知道该去重新登录哪个。
+        expect(useStatusMessageStore.getState().message).toEqual({ type: 'error', text: 'status.providerLoginExpired' });
         expect(usePlaybackStore.getState().playerState).toBe(PlayerState.PAUSED);
+    });
+    it('keeps the unnamed message when the failure carries no provider', async () => {
+        const playError = new Error('MEDIA_ELEMENT_ERROR: Format error');
+        const host = mount({ audioPlay: Promise.reject(playError) });
+        host.recover.mockResolvedValueOnce({
+            status: 'failed', failure: { reason: 'session-expired', stage: 'refresh' },
+        });
+        await act(async () => { await expect(host.actions().resumePlayback()).rejects.toBe(playError); });
+        // 没有平台就别硬塞一个空的 {{provider}} 进去，退回不带名的那句。
+        expect(useStatusMessageStore.getState().message).toEqual({ type: 'error', text: 'status.loginExpired' });
     });
     it('names a failed TTL refresh when the fallback play then fails without a further reason', async () => {
         const playError = new Error('MEDIA_ELEMENT_ERROR: Format error');

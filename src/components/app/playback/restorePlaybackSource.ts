@@ -8,7 +8,7 @@ import { buildNavidromeSourceRevision } from '../../../services/playbackRecovery
 import { getLocalLibraryCatalogSnapshot } from '../../../services/localLibraryEntityRepository';
 import { getNavidromeConfig, navidromeApi } from '../../../services/navidromeService';
 import { applyOnlineAudioSourceMetadata, loadOnlineSongAudioSource } from '../../../services/onlinePlayback';
-import { getPlaybackFailureMessage } from '../../../services/playbackRecovery/playbackFailurePolicy';
+import { getPlaybackFailureMessage, withProviderLabel } from '../../../services/playbackRecovery/playbackFailurePolicy';
 import type { ThemeCacheSongKey } from '../../../services/themeCache';
 import type { LyricData, LocalSong, SongResult, StatusMessage } from '../../../types';
 import type { NavidromeSong } from '../../../types/navidrome';
@@ -77,9 +77,13 @@ const replaceBlobUrl = (
 // It never replaces a persistent toast: that belongs to a newer play request (its retry / skip, or a
 // countdown), which the store cannot yet tell apart from this song while that request is loading.
 const showRestoreFailure = (failure: PlaybackFailure) => {
-    const { key, params } = getPlaybackFailureMessage(failure);
-    const message: StatusMessage = { type: 'error', text: params ? i18n.t(key, params) : i18n.t(key) };
-    setStatusMsg(prev => (prev?.persistent ? prev : message));
+    const message = getPlaybackFailureMessage(failure);
+    // 登录过期 / 未登录那条文案带 {{provider}}，平台名在这层补（策略层拿不到 provider 注册表）。
+    const providerLabel = failure.providerId ? omni.getProviderLabel(failure.providerId) : undefined;
+    const params = withProviderLabel(message, providerLabel);
+    const text = params ? i18n.t(message.key, params) : i18n.t(message.key);
+    const status: StatusMessage = { type: 'error', text };
+    setStatusMsg(prev => (prev?.persistent ? prev : status));
 };
 
 // Restores the remembered song's source and lyrics. 'stale' means the listener moved on to another

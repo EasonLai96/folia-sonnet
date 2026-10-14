@@ -59,6 +59,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         isSearching,
         isLoadingMore,
         searchError,
+        searchAuthExpiredProvider,
         hasMore,
         scrollTop,
         setSearchQuery,
@@ -71,6 +72,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         isSearching: state.isSearching,
         isLoadingMore: state.isLoadingMore,
         searchError: state.searchError,
+        searchAuthExpiredProvider: state.searchAuthExpiredProvider,
         hasMore: state.hasMore,
         scrollTop: state.scrollTop,
         setSearchQuery: state.setSearchQuery,
@@ -80,6 +82,16 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         const raw = searchResults || [];
         return resolveTrackDisplay ? raw.map(resolveTrackDisplay) : raw;
     }, [resolveTrackDisplay, searchResults]);
+    /*
+     * 搜索失败时点名是哪个平台登录过期了。
+     *
+     * 光说「搜索失败」用户只会重试 —— 而 cookie 过期是重试一万次也不会好的，
+     * 他真正要做的是去重新登录那个平台。平台名必须带上：手机上同时挂着好几个平台，
+     * 不点名他只能挨个试。
+     */
+    const searchErrorText = searchAuthExpiredProvider
+        ? t('status.providerLoginExpired', { provider: omni.getProviderLabel(searchAuthExpiredProvider) })
+        : t('search.error');
     const activeOnlineProviderId = useOnlineProviderAccountStore(state => state.activeProviderId);
     const providerRegistryVersion = useSyncExternalStore(
         subscribeProviderRegistry,
@@ -250,7 +262,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                         ) : searchError && results.length === 0 ? (
                             <div className="flex h-full flex-col items-center justify-center gap-3 text-center opacity-65">
                                 <AlertCircle size={32} />
-                                <p>{t('search.error')}</p>
+                                <p>{searchErrorText}</p>
                                 <button
                                     type="button"
                                     onClick={() => onSubmitSearch()}
@@ -279,7 +291,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                                 </div>
                                 {searchError ? (
                                     <div className="flex shrink-0 items-center justify-center gap-3 py-3 text-sm">
-                                        <span className="opacity-60">{t('search.error')}</span>
+                                        <span className="opacity-60">{searchErrorText}</span>
                                         <button
                                             type="button"
                                             disabled={isLoadingMore}

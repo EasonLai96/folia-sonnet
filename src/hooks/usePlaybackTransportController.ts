@@ -8,7 +8,8 @@ import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { currentTime } from '../stores/motionSignals';
 import { markProgrammaticPause, playbackFade, type PlaybackFadeSettleReason } from '../services/playbackFade';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
-import { getPlaybackFailureMessage, isPlaybackFailureStatus } from '../services/playbackRecovery/playbackFailurePolicy';
+import { omni } from '../services/onlineMusic/omni';
+import { getPlaybackFailureMessage, isPlaybackFailureStatus, withProviderLabel } from '../services/playbackRecovery/playbackFailurePolicy';
 import type { OnlineRecoveryOptions, OnlineRecoveryResult, PlaybackFailure } from '../types/playbackFailure';
 
 // src/hooks/usePlaybackTransportController.ts
@@ -186,8 +187,11 @@ export function usePlaybackTransportController({
 
             const failure = recovered.status === 'failed' ? recovered.failure : refreshFailure;
             const failureMessage = failure ? getPlaybackFailureMessage(failure) : null;
+            // 登录过期 / 未登录那条文案带 {{provider}}，平台名在这层补（策略层拿不到 provider 注册表）。
+            const providerLabel = failure?.providerId ? omni.getProviderLabel(failure.providerId) : undefined;
+            const messageParams = failureMessage ? withProviderLabel(failureMessage, providerLabel) : undefined;
             const text = failureMessage
-                ? (failureMessage.params ? t(failureMessage.key, failureMessage.params) : t(failureMessage.key))
+                ? (messageParams ? t(failureMessage.key, messageParams) : t(failureMessage.key))
                 : t('status.playbackError');
             // 已有带「重试 / 跳过」的常驻失败提示时保留它：它已写明原因，而且没有关闭按钮，「重试」是唯一的强制刷新入口。
             // 在出错的元素上按播放（play() 以 NotSupportedError 拒绝、刷新被按文件去重）或与 onError 共用同一个恢复任务时，

@@ -1,4 +1,5 @@
 import { OnlineProviderError, type OnlineProviderId, type ProviderErrorCode } from '../../types/onlineMusic';
+import { noteAuthFailureIfAny } from '../onlineMusic/authExpiry';
 import type { PlaybackFailure, PlaybackFailureReason, PlaybackFailureStage } from '../../types/playbackFailure';
 
 // src/services/playbackRecovery/onlinePlaybackFailure.ts
@@ -40,6 +41,34 @@ const resolveAuthReason = (
     return 'not-signed-in';
 };
 
+/**
+ * 只有试听片段，但**原因是登录态不行**。
+ *
+ * 波点和网易云在会话失效时的表现不是报鉴权错误，而是默默把音源降级成 30 秒试听 ——
+ * 分类到 'preview-only' 后用户只看到「当前账号仅可试听」，既看不出是哪个平台、
+ * 也看不出是 cookie 过期了，只会以为这首歌本来就没完整版。
+ *
+ * 两种信号都收：provider 显式给的 `signInMayHelp`，以及请求前账号快照显示根本没登录
+ * / 已经过期。反过来，账号明明是正常的（status=authenticated）就还是按「只有试听」报 ——
+ * 那种情况多半是真的要会员，报登录过期会把人引到错误的方向。
+ */
+const resolvePreviewOnlyReason = (
+    error: OnlineProviderError,
+    account: PlaybackFailureClassifyContext['account'],
+): PlaybackFailureReason => {
+    if (error.details?.signInMayHelp) {
+        return resolveAuthReason(error, account);
+    }
+    /*
+     * 只认**明确**的未登录 / 已过期，不看 'unknown'：那多半是刚启动还没查过登录状态，
+     * 此时一首本来就要会员的歌被判成「未登录」会误导用户 —— 他登录了照样听不了。
+     */
+    if (account?.status === 'anonymous' || account?.error === 'auth-required') {
+        return resolveAuthReason(error, account);
+    }
+    return 'preview-only';
+};
+
 // network code 的细分：带 upstreamCode 说明上游有应答（业务拒绝），其余按 HTTP 状态区分。
 const resolveNetworkReason = (error: OnlineProviderError): PlaybackFailureReason => {
     if (error.details?.upstreamCode !== undefined) return 'unknown';
@@ -79,6 +108,7 @@ const resolveProviderErrorReason = (
         case 'rate-limited':
             return 'rate-limited';
         case 'preview-only':
+            return resolvePreviewOnlyReason(error, account);
         case 'region-restricted':
         case 'membership-required':
         case 'purchase-required':

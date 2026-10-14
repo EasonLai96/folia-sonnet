@@ -370,6 +370,8 @@ export default {
     "dataSynced": "Data berhasil disinkronkan",
     "syncFailed": "Sinkronisasi gagal",
     "loginExpired": "Login kedaluwarsa. Silakan login lagi",
+    "providerLoginExpired": "Login {{provider}} kedaluwarsa. Silakan login lagi",
+    "songLoginRequiredForProvider": "Masuk ke {{provider}} untuk memutar lagu lengkap",
     "songPreviewOnly": "Hanya pratinjau tersedia. Masuk dengan akun yang dapat memutar lagu lengkap.",
     "songRegionRestricted": "Pemutaran hanya tersedia di Tiongkok daratan. Periksa koneksi jaringan Anda.",
     "songTemporarilyUnavailable": "Lagu ini belum dapat diputar saat ini",

@@ -3,6 +3,7 @@ import type { SkipPromptMessageKey } from '../../../types/appPlayback';
 import type { PlaybackFailure, PlaybackFailureContext } from '../../../types/playbackFailure';
 import type { StatusSetter } from '../../../stores/useStatusMessageStore';
 import { buildPlaybackFailureStatus, resolvePlaybackFailurePolicy } from '../../../services/playbackRecovery/playbackFailurePolicy';
+import { omni } from '../../../services/onlineMusic/omni';
 
 // src/components/app/playback/presentPlaybackFailure.ts
 // 播放失败的展示层：按策略表决定倒计时跳歌、停播，还是给出带“重试 / 跳过”的常驻消息。
@@ -62,10 +63,19 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
         action();
     });
 
+    /*
+     * 登录过期 / 未登录这类文案要带平台名（{{provider}}）。
+     * 平台名在这层才能取：策略表是纯函数，拿不到运行时的 provider 注册表。
+     */
+    const needsProviderLabel = policy.messageKey === 'status.songLoginRequiredForProvider'
+        || policy.messageKey === 'status.providerLoginExpired';
+    const providerLabel = needsProviderLabel && failure.providerId
+        ? omni.getProviderLabel(failure.providerId)
+        : undefined;
     built = buildPlaybackFailureStatus(policy, deps.t, {
         retry: wrap(retry),
         skip: wrap(skip),
         dismiss: () => deps.setStatusMsg(null),
-    });
+    }, providerLabel ? { provider: providerLabel } : undefined);
     deps.setStatusMsg(built);
 };

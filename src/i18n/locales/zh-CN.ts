@@ -372,6 +372,8 @@ export default {
     "dataSynced": "数据同步成功",
     "syncFailed": "同步失败",
     "loginExpired": "登录状态已失效，请重新登录",
+    "providerLoginExpired": "{{provider}} 登录已失效，请重新登录",
+    "songLoginRequiredForProvider": "{{provider}} 未登录，登录后才能播放完整版",
     "songPreviewOnly": "当前账号仅可试听此歌曲，请登录具有完整播放权限的账号",
     "songRegionRestricted": "仅限中国大陆地区播放，请检查网络环境",
     "songTemporarilyUnavailable": "暂时无法播放这首歌",

@@ -39,6 +39,9 @@ export type PlaybackFailureAction = 'retry' | 'skip';
 
 export type PlaybackFailureMessageKey =
     | 'status.songLoginRequired' | 'status.loginExpired'
+    // 与上两条同一件事，但带上平台名（{{provider}}）：同一句「登录已失效」不点名是哪个平台，
+    // 用户根本不知道该去重新登录哪一个 —— cookie 过期时这条尤其重要。
+    | 'status.songLoginRequiredForProvider' | 'status.providerLoginExpired'
     | 'status.songMembershipRequired' | 'status.songPurchaseRequired' | 'status.songEntitlementRequired'
     | 'status.songPreviewOnly' | 'status.songRegionRestricted' | 'status.songUnavailable'
     | 'status.songNetworkFailed' | 'status.songRequestTimedOut'

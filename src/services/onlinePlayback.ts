@@ -18,6 +18,7 @@ import { getProviderSongMetadata } from './onlineMusic/songMetadata';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
 import { saveLyricCacheSongMetadata } from './lyricExport/lyricCacheMetadata';
+import { noteProviderAuthExpired } from './onlineMusic/authExpiry';
 import { classifyMissingAudioUrl, classifyPlaybackError } from './playbackRecovery/onlinePlaybackFailure';
 import { resolvePlaybackFailurePolicy, sleepForPlaybackRetry } from './playbackRecovery/playbackFailurePolicy';
 import { getProviderPlaybackCooldown, noteProviderFailure } from './playbackRecovery/providerPlaybackCooldown';
@@ -103,6 +104,17 @@ export async function loadOnlineSongAudioSource(
                 providerId,
                 account: { status: account?.status, error: account?.error },
             });
+            /*
+             * 登录态过期这件事必须记下来，否则它只存在于这条 warn 里。
+             *
+             * 两条路都会走到这里：provider 直接报 auth-required，以及波点 / 网易云那种
+             * 静默降级成 30 秒试听（已被 resolvePreviewOnlyReason 归到 session-expired）。
+             * 记下之后账号状态变成 error='auth-required'，首页和账户面板那套
+             * 「登录已过期」的 UI 会自己亮起来 —— 用户不用来猜为什么只剩试听。
+             */
+            if (failure.reason === 'session-expired') {
+                noteProviderAuthExpired(providerId);
+            }
         }
 
         if (!failure) {
