@@ -119,8 +119,8 @@ const VideoExportTab: React.FC<VideoExportTabProps> = (
             visualizerTunings: collectVisualizerTunings(settings as unknown as Record<string, unknown>),
             theme,
             songMeta: {
-                title: currentSong?.title ?? undefined,
-                artist: currentSong?.artist ?? undefined,
+                title: currentSong?.name ?? undefined,
+                artist: currentSong?.artists?.map(item => item.name).join(', ') || undefined,
             },
             startSec: 0,
             // 不透明导出：让渲染页自己铺主题底色，别指望后面再抠。

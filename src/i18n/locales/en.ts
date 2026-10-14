@@ -3282,6 +3282,33 @@ export default {
         "description": "When signed in, your own private playlists now load their songs, with real paging. Self-hosted backends must run qq-music-api 3.1.2 or later; older backends fall back automatically, and a playlist that cannot be read now says it is not public instead of silently showing as empty."
       }
     },
+    "v0_7_19": {
+      "intro": "0.7.19 turns the artist and album pages in Bravais into Tempera-style posters. When an online song fails to play, Folia now tells you the real reason instead of always saying it was removed; word-by-word visualizers such as Tempera split Chinese and Japanese lyrics more naturally; and the web version starts up offline again.",
+      "artistPoster": {
+        "title": "Artist Pages Become Posters",
+        "description": "The full info strip on a Bravais artist page is now drawn as a Tempera-style poster pinned to the left of the wall. Its layout is fixed per artist, its colours come from the artist's three most popular albums, and the name scales to fit instead of overflowing. The album wall to the right tilts to meet it, and you can still drag and scroll while it is tilted."
+      },
+      "albumPoster": {
+        "title": "Album Posters and Cover Mosaics",
+        "description": "Album pages get a poster too: the cover taped onto dotted paper, a large title with a layered shadow, and the artist, year and track count, all with an entrance animation. Open an album from an artist page and its cover flies from the tile you clicked onto the poster, then flies back when you return. On the wall beside it, an album with a single cover is assembled into one large cover across the tracks; when an album mixes in single covers, repeated covers are cut into fragments that return to full colour on hover or while playing."
+      },
+      "playbackFailure": {
+        "title": "Playback Failures Explain Themselves",
+        "description": "An online song that fails to play no longer always shows \"song removed\". Folia now tells apart removed songs, network drops or timeouts, service errors or rate limits, songs that need sign-in, a membership or a purchase, and regional restrictions. Only truly removed songs count down to the next track and look for another version; when the network drops, playback stops and keeps your queue so you can retry or skip; sign-in, membership and purchase cases are shown without retrying again and again. Works with NetEase, QQ Music, KuGou and Bodian."
+      },
+      "lyricSegmenter": {
+        "title": "More Natural Chinese and Japanese Word Splits",
+        "description": "Tempera, Sonnet and other modes that lay lyrics out word by word now use a new default segmenter, icu-folia. Chinese is no longer chopped into fragments (idioms and words stay whole, and particles such as 的 and 了 stay with the word before them), and Japanese is split into natural phrases. Tempera also no longer scatters short words that belong together across separate shots. Word splits you saved yourself still come first, and the dictionaries load only when needed."
+      },
+      "offlineStartup": {
+        "title": "Web Version Starts Offline",
+        "description": "Fixed the web version / PWA failing to load when refreshed without a network connection. Local covers also show offline, and on a first visit they no longer wait for the background cache to finish downloading. Icons used by themes now load on demand, so less is downloaded at startup."
+      },
+      "stabilityFixes": {
+        "title": "Steadier All Round",
+        "description": "On Android, opening Options or other overlays on the Bravais or Lattice wall no longer flashes the wall underneath. Fixed an occasional crash when resizing the window while Tempera is playing. The Sora background stops drawing while paused, and its stars hold still in static mode. The release notes window shown at startup now closes with Esc."
+      }
+    },
     "v0_7_18": {
       "intro": "0.7.18 adds a play queue you can work with right from the wall tools in Bravais and Lattice, and both walls now share one tools panel. Several lyric visualizers use fewer resources, switching between local songs is smoother, QQ Music QR sign-in tells you what to do when your device limit is reached, and the desktop app now stores AI keys encrypted.",
       "queueIsland": {
@@ -3823,7 +3850,12 @@ export default {
     "albumsSyncing": "Loading albums {{loaded}} / {{total}}",
     "albumsSyncingOpen": "Loading albums… {{loaded}}",
     "albumsInterrupted": "Albums stopped at {{loaded}}",
-    "panelTitle": "Top songs and albums"
+    "panelTitle": "Top songs and albums",
+    "posterLabel": "Artist poster",
+    "posterTopSongs": "Top songs"
+  },
+  "libraryBravaisAlbum": {
+    "posterLabel": "Album poster"
   },
   "artistGrid": {
     "localArtist": "Local Artist: {{artistName}}",

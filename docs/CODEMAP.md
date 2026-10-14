@@ -62,6 +62,7 @@
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
 | 32+ | `src/stores/useVisualizerSettingsStore.ts` |
 | 32+ | `src/types/localLibrary.ts` |
+| 32+ | `src/utils/coverUrl.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
 | 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
