@@ -154,6 +154,14 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
         state => state.wallpaperFloatingAvoidOffsetX);
     const onSetWallpaperFloatingAvoidOffsetX = useVisualizerSettingsStore(
         state => state.handleSetWallpaperFloatingAvoidOffsetX);
+    // 歌词字体的来路：跟随播放页 / 单独指定。只有「单独」才需要那个选字体的按钮。
+    const wallpaperLyricsFontMode = useVisualizerSettingsStore(
+        state => state.wallpaperLyricsFontMode);
+    const onSetWallpaperLyricsFontMode = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperLyricsFontMode);
+    // 预览：在 App 里也把那层小窗挂出来（正常逻辑在 App 里不挂，设置页就什么都看不见）。
+    const onSetWallpaperFloatingPreview = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingPreview);
     // 字号：动态（跟着窗口高度算）/ 自定义（自己指定 dp）。
     const wallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
         state => state.wallpaperFloatingFontSizeMode);
@@ -341,6 +349,21 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
             cancelled = true;
         };
     }, [isAndroid]);
+
+    /*
+     * 预览：只要这一页挂着，就让原生那层悬浮小窗**在 App 里也显示出来**。
+     *
+     * 正常逻辑是「在应用里就不挂」（怕盖着自己的界面、播放页本来就有歌词），
+     * 但调这些位置 / 大小 / 避开区域的滑条恰恰是在 App 里做的 —— 不开预览的话，
+     * 拖到底屏幕上也一点反应都没有（「看不到预览界面」）。
+     * 这一页是按 section 条件渲染的，卸载 = 离开设置页，预览随之关掉。
+     */
+    React.useEffect(() => {
+        onSetWallpaperFloatingPreview(true);
+        return () => {
+            onSetWallpaperFloatingPreview(false);
+        };
+    }, [onSetWallpaperFloatingPreview]);
 
     const handlePickWallpaperFont = async () => {
         const result = await pickWallpaperFont();
@@ -1142,50 +1165,77 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                             control={renderToggle(lyricsWallpaperTranslation, () => onToggleLyricsWallpaperTranslation(!lyricsWallpaperTranslation))}
                             dividerClass={dividerClass}
                         />
+                        {/* 字体来路：跟随播放页 / 单独指定。选「单独」才有下面那个选字体的按钮。 */}
                         <SettingsRow
-                            title={t('options.lyricsWallpaperFont')}
-                            description={t('options.lyricsWallpaperFontDesc')}
-                            control={(
-                                <button
-                                    type="button"
-                                    onClick={() => void handlePickWallpaperFont()}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
-                                    {hasWallpaperFont
-                                        ? t('options.lyricsWallpaperReplaceFont')
-                                        : t('options.lyricsWallpaperPickFont')}
-                                </button>
-                            )}
+                            title={t('options.lyricsWallpaperFontMode')}
+                            description={t('options.lyricsWallpaperFontModeDesc')}
                             dividerClass={dividerClass}
-                        >
-                            <div className="mt-2 flex items-center gap-3">
-                                <span
-                                    className="text-xs"
-                                    style={{
-                                        color: fontNotice === 'rejected'
-                                            ? 'var(--danger-color, #ef4444)'
-                                            : 'var(--text-secondary)',
-                                    }}
-                                >
-                                    {fontNotice === 'applied'
-                                        ? t('options.lyricsWallpaperFontApplied')
-                                        : fontNotice === 'rejected'
-                                            ? t('options.lyricsWallpaperFontFailed')
-                                            : ''}
-                                </span>
-                                {hasWallpaperFont && (
+                            control={(
+                                <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
+                                    {(['follow', 'custom'] as const).map((mode) => (
+                                        <button
+                                            key={mode}
+                                            type="button"
+                                            onClick={() => onSetWallpaperLyricsFontMode(mode)}
+                                            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${wallpaperLyricsFontMode === mode ? '' : 'opacity-60'}`}
+                                            style={wallpaperLyricsFontMode === mode
+                                                ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
+                                                : { color: 'var(--text-primary)' }}
+                                        >
+                                            {mode === 'follow'
+                                                ? t('options.lyricsWallpaperFontFollow')
+                                                : t('options.lyricsWallpaperFontCustom')}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        />
+                        {wallpaperLyricsFontMode === 'custom' && (
+                            <SettingsRow
+                                title={t('options.lyricsWallpaperFont')}
+                                description={t('options.lyricsWallpaperFontDesc')}
+                                control={(
                                     <button
                                         type="button"
-                                        onClick={handleClearWallpaperFont}
-                                        className="text-xs opacity-60 hover:opacity-100"
-                                        style={{ color: 'var(--text-secondary)' }}
+                                        onClick={() => void handlePickWallpaperFont()}
+                                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
+                                        style={{ color: 'var(--text-primary)' }}
                                     >
-                                        {t('options.lyricsWallpaperClearFont')}
+                                        {hasWallpaperFont
+                                            ? t('options.lyricsWallpaperReplaceFont')
+                                            : t('options.lyricsWallpaperPickFont')}
                                     </button>
                                 )}
-                            </div>
-                        </SettingsRow>
+                                dividerClass={dividerClass}
+                            >
+                                <div className="mt-2 flex items-center gap-3">
+                                    <span
+                                        className="text-xs"
+                                        style={{
+                                            color: fontNotice === 'rejected'
+                                                ? 'var(--danger-color, #ef4444)'
+                                                : 'var(--text-secondary)',
+                                        }}
+                                    >
+                                        {fontNotice === 'applied'
+                                            ? t('options.lyricsWallpaperFontApplied')
+                                            : fontNotice === 'rejected'
+                                                ? t('options.lyricsWallpaperFontFailed')
+                                                : ''}
+                                    </span>
+                                    {hasWallpaperFont && (
+                                        <button
+                                            type="button"
+                                            onClick={handleClearWallpaperFont}
+                                            className="text-xs opacity-60 hover:opacity-100"
+                                            style={{ color: 'var(--text-secondary)' }}
+                                        >
+                                            {t('options.lyricsWallpaperClearFont')}
+                                        </button>
+                                    )}
+                                </div>
+                            </SettingsRow>
+                        )}
                         <SettingsRow
                             title={t('options.lyricsWallpaperFeed')}
                             description={t('options.lyricsWallpaperFeedDesc')}

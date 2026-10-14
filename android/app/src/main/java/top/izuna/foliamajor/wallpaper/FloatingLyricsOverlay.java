@@ -108,6 +108,21 @@ public final class FloatingLyricsOverlay {
     private static final String KEY_AVOID_WIDTH = "wp.floatingAvoidWidth";
     /** 避开区域的左右位置：0 = 贴左，1 = 贴右。 */
     private static final String KEY_AVOID_OFFSET_X = "wp.floatingAvoidOffsetX";
+    /**
+     * 开关：在 App 里也把这一层挂出来，好让设置页当场看到改动（预览）。
+     *
+     * 没有它的话「实时预览」是个空话 —— 正常逻辑里 `appForeground` 一命中就不挂，
+     * 而调设置恰恰是在 App 里做的，滑条拖到头也看不见任何东西。
+     * 由设置页挂载期间置 1、离开置 0。
+     */
+    private static final String KEY_PREVIEW = "wp.floatingPreview";
+    /**
+     * 预览又没有歌词可显示时画的占位。
+     *
+     * 挑一行「什么语言都认识」的：它只是让人看清位置 / 大小 / 避开区域，
+     * 长度也要够 —— 太短的话绕不过避开区域，看不到那条缝在哪。
+     */
+    private static final String PREVIEW_SAMPLE_TEXT = "♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪";
     /** 用户在叠加模式下拖出来的左右位置（0~1）。拖过就以它为准，设置里改了再覆盖。 */
     private static final String KEY_DRAG_RATIO = "drag_ratio";
 
@@ -133,6 +148,9 @@ public final class FloatingLyricsOverlay {
     private WindowManager.LayoutParams chipParams = null;
     private boolean chipAdded = false;
     private boolean appForeground = false;
+    /** 上一次量到的屏幕尺寸（0 = 还没量过）。转屏时用来把位置按比例搬过去。 */
+    private int lastScreenW = 0;
+    private int lastScreenH = 0;
     private volatile boolean screenOn = true;
     private boolean receiverRegistered = false;
     private boolean polling = false;
@@ -255,12 +273,29 @@ public final class FloatingLyricsOverlay {
         if (!tuningFlag("wp.overlayEnabled", true)) return false;
         if (!Settings.canDrawOverlays(context)) return false;
         if (!screenOn) return false;
-        // 在应用里就别盖着自己的界面 —— 播放页本身就有歌词。
-        if (appForeground) return false;
+
+        /*
+         * 预览时**唯独**放行「在应用里」这一条。
+         *
+         * 正常逻辑在 App 里不挂是怕盖着自己的界面（播放页本身就有歌词），
+         * 但调设置恰恰是在 App 里做的 —— 不放行的话，设置页那几根「实时预览」的滑条
+         * 拖到头也看不到任何东西（这正是「看不到预览」）。
+         * 预览窗口同时被强制成不吃触摸（见 buildParams），不会挡住底下的滑条。
+         */
+        boolean preview = previewMode();
+        if (appForeground && !preview) return false;
 
         WallpaperLyricsState.Snapshot snapshot = WallpaperLyricsState.get();
         // 只有「精简」样式挂这一层：跟随样式走的是 WebView 叠层（那一层不挂是另一套逻辑）。
         if (!"minimal".equals(snapshot.visualizerMode)) return false;
+
+        /*
+         * 预览只看**摆成什么样**，不看该不该出现 —— 暂停中、唱完了、甚至压根没放歌
+         * 都得照样画出来，否则用户拨了半天开关面对的是一片空白，
+         * 只会以为功能坏了（没歌词时走 onDraw 里那行占位）。
+         */
+        if (preview) return true;
+
         // 这两条跟随叠层那两个开关：用户在设置里关了「暂停时隐藏 / 唱完隐藏」，
         // 那小窗就该跟着留着 —— 它是同一套桌面歌词，不该自己另立一套规则。
         if (!snapshot.playing && tuningFlag("wp.hideWhenPaused", true)) return false;
@@ -310,6 +345,30 @@ public final class FloatingLyricsOverlay {
         if (params == null) return;
         int screenW = context.getResources().getDisplayMetrics().widthPixels;
         int screenH = context.getResources().getDisplayMetrics().heightPixels;
+
+        /*
+         * 转屏（或换了分辨率）：位置按**比例**搬过去，不能沿用上一屏的像素坐标。
+         *
+         * 原来只是把旧坐标夹回新屏幕内 —— 竖屏算出来的 x 是「竖屏宽」的中点，
+         * 横过来屏幕一下子宽了一倍多，那个 x 就变成了明显偏左（用户原话：
+         * 「横屏状态下没有在最中间」）。安全区那套早就是按比例的（左右位置存 0~1），
+         * 所以横屏下它仍然居中 —— 普通模式现在跟它一致：竖屏居中，横屏照样居中；
+         * 拖到左边的，横屏也还在左边那个相对位置。
+         */
+        if (lastScreenW > 0 && lastScreenH > 0
+                && (lastScreenW != screenW || lastScreenH != screenH)) {
+            float ratioX = clamp01(params.x / (float) Math.max(1, lastScreenW - params.width));
+            float ratioY = clamp01(params.y / (float) Math.max(1, lastScreenH - params.height));
+            int spanW = Math.max(0, screenW - params.width);
+            int spanH = Math.max(0, screenH - params.height);
+            int x = clampInt(Math.round(ratioX * spanW), 0, spanW);
+            int y = clampInt(Math.round(ratioY * spanH), 0, spanH);
+            applyLayout(x, y, params.width, params.height);
+            persistLayout();
+        }
+        lastScreenW = screenW;
+        lastScreenH = screenH;
+
         if (overSafeArea()) {
             // 转屏之后宽度变了，左右比例要按新的屏幕重算一次，不然小窗会跑出去；
             // 高度跟着新的状态栏高度走（横屏时它可能不一样）。
@@ -521,8 +580,13 @@ public final class FloatingLyricsOverlay {
         int flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-        // 上着锁的话整层不收触摸：让手指直接落到下面的桌面 / 应用上（见 syncLockTouchable）。
-        if (isLocked()) {
+        /*
+         * 上着锁的话整层不收触摸：让手指直接落到下面的桌面 / 应用上（见 syncLockTouchable）。
+         *
+         * 预览同理、而且更必要：这一层此刻正压在设置页上面，吃了触摸就等于
+         * 底下那几根滑条 / 列表划不动。预览是「只看不动」，拖动本来就该走设置里的滑条。
+         */
+        if (isLocked() || previewMode()) {
             flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         }
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -577,18 +641,12 @@ public final class FloatingLyricsOverlay {
         syncLockChip();
     }
 
-    /** 点一下进应用。用 REORDER_TO_FRONT：已经在后台就把它叫回来，不新起一个实例。 */
-    private void openApp() {
-        try {
-            Intent launch = context.getPackageManager()
-                    .getLaunchIntentForPackage(context.getPackageName());
-            if (launch == null) return;
-            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            context.startActivity(launch);
-        } catch (Throwable error) {
-            Log.w(TAG, "open app failed", error);
-        }
-    }
+    /*
+     * 原来这里有个 openApp()：「点一下悬浮窗回到应用」。
+     * 撤掉了 —— 这一层压在别的应用上面，点一下就把我们的应用拽到前台，
+     * 既打断别人，也让「想拖一下小窗」变成不可能（手指一碰整屏就切走）。
+     * 要回应用走通知栏 / 最近任务，不该让一层装饰性的歌词抢这个动作。
+     */
 
     private static boolean tuningFlag(String key, boolean fallback) {
         java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
@@ -615,6 +673,11 @@ public final class FloatingLyricsOverlay {
     /** 小窗是否直接叠在安全区上面。 */
     private static boolean overSafeArea() {
         return tuningFlag(KEY_OVER_SAFE_AREA, false);
+    }
+
+    /** 设置页正开着：即使在 App 里也要挂出来给人看（见 KEY_PREVIEW）。 */
+    private static boolean previewMode() {
+        return tuningFlag(KEY_PREVIEW, false);
     }
 
     /**
@@ -984,19 +1047,13 @@ public final class FloatingLyricsOverlay {
             updateAvoidZone(width);
 
             long position = snapshot.positionMs();
-            int index = snapshot.lines.length == 0 ? -1 : snapshot.indexAt(position);
-            if (index < 0) {
-                if (showControls) {
-                    drawControls(canvas, width, height, appear);
-                }
-                return;
-            }
-            int previous = lastIndex;
-            if (index != lastIndex) {
-                lastIndex = index;
-                transitionStartMs = now;
-            }
+            int index = (snapshot.lines == null || snapshot.lines.length == 0)
+                    ? -1 : snapshot.indexAt(position);
 
+            /*
+             * 下面这一串布局提前算：预览时可能一句歌词都没有，
+             * 那行占位也得按同一套位置 / 字号画，不然预览跟真身对不上。
+             */
             /*
              * 叠加模式下只有**一行**：窗口高度就是状态栏那一条（二十几到四十 dp），
              * 硬塞两行的话每行只剩几个 dp，字根本画不出来。
@@ -1016,6 +1073,27 @@ public final class FloatingLyricsOverlay {
             float customSize = customFontSizePx();
             if (customSize > 0f) {
                 focusSize = Math.min(customSize, singleRow ? rowHeight : rowHeight * 0.95f);
+            }
+
+            if (index < 0) {
+                if (showControls) {
+                    drawControls(canvas, width, height, appear);
+                }
+                /*
+                 * 预览且一句歌词都没有（没放歌 / 纯音乐 / 还没解析出来）：
+                 * 画一行占位。这时候什么都不画的话，用户面对一片空白只会以为开关坏了 ——
+                 * 他要调的本来就是位置、大小、避开区域，这些靠占位一样看得出来。
+                 */
+                if (previewMode()) {
+                    drawRow(canvas, PREVIEW_SAMPLE_TEXT, width, focusY, focusSize,
+                            primaryColor, appear * 0.85f, -1f, null, 0L, false);
+                }
+                return;
+            }
+            int previous = lastIndex;
+            if (index != lastIndex) {
+                lastIndex = index;
+                transitionStartMs = now;
             }
 
             float transition = clamp01((now - transitionStartMs) / (float) LINE_ENTER_MS);
@@ -1255,6 +1333,16 @@ public final class FloatingLyricsOverlay {
             float x = measured <= maxWidth
                     ? Math.max(padX, (width - visible) / 2f)
                     : padX - scroll;
+            /*
+             * 洞的左边缘要落在**字符边界**上。
+             *
+             * 不挪的话跨在边界上的那个字会被劈成两半（左半在洞左边、右半在洞右边）。
+             * 要的是「洞夹在字与字之间」，不是一个字被切开。
+             * 挪的是整行、最多半个字宽，洞本身的宽度一点不变（右段照旧整体右移 holeW）。
+             */
+            if (avoidActive) {
+                x = snapToCharBoundary(text, x, measured);
+            }
             Paint.FontMetrics metrics = textPaint.getFontMetrics();
             float baseline = centerY - (metrics.ascent + metrics.descent) / 2f;
 
@@ -1289,6 +1377,29 @@ public final class FloatingLyricsOverlay {
             paintRow(canvas, text, x + holeW, baseline, fontSize, color, alpha, progress, line,
                     positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
             canvas.restore();
+        }
+
+        /**
+         * 把整行的起点挪一挪，让避开区域的左边缘正好压在某个字符的边界上。
+         *
+         * 挨个试每个字符边界、挑离当前位置最近的那个：位移因此最多半个字宽，
+         * 看不出来是「挪过」，但字绝不会被切开。
+         *
+         * 洞没压在这行字上（在字的左边或右边）时不用挪 —— 那本来就没有字会被切。
+         */
+        private float snapToCharBoundary(String text, float x, float measured) {
+            if (avoidLeftPx <= x || avoidLeftPx >= x + measured) return x;
+            float best = x;
+            float bestDelta = Float.MAX_VALUE;
+            for (int i = 0; i <= text.length(); i += 1) {
+                float candidate = avoidLeftPx - textPaint.measureText(text, 0, i);
+                float delta = Math.abs(candidate - x);
+                if (delta < bestDelta) {
+                    bestDelta = delta;
+                    best = candidate;
+                }
+            }
+            return best;
         }
 
         /**
@@ -1469,14 +1580,19 @@ public final class FloatingLyricsOverlay {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     boolean isUp = event.getActionMasked() == MotionEvent.ACTION_UP;
-                    long held = android.os.SystemClock.elapsedRealtime() - downAtMs;
                     if (isUp && !moved && touchMode == MODE_LOCK) {
                         setLocked(!isLocked());
-                    } else if (isUp && !moved && held < ViewConfiguration.getTapTimeout() + 120L) {
-                        openApp();
                     } else if (moved && (touchMode == MODE_MOVE || touchMode == MODE_RESIZE)) {
                         persistLayout();
                     }
+                    /*
+                     * 点一下**不再跳回主页面**。
+                     *
+                     * 原来这里有个 openApp()：这一层是叠在所有窗口之上的「桌面歌词」，
+                     * 点它一下就把应用拽到前台，等于每次想拖它、想调它，手指一碰就整屏切走 ——
+                     * 尤其叠加在安全区上时，那一条就压在别的应用顶上，误触更是直接打断人家。
+                     * 现在单击什么都不做：要动它靠拖（MODE_MOVE），要上锁点右上角那颗锁。
+                     */
                     touchMode = MODE_NONE;
                     return true;
                 default:

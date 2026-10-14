@@ -129,6 +129,27 @@ export const readStoredWallpaperFloatingWidth = () => {
  * 非竖屏时原生那边不认这一条：横屏下状态栏那一条的意义完全不同，
  * 占满只会糊住一整条，所以自动退回宽度滑条给的宽。
  */
+/**
+ * 歌词字体的来路：'follow' = 跟随播放页那套，'custom' = 这两层单独指定一个字体文件。
+ *
+ * 默认 custom —— 老用户已经选过字体的，不该因为多了这个开关就悄悄失效。
+ *
+ * 为什么「跟随」在原生那两层上等于「用系统字体」：播放页的歌词字体是网页侧用
+ * FontFace 注册的（文件存在 IndexedDB 里），原生拿不到那个字节，只能不覆盖、
+ * 回落到系统 sans-serif。真正跟着播放页走的是 WebView 叠层那一层 ——
+ * 它本来就是网页，用的就是主题里那个字体。
+ */
+export const WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY = 'folia.wallpaperLyricsFontMode';
+
+export const readStoredWallpaperLyricsFontMode = (): 'follow' | 'custom' => {
+    if (typeof window === 'undefined') {
+        return 'custom';
+    }
+    return localStorage.getItem(WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY) === 'follow'
+        ? 'follow'
+        : 'custom';
+};
+
 export const WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY = 'folia.wallpaperFloatingFillSafeArea';
 
 export const readStoredWallpaperFloatingFillSafeArea = () => {

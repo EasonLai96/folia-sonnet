@@ -132,6 +132,20 @@ public final class WallpaperLyricsFont {
         if (context == null) {
             return null;
         }
+        /*
+         * 「歌词字体」选的是**跟随播放页**时，这里一律当没选 —— 渲染器回落到系统
+         * sans-serif。
+         *
+         * 播放页那个字体是网页侧用 FontFace 注册的（字节在 IndexedDB 里），
+         * 原生两层（壁纸渲染器、精简小窗）根本拿不到，能做的只有「不覆盖」。
+         * 真正跟着播放页字体走的是 WebView 叠层那一层 —— 它本来就是网页。
+         * 缺这个 key（还没推过配置）时按「单独」处理：老用户选过的不该悄悄失效。
+         */
+        java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
+        Float custom = tuning == null ? null : tuning.get("wp.lyricsFontCustom");
+        if (custom != null && custom < 0.5f) {
+            return null;
+        }
         File file = file(context);
         if (!file.exists()) {
             return null;

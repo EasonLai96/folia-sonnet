@@ -266,6 +266,12 @@ export const useLyricsWallpaperFeed = ({
         state => state.wallpaperFloatingAvoidWidth);
     const wallpaperFloatingAvoidOffsetX = useVisualizerSettingsStore(
         state => state.wallpaperFloatingAvoidOffsetX);
+    // 设置页正开着：即使在 App 里也要把那层小窗挂出来，否则在设置页看不见预览。
+    const wallpaperFloatingPreview = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingPreview);
+    // 歌词字体的来路：跟随播放页 / 单独指定。
+    const wallpaperLyricsFontMode = useVisualizerSettingsStore(
+        state => state.wallpaperLyricsFontMode);
     const wallpaperFloatingFontSizeMode = useVisualizerSettingsStore(
         state => state.wallpaperFloatingFontSizeMode);
     const wallpaperFloatingFontSize = useVisualizerSettingsStore(
@@ -303,6 +309,8 @@ export const useLyricsWallpaperFeed = ({
             wallpaperFloatingFillSafeArea,
             wallpaperFloatingAvoidWidth,
             wallpaperFloatingAvoidOffsetX,
+            wallpaperFloatingPreview,
+            wallpaperLyricsFontMode,
             wallpaperFloatingFontSizeMode,
             wallpaperFloatingFontSize,
             wallpaperOverlayEnabled,
@@ -320,7 +328,7 @@ export const useLyricsWallpaperFeed = ({
             disableVisualizerGeometricBackground, wallpaperOverlayOpacity, wallpaperFloatingOpacity,
             wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX, wallpaperFloatingWidth,
             wallpaperFloatingFillSafeArea, wallpaperFloatingAvoidWidth,
-            wallpaperFloatingAvoidOffsetX,
+            wallpaperFloatingAvoidOffsetX, wallpaperFloatingPreview, wallpaperLyricsFontMode,
             wallpaperFloatingFontSizeMode, wallpaperFloatingFontSize,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen, wallpaperOverlayLockScreenOnly, wallpaperOverlayAllApps,

@@ -113,10 +113,19 @@ export const WALLPAPER_GLOBAL_KEYS = {
     floatingAvoidWidth: 'wp.floatingAvoidWidth',
     /** 避开区域的左右位置（0 = 贴左，1 = 贴右）。 */
     floatingAvoidOffsetX: 'wp.floatingAvoidOffsetX',
+    /**
+     * 设置页正开着：即使在 App 里也把那层小窗挂出来，好让人当场看见改动。
+     *
+     * 不预览的话「实时预览」是空话 —— 正常逻辑在 App 里根本不挂这一层，
+     * 而调设置恰恰是在 App 里做的。由设置页挂载期间置 1、离开置 0。
+     */
+    floatingPreview: 'wp.floatingPreview',
     /** 字号模式：0 = 动态（跟着窗口高度算），1 = 自定义。 */
     floatingFontSizeMode: 'wp.floatingFontSizeMode',
     /** 自定义模式的字号（dp）。只在上面那个开关打开时用。 */
     floatingFontSize: 'wp.floatingFontSize',
+    /** 歌词字体是否走「单独指定」的那份（0 = 跟随播放页，不给原生两层覆盖字体）。 */
+    lyricsFontCustom: 'wp.lyricsFontCustom',
     /** 叠层总开关。关掉就一层都不挂。 */
     overlayEnabled: 'wp.overlayEnabled',
     /** 音乐锁屏：锁屏之上也挂叠层。 */
@@ -193,6 +202,9 @@ export const withGlobalSettings = (
     if (typeof floatingAvoidOffsetX === 'number' && Number.isFinite(floatingAvoidOffsetX)) {
         out[WALLPAPER_GLOBAL_KEYS.floatingAvoidOffsetX] = floatingAvoidOffsetX;
     }
+    out[WALLPAPER_GLOBAL_KEYS.floatingPreview] = settings.wallpaperFloatingPreview ? 1 : 0;
+    out[WALLPAPER_GLOBAL_KEYS.lyricsFontCustom] =
+        settings.wallpaperLyricsFontMode === 'follow' ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.floatingFontSizeMode] =
         settings.wallpaperFloatingFontSizeMode === 'custom' ? 1 : 0;
     const floatingFontSize = settings.wallpaperFloatingFontSize;

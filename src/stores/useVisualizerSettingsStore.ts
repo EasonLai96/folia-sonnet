@@ -20,8 +20,10 @@ import { setStatusMessage } from './useStatusMessageStore';
 import { WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY } from './visualizerSettingsPersistence';
 import { LUMIERE_TUNING_STORAGE_KEY, VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY,
 WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY,
+WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY,
 WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, clampCladdaghEllipseTiltDeg, clampCladdaghFocusScaleRatio, clampCladdaghLetterSpacingOffset, clampCladdaghRadiusScale, clampClassicBreathingFloatMultiplier, clampClassicWordSpacing, clampFumeBackgroundObjectOpacity, clampFumeCameraSpeed, clampFumeGlowIntensity, clampFumeHeroScale, clampFumeTextHoldRatio, clampPartitaStagger, clampUnit, readStoredBackgroundOpacity, readStoredCadenzaTuning, readStoredCappellaTuning, readStoredCladdaghTuning, readStoredClassicTuning, readStoredDioramaTuning, readStoredFumeTuning, readStoredLatentBackgroundTuning, readStoredLumiereTuning, readStoredMonetBackgroundTuning, readStoredMonetTuning, readStoredNomandBackgroundTuning, readStoredPartitaTuning, readStoredPendoloTuning, readStoredSonnetTuning, readStoredSoraBackgroundTuning, readStoredTemperaTuning, readStoredTiltTuning, readStoredUrlBackgroundList, readStoredUrlBackgroundSelectedId, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingFontSize, readStoredWallpaperFloatingFontSizeMode,
 readStoredWallpaperFloatingFillSafeArea, readStoredWallpaperFloatingAvoidWidth, readStoredWallpaperFloatingAvoidOffsetX,
+readStoredWallpaperLyricsFontMode,
 readStoredWallpaperFloatingWidth,
 readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, resolveCappellaAvatarSource, resolveFumeCameraTrackingMode, resolvePendoloNumber, resolveStoredDioramaTuning, resolveStoredLatentBackgroundTuning, resolveStoredMonetBackgroundTuning, resolveStoredMonetTuning, resolveStoredNomandBackgroundTuning, resolveStoredSoraBackgroundTuning, sanitizeTemperaLayerImages } from './visualizerSettingsPersistence';
 import { getStoredBoolean, getStoredString, setStoredBoolean, setStoredString } from './storagePrimitives';
@@ -101,6 +103,13 @@ export type VisualizerSettingsState = {
      * 单独一份：小窗是另一层系统窗口，底色的浓淡和壁纸那头、跟随样式那层 WebView
      * 叠层都无关，复用那两个滑条只会两头都对不上。
      */
+    /**
+     * 歌词字体的来路：'follow' = 跟随播放页那套，'custom' = 单独指定一个字体文件。
+     *
+     * 'custom' 才需要那个「选择字体」按钮 —— 'follow' 时选了也不该用
+     * （见 persistence 里的说明：原生那两层拿不到播放页那个字体字节）。
+     */
+    wallpaperLyricsFontMode: 'follow' | 'custom';
     wallpaperFloatingOpacity: number;
     /**
      * 「精简」样式那颗小窗直接叠在安全区（状态栏那一条）上面。
@@ -140,6 +149,13 @@ export type VisualizerSettingsState = {
     wallpaperFloatingAvoidWidth: number;
     /** 避开区域的左右位置，0 = 贴左，1 = 贴右。只在上面的宽度大于 0 时有意义。 */
     wallpaperFloatingAvoidOffsetX: number;
+    /**
+     * 设置页正开着 → 原生那层小窗即使在 App 里也挂出来（预览）。不持久化。
+     *
+     * 没有它，「实时预览」这几根滑条是空的：正常逻辑在 App 里不挂这一层，
+     * 而调设置恰恰是在 App 里做的 —— 拖到底也看不见任何东西。
+     */
+    wallpaperFloatingPreview: boolean;
     /**
      * 悬浮小窗的字号模式：'dynamic' = 跟着窗口高度算，'custom' = 自己指定。
      *
@@ -221,6 +237,14 @@ export type VisualizerSettingsState = {
     handleSetWallpaperFloatingAvoidWidth: (value: number) => void;
     /** 避开区域的左右位置。见 wallpaperFloatingAvoidOffsetX 的说明。 */
     handleSetWallpaperFloatingAvoidOffsetX: (value: number) => void;
+    /**
+     * 设置页正开着（预览）。**不落盘** —— 它是「此刻在看不在看」，不是偏好。
+     *
+     * 页面挂载 / 卸载时由设置页自己拨，关掉之后下一次启动不该还挂在那儿。
+     */
+    handleSetWallpaperFloatingPreview: (enable: boolean) => void;
+    /** 歌词字体来路。见 wallpaperLyricsFontMode 的说明。 */
+    handleSetWallpaperLyricsFontMode: (mode: 'follow' | 'custom') => void;
     handleSetWallpaperFloatingFontSizeMode: (mode: 'dynamic' | 'custom') => void;
     /** 自定义字号（dp）。见 wallpaperFloatingFontSize 的说明。 */
     handleSetWallpaperFloatingFontSize: (value: number) => void;
@@ -305,6 +329,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     wallpaperOverlayLockScreen: readStoredWallpaperOverlayLockScreen(),
     wallpaperOverlayLockScreenOnly: readStoredWallpaperOverlayLockScreenOnly(),
     wallpaperOverlayOpacity: readStoredWallpaperOverlayOpacity(),
+    wallpaperLyricsFontMode: readStoredWallpaperLyricsFontMode(),
     wallpaperFloatingOpacity: readStoredWallpaperFloatingOpacity(),
     wallpaperFloatingOverSafeArea: readStoredWallpaperFloatingOverSafeArea(),
     wallpaperFloatingOffsetX: readStoredWallpaperFloatingOffsetX(),
@@ -312,6 +337,8 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     wallpaperFloatingFillSafeArea: readStoredWallpaperFloatingFillSafeArea(),
     wallpaperFloatingAvoidWidth: readStoredWallpaperFloatingAvoidWidth(),
     wallpaperFloatingAvoidOffsetX: readStoredWallpaperFloatingAvoidOffsetX(),
+    // 预览不读存储：它是「此刻在不在设置页」，不是用户偏好。
+    wallpaperFloatingPreview: false,
     wallpaperFloatingFontSizeMode: readStoredWallpaperFloatingFontSizeMode(),
     wallpaperFloatingFontSize: readStoredWallpaperFloatingFontSize(),
     wallpaperOverlayAllApps: readStoredWallpaperOverlayAllApps(),
@@ -550,6 +577,13 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.5;
         localStorage.setItem(WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY, String(clamped));
         set({ wallpaperFloatingAvoidOffsetX: clamped });
+    },
+    handleSetWallpaperFloatingPreview: (enable) => {
+        set({ wallpaperFloatingPreview: enable });
+    },
+    handleSetWallpaperLyricsFontMode: (mode) => {
+        localStorage.setItem(WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY, mode);
+        set({ wallpaperLyricsFontMode: mode });
     },
     handleSetWallpaperFloatingFontSizeMode: (mode) => {
         localStorage.setItem(WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, mode);
