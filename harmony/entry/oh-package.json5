@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Folia HarmonyOS WebView shell.",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

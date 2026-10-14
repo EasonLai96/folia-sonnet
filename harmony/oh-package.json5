@@ -1,0 +1,12 @@
+{
+  "modelVersion": "6.0.2",
+  "name": "folia-harmony",
+  "version": "1.0.0",
+  "description": "Folia 音乐播放器的 HarmonyOS NEXT WebView 外壳工程。",
+  "dependencies": {
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.25",
+    "@ohos/hamock": "1.0.0"
+  }
+}

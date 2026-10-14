@@ -1,0 +1,6 @@
+# 混淆规则：发布构建如需开启混淆，至少保留桥接层暴露给 JS 的方法名。
+-keep-property-name
+call
+
+-keep-global-name
+FoliaHarmonyNative

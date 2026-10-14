@@ -1,0 +1,48 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Folia HarmonyOS 版"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Folia 音乐播放器"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Folia"
+    },
+    {
+      "name": "app_name",
+      "value": "Folia"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "用于加载在线音乐、歌词与封面"
+    },
+    {
+      "name": "permission_network_reason",
+      "value": "用于在无网络时给出提示"
+    },
+    {
+      "name": "permission_background_reason",
+      "value": "用于切到后台或息屏后继续播放音乐"
+    },
+    {
+      "name": "permission_read_reason",
+      "value": "用于选择相册图片（头像、歌单封面）"
+    },
+    {
+      "name": "web_load_failed",
+      "value": "页面加载失败"
+    },
+    {
+      "name": "web_retry",
+      "value": "重新加载"
+    },
+    {
+      "name": "press_back_again_to_exit",
+      "value": "再按一次退出 Folia"
+    }
+  ]
+}
