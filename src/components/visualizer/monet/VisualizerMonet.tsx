@@ -51,6 +51,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         hideCoverArt = false,
         staticMode = false,
         isPreviewMode = false,
+        isWallpaperSurface = false,
         monetTuning = DEFAULT_MONET_TUNING,
         monetPortraitImage = null,
         onMonetTuningChange,
@@ -524,7 +525,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 </div>
             </div>
 
-            {showText && monetTuning.showAudioVisualization && (
+            {!isWallpaperSurface && showText && monetTuning.showAudioVisualization && (
                 <motion.div
                     key={`audio-${introKey}`}
                     initial={{ opacity: 0, y: 15 }}
