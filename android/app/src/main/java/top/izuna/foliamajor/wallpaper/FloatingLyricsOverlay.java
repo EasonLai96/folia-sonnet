@@ -75,6 +75,14 @@ public final class FloatingLyricsOverlay {
 
     /** 开关：小窗直接叠在安全区（状态栏那一条）上面，而不是摆在屏幕里。 */
     private static final String KEY_OVER_SAFE_AREA = "wp.floatingOverSafeArea";
+    /**
+     * 叠加模式下窗口高度的下限（dp）。
+     *
+     * 正常是拿系统的 status_bar_height（一般 24~40dp）。少数 ROM 不提供那个 dimen，
+     * 读出来是 0 —— 那时窗口高度会变成 0，整层直接看不见，所以兜一个能画下
+     * 一行字的高度。
+     */
+    private static final float MIN_SAFE_AREA_HEIGHT_DP = 26f;
     /** 左右位置：0 = 贴左，1 = 贴右。只有「叠加安全区」开着时才用得上。 */
     private static final String KEY_OFFSET_X = "wp.floatingOffsetX";
     /** 用户在叠加模式下拖出来的左右位置（0~1）。拖过就以它为准，设置里改了再覆盖。 */
@@ -280,12 +288,16 @@ public final class FloatingLyricsOverlay {
         int screenW = context.getResources().getDisplayMetrics().widthPixels;
         int screenH = context.getResources().getDisplayMetrics().heightPixels;
         if (overSafeArea()) {
-            // 转屏之后宽度变了，左右比例要按新的屏幕重算一次，不然小窗会跑出去。
+            // 转屏之后宽度变了，左右比例要按新的屏幕重算一次，不然小窗会跑出去；
+            // 高度跟着新的状态栏高度走（横屏时它可能不一样）。
             int x = clampInt(Math.round((screenW - params.width) * offsetRatio()),
                     0, Math.max(0, screenW - params.width));
-            if (x != params.x || params.y != 0) {
-                applyLayout(x, 0, params.width, params.height);
+            int height = statusBarHeightPx();
+            if (x != params.x || params.height != height) {
+                applyLayout(x, params.y, params.width, height);
             }
+            // 重新挂过一次之后可能又被系统夹下来了，再顶一遍。
+            nudgeIntoCutout();
             return;
         }
         int x = clampInt(params.x, 0, Math.max(0, screenW - params.width));
@@ -305,6 +317,8 @@ public final class FloatingLyricsOverlay {
             added = true;
             // 上过锁的话还得把那颗解锁按钮单独挂起来（主窗已经整体不吃触摸了）。
             syncLockChip();
+            // 叠加模式下按实际量到的位置再往上顶一次（有些 ROM 会把这一层夹到状态栏之下）。
+            nudgeIntoCutout();
         } catch (Throwable error) {
             Log.w(TAG, "attach floating lyrics failed", error);
             view = null;
@@ -446,7 +460,11 @@ public final class FloatingLyricsOverlay {
             /*
              * 叠加在安全区上面：贴着屏幕最顶上那条放（y = 0，盖住状态栏那一带），
              * 左右由比例决定 —— 这个模式下高度方向没有意义，只给左右。
+             *
+             * 高度**锁死**成状态栏那一条：这个模式要的就是占住那一带，
+             * 让用户把它拖成三行高就等于把状态栏整条糊住了。宽度仍然可调（左右大小）。
              */
+            height = statusBarHeightPx();
             x = Math.round((screenW - width) * offsetRatio());
             y = 0;
         } else {
@@ -474,10 +492,14 @@ public final class FloatingLyricsOverlay {
                 width, height, x, y, windowType(), flags,
                 android.graphics.PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.LEFT;
-        // 让这一层不吃掉窗口 inset：它自己按存的坐标摆，系统栏那一条由用户拖出来的位置决定。
+        /*
+         * ALWAYS 而不是 SHORT_EDGES：SHORT_EDGES 只在「短边」允许延伸到挖孔区，
+         * 横屏 / 某些 ROM 上会被判成不该延伸 —— 这一层要的就是能压到屏幕最顶上，
+         * 含挖孔区在内。
+         */
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             lp.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
         }
         return lp;
     }
@@ -548,6 +570,43 @@ public final class FloatingLyricsOverlay {
     /** 小窗是否直接叠在安全区上面。 */
     private static boolean overSafeArea() {
         return tuningFlag(KEY_OVER_SAFE_AREA, false);
+    }
+
+    /**
+     * 状态栏（安全区）的高度。
+     *
+     * 不能靠网页那边的 `env(safe-area-inset-*)` —— 安卓上它只报挖孔、不报系统栏，
+     * 无刘海机型一律返回 0。这里读系统自己的 `status_bar_height`。
+     * 读到 0（极少数 ROM 不提供这个 dimen）时给一个能画下一行字的下限，
+     * 否则窗口高度会变成 0、整层直接消失。
+     */
+    private int statusBarHeightPx() {
+        int resId = context.getResources().getIdentifier("status_bar_height", "dimen", "android");
+        int value = resId > 0 ? context.getResources().getDimensionPixelSize(resId) : 0;
+        int fallback = Math.round(MIN_SAFE_AREA_HEIGHT_DP
+                * context.getResources().getDisplayMetrics().density);
+        return Math.max(value, fallback);
+    }
+
+    /**
+     * 把窗口**按实际量到的位置**再往上顶一次。
+     *
+     * `TYPE_APPLICATION_OVERLAY` 那层在不少 ROM 上会被系统夹到状态栏之下：
+     * params.y 写 0，真画出来却掉在状态栏底边。写死一个负偏移在不同 ROM 上会过头
+     * （另一批 ROM 本来就不夹，负 y 会把窗口上半截推出屏幕），所以这里反过来量：
+     * 拿到窗口在屏幕上的真实顶边，差多少就补多少。
+     */
+    private void nudgeIntoCutout() {
+        if (!overSafeArea() || view == null || params == null || !added) return;
+        view.post(() -> {
+            if (view == null || params == null) return;
+            int[] location = new int[2];
+            view.getLocationOnScreen(location);
+            int delta = -location[1];
+            if (delta != 0) {
+                applyLayout(params.x, params.y + delta, params.width, params.height);
+            }
+        });
     }
 
     /**
@@ -764,11 +823,16 @@ public final class FloatingLyricsOverlay {
                 transitionStartMs = now;
             }
 
-            float padY = dp(10);
-            float rowHeight = (height - padY * 2f) / 2f;
-            float focusY = padY + rowHeight * 0.5f;
+            /*
+             * 叠加模式下只有**一行**：窗口高度就是状态栏那一条（二十几到四十 dp），
+             * 硬塞两行的话每行只剩几个 dp，字根本画不出来。
+             */
+            boolean singleRow = overSafeArea();
+            float padY = singleRow ? Math.min(dp(6), height * 0.1f) : dp(10);
+            float rowHeight = singleRow ? (height - padY * 2f) : (height - padY * 2f) / 2f;
+            float focusY = singleRow ? height * 0.5f : padY + rowHeight * 0.5f;
             float secondY = padY + rowHeight * 1.5f;
-            float focusSize = rowHeight * 0.62f;
+            float focusSize = singleRow ? rowHeight * 0.82f : rowHeight * 0.62f;
 
             float transition = clamp01((now - transitionStartMs) / (float) LINE_ENTER_MS);
             float enter = easeOutCubic(transition);
@@ -793,13 +857,13 @@ public final class FloatingLyricsOverlay {
                 float outAlpha = appear * (1f - enter);
                 float outShift = -rise * enter;
                 drawBlock(canvas, snapshot, previous, width, focusY + outShift,
-                        secondY + outShift, focusSize, outAlpha, -1f, 1f, 0L);
+                        secondY + outShift, focusSize, outAlpha, -1f, 1f, 0L, singleRow);
             }
             float inAlpha = rolled ? enter : 1f;
             float inShift = rolled ? rise * (1f - enter) : 0f;
             drawBlock(canvas, snapshot, index, width, focusY + inShift,
                     secondY + inShift, focusSize, appear * inAlpha, progress,
-                    breath, position);
+                    breath, position, singleRow);
 
             drawControls(canvas, width, height, appear);
 
@@ -834,7 +898,8 @@ public final class FloatingLyricsOverlay {
          */
         private void drawBlock(Canvas canvas, WallpaperLyricsState.Snapshot snapshot, int index,
                                int width, float focusY, float secondY, float focusSize,
-                               float alpha, float progress, float breath, long position) {
+                               float alpha, float progress, float breath, long position,
+                               boolean singleRow) {
             if (index < 0 || index >= snapshot.lines.length || alpha <= 0.004f) return;
 
             // 焦点行：逐字（逐词）扫光 + 呼吸。
@@ -843,6 +908,9 @@ public final class FloatingLyricsOverlay {
             drawRow(canvas, snapshot.lines[index].text, width, focusY, focusSize,
                     primaryColor, alpha * breath,
                     progress, snapshot.lines[index], position, progress >= 0f);
+
+            // 叠加模式下没有第二格：那一条只有状态栏那么高，见 onDraw 里的说明。
+            if (singleRow) return;
 
             // 第二行：有翻译且开了就显示翻译，否则显示下一句。
             String translation = snapshot.showTranslation ? snapshot.lines[index].translation : null;
