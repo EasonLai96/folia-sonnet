@@ -128,6 +128,15 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     // 「精简」样式那颗悬浮歌词小窗的底色浓度。单独一根滑条，不复用叠层那根。
     const wallpaperFloatingOpacity = useVisualizerSettingsStore(state => state.wallpaperFloatingOpacity);
     const onSetWallpaperFloatingOpacity = useVisualizerSettingsStore(state => state.handleSetWallpaperFloatingOpacity);
+    // 小窗叠在安全区上面 + 叠加模式下的左右位置。
+    const wallpaperFloatingOverSafeArea = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingOverSafeArea);
+    const onToggleWallpaperFloatingOverSafeArea = useVisualizerSettingsStore(
+        state => state.handleToggleWallpaperFloatingOverSafeArea);
+    const wallpaperFloatingOffsetX = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingOffsetX);
+    const onSetWallpaperFloatingOffsetX = useVisualizerSettingsStore(
+        state => state.handleSetWallpaperFloatingOffsetX);
     const wallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.wallpaperOverlayAllApps);
     const onToggleWallpaperOverlayAllApps = useVisualizerSettingsStore(state => state.handleToggleWallpaperOverlayAllApps);
     const wallpaperOverlayHideNativeLyrics = useVisualizerSettingsStore(state => state.wallpaperOverlayHideNativeLyrics);
@@ -518,6 +527,47 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                         </div>
                                     )}
                                 />
+                                {/* 叠在安全区上面：小窗贴到屏幕最顶上那一条（盖住状态栏），
+                                    此时高度方向不再参与摆放，只给左右。 */}
+                                <SettingsRow
+                                    title={t('options.floatingLyricsOverSafeArea')}
+                                    description={t('options.floatingLyricsOverSafeAreaDesc')}
+                                    dividerClass={dividerClass}
+                                    control={(
+                                        <button
+                                            type="button"
+                                            onClick={() => onToggleWallpaperFloatingOverSafeArea(!wallpaperFloatingOverSafeArea)}
+                                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperFloatingOverSafeArea ? toggleOffBackgroundClass : ''}`}
+                                            style={{ backgroundColor: wallpaperFloatingOverSafeArea ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                                        >
+                                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperFloatingOverSafeArea ? 'translate-x-6' : 'translate-x-0'}`} />
+                                        </button>
+                                    )}
+                                />
+                                {/* 叠加模式下的左右位置。只给初值：原生那边拖过之后以拖出来的为准。 */}
+                                {wallpaperFloatingOverSafeArea && (
+                                    <SettingsRow
+                                        title={t('options.floatingLyricsOffsetX')}
+                                        description={t('options.floatingLyricsOffsetXDesc')}
+                                        dividerClass={dividerClass}
+                                        control={(
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={100}
+                                                    step={5}
+                                                    value={Math.round(wallpaperFloatingOffsetX * 100)}
+                                                    onChange={(event) => onSetWallpaperFloatingOffsetX(Number(event.target.value) / 100)}
+                                                    className="h-1 w-28 cursor-pointer accent-white"
+                                                />
+                                                <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                                    {Math.round(wallpaperFloatingOffsetX * 100)}%
+                                                </span>
+                                            </div>
+                                        )}
+                                    />
+                                )}
                                 {/* 拖到角落 / 缩到最小又上了锁之后光靠手势弄不回来，
                                     所以这里给一颗「重置」当出口。 */}
                                 <SettingsRow

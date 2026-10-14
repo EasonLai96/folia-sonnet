@@ -252,6 +252,11 @@ export const useLyricsWallpaperFeed = ({
     const wallpaperOverlayOpacity = useVisualizerSettingsStore(state => state.wallpaperOverlayOpacity);
     // 「精简」样式那颗悬浮歌词小窗的底色浓度。跟着同一张 tuning 表下发。
     const wallpaperFloatingOpacity = useVisualizerSettingsStore(state => state.wallpaperFloatingOpacity);
+    // 小窗叠在安全区上 + 叠加模式下的左右位置。同样走 tuning 表下发。
+    const wallpaperFloatingOverSafeArea = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingOverSafeArea);
+    const wallpaperFloatingOffsetX = useVisualizerSettingsStore(
+        state => state.wallpaperFloatingOffsetX);
     const wallpaperOverlayEnabled = useVisualizerSettingsStore(state => state.wallpaperOverlayEnabled);
     const wallpaperOverlayLockScreen = useVisualizerSettingsStore(state => state.wallpaperOverlayLockScreen);
     const wallpaperOverlayLockScreenOnly = useVisualizerSettingsStore(
@@ -279,6 +284,8 @@ export const useLyricsWallpaperFeed = ({
             disableVisualizerGeometricBackground,
             wallpaperOverlayOpacity,
             wallpaperFloatingOpacity,
+            wallpaperFloatingOverSafeArea,
+            wallpaperFloatingOffsetX,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen,
             wallpaperOverlayLockScreenOnly,
@@ -292,6 +299,7 @@ export const useLyricsWallpaperFeed = ({
         }),
         [rawTuning, backgroundOpacity, disableVisualizerVignette,
             disableVisualizerGeometricBackground, wallpaperOverlayOpacity, wallpaperFloatingOpacity,
+            wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen, wallpaperOverlayLockScreenOnly, wallpaperOverlayAllApps,
             wallpaperOverlayHideNativeLyrics, wallpaperOverlayHideNativeProgress,

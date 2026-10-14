@@ -83,6 +83,15 @@ export const WALLPAPER_GLOBAL_KEYS = {
      * 和跟随样式那层 WebView 叠层（overlayOpacity）都无关，共用只会两头对不上。
      */
     floatingBackgroundOpacity: 'wp.floatingBackgroundOpacity',
+    /**
+     * 「精简」样式那颗小窗直接叠在安全区（状态栏那一条）上面。
+     *
+     * 开之后小窗贴在屏幕最顶上（y = 0），高度方向不再参与摆放，只给左右；
+     * 关着时它还是那个能上下左右拖的桌面小窗。
+     */
+    floatingOverSafeArea: 'wp.floatingOverSafeArea',
+    /** 叠加模式下小窗的左右位置（0 = 贴左，1 = 贴右）。只在这个开关打开时生效。 */
+    floatingOffsetX: 'wp.floatingOffsetX',
     /** 叠层总开关。关掉就一层都不挂。 */
     overlayEnabled: 'wp.overlayEnabled',
     /** 音乐锁屏：锁屏之上也挂叠层。 */
@@ -138,6 +147,12 @@ export const withGlobalSettings = (
     const floatingOpacity = settings.wallpaperFloatingOpacity;
     if (typeof floatingOpacity === 'number' && Number.isFinite(floatingOpacity)) {
         out[WALLPAPER_GLOBAL_KEYS.floatingBackgroundOpacity] = floatingOpacity;
+    }
+    out[WALLPAPER_GLOBAL_KEYS.floatingOverSafeArea] =
+        settings.wallpaperFloatingOverSafeArea ? 1 : 0;
+    const floatingOffsetX = settings.wallpaperFloatingOffsetX;
+    if (typeof floatingOffsetX === 'number' && Number.isFinite(floatingOffsetX)) {
+        out[WALLPAPER_GLOBAL_KEYS.floatingOffsetX] = floatingOffsetX;
     }
     out[WALLPAPER_GLOBAL_KEYS.overlayEnabled] = settings.wallpaperOverlayEnabled === false ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.showOnLockScreen] = settings.wallpaperOverlayLockScreen ? 1 : 0;

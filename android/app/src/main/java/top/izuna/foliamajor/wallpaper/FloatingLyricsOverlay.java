@@ -73,6 +73,13 @@ public final class FloatingLyricsOverlay {
     /** 小窗底色的默认浓度。滑条没推过来时用它（与 store 里那个缺省值同一个数）。 */
     private static final float DEFAULT_BACKGROUND_OPACITY = 0.62f;
 
+    /** 开关：小窗直接叠在安全区（状态栏那一条）上面，而不是摆在屏幕里。 */
+    private static final String KEY_OVER_SAFE_AREA = "wp.floatingOverSafeArea";
+    /** 左右位置：0 = 贴左，1 = 贴右。只有「叠加安全区」开着时才用得上。 */
+    private static final String KEY_OFFSET_X = "wp.floatingOffsetX";
+    /** 用户在叠加模式下拖出来的左右位置（0~1）。拖过就以它为准，设置里改了再覆盖。 */
+    private static final String KEY_DRAG_RATIO = "drag_ratio";
+
     private static volatile FloatingLyricsOverlay instance;
 
     public static synchronized FloatingLyricsOverlay shared(Context context) {
@@ -154,6 +161,8 @@ public final class FloatingLyricsOverlay {
                         .remove(KEY_W)
                         .remove(KEY_H)
                         .remove(KEY_LOCKED)
+                        // 叠加模式拖出来的左右位置也一起清：不然「重置」完小窗还在老的那一侧。
+                        .remove(KEY_DRAG_RATIO)
                         .apply();
                 if (added && view != null) {
                     WindowManager.LayoutParams fresh = buildParams();
@@ -270,6 +279,15 @@ public final class FloatingLyricsOverlay {
         if (params == null) return;
         int screenW = context.getResources().getDisplayMetrics().widthPixels;
         int screenH = context.getResources().getDisplayMetrics().heightPixels;
+        if (overSafeArea()) {
+            // 转屏之后宽度变了，左右比例要按新的屏幕重算一次，不然小窗会跑出去。
+            int x = clampInt(Math.round((screenW - params.width) * offsetRatio()),
+                    0, Math.max(0, screenW - params.width));
+            if (x != params.x || params.y != 0) {
+                applyLayout(x, 0, params.width, params.height);
+            }
+            return;
+        }
         int x = clampInt(params.x, 0, Math.max(0, screenW - params.width));
         int y = clampInt(params.y, 0, Math.max(0, screenH - params.height));
         if (x != params.x || y != params.y) {
@@ -422,17 +440,28 @@ public final class FloatingLyricsOverlay {
         width = clampInt(width, Math.round(MIN_WIDTH_DP * density), Math.round(MAX_WIDTH_DP * density));
         height = clampInt(height, Math.round(MIN_HEIGHT_DP * density), Math.round(MAX_HEIGHT_DP * density));
 
-        int x = prefs.getInt(KEY_X, Integer.MIN_VALUE);
-        int y = prefs.getInt(KEY_Y, Integer.MIN_VALUE);
-        boolean hasPosition = x != Integer.MIN_VALUE && y != Integer.MIN_VALUE;
-        if (!hasPosition) {
-            // 默认落在屏幕上方三分之一处居中：桌面歌词放中间会挡住图标，放最上面又压状态栏。
-            x = Math.max(0, (screenW - width) / 2);
-            y = Math.round(screenH * 0.22f);
+        int x;
+        int y;
+        if (overSafeArea()) {
+            /*
+             * 叠加在安全区上面：贴着屏幕最顶上那条放（y = 0，盖住状态栏那一带），
+             * 左右由比例决定 —— 这个模式下高度方向没有意义，只给左右。
+             */
+            x = Math.round((screenW - width) * offsetRatio());
+            y = 0;
+        } else {
+            x = prefs.getInt(KEY_X, Integer.MIN_VALUE);
+            y = prefs.getInt(KEY_Y, Integer.MIN_VALUE);
+            boolean hasPosition = x != Integer.MIN_VALUE && y != Integer.MIN_VALUE;
+            if (!hasPosition) {
+                // 默认落在屏幕上方三分之一处居中：桌面歌词放中间会挡住图标，放最上面又压状态栏。
+                x = Math.max(0, (screenW - width) / 2);
+                y = Math.round(screenH * 0.22f);
+            }
+            // 换了屏幕（转屏 / 换设备）之后原来那个位置可能已经在屏幕外了，拉回来。
+            x = clampInt(x, 0, Math.max(0, screenW - width));
+            y = clampInt(y, 0, Math.max(0, screenH - height));
         }
-        // 换了屏幕（转屏 / 换设备）之后原来那个位置可能已经在屏幕外了，拉回来。
-        x = clampInt(x, 0, Math.max(0, screenW - width));
-        y = clampInt(y, 0, Math.max(0, screenH - height));
 
         int flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
@@ -516,6 +545,31 @@ public final class FloatingLyricsOverlay {
         return clamp(value, 0.05f, 1f);
     }
 
+    /** 小窗是否直接叠在安全区上面。 */
+    private static boolean overSafeArea() {
+        return tuningFlag(KEY_OVER_SAFE_AREA, false);
+    }
+
+    /**
+     * 叠加模式下的左右位置（0~1）。
+     *
+     * 拖过就以拖出来的为准：设置里那根滑条只是给个初值，用户上手一拖就该听他的，
+     * 否则每次巡检都用设置值把小窗拽回去，看起来就是「拖不动」。
+     */
+    private float offsetRatio() {
+        float dragged = prefs.getFloat(KEY_DRAG_RATIO, Float.NaN);
+        if (Float.isFinite(dragged)) return clamp01(dragged);
+        return clamp01(rawTuningFloat(KEY_OFFSET_X, 0.5f));
+    }
+
+    /** 读一个 wp. 开头的原始数值（不夹到 0.05：左右位置需要允许取 0）。 */
+    private static float rawTuningFloat(String key, float fallback) {
+        java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
+        Float value = tuning == null ? null : tuning.get(key);
+        if (value == null || !Float.isFinite(value)) return fallback;
+        return value;
+    }
+
     private static float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -571,6 +625,20 @@ public final class FloatingLyricsOverlay {
         private int accentColor = 0xFF7C5CFF;
         private int baseColor = 0xFF09090B;
         private long paletteStamp = -1L;
+        /**
+         * AI 主题里被标了色的那些词（主题的 `wordColors`）。
+         *
+         * 从叠层那一份主题 JSON 里解析出来（见 WallpaperThemePalette.readThemeJson），
+         * 缓存住 —— 那是几百上千字符的 JSON，逐帧解析不划算。
+         */
+        private FloatingWordColors.Rule[] wordRules = FloatingWordColors.EMPTY;
+        /** 解析 wordRules 时用的那份 JSON，用来判断主题换没换。 */
+        private String wordThemeJson = null;
+        // 下面三个是「当前这一行的片段表」的小缓存：换行的 420ms 里同一行会被画几十帧，
+        // 每帧都重新匹配一遍纯属浪费（一次匹配要扫几条短语 × 几十个词）。
+        private WallpaperLyricsState.TimedLine cachedSegmentLine = null;
+        private FloatingWordColors.Rule[] cachedSegmentRules = null;
+        private FloatingWordColors.Segment[] cachedSegments = null;
 
         // ---- 触摸 ----
         private static final int MODE_NONE = 0;
@@ -607,6 +675,24 @@ public final class FloatingLyricsOverlay {
             primaryColor = parseColor(palette[0], 0xFFFFFFFF);
             secondaryColor = parseColor(palette[1], 0xB3FFFFFF);
             paletteStamp = snapshot.stamp;
+            syncWordRules();
+        }
+
+        /**
+         * 主题换过就重解析一次 `wordColors`。
+         *
+         * 不能只挂在 `paletteStamp` 上：换主题走的是 `setAppearance` 那条路，
+         * 它不动 stamp（stamp 只在换歌时变）—— 只认 stamp 的话「暂停时换个 AI 主题」
+         * 小窗这边就永远看不到新配色。所以每帧自己比一次 JSON 串：
+         * SharedPreferences 读出来的是同一份缓存对象，绝大多数帧只是比个引用。
+         */
+        private void syncWordRules() {
+            String themeJson = WallpaperThemePalette.readThemeJson(context);
+            if (themeJson == null ? wordThemeJson == null : themeJson.equals(wordThemeJson)) {
+                return;
+            }
+            wordThemeJson = themeJson;
+            wordRules = FloatingWordColors.parse(themeJson);
         }
 
         private int parseColor(String value, int fallback) {
@@ -633,6 +719,8 @@ public final class FloatingLyricsOverlay {
             WallpaperLyricsState.Snapshot snapshot = WallpaperLyricsState.get();
             if (snapshot.stamp != paletteStamp) {
                 refreshPalette();
+            } else {
+                syncWordRules();
             }
 
             long now = android.os.SystemClock.elapsedRealtime();
@@ -795,46 +883,86 @@ public final class FloatingLyricsOverlay {
             Paint.FontMetrics metrics = textPaint.getFontMetrics();
             float baseline = centerY - (metrics.ascent + metrics.descent) / 2f;
 
-            textPaint.setAlpha(Math.round(clamp01(alpha) * 255f));
+            int textAlpha = Math.round(clamp01(alpha) * 255f);
+            textPaint.setAlpha(textAlpha);
+            // 第一遍：整行的主色（还没唱到的那部分）。
             canvas.drawText(text, x, baseline, textPaint);
 
             if (progress < 0f || line == null) return;
-            float swept = sweptWidth(textPaint, line, text, positionMs, progress);
-            if (swept <= 0.5f) return;
 
-            canvas.save();
-            canvas.clipRect(x - dp(2), centerY - fontSize * 1.2f, x + swept + dp(2), centerY + fontSize * 1.2f);
-            textPaint.setColor(accentColor);
-            textPaint.setAlpha(Math.round(clamp01(alpha) * 255f));
-            canvas.drawText(text, x, baseline, textPaint);
-            canvas.restore();
+            float clipTop = centerY - fontSize * 1.2f;
+            float clipBottom = centerY + fontSize * 1.2f;
+            WallpaperLyricsState.TimedWord[] words = line.words;
+            if (words == null || words.length == 0) {
+                // 没有逐词轴：整行按进度线性推进（老做法）。
+                float swept = measured * clamp01(progress);
+                if (swept <= 0.5f) return;
+                canvas.save();
+                canvas.clipRect(x - dp(2), clipTop, x + swept + dp(2), clipBottom);
+                textPaint.setColor(accentColor);
+                textPaint.setAlpha(textAlpha);
+                canvas.drawText(text, x, baseline, textPaint);
+                canvas.restore();
+                return;
+            }
+
+            /*
+             * 第二遍：**逐词**重画唱过的那一段。
+             *
+             * 为什么要一个词一个词画而不是整行裁一刀：AI 主题给某些词单独标了颜色，
+             * 那些词唱过去时要用它自己的颜色（播放页也是这么做的），
+             * 一整行只能有一个颜色，做不到。
+             *
+             * 每个词都画**整行**再裁到它自己那一小段：直接只画词自己的文本会丢掉
+             * 整行里相邻字符之间的 shaping（西文尤其明显），位置也会和第一遍错开。
+             */
+            FloatingWordColors.Segment[] segments = segmentsFor(line);
+            for (int i = 0; i < words.length; i += 1) {
+                WallpaperLyricsState.TimedWord word = words[i];
+                if (word == null || word.text == null || word.text.isEmpty()) continue;
+                float ratio = sungRatio(word, positionMs);
+                if (ratio <= 0f) continue;
+                FloatingWordColors.Segment segment = segments[i];
+                if (segment == null || segment.endOffset <= segment.startOffset) continue;
+                float wordX = x + textPaint.measureText(text, 0, segment.startOffset);
+                float wordWidth = textPaint.measureText(text, segment.startOffset, segment.endOffset);
+                if (wordWidth <= 0f) continue;
+                float swept = ratio >= 1f ? wordWidth : wordWidth * ratio;
+                canvas.save();
+                canvas.clipRect(wordX, clipTop, wordX + swept, clipBottom);
+                textPaint.setColor(segment.color == FloatingWordColors.NO_COLOR
+                        ? accentColor
+                        : segment.color);
+                textPaint.setAlpha(textAlpha);
+                canvas.drawText(text, wordX, baseline, textPaint);
+                canvas.restore();
+            }
         }
 
         /**
-         * 唱到哪个位置（像素）。
+         * 这一行的片段表（每个词落在整行哪儿、被标了什么颜色）。
          *
-         * 有逐词时间轴就按词算（和 App 里那份 LRC 的粒度一致）；没有就退化成整行按进度线性推。
+         * 只认「同一行 + 同一套规则」：两者都是引用比较，`TimedLine` 没有重写 equals，
+         * 而 `wordRules` 只在换主题时才换对象 —— 于是换行的 420ms 里几十帧只算一次。
          */
-        private float sweptWidth(TextPaint paint, WallpaperLyricsState.TimedLine line, String text,
-                                 long positionMs, float progress) {
-            WallpaperLyricsState.TimedWord[] words = line.words;
-            if (words == null || words.length == 0) {
-                return paint.measureText(text) * clamp01(progress);
+        private FloatingWordColors.Segment[] segmentsFor(WallpaperLyricsState.TimedLine line) {
+            if (cachedSegmentLine == line && cachedSegmentRules == wordRules
+                    && cachedSegments != null) {
+                return cachedSegments;
             }
-            StringBuilder done = new StringBuilder();
-            for (int i = 0; i < words.length; i += 1) {
-                WallpaperLyricsState.TimedWord word = words[i];
-                if (word == null) continue;
-                if (positionMs >= word.endMs) {
-                    done.append(word.text);
-                    continue;
-                }
-                float headWidth = done.length() == 0 ? 0f : paint.measureText(done.toString());
-                long span = word.endMs - word.startMs;
-                float ratio = span <= 0 ? 1f : clamp01((positionMs - word.startMs) / (float) span);
-                return headWidth + paint.measureText(word.text) * ratio;
-            }
-            return paint.measureText(text);
+            cachedSegmentLine = line;
+            cachedSegmentRules = wordRules;
+            cachedSegments = FloatingWordColors.segments(line.text, line.words, wordRules);
+            return cachedSegments;
+        }
+
+        /** 一个词唱过了多少（0..1）。整行没有逐词轴时不走这里。 */
+        private float sungRatio(WallpaperLyricsState.TimedWord word, long positionMs) {
+            if (positionMs >= word.endMs) return 1f;
+            if (positionMs <= word.startMs) return 0f;
+            long span = word.endMs - word.startMs;
+            if (span <= 0L) return 1f;
+            return clamp01((positionMs - word.startMs) / (float) span);
         }
 
         /** 右上角那颗锁（常驻，锁了也能解锁）与右下角的拉伸把手（锁了就不画）。 */
@@ -948,9 +1076,23 @@ public final class FloatingLyricsOverlay {
             if (params == null) return;
             int screenW = getResources().getDisplayMetrics().widthPixels;
             int screenH = getResources().getDisplayMetrics().heightPixels;
+            if (overSafeArea()) {
+                // 贴着安全区这个模式只给左右：上下没有意义，y 恒为 0（拖也拖不动）。
+                int x = clampInt((int) (startWinX + dx), 0, Math.max(0, screenW - params.width));
+                applyLayout(x, 0, params.width, params.height);
+                persistOffsetRatio(x, screenW);
+                return;
+            }
             int x = clampInt((int) (startWinX + dx), 0, Math.max(0, screenW - params.width));
             int y = clampInt((int) (startWinY + dy), 0, Math.max(0, screenH - params.height));
             applyLayout(x, y, params.width, params.height);
+        }
+
+        /** 叠加模式下拖出来的左右位置要自己记住：不然下一次巡检又按设置值把它拽回去。 */
+        private void persistOffsetRatio(int x, int screenW) {
+            int span = Math.max(0, screenW - (params == null ? 0 : params.width));
+            float ratio = span <= 0 ? 0f : x / (float) span;
+            prefs.edit().putFloat(KEY_DRAG_RATIO, clamp01(ratio)).apply();
         }
 
         private void resizeBy(float dx, float dy) {

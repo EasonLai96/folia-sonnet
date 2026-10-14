@@ -69,6 +69,36 @@ export const readStoredWallpaperFloatingOpacity = () => {
 };
 
 /**
+ * 「精简」小窗是否直接叠在安全区（状态栏那一条）上面。默认关 ——
+ * 开着会压住状态栏，那是用户主动选的，不该是默认值。
+ */
+export const WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY = 'folia.wallpaperFloatingOverSafeArea';
+
+export const readStoredWallpaperFloatingOverSafeArea = () => {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+    return localStorage.getItem(WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY) === 'true';
+};
+
+/**
+ * 叠加安全区时小窗的左右位置（0 = 贴左，1 = 贴右）。默认 0.5 = 居中。
+ *
+ * 它只是**初值**：用户上手拖过之后原生那边记的是拖出来的比例，
+ * 这里再改会覆盖回去（真正的「拖不动」只能靠设置里改这个值来修）。
+ */
+export const WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY = 'folia.wallpaperFloatingOffsetX';
+
+export const readStoredWallpaperFloatingOffsetX = () => {
+    if (typeof window === 'undefined') {
+        return 0.5;
+    }
+    const saved = localStorage.getItem(WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY);
+    const parsed = saved ? parseFloat(saved) : 0.5;
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.5;
+};
+
+/**
  * 叠层总开关。
  *
  * 关掉之后一层都不挂（原生那层歌词照旧）。它同时也是「叠层由应用进程托管」的开关 ——
