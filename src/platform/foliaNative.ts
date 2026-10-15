@@ -123,6 +123,41 @@ interface FoliaNativePlugin {
 const FoliaNative = registerPlugin<FoliaNativePlugin>('FoliaNative');
 
 /**
+ * 当前手上有没有「真正把应用关掉」这条路。
+ *
+ * 桌面端 Electron 给 quitApp；安卓这边是 exitApp（销毁 Activity）。浏览器里两者都没有，
+ * 界面上就不该摆「退出应用」这一项 —— 摆了也只能 silently 退化成暂停，不如说清楚。
+ */
+export const canExitApp = (): boolean => (
+    isCapacitorAndroid() || Boolean(window.electron?.quitApp)
+);
+
+/**
+ * 定时关闭的「退出应用」。
+ *
+ * 走 Async 顺序（await 抛错才 return false，不是 reject）。失败由调用方自己兜底：
+ * 到点了却退不掉，至少得把播放停了，而不是假装什么都没发生。
+ */
+export const requestAppExit = async (): Promise<boolean> => {
+    if (isCapacitorAndroid()) {
+        try {
+            await FoliaNative.exitApp();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+    if (window.electron?.quitApp) {
+        try {
+            return await window.electron.quitApp();
+        } catch {
+            return false;
+        }
+    }
+    return false;
+};
+
+/**
  * 进出可视化歌词页面时切换系统栏。
  *
  * 只有歌词页需要整块屏幕；其余页面状态栏一直显示。

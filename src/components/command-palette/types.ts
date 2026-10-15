@@ -331,6 +331,15 @@ export type CommandPaletteSettingsContext = {
     sleepTimerMinutes: number;
     setSleepTimerMinutes: (minutes: number) => void;
     sleepTimerDeadlineMs: number | null;
+    /** 到点之后干什么。控制面板那一行现在能选，命令面板只按它显示提示语。 */
+    sleepTimerEndAction: 'pause' | 'quit';
+    /**
+     * 把定时方式挪回「分钟后」。
+     *
+     * 控制面板里可以把方式切成「小时」或「定时（几点）」，那时这两边的 hours / minutes
+     * 不再驱动倒计时；命令面板一改时长就把方式拉回来，最后一次改动为准，不会互相打架。
+     */
+    setSleepTimerMinutesMode: () => void;
     canGenerateAITheme: boolean;
     isGeneratingTheme: boolean;
     generateAITheme: () => void;

@@ -122,6 +122,7 @@ export const useCommandPaletteContext = (
         sleepTimerHours: state.sleepTimerHours,
         sleepTimerMinutes: state.sleepTimerMinutes,
         sleepTimerDeadlineMs: state.sleepTimerDeadlineMs,
+        sleepTimerEndAction: state.sleepTimerEndAction,
     })));
     const latticeSignals = useLatticeSettingsStore(useShallow(state => ({
         latticePosterTintEnabled: state.latticePosterTintEnabled,

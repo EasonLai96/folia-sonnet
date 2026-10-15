@@ -3,6 +3,7 @@ import { Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import { DioramaSettingsToggle } from '../visualizer/diorama/DioramaSettingsToggle';
+import type { SleepTimerEndAction } from '../../services/sleepTimerPlan';
 
 // src/components/command-palette/SleepTimerControl.tsx
 
@@ -13,6 +14,8 @@ type SleepTimerControlProps = {
     hours: number;
     minutes: number;
     deadlineMs: number | null;
+    /** 控制面板那一栏选的结束方式；这里按它决定提示语说「关闭」还是「暂停」。 */
+    endAction: SleepTimerEndAction;
     queryFeedback: { isError: boolean; text: string } | null;
     onEnabledChange: (enabled: boolean) => void;
     onHoursChange: (hours: number) => void;
@@ -75,6 +78,7 @@ const SleepTimerControl: React.FC<SleepTimerControlProps> = ({
     hours,
     minutes,
     deadlineMs,
+    endAction,
     queryFeedback,
     onEnabledChange,
     onHoursChange,
@@ -97,13 +101,13 @@ const SleepTimerControl: React.FC<SleepTimerControlProps> = ({
         ? t('commandPalette.sleepTimerDisabledHint', 'Turn it on to start the timer')
         : hours === 0 && minutes === 0
             ? t('commandPalette.sleepTimerZeroHint', 'Choose a duration greater than zero')
-            : t(
-                window.electron?.quitApp
-                    ? 'commandPalette.sleepTimerCountdownHint'
-                    : 'commandPalette.sleepTimerPauseCountdownHint',
-                window.electron?.quitApp ? 'Closing in {{time}}' : 'Pausing playback in {{time}}',
-            )
-                .replace('{{time}}', formatRemaining(remainingMs ?? (hours * 3600 + minutes * 60) * 1000));
+        : t(
+            endAction === 'quit'
+                ? 'commandPalette.sleepTimerCountdownHint'
+                : 'commandPalette.sleepTimerPauseCountdownHint',
+            endAction === 'quit' ? 'Closing in {{time}}' : 'Pausing playback in {{time}}',
+        )
+            .replace('{{time}}', formatRemaining(remainingMs ?? (hours * 3600 + minutes * 60) * 1000));
     const hint = queryFeedback?.text ?? timerHint;
 
     return (

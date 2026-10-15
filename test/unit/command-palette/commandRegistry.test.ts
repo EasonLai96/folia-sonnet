@@ -163,6 +163,8 @@ const createContext = (overrides: CommandPaletteContextOverrides = {}): CommandP
             sleepTimerMinutes: 0,
             setSleepTimerMinutes: vi.fn(),
             sleepTimerDeadlineMs: null,
+            sleepTimerEndAction: 'pause',
+            setSleepTimerMinutesMode: vi.fn(),
             canGenerateAITheme: true,
             isGeneratingTheme: false,
             generateAITheme: vi.fn(),

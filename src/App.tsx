@@ -428,6 +428,10 @@ export default function App() {
         sleepTimerEnabled,
         sleepTimerHours,
         sleepTimerMinutes,
+        sleepTimerMode,
+        sleepTimerClockHour,
+        sleepTimerClockMinute,
+        sleepTimerEndAction,
     } = useSleepTimerStore(useShallow(selectSleepTimerSnapshot));
     const {
         disableHomeDynamicBackground,
@@ -1853,10 +1857,18 @@ export default function App() {
         pausePlayback();
         setStatusMsg({ type: 'info', text: t('notifications.sleepTimerPlaybackPaused') });
     }, [pausePlayback, setStatusMsg, t]);
+    // 到点了要暂停就暂停，要退出就在停完之后退出应用 —— 「怎么结束」现在由那一栏自己选，
+    // 这里只是把选择连同三种定时方式（分钟后 / 小时后 / 到几点）交给倒计时。
     useSleepTimer({
         enabled: sleepTimerEnabled,
-        hours: sleepTimerHours,
-        minutes: sleepTimerMinutes,
+        plan: {
+            mode: sleepTimerMode,
+            hours: sleepTimerHours,
+            minutes: sleepTimerMinutes,
+            clockHour: sleepTimerClockHour,
+            clockMinute: sleepTimerClockMinute,
+        },
+        endAction: sleepTimerEndAction,
         onExpireFallback: handleSleepTimerExpireFallback,
     });
     // Saving or clearing a segmentation has to re-lay the current song's lyrics, so it needs the

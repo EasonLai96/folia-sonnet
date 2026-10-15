@@ -25,11 +25,13 @@ export const sleepTimerSurface: CommandPaletteSurface = {
                 ? context.settings.sleepTimerMinutes
                 : previewTotalMinutes % 60,
             deadlineMs: context.settings.sleepTimerDeadlineMs,
+            endAction: context.settings.sleepTimerEndAction,
             queryFeedback: queryResult
                 ? describeSleepTimerQuery(queryResult, context.shared.t)
                 : null,
             onEnabledChange: (enabled: boolean) => {
                 if (enabled && previewTotalMinutes !== null) {
+                    context.settings.setSleepTimerMinutesMode();
                     context.settings.setSleepTimerHours(Math.floor(previewTotalMinutes / 60));
                     context.settings.setSleepTimerMinutes(previewTotalMinutes % 60);
                 }
@@ -38,10 +40,12 @@ export const sleepTimerSurface: CommandPaletteSurface = {
             },
             onHoursChange: (hours: number) => {
                 setQuery('');
+                context.settings.setSleepTimerMinutesMode();
                 context.settings.setSleepTimerHours(hours);
             },
             onMinutesChange: (minutes: number) => {
                 setQuery('');
+                context.settings.setSleepTimerMinutesMode();
                 context.settings.setSleepTimerMinutes(minutes);
             },
         };

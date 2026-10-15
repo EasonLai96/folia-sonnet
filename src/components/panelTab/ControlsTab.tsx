@@ -9,10 +9,11 @@ import { useThemeSyncAction } from '../../hooks/useThemeSyncAction';
 import AudioEqualizerDialog from './AudioEqualizerDialog';
 import AppearanceSection from './controls/AppearanceSection';
 import SongActionRow from './controls/SongActionRow';
+import SleepTimerRow from './controls/SleepTimerRow';
 import VolumeRow from './controls/VolumeRow';
 
 // src/components/panelTab/ControlsTab.tsx
-// 控制标签页只负责装配：歌曲动作、音量、外观区，以及底部的当前主题行。
+// 控制标签页只负责装配：歌曲动作、音量、定时关闭、外观区，以及底部的当前主题行。
 
 interface ControlsTabProps {
     loopMode: 'off' | 'all' | 'one' | 'shuffle';
@@ -125,6 +126,8 @@ const ControlsTab: React.FC<ControlsTabProps> = ({
                 />
 
                 <div className="pt-2 border-t border-white/5 space-y-3">
+                    <SleepTimerRow theme={theme} isDaylight={isDaylight} />
+
                     <VolumeRow
                         volume={volume}
                         isMuted={isMuted}
