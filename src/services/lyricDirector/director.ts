@@ -4,8 +4,8 @@ import { selectDisplayLyrics, selectDisplaySong, usePlaybackStore } from '../../
 import { useAudioSettingsStore } from '../../stores/useAudioSettingsStore';
 import { setStatusMessage } from '../../stores/useStatusMessageStore';
 import { omni } from '../onlineMusic/omni';
-import { fingerprintLyricSource, pushAiCloudCache, withAiCloudCache } from '../aiCloudCache';
-import { describeAiTarget, requestAiCompletion, translateAiCompletionError } from '../aiCompletion';
+import { requestStage } from '../aiStage';
+import { describeAiTarget, translateAiCompletionError } from '../aiCompletion';
 import type { AiCompletionTarget } from '../aiCompletion';
 import {
     formatParamValue,
@@ -14,29 +14,19 @@ import {
     isBlockedDirectorMode,
     isInertValue,
     isKnownDirectorMode,
-    listDirectorModes,
     modeLabel,
     sanitizeParams,
     tuningStateKey,
     MODE_PARAMS,
 } from './catalog';
-import {
-    REASON_MAX_CHARS,
-    buildSourcePrompt,
-    buildSystemPrompt,
-    extractJsonText,
-    MAX_TOKENS,
-    type DirectorLyricLine,
-    type DirectorSongInfo,
+import type {
+    DirectorLyricLine,
+    DirectorSongInfo,
 } from './prompt';
 import {
-    countDecisions,
     noteRecentMode,
-    readDecision,
     readDirectorSettings,
-    readRecentModes,
     readSnapshot,
-    writeDecision,
     writeSnapshotOnce,
 } from './state';
 import type { SongResult, VisualizerMode } from '../../types';
@@ -88,7 +78,6 @@ export interface DirectorRuntime {
     currentModeLabel: string;
     aiKnown: boolean;
     aiTarget: AiCompletionTarget | null;
-    rememberedSongCount: number;
 }
 
 // ------------------------------------------------------------------ song identity
@@ -186,7 +175,6 @@ function buildRuntime(): DirectorRuntime {
         currentModeLabel: modeLabel(mode, translate),
         aiKnown,
         aiTarget,
-        rememberedSongCount: countDecisions(),
     };
 }
 
@@ -364,6 +352,14 @@ export const restoreLyricDirectorSnapshot = (): string => {
 
 // ------------------------------------------------------------------ the request
 
+/*
+ * 动画决策走统一 stage 入口（services/aiStage.ts）。
+ *
+ * 切歌后主题那条链路通常已经先问过同一段歌词了 —— policy 由同一个函数算出来，指纹相同，
+ * 这里直接命中它留下的结果，不再发第二次请求。以前这两件事是各自单独问一次模型的。
+ *
+ * 「按歌记住」现在由云缓存承担：命中缓存 = 沿用这首歌上次的答案，跨设备也一样。
+ */
 const requestDecision = async (input: {
     song: DirectorSongInfo | null;
     lines: DirectorLyricLine[];
@@ -371,110 +367,33 @@ const requestDecision = async (input: {
     force: boolean;
 }): Promise<{ mode: string; reason: string; params: Record<string, unknown> }> => {
     const settings = readDirectorSettings();
-    const key = input.targetSongKey ?? currentSongKey();
-    const previous = key ? readDecision(key) : null;
-    // A blocked mode is simply absent from the list the AI is shown: it cannot
-    // pick what it never saw.
-    const modes = listDirectorModes(translate).filter((mode) => !isBlockedDirectorMode(mode.id, settings.blockedModes));
-    const system = buildSystemPrompt(settings.userHint);
-    const prompt = buildSourcePrompt({
-        song: input.song,
-        lines: input.lines,
-        modes,
-        currentMode: currentModeOf(useVisualizerSettingsStore.getState()),
-        userHint: settings.userHint,
-        recentModes: readRecentModes(),
-        blockedModes: settings.blockedModes,
-        previousChoice: previous
-            ? { mode: previous.mode, params: previous.params, reason: previous.reason, forced: input.force }
-            : null,
-    });
-
     /*
-     * 云缓存的键：歌词正文 + 影响判断的那几个设置。
-     *
-     * 只按歌词做键是不对的 —— 用户把某个样式屏蔽掉、或者改了提示语之后，
-     * 同一份歌词的最优答案会变。把这些都并进 policy，设置一变就重新问，
-     * 不会拿到上一个设置下的旧答案。
+     * 请求自己不带中止，登记到 inFlight 里，好让 abortLyricDirectorRequests()
+     * 在切歌时把它掐掉 —— 否则一首歌切走之后，上一次的判断还在路上，回来时
+     * 会把结果画到已经换了的那首歌上。
      */
-    const lyricSource = input.lines.map(line => line.fullText).join('\n');
-    const policy = JSON.stringify({
-        hint: settings.userHint,
-        blocked: [...settings.blockedModes].sort(),
-        modes: modes.map(mode => mode.id),
-        force: input.force,
-    });
-    const cacheFingerprint = fingerprintLyricSource('director', lyricSource, policy);
-
-    const generate = async (): Promise<{ mode: string; reason: string; params: Record<string, unknown> }> => {
-        const controller = new AbortController();
-        inFlight.add(controller);
-        try {
-            const { text } = await requestAiCompletion({
-                system,
-                prompt,
-                maxTokens: MAX_TOKENS,
-                json: true,
-                signal: controller.signal,
-            });
-            let parsed: unknown;
-            try {
-                parsed = JSON.parse(extractJsonText(text));
-            } catch (error) {
-                throw new Error(`AI 返回的内容无法解析为 JSON：${String((error as Error)?.message ?? error)}`);
-            }
-            const raw = parsed as { mode?: unknown; reason?: unknown; params?: unknown } | null;
-            if (!raw || typeof raw !== 'object' || typeof raw.mode !== 'string') {
-                throw new Error('AI 返回的 JSON 里没有可用的 mode 字段。');
-            }
-            return {
-                mode: raw.mode,
-                reason: typeof raw.reason === 'string' ? raw.reason : '',
-                params: raw.params && typeof raw.params === 'object' ? raw.params as Record<string, unknown> : {},
-            };
-        } finally {
-            inFlight.delete(controller);
-        }
-    };
-
-    /* 「重新判断」就是要一个新的答案 —— 这时候别去问缓存，直接生成。 */
-    if (input.force) {
-        const value = await generate();
-        void pushAiCloudCache('director', cacheFingerprint, value, {
+    const controller = new AbortController();
+    inFlight.add(controller);
+    try {
+        const { decision } = await requestStage({
+            song: input.song,
+            lines: input.lines,
+            /* 没歌词就是纯音乐，和主题那条链路同一个判定 —— 指纹要对得上。 */
+            isPureMusic: input.lines.length === 0,
             songTitle: input.song?.title ?? '',
+            hint: settings.userHint,
+            blockedModes: settings.blockedModes,
+            currentMode: currentModeOf(useVisualizerSettingsStore.getState()),
+            /* 关掉「按歌记住」= 每次都重新问一次模型，不复用云缓存里那份旧答案。 */
+            force: input.force || !settings.rememberPerSong,
+            signal: controller.signal,
+            require: 'decision',
         });
-        return value;
+        if (!decision) throw new Error('AI 没有返回可用的动画决策。');
+        return decision;
+    } finally {
+        inFlight.delete(controller);
     }
-
-    const { value } = await withAiCloudCache({
-        kind: 'director',
-        fingerprint: cacheFingerprint,
-        validate: (payload) => validateCachedDecision(payload, settings.blockedModes),
-        generate,
-        songTitle: input.song?.title ?? '',
-    });
-    return value;
-};
-
-/*
- * 缓存里的答案是别人机器上生成的，这里一律当不可信输入：
- * mode 不认识、或者恰好是本机屏蔽掉的样式，就跟没命中一样重新问。
- */
-const validateCachedDecision = (
-    payload: unknown,
-    blockedModes: readonly string[],
-): { mode: string; reason: string; params: Record<string, unknown> } | null => {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-    const raw = payload as { mode?: unknown; reason?: unknown; params?: unknown };
-    if (typeof raw.mode !== 'string' || !raw.mode.trim()) return null;
-    const mode = raw.mode.trim();
-    if (!isKnownDirectorMode(mode)) return null;
-    if (isBlockedDirectorMode(mode, blockedModes)) return null;
-    return {
-        mode,
-        reason: typeof raw.reason === 'string' ? raw.reason.slice(0, REASON_MAX_CHARS) : '',
-        params: sanitizeParams(mode, raw.params),
-    };
 };
 
 const toast = (text: string, type: 'info' | 'success' | 'error') => {
@@ -487,27 +406,6 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
     const settings = readDirectorSettings();
     const songKey = currentSongKey();
     if (!songKey || !songInfoOf(displaySong())) return { kind: 'no-song' };
-
-    // A stored decision is applied without asking the AI again — unless it names
-    // a mode the user has blocked since, in which case it is decided afresh.
-    if (!force && settings.rememberPerSong) {
-        const remembered = readDecision(songKey);
-        if (remembered && !isBlockedDirectorMode(remembered.mode, settings.blockedModes) && currentSongKey() === songKey) {
-            snapshotSettings();
-            const result = applyDecision(remembered, {
-                applyParams: settings.applyParams,
-                blockedModes: settings.blockedModes,
-            });
-            lastReason = remembered.reason;
-            const changes = result.applied.length > 0 ? result.applied.join('，') : translate('aiDirector.nothingToChange');
-            lastSummary = `${changes}${translate('aiDirector.fromMemory')}`;
-            const text = `${lastSummary}${lastReason ? `（${lastReason}）` : ''}`;
-            refreshRuntime();
-            if (announce) toast(translate('aiDirector.toastApplied').replace('{{text}}', text), 'info');
-            void prefetchNextSong();
-            return { kind: 'applied', text };
-        }
-    }
 
     const liveKey = currentSongKey();
     if (!liveKey || !songInfoOf(displaySong())) return { kind: 'no-song' };
@@ -529,23 +427,12 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
             force,
         });
 
-        /* The track changed while the AI was thinking: this answer describes a song
-         * that is no longer playing, so it is remembered for *that* song instead of
-         * being painted onto the new one. */
+        /* The track changed while the AI was thinking: this answer describes a
+         * song that is no longer playing, so it is dropped rather than painted
+         * onto the new one. It stays in the cloud cache under *that* song's
+         * fingerprint, so the next play comes back for free. */
         const nowKey = currentSongKey();
         if (nowKey !== inFlightSongKey) {
-            if (settings.rememberPerSong && inFlightSongKey) {
-                const candidate = typeof decision?.mode === 'string' ? decision.mode.trim() : '';
-                // The current mode is NOT a valid fallback here: it belongs to a
-                // different song, so an unknown id is dropped instead.
-                if (isKnownDirectorMode(candidate) && !isBlockedDirectorMode(candidate, settings.blockedModes)) {
-                    writeDecision(inFlightSongKey, {
-                        mode: candidate,
-                        reason: decision.reason.slice(0, REASON_MAX_CHARS),
-                        params: sanitizeParams(candidate, decision.params),
-                    });
-                }
-            }
             return { kind: 'stale' };
         }
 
@@ -558,14 +445,6 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
         lastSummary = result.applied.length > 0
             ? result.applied.join('，')
             : translate('aiDirector.nothingToChange');
-        const hadLyrics = currentLines().length > 0;
-        if (settings.rememberPerSong && inFlightSongKey && hadLyrics) {
-            writeDecision(inFlightSongKey, {
-                mode: result.mode,
-                reason: lastReason.slice(0, REASON_MAX_CHARS),
-                params: sanitizeParams(result.mode, decision.params),
-            });
-        }
         noteRecentMode(result.mode);
         const text = `${lastSummary}${lastReason ? `（${lastReason}）` : ''}`;
         refreshRuntime();
@@ -626,11 +505,7 @@ const prefetchNextSong = async (): Promise<void> => {
     const key = songKeyOf(song);
     if (!key || key === prefetchedSongKey) return;
     if (key === songKeyOf(displaySong())) return;
-    if (!settings.rememberPerSong) return; // nowhere to park the answer
-    if (readDecision(key)) {
-        prefetchedSongKey = key;
-        return;
-    }
+    if (!settings.rememberPerSong) return; // 关掉「按歌记住」就不预先问
 
     prefetchedSongKey = key;
     try {
@@ -641,25 +516,17 @@ const prefetchNextSong = async (): Promise<void> => {
             return;
         }
         if (busy || songKeyOf(displaySong()) === key) return;
-        const decision = await requestDecision({
+        /*
+         * 预先问一次：答案由 requestStage 自己推进云端缓存与进程内缓存，等这首歌真正
+         * 开始播放时，导演链路按同一个指纹命中它，就不用再等一次模型了。
+         * 本地不再落盘 —— 结果只有一份，存在云端。
+         */
+        await requestDecision({
             song: songInfoOf(song),
             lines,
             targetSongKey: key,
             force: false,
         });
-        if (busy || songKeyOf(displaySong()) === key) return;
-        const candidate = typeof decision?.mode === 'string' ? decision.mode.trim() : '';
-        const blockedNow = readDirectorSettings().blockedModes;
-        if (!isKnownDirectorMode(candidate) || isBlockedDirectorMode(candidate, blockedNow)) return;
-        const existing = readDecision(key);
-        if (existing && existing.at > 0) return; // a newer answer is already there
-        if (readDirectorSettings().rememberPerSong) {
-            writeDecision(key, {
-                mode: candidate,
-                reason: decision.reason.slice(0, REASON_MAX_CHARS),
-                params: sanitizeParams(candidate, decision.params),
-            });
-        }
     } catch {
         prefetchedSongKey = null; // a failed prefetch must not block a later retry
     }

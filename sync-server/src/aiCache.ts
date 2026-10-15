@@ -21,7 +21,13 @@ const DEFAULT_LIST_LIMIT = 200;
 const KIND_PATTERN = /^[a-z0-9_-]{1,32}$/;
 const KEY_PATTERN = /^[a-f0-9]{32}$/;
 
-export type AiCacheKind = 'theme' | 'director';
+/*
+ * 只有一种条目：stage = 「这段歌词对应的主题 + 歌词动画」。
+ *
+ * 客户端合并成一次请求之后，服务端也就只留一种。表面上 `kind` 还在 URL 里，
+ * 是为了以后再加别的缓存时不用改路由和表结构。
+ */
+export type AiCacheKind = 'stage';
 
 export interface AiCacheEntry {
   kind: string;

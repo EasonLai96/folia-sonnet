@@ -44,6 +44,12 @@ export interface DirectorPromptInput {
     previousChoice?: DirectorPreviousChoice | null;
     /** Modes the AI must not pick: left out of the list *and* of the parameter space. */
     blockedModes?: readonly string[];
+    /*
+     * Off in the combined stage request (services/aiStage.ts): the lyrics are
+     * already at the end of that prompt, so the director half must not send a
+     * second copy — same words twice doubles the input for no gain.
+     */
+    includeLyrics?: boolean;
 }
 
 const SYSTEM_PROMPT = [
@@ -147,7 +153,9 @@ export const buildSourcePrompt = (input: DirectorPromptInput): string => {
         out.push('', '各模式可调参数（键(范围或取值)；未列出的键不要使用）：');
         specEntries.forEach(([modeId, value]) => out.push(`- ${modeId}: ${value}`));
     }
-    out.push('', '歌词片段：', buildLyricSnippet(lines));
+    if (input.includeLyrics !== false) {
+        out.push('', '歌词片段：', buildLyricSnippet(lines));
+    }
     return out.join('\n');
 };
 

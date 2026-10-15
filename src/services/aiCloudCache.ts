@@ -21,7 +21,14 @@ const REQUEST_TIMEOUT_MS = 12_000;
 /** 同一个键刚问过「没有」就别再问，省一次往返。 */
 const MISS_TTL_MS = 5 * 60 * 1000;
 
-export type AiCloudCacheKind = 'theme' | 'director';
+/*
+ * 只有一种。
+ *
+ * 主题与动画决策合成一次请求之后，服务端也只留一种条目：一条 stage =
+ * 「这段歌词对应的主题 + 动画」。以前 theme / director 各存一条，同一段歌词交两遍，
+ * 两条链路各拉自己那条 —— 既浪费空间，也没法一次往返同时喂饱两条链路。
+ */
+export type AiCloudCacheKind = 'stage';
 
 /** `/api/ai-cache/<kind>/<md5>`。 */
 export const resolveAiCloudCacheUrl = (kind: AiCloudCacheKind, key: string): string => (
@@ -155,10 +162,17 @@ export const withAiCloudCache = async <T>(options: {
     generate: () => Promise<T>;
     validate: (value: unknown) => T | null;
     songTitle?: string;
+    /**
+     * 别去问云端，直接生成 —— 「重新判断」就是要一个跟缓存里不一样的答案。
+     *
+     * 少了这一条，force 只是跳过了进程内缓存，云端那份照样命中，用户点
+     * 「重新判断」永远是同一个结果。
+     */
+    skipPull?: boolean;
 }): Promise<{ value: T; source: AiCloudCacheSource }> => {
-    const { kind, fingerprint, generate, validate, songTitle } = options;
+    const { kind, fingerprint, generate, validate, songTitle, skipPull } = options;
 
-    if (isFoliaCloudCacheEnabled()) {
+    if (!skipPull && isFoliaCloudCacheEnabled()) {
         const pulled = await pullAiCloudCache(kind, fingerprint);
         const validated = pulled.status === 'hit' ? validate(pulled.payload) : null;
         if (validated !== null) return { value: validated, source: 'cloud' };

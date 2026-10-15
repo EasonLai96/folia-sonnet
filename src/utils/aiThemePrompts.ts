@@ -84,7 +84,14 @@ export const parseAiThemeJsonInput = (input: string): Partial<DualTheme> => {
     throw new Error('Invalid AI theme JSON format', { cause: lastError });
 };
 
-export const THEME_GENERATION_PROMPT_PREFIX = `Analyze the mood of the provided song source text and generate TWO visual theme configurations for a music player - one for LIGHT mode and one for DARK mode.
+/*
+ * Rules and output shape are kept apart on purpose: the same rules feed two
+ * contracts — a bare `{ light, dark }` when only a theme is asked for, and
+ * `{ theme: { light, dark }, mode, reason, params }` when the lyric animation
+ * is decided in the same round trip (services/aiStage.ts). Merging them into
+ * one string would make the model answer in the wrong shape for one caller.
+ */
+const THEME_GENERATION_RULES = `Analyze the mood of the provided song source text and generate TWO visual theme configurations for a music player - one for LIGHT mode and one for DARK mode.
 
 DUAL THEME REQUIREMENTS:
 1. Generate TWO complete themes: one optimized for LIGHT/DAYLIGHT mode, one for DARK/MIDNIGHT mode.
@@ -133,9 +140,10 @@ IMPORTANT for 'wordColors':
 
 IMPORTANT for 'lyricsIcons':
 1. Identify 3-5 visual concepts/objects mentioned in or strongly implied by the source text.
-2. Return them as valid Lucide React icon names (PascalCase, e.g., 'CloudLightning', 'HeartHandshake').
+2. Return them as valid Lucide React icon names (PascalCase, e.g., 'CloudLightning', 'HeartHandshake').`;
 
-OUTPUT CONTRACT:
+/** 只问主题时的契约：顶层就是 light / dark。 */
+const THEME_OUTPUT_CONTRACT_DUAL = `OUTPUT CONTRACT:
 Return one JSON object with required "light" and "dark" objects. Each theme object requires "name", "backgroundColor", "primaryColor", "accentColor", "secondaryColor", "wordColors", and "lyricsIcons".
 
 Expected JSON structure:
@@ -171,6 +179,53 @@ Expected JSON structure:
     "lyricsIcons": ["string", "string"]
   }
 }`;
+
+/** 主题与歌词动画一起问时的契约：主题整体收进 "theme"，旁边再给动画决策。 */
+const THEME_OUTPUT_CONTRACT_STAGE = `OUTPUT CONTRACT:
+The theme half is exactly what the rules above describe, just nested one level under "theme".
+
+Return one JSON object with ALL of the following keys:
+- "theme": an object with required "light" and "dark" objects. Each theme object requires "name", "backgroundColor", "primaryColor", "accentColor", "secondaryColor", "wordColors", and "lyricsIcons".
+- "mode": a string — the id of the chosen lyric animation mode, exactly as written in the mode list.
+- "reason": a short Chinese sentence (30 characters or fewer) explaining why that mode fits.
+- "params": an object of that mode's tunable parameters; leave out anything you are not sure about.
+
+Expected JSON structure:
+{
+  "theme": {
+    "light": {
+      "name": "string (max 10 chars, in Chinese)",
+      "description": "string (15-30 chars, in Chinese)",
+      "backgroundColor": "hex string",
+      "primaryColor": "hex string",
+      "accentColor": "hex string",
+      "secondaryColor": "hex string",
+      "wordColors": [ { "word": "string", "color": "hex string" } ],
+      "lyricsIcons": ["string", "string"]
+    },
+    "dark": {
+      "name": "string (max 10 chars, in Chinese)",
+      "description": "string (15-30 chars, in Chinese)",
+      "backgroundColor": "hex string",
+      "primaryColor": "hex string",
+      "accentColor": "hex string",
+      "secondaryColor": "hex string",
+      "wordColors": [ { "word": "string", "color": "hex string" } ],
+      "lyricsIcons": ["string", "string"]
+    }
+  },
+  "mode": "string (a mode id from the list)",
+  "reason": "string (max 30 chars, in Chinese)",
+  "params": { "<param key>": <value> }
+}`;
+
+/** 只生成主题那一版的完整提示词（保持原有形状）。 */
+export const THEME_GENERATION_PROMPT_PREFIX =
+    `${THEME_GENERATION_RULES}\n\n${THEME_OUTPUT_CONTRACT_DUAL}`;
+
+/** 主题与歌词动画合成一次请求时用的那一版（services/aiStage.ts）。 */
+export const THEME_GENERATION_STAGE_PREFIX =
+    `${THEME_GENERATION_RULES}\n\n${THEME_OUTPUT_CONTRACT_STAGE}`;
 
 export const buildThemeSourcePrompt = (snippet: string, isPureMusic: boolean, songTitle?: string) => `Pure instrumental: ${isPureMusic ? 'yes' : 'no'}
 ${isPureMusic && songTitle ? `Song title: ${songTitle}\n` : ''}Source snippet:

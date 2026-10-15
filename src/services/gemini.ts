@@ -5,7 +5,18 @@ import { getWebAiProvider } from "./runtimeConfig";
 import { resolveFoliaApiUrl } from "./webApi";
 import { recordAiThemeAttempt, type AiThemeTrigger } from "../utils/aiThemeDiagnostics";
 import { generateThemeWithConfiguredAi, isLocalAiThemeAvailable } from "./aiThemeClient";
-import { fingerprintLyricSource, pullAiCloudCache, pushAiCloudCache } from "./aiCloudCache";
+import { pullAiCloudCache, pushAiCloudCache } from "./aiCloudCache";
+import {
+    STAGE_CACHE_KIND,
+    buildStagePolicy,
+    fingerprintStage,
+    normalizeStagePayload,
+    notifyCloudCacheHit,
+    requestStage,
+    resolveStageLyricSource,
+    type StageLyricLine,
+} from "./aiStage";
+import { readDirectorSettings } from "./lyricDirector/state";
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
@@ -15,22 +26,9 @@ const getErrorMessage = (error: unknown) => {
 };
 
 /*
- * Cloud cache entries are untrusted input: they came off a server anyone can
- * push to. A shape check runs before they are let anywhere near the player —
- * a malformed payload is treated as a miss rather than an error.
+ * 云端缓存条目的形状校验放在 services/aiStage.ts —— 缓存是任何人都能推的，
+ * 先校验再用，形状不对就跟没命中一样。
  */
-const isThemeShaped = (value: unknown): value is Theme => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const theme = value as Record<string, unknown>;
-  return typeof theme.backgroundColor === 'string'
-    && typeof theme.primaryColor === 'string';
-};
-
-const isDualThemeShaped = (value: unknown): value is DualTheme => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return isThemeShaped(record.light) && isThemeShaped(record.dark);
-};
 
 export const isMissingAiApiKeyError = (error: unknown) => {
   const message = getErrorMessage(error);
@@ -44,7 +42,14 @@ export const isMissingAiApiKeyError = (error: unknown) => {
  */
 export const generateThemeFromLyrics = async (
   lyricsText: string,
-  options?: { isPureMusic?: boolean; songTitle?: string; trigger?: AiThemeTrigger }
+  options?: {
+    isPureMusic?: boolean;
+    songTitle?: string;
+    artist?: string;
+    album?: string | null;
+    trigger?: AiThemeTrigger;
+    lines?: readonly StageLyricLine[];
+  }
 ): Promise<DualTheme> => {
   const provider = getWebAiProvider();
   const trigger = options?.trigger ?? 'unknown';
@@ -52,20 +57,41 @@ export const generateThemeFromLyrics = async (
   // HTTP 失败那条在分支里已经记过，catch 只补没走到响应的（网络错误、解析失败），不重复记。
   let recorded = false;
 
+  const directorSettings = readDirectorSettings();
+  const blockedModes = directorSettings.blockedModes ?? [];
   /*
-   * 云缓存的键取的是「喂给模型的那段歌词原文」的 MD5，纯音乐时喂的是标题 ——
-   * 所以 policy 里要把这个区别带上，否则纯音乐和同名词曲会互相拿错答案。
+   * 歌词正文优先用调用方给的歌词行，没有才退回 `lyricsText` 字符串 ——
+   * 两处必须拼出同一段文字，否则与导演链路的指纹对不上，一次请求省下的
+   * 那次模型调用就没了。
    */
-  const cacheFingerprint = fingerprintLyricSource(
-    'theme',
-    lyricsText,
-    `pure:${options?.isPureMusic === true}`,
+  const lyricLines = options?.lines ?? [];
+  const resolved = resolveStageLyricSource({
+      lines: lyricLines as { fullText?: string }[],
+      isPureMusic: options?.isPureMusic === true,
+      songTitle: options?.songTitle ?? '',
+  });
+  const cacheFingerprint = fingerprintStage(
+    resolved.lyricSource,
+    buildStagePolicy({
+      isPureMusic: resolved.isPureMusic,
+      hint: directorSettings.userHint,
+      blocked: blockedModes,
+    }),
   );
 
   try {
-    /* 先问缓存。命中就不用 Key 了 —— 没填 Key 的人靠这个也能出主题。 */
-    const hit = await pullAiCloudCache('theme', cacheFingerprint);
-    if (hit.status === 'hit' && isDualThemeShaped(hit.payload)) {
+    /*
+     * 先问缓存 —— 命中就不用调模型了，没填 Key 的人靠这个也能出主题。
+     *
+     * 这里自己拉一次、不直接进 requestStage，是因为「桌面版走 Electron 主进程」
+     * 这条路拿不到合并 prompt：它只能出主题，出不了动画决策，也就没法复用
+     * requestStage 内部的统一编排。
+     */
+    const hit = await pullAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint);
+    const cachedTheme = hit.status === 'hit'
+      ? normalizeStagePayload(hit.payload, blockedModes)?.theme ?? null
+      : null;
+    if (cachedTheme) {
       recorded = true;
       recordAiThemeAttempt({
         provider,
@@ -74,7 +100,8 @@ export const generateThemeFromLyrics = async (
         ok: true,
         durationMs: Date.now() - startedAt,
       });
-      return applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(hit.payload));
+      notifyCloudCacheHit();
+      return applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(cachedTheme));
     }
 
     // Check if running in Electron environment
@@ -82,20 +109,40 @@ export const generateThemeFromLyrics = async (
       const dualTheme = await (window as any).electron.generateTheme(lyricsText, options);
       const theme = sanitizeDualTheme(dualTheme);
       recordAiThemeAttempt({ provider, trigger, stage: 'request', ok: true, durationMs: Date.now() - startedAt });
-      void pushAiCloudCache('theme', cacheFingerprint, theme, { songTitle: options?.songTitle });
+      void pushAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint, { theme }, { songTitle: options?.songTitle });
       return theme;
     }
 
     /*
      * 设备本地直连：安卓没有 Electron 主进程，也没有部署自带的 generate-theme 端点，
      * 两条路都走不通 —— 这就是「AI 主题」在 App 里一直是灰的的原因。
-     * 用户在设置里填了自己的 Key 之后走这条，请求直接从设备发出去（安卓经原生 OkHttp 桥
-     * 绕开 CORS）。它自己会记诊断，这里不要再记一条。
+     *
+     * 用户在设置里填了自己的 Key 之后走这条，请求直接从设备发出去（安卓经原生
+     * OkHttp 桥绕开 CORS）。主题与歌词动画合成一次请求（services/aiStage.ts）：
+     * 一次往返两份答案，另一半留给动画导演，切一首歌只烧一次调用。
      */
     if (isLocalAiThemeAvailable()) {
-      const dualTheme = await generateThemeWithConfiguredAi(lyricsText, options);
-      void pushAiCloudCache('theme', cacheFingerprint, dualTheme, { songTitle: options?.songTitle });
-      return dualTheme;
+      const stage = await requestStage({
+        song: {
+          title: options?.songTitle ?? '',
+          artist: options?.artist ?? '',
+          album: options?.album ?? null,
+        },
+        lines: lyricLines as { fullText?: string }[],
+        isPureMusic: resolved.isPureMusic,
+        songTitle: options?.songTitle,
+        require: 'theme',
+      });
+      if (!stage.theme) throw new Error('AI 没有返回可用的主题。');
+      recorded = true;
+      recordAiThemeAttempt({
+        provider,
+        trigger,
+        stage: stage.source === 'cloud' ? 'cloud-cache' : 'request',
+        ok: true,
+        durationMs: Date.now() - startedAt,
+      });
+      return applyStoredAnimationIntensityToDualTheme(stage.theme);
     }
 
     const endpoint = resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme');
@@ -133,9 +180,13 @@ export const generateThemeFromLyrics = async (
       status: response.status,
       durationMs: Date.now() - startedAt,
     });
-    const theme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme as DualTheme));
-    void pushAiCloudCache('theme', cacheFingerprint, theme, { songTitle: options?.songTitle });
-    return theme;
+    /*
+     * 存进去的是「未经动画强度处理」的原始那份，取出来时才叠加。
+     * 存已处理的、取时再处理一遍，强度会被叠乘，越用越偏。
+     */
+    const theme = sanitizeDualTheme(dualTheme as DualTheme);
+    void pushAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint, { theme }, { songTitle: options?.songTitle });
+    return applyStoredAnimationIntensityToDualTheme(theme);
   } catch (error) {
     if (!recorded) {
       recordAiThemeAttempt({
