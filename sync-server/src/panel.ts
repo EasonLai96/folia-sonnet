@@ -19,6 +19,7 @@ const shell = (title: string, body: string, script: string): string => `<!DOCTYP
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <title>${escapeHtml(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -463,7 +464,7 @@ const buildPreview = async () => {
  * 一个明确的落点 —— 否则界面只是把表单清空，看不出成功没成功。
  */
 let thanksTimer = 0;
-const showUploadThanks = (fontName: string): void => {
+const showUploadThanks = (fontName) => {
   const node = document.getElementById('upload-thanks');
   if (!node) return;
   node.textContent = '感谢你的贡献，' + fontName + ' 已上架';
@@ -522,7 +523,7 @@ document.getElementById('refresh-fonts').addEventListener('click', () => { void 
 document.getElementById('refresh-cache').addEventListener('click', () => { void loadCache(); });
 
 /* 概况图是服务端按 minutes 现画的，换窗口就换一次 src；加个时间戳戳破缓存。 */
-const reloadStatsImage = (): void => {
+const reloadStatsImage = () => {
   const minutes = String(document.getElementById('stats-minutes')?.value || '5');
   const image = document.getElementById('stats-image');
   if (image instanceof HTMLImageElement) {
