@@ -2741,6 +2741,8 @@ export default {
     "cloudCacheProbeOk": "Layanan awan dapat dihubungi",
     "cloudCacheProbeFailed": "Tidak dapat menghubungi layanan awan: ",
     "cloudCachePrivacy": "Yang diunggah hanya hasil generasi (JSON tema / parameter animasi) dan MD5 file lirik — bukan teks lirik, prompt, maupun kunci.",
+    "cloudCacheHit": "Cache awan cocok — tidak ada pemanggilan model kali ini",
+    "openProviderConsole": "Buka konsol {{provider}}",
     "fontMarket": "Pasar font",
     "fontMarketDesc": "Font yang diterbitkan dari panel admin. Daftar memakai preview yang dibuat saat upload; file font baru diunduh setelah Anda menekan Pakai.",
     "fontMarketSearch": "Cari nama atau kategori",

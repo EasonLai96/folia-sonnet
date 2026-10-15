@@ -111,6 +111,7 @@ const shell = (title: string, body: string, script: string): string => `<!DOCTYP
   .toolbar input, .toolbar select { width: auto; min-width: 140px; }
   .empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
   .err { color: #fca5a5; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .ok { color: var(--ok); font-size: 12px; margin-top: 10px; min-height: 16px; }
   .warn {
     margin-bottom: 18px; padding: 12px 14px; border-radius: 14px; font-size: 12px; line-height: 1.6;
     background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.32); color: #fcd34d;
@@ -229,6 +230,7 @@ export const renderPanelPage = (): string => shell('Folia 云服务后台', `
     <div class="err" id="upload-error"></div>
     <div class="row">
       <button class="primary" id="do-upload" disabled>上传上架</button>
+      <span class="ok" id="upload-thanks" hidden></span>
     </div>
   </div>
 
@@ -249,8 +251,7 @@ export const renderPanelPage = (): string => shell('Folia 云服务后台', `
       <h2 style="margin:0 12px 0 0;">缓存条目（<span id="cache-count">0</span>）</h2>
       <select id="cache-kind">
         <option value="">全部类型</option>
-        <option value="theme">AI 主题</option>
-        <option value="director">AI 导演</option>
+        <option value="stage">主题 + 动画</option>
       </select>
       <input type="text" id="cache-search" placeholder="搜索 MD5 / 歌名" />
       <button id="refresh-cache">刷新</button>
@@ -335,7 +336,7 @@ const renderCache = () => {
   document.getElementById('cache-empty').hidden = visible.length > 0;
   document.getElementById('cache-rows').innerHTML = visible.map((entry) => (
     '<tr>'
-    + '<td>' + esc(entry.kind === 'theme' ? 'AI 主题' : 'AI 导演') + '</td>'
+    + '<td>' + esc(entry.kind === 'stage' ? '主题 + 动画' : entry.kind || '—') + '</td>'
     + '<td class="mono">' + esc(String(entry.key || '').slice(0, 10)) + '…</td>'
     + '<td>' + esc(entry.songTitle || '—') + '</td>'
     + '<td>' + esc(fmtBytes(entry.payloadBytes)) + '</td>'
@@ -438,6 +439,22 @@ const buildPreview = async () => {
   }
 };
 
+/*
+ * 上传成功后道一声谢。
+ *
+ * 字体是别人无偿传上来的，一句「感谢你的贡献」是应当的；顺便也给了「上传确实生效了」
+ * 一个明确的落点 —— 否则界面只是把表单清空，看不出成功没成功。
+ */
+let thanksTimer = 0;
+const showUploadThanks = (fontName: string): void => {
+  const node = document.getElementById('upload-thanks');
+  if (!node) return;
+  node.textContent = '感谢你的贡献，' + fontName + ' 已上架';
+  node.hidden = false;
+  window.clearTimeout(thanksTimer);
+  thanksTimer = window.setTimeout(() => { node.hidden = true; }, 6000);
+};
+
 const uploadFont = async () => {
   const file = document.getElementById('font-file').files?.[0];
   const errorNode = document.getElementById('upload-error');
@@ -448,10 +465,11 @@ const uploadFont = async () => {
   const button = document.getElementById('do-upload');
   button.disabled = true;
   try {
+    const fontName = String(document.getElementById('font-name').value || '').trim() || file.name;
     const form = new FormData();
     form.append('file', file, file.name);
     form.append('preview', previewBlob, 'preview.png');
-    form.append('name', String(document.getElementById('font-name').value || '').trim());
+    form.append('name', fontName);
     form.append('category', String(document.getElementById('font-category').value || 'sans'));
     form.append('license', String(document.getElementById('font-license').value || '').trim());
     const response = await fetch('/admin/api/fonts', { method: 'POST', body: form });
@@ -463,6 +481,7 @@ const uploadFont = async () => {
     document.getElementById('preview-holder').innerHTML = '';
     previewBlob = null;
     errorNode.textContent = '';
+    showUploadThanks(fontName);
     await refreshAll();
   } catch (error) {
     errorNode.textContent = '上传失败：' + String(error?.message || error);

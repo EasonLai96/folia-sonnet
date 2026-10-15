@@ -1,5 +1,5 @@
 import React, { useState, useSyncExternalStore } from 'react';
-import { Check, Cloud, Loader2, Sparkles, X } from 'lucide-react';
+import { Check, Cloud, ExternalLink, Loader2, Sparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
     readAiSettings,
@@ -7,6 +7,7 @@ import {
     type AiProviderId,
 } from '../../../services/aiSettings';
 import { resolveAiCloudCacheUrl } from '../../../services/aiCloudCache';
+import { STAGE_CACHE_KIND } from '../../../services/aiStage';
 import {
     getFoliaCloudSettingsVersion,
     readFoliaCloudSettings,
@@ -43,6 +44,26 @@ type TestState = 'idle' | 'running' | 'done';
  * written to, so "connected" only ever means "the endpoint answered".
  */
 const CLOUD_CACHE_PROBE_KEY = '00000000000000000000000000000000';
+
+/*
+ * 选完供应商，下一步就是去拿 Key。
+ *
+ * 各家开放平台的入口都不好找，而且改过好几次 —— 与其让用户自己去搜，不如把链接
+ * 直接摆在选项下面。
+ */
+const PROVIDER_CONSOLE_URLS: Record<AiProviderId, string> = {
+    gemini: 'https://aistudio.google.com/apikey',
+    deepseek: 'https://platform.deepseek.com/api_keys',
+    openai: 'https://platform.openai.com/api-keys',
+};
+
+const providerLabelOf = (provider: AiProviderId, t: (key: string) => string): string => (
+    provider === 'deepseek'
+        ? 'DeepSeek'
+        : provider === 'openai'
+            ? t('options.otherCompatibleApi')
+            : 'Google Gemini'
+);
 
 const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardClass, isDaylight }) => {
     const { t } = useTranslation();
@@ -85,7 +106,7 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
         const startedAt = Date.now();
         try {
             const response = await createAiFetch()(
-                resolveAiCloudCacheUrl('theme', CLOUD_CACHE_PROBE_KEY),
+                resolveAiCloudCacheUrl(STAGE_CACHE_KIND, CLOUD_CACHE_PROBE_KEY),
                 { method: 'GET', headers: { Accept: 'application/json' } },
             );
             if (!response.ok) {
@@ -187,6 +208,19 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                     {renderProviderOption('deepseek', 'DeepSeek')}
                     {renderProviderOption('openai', t('options.otherCompatibleApi'))}
                 </div>
+            </div>
+
+            <div className="px-4 pb-3 text-left">
+                <a
+                    href={PROVIDER_CONSOLE_URLS[settings.provider]}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium underline underline-offset-2 opacity-60 hover:opacity-100 transition-opacity"
+                    style={{ color: 'var(--text-secondary)' }}
+                >
+                    {t('options.openProviderConsole', { provider: providerLabelOf(settings.provider, t) })}
+                    <ExternalLink size={11} aria-hidden="true" />
+                </a>
             </div>
 
             <div className={`p-4 space-y-3 border-b ${rowDividerClass}`}>
