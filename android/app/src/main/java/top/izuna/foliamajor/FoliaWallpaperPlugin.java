@@ -238,6 +238,23 @@ public class FoliaWallpaperPlugin extends Plugin {
     }
 
     /**
+     * 开 / 关「精简小窗」的预览。
+     *
+     * 单独开一条通道，不走 setAppearance 那张 tuning 表 —— 那张表是**落盘**的，
+     * 而预览是瞬时状态：落一次盘，只要应用没来得及把它关掉（被杀 / 崩 / 回收），
+     * 它就永久卡在开。详见 FloatingLyricsOverlay 里 PREVIEW_LEASE_MS 那段。
+     *
+     * 前端在设置页期间会定期续约，租约过期自动失效。
+     */
+    @PluginMethod
+    public void setFloatingPreview(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on"));
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(getContext()).setPreview(on);
+        call.resolve();
+    }
+
+    /**
      * 打开系统文件选择器挑一个 .ttf / .otf 给壁纸歌词用。
      *
      * 为什么不走 base64：一个中文字体动辄好几 MB，转 base64 过桥既慢又吃内存，

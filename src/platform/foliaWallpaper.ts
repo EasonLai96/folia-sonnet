@@ -135,6 +135,13 @@ interface FoliaWallpaperPlugin {
     setFont(options: { font: string | null }): Promise<void>;
     /** 「跟随播放页」用：把播放页那个字体的字节（base64）托管给原生。null = 清除。 */
     setFollowFont(options: { font: string | null }): Promise<void>;
+    /**
+     * 开 / 关「精简小窗」的预览。
+     *
+     * 不走 setAppearance 那张 tuning 表：那张表是落盘的，而预览是瞬时状态。
+     * 见 setWallpaperFloatingPreview 上方那段。
+     */
+    setFloatingPreview(options: { on: boolean }): Promise<void>;
     getBackground(): Promise<{ mode: FoliaWallpaperBackgroundMode }>;
     /**
      * 把「简易」样式那颗悬浮歌词小窗恢复默认（位置 / 大小 / 锁一起清掉）。
@@ -258,6 +265,26 @@ export const resetFloatingLyricsWindow = async (): Promise<void> => {
 export const pushLyricsFontToNative = async (base64: string | null): Promise<void> => {
     try {
         await FoliaWallpaper.setFollowFont({ font: base64 });
+    } catch {
+        // 桌面端 / 老版本原生没有这个方法，静默。
+    }
+};
+
+/*
+ * 开 / 关「精简小窗」的预览。前端在设置页期间要**定期续约**（见 useLyricsWallpaperFeed）。
+ *
+ * 为什么单独开一条通道，不塞进 tuning 表跟着 setAppearance 一起下发：
+ * 原生那张 tuning 表是**落盘**的。而预览是「设置页还开着」这种**会话内的瞬时状态** ——
+ * 把它落盘，只要应用没来得及把它关掉（被杀 / 崩 / WebView 被回收），
+ * 盘上的 1 就一直留到下次冷启动，于是两个症状同时出现：
+ *   ① 小窗恒挂 → 壁纸那层看见它恒挂就不再画自己的原生歌词
+ *      （「我没有打开隐藏原生歌词，原生歌词在所有情况下都不显示了」）；
+ *   ② 预览会强制整层不吃触摸 → 小窗彻底拖不动（「安全区开关了 无法拖动」）。
+ * 独立通道只活在进程内存里，还带租约，没人续就自动过期 —— 任何异常退出都能自愈。
+ */
+export const setWallpaperFloatingPreview = async (on: boolean): Promise<void> => {
+    try {
+        await FoliaWallpaper.setFloatingPreview({ on });
     } catch {
         // 桌面端 / 老版本原生没有这个方法，静默。
     }

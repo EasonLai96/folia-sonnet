@@ -14,6 +14,7 @@ import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextPaint;
 import android.util.Log;
@@ -115,7 +116,24 @@ public final class FloatingLyricsOverlay {
      * 而调设置恰恰是在 App 里做的，滑条拖到头也看不见任何东西。
      * 由设置页挂载期间置 1、离开置 0。
      */
-    private static final String KEY_PREVIEW = "wp.floatingPreview";
+    /*
+     * 预览**不再是 tuning 表里的一个 key**。
+     *
+     * 原来它叫 wp.floatingPreview，和「叠加安全区」「宽度」这些真设置挤在同一张表里。
+     * 而那张表是**落盘的**（WallpaperLyricsState.setAppearance → SharedPreferences）：
+     * 应用一旦被杀 / 崩在设置页里，「关掉预览」那一次就永远发不出来，
+     * 盘上的 1 留到下辈子 —— 于是两个症状同时出现：
+     *   ① buildParams() 里 `previewMode()` 为真 → 强制 FLAG_NOT_TOUCHABLE → 小窗拖不动；
+     *   ② shouldShow() 里 `if (preview) return true` → 暂停 / 没歌词 / 唱完都照样挂，
+     *      isShowing() 恒真 → 壁纸那层以为「小窗在显示」，原生歌词就再也不画了
+     *      （用户原话：我没有打开隐藏原生歌词，原生歌词在所有情况下都不显示了）。
+     *
+     * 预览从来不是设置，它是**一次会话内的瞬时状态**（设置页还开着）。
+     * 所以它现在走独立通道，只活在进程内存里，并且带租约：
+     * 没人续就自动过期。进程被杀、页面没卸载、事件丢了 —— 哪一条出问题都能自愈。
+     */
+    /** 预览的租约时长。前端在设置页期间会定期续约。 */
+    private static final long PREVIEW_LEASE_MS = 45_000L;
     /**
      * 预览又没有歌词可显示时画的占位。
      *
@@ -125,6 +143,14 @@ public final class FloatingLyricsOverlay {
     private static final String PREVIEW_SAMPLE_TEXT = "♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪";
     /** 用户在叠加模式下拖出来的左右位置（0~1）。拖过就以它为准，设置里改了再覆盖。 */
     private static final String KEY_DRAG_RATIO = "drag_ratio";
+
+    /**
+     * 预览租约的到期时刻（elapsedRealtime）。过了就算没开，见 previewMode()。
+     *
+     * 必须是 volatile：写它的是主线程（桥那一路），读它的是 GLES 渲染线程
+     * （壁纸那边通过 isShowing() 间接读）。
+     */
+    private static volatile long previewUntilMs = 0L;
 
     private static volatile FloatingLyricsOverlay instance;
 
@@ -168,7 +194,32 @@ public final class FloatingLyricsOverlay {
     public void setAppForeground(boolean foreground) {
         if (appForeground == foreground) return;
         appForeground = foreground;
+        /*
+         * 退到后台就把预览掐掉。
+         *
+         * 预览的全部意义是「人在 App 里调参数时也能看见那一层」，人已经走了它就没有
+         * 存在的理由。而「应用退到后台」是系统给的一个**必然会发生**的信号
+         * （比「设置页卸载了」可靠得多）—— 拿它当第二道保险，即使前端那边的
+         * 关预览调用一次都没送达，用户切走再回来也是干净的：
+         * 小窗重新按正常规则挂，壁纸那层的原生歌词也跟着回来。
+         */
+        if (!foreground) {
+            previewUntilMs = 0L;
+        }
         evaluate();
+    }
+
+    /**
+     * 开 / 关预览。开的那一侧带租约，前端要定期续（见 PREVIEW_LEASE_MS）。
+     *
+     * 走独立通道而不是混在 tuning 表里：tuning 表会落盘，而预览是瞬时状态，
+     * 落盘就等于「这次没关掉就再也不关了」。详见 PREVIEW_LEASE_MS 上面那段。
+     */
+    public void setPreview(boolean on) {
+        previewUntilMs = on
+                ? SystemClock.elapsedRealtime() + PREVIEW_LEASE_MS
+                : 0L;
+        runOnUi(() -> evaluate());
     }
 
     /**
@@ -720,9 +771,16 @@ public final class FloatingLyricsOverlay {
         return tuningFlag(KEY_OVER_SAFE_AREA, false);
     }
 
-    /** 设置页正开着：即使在 App 里也要挂出来给人看（见 KEY_PREVIEW）。 */
+    /**
+     * 设置页正开着：即使在 App 里也要挂出来给人看。
+     *
+     * 判据是**租约有没有过期**，不是「有没有人来关过」——
+     * 后者要指望一次卸载事件，而那次事件是这世界上最靠不住的东西
+     * （应用被杀、崩了、WebView 被回收，它都不会来）。租约过期自动失效，
+     * 谁都不用为「关掉预览」这件事负责。
+     */
     private static boolean previewMode() {
-        return tuningFlag(KEY_PREVIEW, false);
+        return SystemClock.elapsedRealtime() < previewUntilMs;
     }
 
     /**
@@ -1662,7 +1720,18 @@ public final class FloatingLyricsOverlay {
                     if (isUp && !moved && touchMode == MODE_LOCK) {
                         setLocked(!isLocked());
                     } else if (moved && (touchMode == MODE_MOVE || touchMode == MODE_RESIZE)) {
-                        persistLayout();
+                        /*
+                         * 叠加模式下**不落盘**四个数。
+                         *
+                         * 这里是最容易漏的一个入口（reclampIfNeeded 那条已经挡过了）：
+                         * 拖动走的是 MODE_MOVE，抬手就落到这一支 —— 于是安全区那套
+                         * 「高度 = 状态栏、宽度 = 滑条比例」被当成用户拖出来的尺寸
+                         * 写进 KEY_X/Y/W/H。等把开关拨回普通模式，buildParams() 读到的
+                         * 就是一条又宽又扁的窗口，把手和锁上下压在一起。
+                         * 左右位置那边有自己单独的 KEY_DRAG_RATIO（moveBy 里已经记了），
+                         * 这一支在叠加模式下什么都不用存。
+                         */
+                        if (!overSafeArea()) persistLayout();
                     }
                     /*
                      * 点一下**不再跳回主页面**。
@@ -1682,6 +1751,29 @@ public final class FloatingLyricsOverlay {
         private int hitTest(float x, float y) {
             int width = getWidth();
             int height = getHeight();
+            /*
+             * 叠加安全区这个模式下，锁的命中区必须**收成画出来的那个圆**。
+             *
+             * 窗口只有状态栏那么高（二十几 dp），而锁的命中区是个 26dp 的方框 ——
+             * 它把整个右端全吃掉了。用户想拖小窗，手指多半就落在右端那一块
+             * （小窗本来就贴着顶、占掉大半屏宽），于是「拖一下」变成了「点了一下锁」：
+             * setLocked(true) 随即将整层设成 FLAG_NOT_TOUCHABLE —— 从此彻底拖不动，
+             * 而那颗锁画在一条这么窄的条里，用户根本看不出是自己刚把它锁上了
+             * （用户原话：安全区开关了 无法拖动）。
+             *
+             * 这个模式下窗口高度是锁死的，拉伸把手本来就不该存在（原来它是被锁的
+             * 命中区顺手挡掉的，属于歪打正着），所以这里直接不给 MODE_RESIZE，
+             * 出了锁那一小块之外一律按拖动处理。
+             */
+            if (overSafeArea()) {
+                float lockX = width - dp(13);
+                float lockY = dp(13);
+                float reach = dp(9) + dp(4);
+                if (Math.abs(x - lockX) <= reach && Math.abs(y - lockY) <= reach) {
+                    return MODE_LOCK;
+                }
+                return MODE_MOVE;
+            }
             // 锁（右上角，命中区比画出来的大一圈：手指没那么准）
             if (x >= width - dp(26) && y <= dp(26)) return MODE_LOCK;
             // 拉伸（右下角）
@@ -1724,6 +1816,9 @@ public final class FloatingLyricsOverlay {
 
         private void resizeBy(float dx, float dy) {
             if (params == null) return;
+            // 叠加模式下窗口高度锁死成状态栏那一条：拉伸会把它变成压住整条系统栏的方块。
+            // 命中区那边已经不给 MODE_RESIZE 了，这里是兜住任何绕过去的调用。
+            if (overSafeArea()) return;
             float density = getResources().getDisplayMetrics().density;
             int width = clampInt((int) (startWidth + dx),
                     Math.round(MIN_WIDTH_DP * density), Math.round(MAX_WIDTH_DP * density));

@@ -570,12 +570,32 @@ public final class WallpaperLyricsState {
                 .apply();
     }
 
+    /*
+     * 这些 key **绝不落盘**。
+     *
+     * 它们不是设置，是**会话内的瞬时状态**。跟着 tuning 表一起写进 SharedPreferences
+     * 的下场只有一个：应用被杀 / 崩了 / WebView 被回收，「把它关掉」那次调用就永远
+     * 发不出来，盘上的 1 一直留到下一次冷启动 —— 状态从此卡死在开。
+     *
+     * wp.floatingPreview 正是这么栽的（详见 FloatingLyricsOverlay 里 PREVIEW_LEASE_MS
+     * 上那段）：卡在 1 之后小窗恒挂，壁纸那层看见 isShowing() 恒真就不再画原生歌词，
+     * 同时整层被强制 FLAG_NOT_TOUCHABLE —— 拖也拖不动。
+     *
+     * 挡在编码这一层，是为了两个写盘点（setAppearance 与 persist）一次都盖住，
+     * 顺带把老版本已经写进盘的脏值在下一次落盘时清掉。
+     */
+    private static final java.util.Set<String> EPHEMERAL_TUNING_KEYS =
+            java.util.Collections.singleton("wp.floatingPreview");
+
     private static String encodeTuning(java.util.Map<String, Float> values) {
         if (values == null || values.isEmpty()) {
             return "";
         }
         StringBuilder joined = new StringBuilder();
         for (java.util.Map.Entry<String, Float> entry : values.entrySet()) {
+            if (EPHEMERAL_TUNING_KEYS.contains(entry.getKey())) {
+                continue;
+            }
             if (joined.length() > 0) {
                 joined.append(TUNING_PAIR_SEPARATOR);
             }

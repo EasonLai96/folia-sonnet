@@ -1,6 +1,6 @@
 import React from 'react';
 import { isCapacitorAndroid } from '../platform/runtime';
-import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
+import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, setWallpaperFloatingPreview, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
 import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
 import { flattenTuning, tuningFieldFor, withGlobalSettings } from '../platform/wallpaperVisualizerTuning';
 import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
@@ -73,6 +73,15 @@ const SEEK_JUMP_MS = 2000;
  * 给得比 `getCurrentTime()` 的更新粒度宽一档，免得把采样噪声当成漂移。
  */
 const WALLPAPER_DRIFT_TOLERANCE_MS = 900;
+/**
+ * 预览的续约间隔。原生那边的租约是 45 秒，这里每 15 秒续一次。
+ *
+ * 「开」这个状态必须能**自己关掉**，所以不能只在挂载时报一次就完事：
+ * 应用被杀、崩在设置页里、WebView 被回收 —— 「关掉预览」那一次调用一次都发不出来。
+ * 只剩租约过期这一条路能收摊，所以开着的时候要一直续。
+ * 间隔留了三倍余量：后台节流漏掉一两次也不会把预览搞没。
+ */
+const PREVIEW_RENEW_MS = 15_000;
 
 /** 超过这个长度的字符串值不进签名：那是 base64 图片（.key 本身还是进的）。 */
 const MAX_FINGERPRINT_STRING = 512;
@@ -346,7 +355,6 @@ export const useLyricsWallpaperFeed = ({
             wallpaperFloatingFillSafeArea,
             wallpaperFloatingAvoidWidth,
             wallpaperFloatingAvoidOffsetX,
-            wallpaperFloatingPreview,
             wallpaperLyricsFontMode,
             wallpaperFloatingFontSizeMode,
             wallpaperFloatingFontSize,
@@ -365,7 +373,7 @@ export const useLyricsWallpaperFeed = ({
             disableVisualizerGeometricBackground, wallpaperOverlayOpacity, wallpaperFloatingOpacity,
             wallpaperFloatingOverSafeArea, wallpaperFloatingOffsetX, wallpaperFloatingWidth,
             wallpaperFloatingFillSafeArea, wallpaperFloatingAvoidWidth,
-            wallpaperFloatingAvoidOffsetX, wallpaperFloatingPreview, wallpaperLyricsFontMode,
+            wallpaperFloatingAvoidOffsetX, wallpaperLyricsFontMode,
             wallpaperFloatingFontSizeMode, wallpaperFloatingFontSize,
             wallpaperOverlayEnabled,
             wallpaperOverlayLockScreen, wallpaperOverlayLockScreenOnly, wallpaperOverlayAllApps,
@@ -525,6 +533,30 @@ export const useLyricsWallpaperFeed = ({
             cancelled = true;
         };
     }, [active, wallpaperLyricsFontMode, lyricsCustomFont]);
+
+    /*
+     * 预览：设置页还开着时，让原生那层悬浮小窗**在 App 里也显示出来**。
+     *
+     * 正常逻辑是「在应用里就不挂」（怕盖着自己的界面、播放页本来就有歌词），
+     * 但调位置 / 大小 / 避开区域那些滑条恰恰是在 App 里做的 —— 不开预览的话，
+     * 拖到底屏幕上也一点反应都没有（「看不到预览界面」）。
+     *
+     * 走**独立通道**而不是混在 tuning 表里下发（见 setWallpaperFloatingPreview
+     * 上方那段）：那张表是落盘的，而预览是会话内的瞬时状态，落一次盘就等于
+     * 「应用被杀一次就永久卡在开」—— 小窗恒挂会让壁纸不再画原生歌词，
+     * 同时整层被强制不吃触摸、彻底拖不动。
+     */
+    React.useEffect(() => {
+        if (!enabled || !wallpaperFloatingPreview) return undefined;
+        void setWallpaperFloatingPreview(true);
+        const timer = window.setInterval(
+            () => void setWallpaperFloatingPreview(true),
+            PREVIEW_RENEW_MS);
+        return () => {
+            window.clearInterval(timer);
+            void setWallpaperFloatingPreview(false);
+        };
+    }, [enabled, wallpaperFloatingPreview]);
 
     // 播放/暂停要立刻通知，否则暂停后原生还在按墙钟往前走。
     React.useEffect(() => {

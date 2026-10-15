@@ -113,13 +113,14 @@ export const WALLPAPER_GLOBAL_KEYS = {
     floatingAvoidWidth: 'wp.floatingAvoidWidth',
     /** 避开区域的左右位置（0 = 贴左，1 = 贴右）。 */
     floatingAvoidOffsetX: 'wp.floatingAvoidOffsetX',
-    /**
-     * 设置页正开着：即使在 App 里也把那层小窗挂出来，好让人当场看见改动。
+    /*
+     * 「设置页正开着」这个预览标记**不在这一张表里**。
      *
-     * 不预览的话「实时预览」是空话 —— 正常逻辑在 App 里根本不挂这一层，
-     * 而调设置恰恰是在 App 里做的。由设置页挂载期间置 1、离开置 0。
+     * 这张表是原生要**落盘**的那一份（WallpaperLyricsState → SharedPreferences），
+     * 而预览是会话内的瞬时状态：混进来就等于「应用被杀一次就永久卡在开」。
+     * 它现在走独立通道 FoliaWallpaper.setFloatingPreview（带租约、不落盘），
+     * 见 foliaWallpaper.ts 里 setWallpaperFloatingPreview 上方那段。
      */
-    floatingPreview: 'wp.floatingPreview',
     /** 字号模式：0 = 动态（跟着窗口高度算），1 = 自定义。 */
     floatingFontSizeMode: 'wp.floatingFontSizeMode',
     /** 自定义模式的字号（dp）。只在上面那个开关打开时用。 */
@@ -202,7 +203,7 @@ export const withGlobalSettings = (
     if (typeof floatingAvoidOffsetX === 'number' && Number.isFinite(floatingAvoidOffsetX)) {
         out[WALLPAPER_GLOBAL_KEYS.floatingAvoidOffsetX] = floatingAvoidOffsetX;
     }
-    out[WALLPAPER_GLOBAL_KEYS.floatingPreview] = settings.wallpaperFloatingPreview ? 1 : 0;
+    // 预览不在这张表里下发（见 WALLPAPER_GLOBAL_KEYS 里那段），它有自己的通道。
     out[WALLPAPER_GLOBAL_KEYS.lyricsFontCustom] =
         settings.wallpaperLyricsFontMode === 'follow' ? 0 : 1;
     out[WALLPAPER_GLOBAL_KEYS.floatingFontSizeMode] =
