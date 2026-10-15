@@ -4,7 +4,17 @@
 //
 // 默认指向官方那个地址，自建的用户把地址换成自己的即可。
 
-const STORAGE_KEY = 'foliaAiCloudCacheSettings';
+/*
+ * 换过一次键名，别再换回来。
+ *
+ * 这个开关出厂就是开的，但老版本把它存成了「关」—— 那些值已经躺在用户的
+ * localStorage 里了。沿用旧键名的话，读出来的是老版本那个 false，代码里写的
+ * 「默认打开」根本轮不上生效，升级上来的用户等于没这个功能。
+ *
+ * 所以这里挂个 v2：读不到新键 = 第一次用这个版本 = 走默认值（开）。
+ * 以后再改默认值，同理再升一位。
+ */
+const STORAGE_KEY = 'foliaCloudSettings.v2';
 export const FOLIA_CLOUD_SETTINGS_CHANGED_EVENT = 'folia-ai-cloud-cache-settings-changed';
 
 export const DEFAULT_CLOUD_BASE_URL = 'https://apif.tangbot.xyz';
