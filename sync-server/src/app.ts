@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bearerAuth } from 'hono/bearer-auth';
+import adminAuthRoutes, {
+  pruneExpiredSessions,
+  readAdminSession,
+  touchAdminSession,
+} from './admin.js';
+import { renderLoginPage, renderPanelPage } from './panel.js';
+import { aiCacheRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
+import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 
 export type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement;
@@ -18,9 +26,13 @@ export type Env = {
   FOLIA_SYNC_DB: D1Database;
   SYNC_TOKEN: string;
   DASHBOARD_TOKEN?: string;
+  /** Panel credentials. Defaults to the shipped account when unset. */
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD?: string;
 };
 
-const SCHEMA_VERSION = 1;
+// Bumped to 2 by the font market + AI cloud cache tables.
+const SCHEMA_VERSION = 2;
 const THEME_BUCKET_COUNT = 256;
 const MAX_THEME_BATCH_SIZE = 500;
 const MAX_THEME_BUCKET_REQUEST_SIZE = 32;
@@ -73,6 +85,63 @@ const ensureSchema = async (db: D1Database) => {
     `),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_themes_updated_at ON themes(updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_themes_bucket_id ON themes(bucket_id)'),
+    // Font market: metadata here, bytes in font_files / font_previews so a
+    // catalogue request never has to touch a multi-megabyte blob.
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS font_market (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        family TEXT NOT NULL,
+        category TEXT NOT NULL,
+        license TEXT,
+        file_name TEXT,
+        mime_type TEXT,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        sort INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS font_files (
+        font_id TEXT PRIMARY KEY,
+        data BLOB NOT NULL
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS font_previews (
+        font_id TEXT PRIMARY KEY,
+        mime TEXT NOT NULL,
+        data BLOB NOT NULL
+      )
+    `),
+    // AI cloud cache: keyed by kind + MD5 of the lyric file.
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_cache (
+        kind TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        payload_bytes INTEGER NOT NULL DEFAULT 0,
+        song_title TEXT,
+        provider TEXT,
+        model TEXT,
+        hits INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (kind, cache_key)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      )
+    `),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_font_market_enabled ON font_market(enabled)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_updated_at ON ai_cache(updated_at)'),
   ]);
   schemaEnsured = true;
 };
@@ -122,7 +191,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
   origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Authorization', 'Content-Type'],
 }));
 
@@ -515,6 +584,35 @@ api.post('/themes/list', async (c) => {
     themes,
     cursor: themes.length === limit ? themes[themes.length - 1].fingerprint : null,
   });
+});
+
+/*
+ * The font market and the AI cloud cache sit outside the bearer gate on
+ * purpose. The gate protects the theme *sync* traffic between devices that
+ * share a token; these two are meant to be readable by any player, including
+ * one that has never filled in an API key — that is the entire point of
+ * turning the cache on by default.
+ */
+app.route('/api/fonts', fontRoutes);
+app.route('/api/ai-cache', aiCacheRoutes);
+
+// Visual panel: /admin is the page, /admin/api/* is what it talks to.
+app.route('/admin', adminAuthRoutes);
+app.get('/admin', async (c) => {
+  const username = await readAdminSession(c);
+  if (!username) return c.html(renderLoginPage());
+  await pruneExpiredSessions(c.env.FOLIA_SYNC_DB);
+  await touchAdminSession(c);
+  return c.html(renderPanelPage());
+});
+app.route('/admin/api/fonts', adminFontRoutes);
+app.route('/admin/api/ai-cache', adminCacheRoutes);
+app.get('/admin/api/stats', requireAdmin, async (c) => {
+  const [fonts, cache] = await Promise.all([
+    readFontStats(c.env.FOLIA_SYNC_DB),
+    readCacheStats(c.env.FOLIA_SYNC_DB),
+  ]);
+  return c.json({ ok: true, ...fonts, ...cache });
 });
 
 app.route('/', api);

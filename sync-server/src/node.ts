@@ -30,6 +30,8 @@ try {
 
 const SYNC_TOKEN = process.env.SYNC_TOKEN;
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'maimai';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '131425++';
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../folia-sync.db');
 
@@ -73,12 +75,15 @@ if (DASHBOARD_TOKEN) {
 } else {
   console.log(`- Dashboard: Disabled (DASHBOARD_TOKEN not set)`);
 }
+console.log(`- Admin panel: \x1b[36mhttp://localhost:${PORT}/admin\x1b[0m (${ADMIN_USERNAME})`);
 
 serve({
   fetch: (req) => app.fetch(req, {
     FOLIA_SYNC_DB: db,
     SYNC_TOKEN,
     DASHBOARD_TOKEN,
+    ADMIN_USERNAME,
+    ADMIN_PASSWORD,
   }),
   port: PORT,
 });

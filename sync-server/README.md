@@ -234,6 +234,10 @@ SYNC_TOKEN="你的_SYNC_TOKEN"
 
 # 选填：网页看板访问 Token (至少 16 位)
 DASHBOARD_TOKEN="你的_DASHBOARD_TOKEN"
+
+# 选填：可视化面板 /admin 的登录凭据（默认 maimai / 131425++）
+ADMIN_USERNAME="maimai"
+ADMIN_PASSWORD="131425++"
 ```
 
 ### 2. 从仓库根目录启动服务
@@ -270,6 +274,10 @@ PORT=3000
 
 # 选填：SQLite 数据库保存路径（默认在当前目录生成 folia-sync.db）
 DB_PATH="./folia-sync.db"
+
+# 选填：可视化面板 /admin 的登录凭据（默认 maimai / 131425++）
+ADMIN_USERNAME="maimai"
+ADMIN_PASSWORD="131425++"
 ```
 
 ### 2. 安装并启动
@@ -293,20 +301,29 @@ https://folia-sync.example.workers.dev
 http://127.0.0.1:13000
 ```
 
-`SYNC_TOKEN` 通过 `Authorization: Bearer <SYNC_TOKEN>` 发送。除 `GET /health` 外，API 均需要鉴权；根路径 `/?token=<DASHBOARD_TOKEN>` 是只读网页看板，不是客户端 API。
+`SYNC_TOKEN` 通过 `Authorization: Bearer <SYNC_TOKEN>` 发送。除 `GET /health`、字体市场和云缓存这三个公开只读/共享接口外，API 均需要鉴权；根路径 `/?token=<DASHBOARD_TOKEN>` 是只读网页看板，不是客户端 API。
 
 当前 API：
 
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/health` | 连通性和 schema 版本检查 |
-| `GET` | `/state` | 读取设置/主题更新时间和主题数量 |
-| `GET` / `PUT` | `/settings` | 读取或按时间戳更新视觉设置快照 |
-| `GET` | `/themes/manifest` | 读取 256 个主题 bucket 摘要 |
-| `POST` | `/themes/get` | 按稳定 fingerprint 读取主题 |
-| `POST` | `/themes/put` | 批量写入主题，旧时间戳不会覆盖新记录 |
-| `POST` | `/themes/bucket` | 按 bucket 拉取主题，用于增量同步 |
-| `POST` | `/themes/list` | 分页读取完整主题库，用于导出 |
+| 方法 | 路径 | 鉴权 | 用途 |
+| --- | --- | --- | --- |
+| `GET` | `/health` | 无 | 连通性和 schema 版本检查 |
+| `GET` | `/state` | Bearer | 读取设置/主题更新时间和主题数量 |
+| `GET` / `PUT` | `/settings` | Bearer | 读取或按时间戳更新视觉设置快照 |
+| `GET` | `/themes/manifest` | Bearer | 读取 256 个主题 bucket 摘要 |
+| `POST` | `/themes/get` | Bearer | 按稳定 fingerprint 读取主题 |
+| `POST` | `/themes/put` | Bearer | 批量写入主题，旧时间戳不会覆盖新记录 |
+| `POST` | `/themes/bucket` | Bearer | 按 bucket 拉取主题，用于增量同步 |
+| `POST` | `/themes/list` | Bearer | 分页读取完整主题库，用于导出 |
+| `GET` | `/api/fonts` | 无 | 字体市场目录（只回已启用的，含后台烤好的预览图地址） |
+| `GET` | `/api/fonts/:id/file` | 无 | 下载字体文件本体（客户端点「使用」才取） |
+| `GET` | `/api/fonts/:id/preview` | 无 | 预览图（不可变缓存） |
+| `GET` | `/api/ai-cache/:kind/:key` | 无 | 拉取 AI 生成缓存，`kind` 为 `theme` / `director`，`key` 为歌词文件 MD5 |
+| `PUT` | `/api/ai-cache/:kind/:key` | 无 | 上传 AI 生成结果（单条 payload 上限 64KB） |
+
+字体市场与云缓存的接口刻意放在 Bearer 门之外：没有填 key 的用户也要能先拉到别人已经生成好的结果。同步数据（设置 / 主题）依旧受 `SYNC_TOKEN` 保护。
+
+字体文件**只能由后台管理人员上传**，上传时在管理员浏览器里用 canvas 把预览图烤成 PNG 一并存库，所以客户端列目录时只需要几 KB 的预览图，几 MB 的字体本体只有点「使用」那一刻才会下载。
 
 客户端是本地优先的：AI 主题和主题同步 registry 保存在本机 IndexedDB，启动时会自动做主题同步；视觉设置的拉取/推送、完整 sync library 的 zip 导入导出由存储设置页面或命令面板触发。主题 registry 从旧 localStorage 迁移到 IndexedDB 时会执行一次性兼容迁移。
 
@@ -318,9 +335,13 @@ http://127.0.0.1:13000
 - `src/node.ts`：Node server 与 SQLite 启动入口。
 - `src/cloudflare.ts`：Worker/D1 适配入口。
 - `src/d1-emulator.ts`：本地 Node 对 D1 风格存储的兼容层。
+- `src/admin.ts`：可视化面板的登录门（数据库 session + httpOnly cookie）。
+- `src/panel.ts`：可视化面板页面（字体市场上架、云缓存查看与清理）。
+- `src/fonts.ts`：字体市场的公开目录接口与管理员上传 / 启停 / 删除接口。
+- `src/aiCache.ts`：AI 生成缓存的公开读写接口与管理员管理接口。
 - `install.sh` / `install.ps1`：Node、Docker、Cloudflare 三种部署菜单。
 
-当前协议约束：schema version 为 `1`，主题 manifest 固定为 `256` 个 bucket；主题批量写入上限为 `500`，bucket 请求最多 `32` 个，完整主题 list 最多 `1000` 条。修改这些限制或路由时必须同步客户端 `src/services/sync/*` 和本 README。
+当前协议约束：schema version 为 `2`（v2 新增 `font_market` / `font_files` / `font_previews` / `ai_cache` / `admin_sessions` 五张表），主题 manifest 固定为 `256` 个 bucket；主题批量写入上限为 `500`，bucket 请求最多 `32` 个，完整主题 list 最多 `1000` 条；字体文件单份上限 `40MB`、预览图 `2MB`；AI 缓存单条 payload 上限 `64KB`，`kind` 需匹配 `^[a-z0-9_-]{1,32}$`、`key` 需匹配 `^[a-f0-9]{32}$`。修改这些限制或路由时必须同步客户端 `src/services/sync/*`、`src/services/fontMarket.ts`、`src/services/aiCloudCache.ts` 和本 README。
 
 ---
 
@@ -331,3 +352,35 @@ http://127.0.0.1:13000
 **访问地址**: `http://你的服务域名/?token=你的_DASHBOARD_TOKEN`
 
 如果 Token 正确，你将看到一个极简的状态看板，展示当前数据库中存储的主题数量和最近更新时间。此页面仅作信息展示，无任何敏感交互。
+
+---
+
+## 🎛 可视化管理面板
+
+服务自带一个带登录的可视化面板，用来上架字体、查看和清理 AI 云缓存。
+
+**访问地址**：`http://你的服务域名/admin`
+
+**默认账号密码**：
+
+| 项目 | 默认值 |
+| --- | --- |
+| 账号 | `maimai` |
+| 密码 | `131425++` |
+
+> [!WARNING]
+> 部署到公网后请务必通过环境变量改掉默认凭据：
+>
+> ```env
+> ADMIN_USERNAME="你的账号"
+> ADMIN_PASSWORD="你的密码"
+> ```
+>
+> 登录态存在服务端的 `admin_sessions` 表里，浏览器只持有一个 httpOnly cookie，有效期 24 小时，活跃使用会自动续期；退出登录即从库中删除该条 session。
+
+面板有两个页签：
+
+- **字体市场**：上传字体文件（`.ttf` / `.otf` / `.woff` / `.woff2`，≤ 40MB），上传时会自动用 `FontFace` + canvas 烤出一张预览图；已上架的字体可以改名、改分类、启用 / 停用、删除。停用的字体不会出现在客户端目录里。
+- **云缓存**：按 `theme` / `director` 筛选，支持按 MD5 或歌名搜索，可以查看某条缓存的完整 payload、删除单条或按类型清空。
+
+面板的写操作接口都在 `/admin/api/*` 下，受上面那套 session + `requireAdmin` 中间件保护；只读的 `/api/fonts` 与 `/api/ai-cache` 仍然公开。
