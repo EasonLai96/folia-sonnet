@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { requireAdmin } from './admin.js';
 import { pruneHitLog } from './aiCache.js';
 import { readFontStats } from './fonts.js';
 import type { D1Database, Env } from './app.js';
@@ -275,10 +274,19 @@ export const renderCacheOverviewSvg = (overview: CacheOverview): string => {
 </svg>`;
 };
 
-/** Admin: `GET /admin/api/stats.svg`. */
+/*
+ * `GET /admin/api/stats.svg` —— 刻意不设门禁。
+ *
+ * 虽然挂在 /admin/api 下，但它不是管理接口：不带任何凭据、不暴露密钥，
+ * 只是一张运营看的概况图（累计命中 / 最近几分钟 / 24 小时分布 / 库大小 /
+ * 最近五条歌名）。要的就是能直接把 URL 打开或嵌到别处，套一层登录
+ * 反而把唯一的用法堵死了。
+ *
+ * 所以这里**不要**加 requireAdmin —— 同前缀的字体与缓存管理接口是要的，
+ * 只有这一条是例外。
+ */
 export const adminStatsImageRoutes = (() => {
     const routes = new Hono<{ Bindings: Env }>();
-    routes.use('*', requireAdmin);
 
     routes.get('/stats.svg', async (c) => {
         const url = new URL(c.req.url);
