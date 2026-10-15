@@ -193,6 +193,22 @@ public class FoliaNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /*
+     * 系统栏的**常驻**策略：平板与手机横屏把状态栏收起来（见 MainActivity.setSystemBarsPolicy）。
+     *
+     * 与 setImmersive 是「或」的关系、互不覆盖：歌词页本来就要全沉浸，这一条只是让它在
+     * 别的页面也把状态栏收起来。判定在 Web 层（设备类型 + 朝向只有它知道），这里只执行。
+     */
+    @PluginMethod
+    public void setSystemBarsPolicy(PluginCall call) {
+        boolean alwaysHidden = Boolean.TRUE.equals(call.getBoolean("alwaysHidden", false));
+        Activity activity = getActivity();
+        if (activity instanceof MainActivity) {
+            MainActivity.setSystemBarsPolicy(activity, alwaysHidden);
+        }
+        call.resolve();
+    }
+
     /**
      * 最近一次算出来的安全区（CSS px），**给叠层那一层取用**。
      *

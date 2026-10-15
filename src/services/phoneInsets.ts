@@ -66,7 +66,8 @@ let source: PhoneInsetsSource = 'env';
 
 export const getPhoneInsetsSource = (): PhoneInsetsSource => source;
 
-export const getPhoneInsets = (): PhoneInsets => ({ ...current });
+/** 关掉避让时一律读 0 —— 与写进 CSS 变量的那一份保持一致（见 setSafeAreaBypass）。 */
+export const getPhoneInsets = (): PhoneInsets => (safeAreaBypass ? { ...ZERO } : { ...current });
 
 type PhoneInsetsListener = (insets: PhoneInsets) => void;
 const listeners = new Set<PhoneInsetsListener>();
@@ -108,18 +109,59 @@ const isUnmeasured = (value: PhoneInsets): boolean => (
     value.top === 0 && value.right === 0 && value.bottom === 0 && value.left === 0
 );
 
-const apply = (next: PhoneInsets): void => {
-    if (isUnmeasured(next)) return;
-    const changed = (Object.keys(CSS_VARIABLES) as Array<keyof PhoneInsets>)
-        .some(side => current[side] !== next[side]);
-    current = next;
+/*
+ * 平板与手机横屏**不做安全区避让**：屏一直够宽（平板）或者横过来之后整块都是内容区
+ * （手机横屏的高度本来就只有 360~400，再让掉状态栏 + 手势条就没什么可放了）。
+ * 只有手机竖屏需要让 —— 顶上状态栏、底下手势条都实实在在压在内容上。
+ *
+ * 由 androidPhoneLayout.applyDeviceProfile 按设备类型与朝向设置。
+ */
+let safeAreaBypass = false;
+
+/** 上一次真正写进 CSS 变量的值，用来判断有没有变。 */
+let written: PhoneInsets = { ...ZERO };
+
+const writeToRoot = (values: PhoneInsets): void => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     (Object.keys(CSS_VARIABLES) as Array<keyof PhoneInsets>).forEach(side => {
-        root.style.setProperty(CSS_VARIABLES[side], `${next[side]}px`);
+        root.style.setProperty(CSS_VARIABLES[side], `${values[side]}px`);
     });
+};
+
+const apply = (next: PhoneInsets): void => {
+    const measured = !isUnmeasured(next);
+    if (measured) {
+        current = next;
+    }
+    /*
+     * 全 0 一律不写（见 isUnmeasured 那条注释）—— 但**「不需要避让」时例外**：
+     * 那种情况要的就是主动把四个方向压成 0，否则 index.css 里那份 env() 兜底
+     * 会继续生效（平板上它可能仍报着挖孔高度），等于没关掉。
+     */
+    if (!measured && !safeAreaBypass) {
+        return;
+    }
+    const values = safeAreaBypass ? { ...ZERO } : { ...current };
+    const changed = (Object.keys(CSS_VARIABLES) as Array<keyof PhoneInsets>)
+        .some(side => written[side] !== values[side]);
+    written = values;
+    writeToRoot(values);
     if (!changed) return;
     listeners.forEach(listener => listener(getPhoneInsets()));
+};
+
+/**
+ * 打开 / 关闭「不做安全区避让」。
+ *
+ * 关掉避让后连 `getPhoneInsets()` 也一起归零：可视化那一层用它把歌词描述摆在
+ * Pixi 画布里（CSS 够不着），读数与 CSS 变量必须是同一份口径，否则同一行字
+ * 在两处的位置会不一样。
+ */
+export const setSafeAreaBypass = (bypass: boolean): void => {
+    if (safeAreaBypass === bypass) return;
+    safeAreaBypass = bypass;
+    apply(current);
 };
 
 type PhoneInsetsPlugin = {

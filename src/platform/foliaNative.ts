@@ -51,6 +51,14 @@ interface FoliaNativePlugin {
      */
     setImmersive(options: { immersive: boolean }): Promise<void>;
     /**
+     * 系统栏的**常驻**策略：true = 不管在哪个页面都把状态栏收起来。
+     *
+     * 平板（屏一直够宽）与手机横屏（高度本来就小）都走这一条 —— 那两种情况下状态栏
+     * 只是白占一条，还压着内容。手机竖屏才需要留着（时间 / 电量 / 通知图标）。
+     * 与 setImmersive 是**或**的关系：歌词页本来就要隐，这里只是让它在别的页面也隐。
+     */
+    setSystemBarsPolicy(options: { alwaysHidden: boolean }): Promise<void>;
+    /**
      * 屏幕常亮开关。
      *
      * 传进来的值必须是**已经算好的结论**（开关 && 正在播放）：原生那边的 FLAG 只有
@@ -154,6 +162,19 @@ export const setAudioFocusPolicy = async (mixWithOthers: boolean): Promise<void>
         await FoliaNative.setAudioFocusPolicy({ mixWithOthers });
     } catch {
         // 同上：策略推不过去最多是保持现状，不该打断设置流程。
+    }
+};
+
+/**
+ * 系统栏的常驻策略：平板 / 手机横屏把状态栏收起来。
+ *
+ * 判定在 Web 层（设备类型 + 朝向），原生只执行。非 Android 没有这一层，静默。
+ */
+export const setSystemBarsAlwaysHidden = async (alwaysHidden: boolean): Promise<void> => {
+    try {
+        await FoliaNative.setSystemBarsPolicy({ alwaysHidden });
+    } catch {
+        // 桌面端 / 插件不可用：静默，系统栏怎么显不该影响其它功能。
     }
 };
 

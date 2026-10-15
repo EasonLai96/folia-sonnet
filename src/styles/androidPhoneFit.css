@@ -540,10 +540,14 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
 /* 手机上的 UI 尺度缩一档（等价于把这台机器的 dpi 调小：每一格元素变小，同一块屏反而放得下更多）。
  *
  * 两档：
- *   ① 在引导里明确选了「手机」→ 92%。竖屏也生效 —— 桌面那套按宽屏排的布局在这块屏上普遍偏大，
+ *   ① 在引导里明确选了「手机」→ 86%。竖屏也生效 —— 桌面那套按宽屏排的布局在这块屏上普遍偏大，
  *      一行放不下几个字、一屏摆不了几个控件。
- *   ② 手机横屏（compact）→ 86%，更紧一档：横过来之后元素互相遮挡得厉害。
+ *   ② 手机横屏（compact）→ 76%，更紧一档：横过来之后元素互相遮挡得厉害。
  *      两条同时命中时以 ② 为准（同样特异性，靠书写顺序，所以 ② 必须写在后面）。
+ *
+ * 早先是 92% / 86%，实测下来等于没缩：一档 8% 在 6 寸屏上就是几个像素，用户原话
+ * 「缩出来的只有一点点，没什么区别」。这里各再往下压 6 个百分点 —— 再小就开始
+ * 影响可点了（图标与文字一起缩），所以这已经是能一眼看出差别、又不至于戳不中的量。
  *
  * ① 挂在 `data-folia-device-resolved` 而不是 `data-folia-device` 上：后者记的是用户的选择，
  * 没选过就是 `auto`，那批人（机器本来就是手机、只是没答过引导）竖屏就漏掉了 —— 而他们恰恰是
@@ -557,11 +561,11 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
  * 改成动 rem 基准就干净了：Tailwind 的间距、字号、圆角几乎全是 rem，会按比例缩小；
  * % / flex / dvh 这类弹性布局原样保留，该铺满的继续铺满，fixed 弹层也不受影响。 */
 html[data-folia-device-resolved='phone'] {
-  font-size: 92%;
+  font-size: 86%;
 }
 
 html[data-folia-ui-scale='compact'] {
-  font-size: 86%;
+  font-size: 76%;
 }
 
 /* 横屏（compact）下被打穿的三处 —— 都是「竖向空间按桌面那套 px 算」。

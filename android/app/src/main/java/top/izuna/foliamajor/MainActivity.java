@@ -83,6 +83,22 @@ public class MainActivity extends BridgeActivity {
     private static volatile boolean immersiveModeEnabled = false;
 
     /**
+     * 系统栏的**常驻**策略：true = 不管在哪个页面都把状态栏收起来。
+     *
+     * 平板（屏一直够宽）与手机横屏（高度本来就小到没余量）都走这一条 —— 那两种情况下
+     * 状态栏只是白占一条、还压着内容；手机竖屏才需要留着看时间 / 电量 / 通知图标。
+     * 判定同样在 Web 层（设备类型 + 朝向都只有它知道），这里只执行结论。
+     *
+     * 与 {@link #immersiveModeEnabled} 是**或**的关系，两者互不覆盖：歌词页本来就要
+     * 全沉浸，这一条只是让它在别的页面也把状态栏收起来。
+     */
+    private static volatile boolean systemBarsAlwaysHidden = false;
+
+    /** 常驻策略落盘的那一份。key 前缀与 PhoneLayoutOrientation 那套保持一致。 */
+    private static final String PREFS_SYSTEM_BARS = "folia_system_bars";
+    private static final String KEY_ALWAYS_HIDDEN = "always_hidden";
+
+    /**
      * 由 Web 层驱动：进入可视化歌词页面时隐藏系统栏，离开就恢复。
      *
      * 判定不放在原生（原生不知道「哪个页面算歌词页」），只在这里收一个已经算好的结论。
@@ -105,10 +121,63 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
+    /**
+     * 由 Web 层驱动：平板与手机横屏把状态栏常驻收起，其余情况交回给
+     * {@link #immersiveModeEnabled} 决定。
+     *
+     * 值没变就不重压 —— 这个入口在转屏时会被反复调用，每次都重压会让栏位抖一下。
+     */
+    public static void setSystemBarsPolicy(Activity activity, boolean hidden) {
+        if (systemBarsAlwaysHidden == hidden) {
+            return;
+        }
+        systemBarsAlwaysHidden = hidden;
+        /*
+         * 落盘再生效。
+         *
+         * Web 层最早那次推送发生在 `index.tsx` 的顶层（installDeviceProfilePreference），
+         * 那会儿 Capacitor 桥还没建好，调用会失败并被静默吞掉 —— 只有盘上留一份，
+         * 下一次冷启动才能直接按上次的选择来，而不是退回「显示」。
+         */
+        if (activity != null) {
+            try {
+                activity.getSharedPreferences(PREFS_SYSTEM_BARS, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(KEY_ALWAYS_HIDDEN, hidden)
+                        .apply();
+            } catch (Throwable error) {
+                Log.w(TAG, "persist system bars policy failed", error);
+            }
+        }
+        if (!(activity instanceof MainActivity)) {
+            return;
+        }
+        final MainActivity main = (MainActivity) activity;
+        main.runOnUiThread(() -> {
+            try {
+                if (main.isFinishing() || main.isDestroyed()) return;
+                main.applyImmersiveMode();
+                // 同上：栏位一变，系统会把 inset 重写成 padding，挖孔那套要跟着重压。
+                PhoneFitCutout.apply(main);
+            } catch (Throwable error) {
+                Log.w(TAG, "apply system bars policy failed", error);
+            }
+        });
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // 第一行就装上：崩溃可能就发生在下面 super.onCreate() 的 Bridge 创建过程中。
         FoliaCrashHandler.install(this);
+
+        // 常驻策略要在 applyImmersiveMode 第一次跑之前读回来，否则冷启动这一帧
+        // 会先按默认值把状态栏显示出来，等 Web 层推过来才收 —— 那一闪正好最显眼。
+        try {
+            systemBarsAlwaysHidden = getSharedPreferences(PREFS_SYSTEM_BARS, MODE_PRIVATE)
+                    .getBoolean(KEY_ALWAYS_HIDDEN, false);
+        } catch (Throwable error) {
+            Log.w(TAG, "read system bars policy failed", error);
+        }
 
         // 必须在 super.onCreate() **之前**注册。
         //
@@ -440,6 +509,15 @@ public class MainActivity extends BridgeActivity {
         if (immersiveModeEnabled) {
             // 可视化歌词页面：两个栏都收起来，歌词吃掉整块屏幕。
             controller.hide(WindowInsetsCompat.Type.systemBars());
+        } else if (systemBarsAlwaysHidden) {
+            /*
+             * 平板 / 手机横屏：**只收状态栏**，导航栏（手势条）照旧显示。
+             *
+             * 常驻策略说的是「顶上那条白占地方」，不是「整屏全沉浸」—— 把导航栏也
+             * 收了，返回 / 回桌面的手势就得先滑一下才出来，日常用着是纯亏。
+             */
+            controller.hide(WindowInsetsCompat.Type.statusBars());
+            controller.show(WindowInsetsCompat.Type.navigationBars());
         } else {
             // 其余页面：状态栏回来。滑动手势调出导航栏的行为仍由上面的 behavior 管。
             controller.show(WindowInsetsCompat.Type.systemBars());

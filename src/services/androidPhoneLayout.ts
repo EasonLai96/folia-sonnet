@@ -1,3 +1,6 @@
+import { setSafeAreaBypass } from './phoneInsets';
+import { setSystemBarsAlwaysHidden } from '../platform/foliaNative';
+
 export const ANDROID_PHONE_FIT_STORAGE_KEY = 'folia_android_phone_fit';
 export const ANDROID_PHONE_FIT_ORIENTATION_STORAGE_KEY = 'folia_android_phone_fit_orientation';
 
@@ -151,7 +154,21 @@ export const applyDeviceProfile = (deviceType: DeviceType | null): void => {
     root.setAttribute('data-folia-device', deviceType ?? 'auto');
     root.setAttribute('data-folia-device-resolved', resolved);
     // 平板横屏本来就够宽，只有手机才需要让路。
-    root.setAttribute('data-folia-ui-scale', resolved === 'phone' && isLandscapeNow() ? 'compact' : 'normal');
+    const landscape = isLandscapeNow();
+    root.setAttribute('data-folia-ui-scale', resolved === 'phone' && landscape ? 'compact' : 'normal');
+    /*
+     * 平板与手机横屏都不再做安全区避让，状态栏也一并常驻收起。
+     *
+     * 只有手机**竖屏**才需要让：顶上状态栏、底下手势条都实实在在压在内容上。
+     *   平板：屏一直够宽，让出来的那一条纯属浪费；
+     *   手机横屏：高度本来就只有 360~400，再让掉状态栏 + 手势条，内容区就没什么了。
+     *
+     * 两条结论都跟着设备类型与朝向走，所以挂在这里 —— 这里已经在
+     * orientationchange / resize 上装了监听，不用再各自装一套。
+     */
+    const roomy = resolved === 'tablet' || (resolved === 'phone' && landscape);
+    setSafeAreaBypass(roomy);
+    void setSystemBarsAlwaysHidden(roomy);
 };
 
 let deviceProfileListenerInstalled = false;
