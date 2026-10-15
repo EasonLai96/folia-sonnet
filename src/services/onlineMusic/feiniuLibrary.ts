@@ -1,5 +1,5 @@
 import type { MediaId, OnlineLibraryProvider, ProviderCollection } from '../../types/onlineMusic';
-import { feiniuList, feiniuRequest } from './feiniuTransport';
+import { feiniuList, feiniuRequest, pickFeiniuTotal } from './feiniuTransport';
 import { FEINIU_FAVORITE_ID } from './feiniuCatalog';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './feiniuNormalize';
 
@@ -18,20 +18,49 @@ const favoriteCollection = (): ProviderCollection => ({
     isLiked: true,
 });
 
-const collectAll = async <T>(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<T[]> => {
+/**
+ * 全量拉取最多翻这么多页（每页 100）。
+ *
+ * 服务端不给 total 时只能「取满了就继续翻」，没有上限就会一路翻到曲库末尾 ——
+ * 几千首的库是几十个请求连着过桥，其它平台的请求全被挤到后面（见 feiniuTransport
+ * 里那个闸门）。收藏这类列表本来也用不到全量，翻够 2000 条收手。
+ */
+const MAX_PAGES = 20;
+
+/**
+ * 同一批数据正在拉就直接复用，别再拉一遍。
+ *
+ * 「取收藏 id」和「取收藏歌曲」是两次调用、同一份数据；界面刷新时它们几乎同时发生，
+ * 于是同一份列表被翻两遍 —— 无谓地翻倍了桥上的压力。
+ */
+const inflight = new Map<string, Promise<unknown[]>>();
+
+const fetchAll = async <T>(path: string, query: Record<string, string | number | boolean | undefined>): Promise<T[]> => {
     const items: T[] = [];
     let offset = 0;
-    while (true) {
-        const page = await feiniuList<T>(path, query, offset, 100);
-        items.push(...page.items);
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+        const result = await feiniuList<T>(path, query, offset, 100);
+        items.push(...result.items);
         // total 为 0（服务端没给）时按「这一页取满了就还有下一页」推进。
-        if (page.items.length === 0) break;
-        if (page.total > 0 && offset + page.items.length >= page.total) break;
-        if (page.total === 0 && page.items.length < 100) break;
-        offset += page.items.length;
-        if (offset > 20_000) break;
+        if (result.items.length === 0) break;
+        if (result.total > 0 && offset + result.items.length >= result.total) break;
+        if (result.total === 0 && result.items.length < 100) break;
+        offset += result.items.length;
     }
     return items;
+};
+
+const collectAll = async <T>(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<T[]> => {
+    const key = `${path}?${JSON.stringify(query)}`;
+    const existing = inflight.get(key);
+    if (existing) return existing as Promise<T[]>;
+    const work = fetchAll<T>(path, query);
+    inflight.set(key, work as Promise<unknown[]>);
+    try {
+        return await work;
+    } finally {
+        inflight.delete(key);
+    }
 };
 
 export const feiniuLibrary: OnlineLibraryProvider = {
@@ -69,6 +98,6 @@ export const feiniuPlayHistory = async (limit = 100) => {
 
 /** 曲目总数，给「我的音乐」这类概览用。 */
 export const feiniuTrackCount = async (): Promise<number> => {
-    const data = await feiniuRequest<{ total?: number }>('/track/list', { query: { page: 1, size: 1 } });
-    return Number(data?.total) || 0;
+    const data = await feiniuRequest<unknown>('/track/list', { query: { page: 1, size: 1 } });
+    return pickFeiniuTotal(data);
 };

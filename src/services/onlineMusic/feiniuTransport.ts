@@ -34,14 +34,48 @@ const readEnvBase = (): string => {
     return viteValue || processValue;
 };
 
-/** 用户常常照着浏览器地址栏复制，尾巴上带着 /music/api/v1，去掉再存。 */
+/**
+ * 飞牛（fnOS）音乐服务的默认端口。
+ *
+ * fnOS 的 Web 网关就挂在这个端口上，音乐是它下面的 `/music/`（接口 `/music/api/v1`）。
+ * 用户从浏览器地址栏复制下来的多半是 `http://192.168.x.x:5666/music/` 这一段，
+ * 但手写时经常只写个 IP —— 那就必须补上这个端口，否则请求会打到 80 上去。
+ */
+const DEFAULT_PORT = 5666;
+
+/**
+ * 存之前先洗干净。
+ *
+ * 用户在手机上填地址，粘贴进来带空格、中文冒号（`：`）是家常便饭，而这两种东西
+ * 拼进 URL 就会让 `new URL()` 直接抛 `Invalid URL` —— 抛出来还是一句看不懂的话，
+ * 界面上只显示「未知错误」。所以在这里就把它们收拾掉。
+ */
 export const normalizeFeiniuServerUrl = (value: string): string => (
-    String(value ?? '').trim().replace(/\/music\/api\/v1\/*$/i, '').replace(/\/+$/, '')
+    String(value ?? '')
+        .replace(/\s+/g, '')
+        .replace(/[：︓]/g, ':')
+        // 照着浏览器地址栏复制的两种尾巴都要剥掉：飞牛音乐的网页地址是
+        // `http://NAS:5666/music/`，接口是它下面的 `/music/api/v1`。留着它们，
+        // 拼出来的就成了 `/music/music/api/v1` —— 网关找不到这个 location，
+        // 把请求兜到前端页面上，登录报「非 JSON 响应」。
+        .replace(/\/music\/api\/v1\/*$/i, '')
+        .replace(/\/music\/*$/i, '')
+        .replace(/\/+$/, '')
 );
 
-const withScheme = (value: string): string => (
-    /^https?:\/\//i.test(value) ? value : `http://${value}`
-);
+/**
+ * 补 scheme 与默认端口。
+ *
+ * 只补 http：https 走 443 是普遍约定（反代 / 穿透通常都挂在 443 上），而 http 这一侧
+ * 飞牛几乎都跑在 5666 —— 没写端口的 http 地址按 80 去连，连上的多半是 NAS 上别的
+ * 服务，回一个 HTML 页面，于是登录报「非 JSON 响应」，看着像是接口坏了。
+ */
+const withSchemeAndPort = (value: string): string => {
+    const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
+    if (/^https:\/\//i.test(withScheme)) return withScheme;
+    if (/^http:\/\/[^/?#]+:\d+/i.test(withScheme)) return withScheme;
+    return withScheme.replace(/^(http:\/\/[^/?#]+)/i, (head) => `${head}:${DEFAULT_PORT}`);
+};
 
 /** 当前生效的服务器地址：会话里存的那份优先，否则用构建期配的默认值。 */
 export const getFeiniuServerUrl = (): string => (
@@ -102,7 +136,7 @@ export const feiniuResourceHeaders = (): Record<string, string> | null => {
 
 const assetBase = (): string => {
     const base = getFeiniuServerUrl();
-    return base ? withScheme(base) : '';
+    return base ? withSchemeAndPort(base) : '';
 };
 
 /**
@@ -145,6 +179,35 @@ export type FeiniuRequestOptions = {
 const describeFeiniuTarget = (url: URL): string => url.origin;
 
 /**
+ * 飞牛自己的超时。比其它平台短一截：NAS 就在局域网里，十几秒还不回就是有问题了，
+ * 没必要让一个请求挂在那儿占着资源。
+ */
+const FEINIU_TIMEOUT_MS = 12_000;
+
+/**
+ * 飞牛的请求闸门：同一时刻只放行一个，两个之间还要让出一个宏任务。
+ *
+ * 为什么必须限：真机上飞牛的请求走的是 Capacitor 桥（原生 OkHttp），而网易 / QQ / 酷狗
+ * 那些接口**同样**过这条桥（fetch shim 把它们的请求也转到 `FoliaNative.httpRequest`）。
+ * 登录飞牛之后界面会并发去拉歌单、收藏、历史、曲目总数 —— 收藏那一路还是无限翻页，
+ * 几十个请求连着把桥占住，别的平台的请求就只能在队列里排队，等排到时调用方那边的
+ * 超时早就到了，于是「登录飞牛之后其它平台集体超时」（退出飞牛重启即恢复）。
+ *
+ * 串行 + 让一帧不是为了变快，是**给别的平台留出插空的缝**：桥是共用的，
+ * 谁都不该被一个后台翻页的任务独占。
+ */
+let feiniuChain: Promise<unknown> = Promise.resolve();
+
+const throughFeiniuGate = <T>(work: () => Promise<T>): Promise<T> => {
+    const started = feiniuChain
+        .catch(() => undefined)
+        .then(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
+        .then(work);
+    feiniuChain = started.catch(() => undefined);
+    return started;
+};
+
+/**
  * 网页 / 桌面端这一路：浏览器 fetch 直连。
  *
  * 受同源策略约束 —— 服务端不下发 CORS 头就是一句 `Failed to fetch`；真机上不走它。
@@ -169,7 +232,15 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
         throw new OnlineProviderError('auth-required', 'FeiNiu is not signed in', 'feiniu');
     }
 
-    const url = new URL(`${withScheme(base)}${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`);
+    let url: URL;
+    try {
+        url = new URL(`${withSchemeAndPort(base)}${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`);
+    } catch {
+        // 地址本身拼不出 URL 时，`new URL` 抛的是一句 "Failed to construct 'URL'"，
+        // 调用方只能当未知错误处理。这里换成「地址不对」并把它回显出来 ——
+        // 用户看着自己填的那串才知道该改什么。
+        throw new OnlineProviderError('unavailable', `FeiNiu server address is not a valid URL: ${base}`, 'feiniu');
+    }
     Object.entries(options.query ?? {}).forEach(([key, value]) => {
         if (value === undefined || value === '') return;
         url.searchParams.set(key, String(value));
@@ -191,13 +262,15 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
         payload = JSON.stringify(options.body);
     }
 
-    const timeoutMs = options.timeoutMs ?? 20_000;
+    const timeoutMs = options.timeoutMs ?? FEINIU_TIMEOUT_MS;
     let status: number;
     let text: string;
     try {
-        const result = isNativeHttpAvailable()
-            ? await nativeHttpRequest({ url: url.toString(), method, headers, bodyText: payload ?? '', timeoutMs })
-            : await browserRequest(url.toString(), method, headers, payload, timeoutMs);
+        const result = await throughFeiniuGate(() => (
+            isNativeHttpAvailable()
+                ? nativeHttpRequest({ url: url.toString(), method, headers, bodyText: payload ?? '', timeoutMs })
+                : browserRequest(url.toString(), method, headers, payload, timeoutMs)
+        ));
         status = result.status;
         text = result.text;
     } catch (error) {
@@ -226,7 +299,20 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
     try {
         envelope = JSON.parse(text) as FeiniuEnvelope<T>;
     } catch (error) {
-        throw new OnlineProviderError('invalid-response', `FeiNiu returned a non-JSON response for ${path}`, 'feiniu', error);
+        // 拿到一个 HTML 页面是最值得说清的一种失败：请求其实**到了**那台机器，
+        // 只是那里不是飞牛的接口 —— 常见的是地址只写到 NAS 的 Web 端口（比如
+        // fnOS 面板本身），或者这台机器上压根没装「音乐」应用，网关就把请求
+        // 兜到了前端页面上。必须把这句话说出来，否则只能看到「非 JSON 响应」。
+        const head = text.trimStart().slice(0, 64).toLowerCase();
+        const isHtml = head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<head');
+        throw new OnlineProviderError(
+            'invalid-response',
+            isHtml
+                ? `FeiNiu returned an HTML page instead of JSON for ${path} (HTTP ${status}, ${describeFeiniuTarget(url)}) — 这个地址不是飞牛音乐的接口：检查端口与路径（接口是 http://NAS:5666/music/api/v1），并确认这台 NAS 上装了「音乐」应用`
+                : `FeiNiu returned a non-JSON response for ${path} (HTTP ${status}, ${describeFeiniuTarget(url)})`,
+            'feiniu',
+            error,
+        );
     }
     if (!envelope || typeof envelope !== 'object') {
         throw new OnlineProviderError('invalid-response', `FeiNiu returned an unexpected payload for ${path}`, 'feiniu');
@@ -249,6 +335,45 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
  * 取一页列表。飞牛的分页是 1 起始的 `page` + `size`，而 omni 用的是 offset + limit，
  * 两边不对齐时（比如 offset=30、limit=50）多要一点再在本地切。
  */
+/**
+ * 列表字段的候选名。
+ *
+ * 飞牛各接口、各版本给的数组字段名并不统一（`list` / `tracks` / `items` …），
+ * 而写死只认 `list` 的后果是**静默拿到空列表** —— 不报错、界面上就是「没有歌」，
+ * 看日志也看不出所以然。所以按候选逐个试到**真的有内容**的那个为止。
+ */
+const LIST_KEYS = ['list', 'tracks', 'items', 'songs', 'records', 'rows', 'data'];
+const TOTAL_KEYS = ['total', 'totalCount', 'count', 'totalSize'];
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+/** 取列表：先找非空的数组，都空就退到第一个数组字段，再没有才认作空。 */
+export const pickFeiniuList = (data: unknown): unknown[] => {
+    if (Array.isArray(data)) return data;
+    const record = asRecord(data);
+    for (const key of LIST_KEYS) {
+        const value = record[key];
+        if (Array.isArray(value) && value.length > 0) return value;
+    }
+    for (const key of LIST_KEYS) {
+        const value = record[key];
+        if (Array.isArray(value)) return value;
+    }
+    return [];
+};
+
+/** 取总数：拿不到就报 0，调用方按「这一页取满了就还有下一页」推进。 */
+export const pickFeiniuTotal = (data: unknown): number => {
+    const record = asRecord(data);
+    for (const key of TOTAL_KEYS) {
+        const value = Number(record[key]);
+        if (Number.isFinite(value) && value > 0) return value;
+    }
+    return 0;
+};
+
 export const feiniuList = async <T>(
     path: string,
     query: Record<string, string | number | boolean | undefined>,
@@ -257,10 +382,15 @@ export const feiniuList = async <T>(
 ): Promise<{ items: T[]; total: number }> => {
     const size = Math.min(Math.max(limit, 1) + (offset % Math.max(limit, 1)), MAX_PAGE_SIZE);
     const page = Math.floor(offset / Math.max(limit, 1)) + 1;
-    const data = await feiniuRequest<{ list?: T[]; total?: number }>(path, { query: { ...query, page, size } });
-    const all = Array.isArray(data?.list) ? data.list : [];
+    const data = await feiniuRequest<unknown>(path, { query: { ...query, page, size } });
+    const all = pickFeiniuList(data) as T[];
+    // 数据回来了、却一个数组字段都没认出来时把键名打出来：
+    // 下次就能直接照着真实结构改，不用再猜。
+    if (all.length === 0 && data !== null && data !== undefined) {
+        console.warn('[Feiniu] unexpected list payload for', path, 'keys:', Object.keys(asRecord(data)));
+    }
     const skip = offset % Math.max(limit, 1);
-    return { items: all.slice(skip, skip + limit), total: Number(data?.total) || 0 };
+    return { items: all.slice(skip, skip + limit), total: pickFeiniuTotal(data) };
 };
 
 export type FeiniuLoginData = {

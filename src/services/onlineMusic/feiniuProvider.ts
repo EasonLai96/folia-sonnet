@@ -13,6 +13,8 @@ import {
     clearFeiniuSession,
     feiniuPasswordLogin,
     feiniuRequest,
+    pickFeiniuList,
+    pickFeiniuTotal,
     feiniuStreamUrl,
     getFeiniuDeviceId,
     feiniuResourceHeaders,
@@ -69,11 +71,11 @@ export const feiniuProvider: OnlineMusicProvider = {
             const page = Math.floor(offset / limit) + 1;
             const skip = offset % limit;
             const size = Math.min(limit + skip, 300);
-            const data = await feiniuRequest<{ list?: unknown[]; total?: number }>('/search/track', {
+            const data = await feiniuRequest<unknown>('/search/track', {
                 query: { q: query, page, size },
             });
-            const all = Array.isArray(data?.list) ? data.list : [];
-            return feiniuPage(all.slice(skip, skip + limit).map(normalizeFeiniuSong), Number(data?.total) || 0, offset, limit);
+            const all = pickFeiniuList(data);
+            return feiniuPage(all.slice(skip, skip + limit).map(normalizeFeiniuSong), pickFeiniuTotal(data), offset, limit);
         },
     },
 
@@ -166,8 +168,8 @@ export const feiniuProvider: OnlineMusicProvider = {
         /** 自建服务没有「推荐歌单」这回事，拿用户的歌单顶上。 */
         async getRecommendedCollections(limit) {
             try {
-                const data = await feiniuRequest<{ list?: unknown[] }>('/playlist/list', { query: { page: 1, size: limit } });
-                return (Array.isArray(data?.list) ? data.list : []).map(item => normalizeFeiniuCollection(item, 'playlist'));
+                const data = await feiniuRequest<unknown>('/playlist/list', { query: { page: 1, size: limit } });
+                return pickFeiniuList(data).map(item => normalizeFeiniuCollection(item, 'playlist'));
             } catch {
                 return [] as ProviderCollection[];
             }
