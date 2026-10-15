@@ -24,7 +24,7 @@ import {
     rememberFeiniuUser,
 } from './feiniuTransport';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong, normalizeFeiniuUser } from './feiniuNormalize';
-import { backfillFeiniuCovers } from './feiniuCoverFallback';
+import { backfillSongCovers } from './onlineCoverFallback';
 import { feiniuAlbumPage, feiniuArtistPage, feiniuCatalog, feiniuTrackDetail } from './feiniuCatalog';
 import { feiniuLibrary, feiniuPlayHistory } from './feiniuLibrary';
 import { feiniuMutations, reportFeiniuPlayback } from './feiniuMutations';
@@ -76,7 +76,7 @@ export const feiniuProvider: OnlineMusicProvider = {
                 query: { q: query, page, size },
             });
             const all = pickFeiniuList(data);
-            const songs = await backfillFeiniuCovers(all.slice(skip, skip + limit).map(normalizeFeiniuSong));
+            const songs = await backfillSongCovers(all.slice(skip, skip + limit).map(normalizeFeiniuSong));
             return feiniuPage(songs, pickFeiniuTotal(data), offset, limit);
         },
     },
@@ -162,7 +162,7 @@ export const feiniuProvider: OnlineMusicProvider = {
                     { query: { deviceId: getFeiniuDeviceId() } },
                 );
                 const tracks = [data?.current?.track, data?.next?.track].filter(Boolean) as unknown[];
-                return backfillFeiniuCovers(tracks.map(normalizeFeiniuSong), 2);
+                return backfillSongCovers(tracks.map(normalizeFeiniuSong), 2);
             } catch {
                 return [];
             }

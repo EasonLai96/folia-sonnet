@@ -2,7 +2,7 @@ import type { MediaId, OnlineLibraryProvider, ProviderCollection } from '../../t
 import { feiniuList, feiniuRequest, pickFeiniuTotal } from './feiniuTransport';
 import { FEINIU_ALL_TRACKS_ID, FEINIU_FAVORITE_ID } from './feiniuCatalog';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './feiniuNormalize';
-import { backfillFeiniuCovers } from './feiniuCoverFallback';
+import { backfillSongCovers } from './onlineCoverFallback';
 
 // src/services/onlineMusic/feiniuLibrary.ts
 // 用户自己的歌单 / 专辑 / 收藏。飞牛的接口不按 userId 过滤（服务端就认当前登录态），
@@ -106,14 +106,14 @@ export const feiniuLibrary: OnlineLibraryProvider = {
 
     async getLikedSongs() {
         const items = await collectAll<unknown>('/favorite-track/list');
-        return backfillFeiniuCovers(items.map(normalizeFeiniuSong));
+        return backfillSongCovers(items.map(normalizeFeiniuSong));
     },
 };
 
 /** 播放历史（首页「最近播放」用）。 */
 export const feiniuPlayHistory = async (limit = 100) => {
     const { items } = await feiniuList<unknown>('/play-history/list', {}, 0, limit);
-    return backfillFeiniuCovers(items.map(normalizeFeiniuSong));
+    return backfillSongCovers(items.map(normalizeFeiniuSong));
 };
 
 /** 曲目总数，给「我的音乐」这类概览用。 */

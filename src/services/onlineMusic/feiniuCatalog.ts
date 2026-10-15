@@ -2,7 +2,7 @@ import type { MediaId, OnlineCatalogProvider, ProviderPage } from '../../types/o
 import type { UnifiedSong } from '../../types';
 import { feiniuList, feiniuRequest } from './feiniuTransport';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './feiniuNormalize';
-import { backfillFeiniuCovers } from './feiniuCoverFallback';
+import { backfillSongCovers } from './onlineCoverFallback';
 
 // src/services/onlineMusic/feiniuCatalog.ts
 // 歌单 / 专辑 / 歌手的曲目与详情。
@@ -29,7 +29,7 @@ const songPage = async (
 ): Promise<ProviderPage<UnifiedSong>> => {
     const { items, total } = await feiniuList<unknown>(path, query, offset, limit);
     // 飞牛的库里常有没嵌封面的文件，这里顺手借一张（有缓存，只补当前页头几首）。
-    return feiniuPage(await backfillFeiniuCovers(items.map(normalizeFeiniuSong)), total, offset, limit);
+    return feiniuPage(await backfillSongCovers(items.map(normalizeFeiniuSong)), total, offset, limit);
 };
 
 export const feiniuCatalog: OnlineCatalogProvider = {
@@ -79,6 +79,6 @@ export const feiniuArtistPage = async (offset: number, limit: number) => {
 /** 单曲详情（播放前补元数据用）。 */
 export const feiniuTrackDetail = async (guid: MediaId) => {
     const data = await feiniuRequest<{ track?: unknown }>('/track/metadata', { query: { guid: String(guid) } });
-    const [song] = await backfillFeiniuCovers([normalizeFeiniuSong(data?.track ?? data)], 1);
+    const [song] = await backfillSongCovers([normalizeFeiniuSong(data?.track ?? data)], 1);
     return song;
 };
