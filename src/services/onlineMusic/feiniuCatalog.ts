@@ -2,6 +2,7 @@ import type { MediaId, OnlineCatalogProvider, ProviderPage } from '../../types/o
 import type { UnifiedSong } from '../../types';
 import { feiniuList, feiniuRequest } from './feiniuTransport';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './feiniuNormalize';
+import { backfillFeiniuCovers } from './feiniuCoverFallback';
 
 // src/services/onlineMusic/feiniuCatalog.ts
 // 歌单 / 专辑 / 歌手的曲目与详情。
@@ -11,6 +12,15 @@ import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './fe
 /** 「我喜欢的」是飞牛自己的收藏接口，不是一个真歌单，用这个固定 id 顶替。 */
 export const FEINIU_FAVORITE_ID = 'favorite';
 
+/**
+ * 「全部歌曲」也是一个伪歌单，走曲目列表接口本身。
+ *
+ * 不是可有可无的一颗按钮：飞牛的歌单要用户自己建，**一个歌单都没有的人点进
+ * 「歌单」看到的是一片空** —— 他的第一反应是「没连上」而不是「我还没建歌单」。
+ * 有这一条，连上就有东西。
+ */
+export const FEINIU_ALL_TRACKS_ID = 'all-tracks';
+
 const songPage = async (
     path: string,
     query: Record<string, string | number | boolean | undefined>,
@@ -18,7 +28,8 @@ const songPage = async (
     offset: number,
 ): Promise<ProviderPage<UnifiedSong>> => {
     const { items, total } = await feiniuList<unknown>(path, query, offset, limit);
-    return feiniuPage(items.map(normalizeFeiniuSong), total, offset, limit);
+    // 飞牛的库里常有没嵌封面的文件，这里顺手借一张（有缓存，只补当前页头几首）。
+    return feiniuPage(await backfillFeiniuCovers(items.map(normalizeFeiniuSong)), total, offset, limit);
 };
 
 export const feiniuCatalog: OnlineCatalogProvider = {
@@ -26,11 +37,16 @@ export const feiniuCatalog: OnlineCatalogProvider = {
     // 曲目里已经带着 album / artists，不需要再解析一次。
     resolveSongCatalogRefs: async song => song,
 
-    getPlaylistTracks: (id, limit, offset, collection) => (
-        String(id) === FEINIU_FAVORITE_ID || collection?.isLiked === true
-            ? songPage('/favorite-track/list', {}, limit, offset)
-            : songPage('/track/playlist-detail/list', { playlistGUID: String(id) }, limit, offset)
-    ),
+    getPlaylistTracks: (id, limit, offset, collection) => {
+        const key = String(id);
+        if (key === FEINIU_FAVORITE_ID || collection?.isLiked === true) {
+            return songPage('/favorite-track/list', {}, limit, offset);
+        }
+        if (key === FEINIU_ALL_TRACKS_ID) {
+            return songPage('/track/list', {}, limit, offset);
+        }
+        return songPage('/track/playlist-detail/list', { playlistGUID: key }, limit, offset);
+    },
     getAlbumTracks: (id, limit = 120, offset = 0) => songPage('/track/album-detail/list', { albumGUID: String(id) }, limit, offset),
     getArtistSongs: (id, limit, offset) => songPage('/track/artist-detail/list', { artistGUID: String(id) }, limit, offset),
 
@@ -63,5 +79,6 @@ export const feiniuArtistPage = async (offset: number, limit: number) => {
 /** 单曲详情（播放前补元数据用）。 */
 export const feiniuTrackDetail = async (guid: MediaId) => {
     const data = await feiniuRequest<{ track?: unknown }>('/track/metadata', { query: { guid: String(guid) } });
-    return normalizeFeiniuSong(data?.track ?? data);
+    const [song] = await backfillFeiniuCovers([normalizeFeiniuSong(data?.track ?? data)], 1);
+    return song;
 };

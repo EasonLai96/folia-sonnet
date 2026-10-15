@@ -1,7 +1,8 @@
 import type { MediaId, OnlineLibraryProvider, ProviderCollection } from '../../types/onlineMusic';
 import { feiniuList, feiniuRequest, pickFeiniuTotal } from './feiniuTransport';
-import { FEINIU_FAVORITE_ID } from './feiniuCatalog';
+import { FEINIU_ALL_TRACKS_ID, FEINIU_FAVORITE_ID } from './feiniuCatalog';
 import { feiniuPage, normalizeFeiniuCollection, normalizeFeiniuSong } from './feiniuNormalize';
+import { backfillFeiniuCovers } from './feiniuCoverFallback';
 
 // src/services/onlineMusic/feiniuLibrary.ts
 // 用户自己的歌单 / 专辑 / 收藏。飞牛的接口不按 userId 过滤（服务端就认当前登录态），
@@ -16,6 +17,21 @@ const favoriteCollection = (): ProviderCollection => ({
     trackCount: 0,
     isOwned: true,
     isLiked: true,
+});
+
+/**
+ * 「全部歌曲」伪歌单，指向曲目列表接口本身。
+ *
+ * 飞牛的歌单是用户自己建的，一个都没建的人点进「歌单」看到的是一片空 ——
+ * 他会以为没连上。有这一条，连上就有东西可点。
+ */
+const allTracksCollection = (trackCount: number): ProviderCollection => ({
+    providerId: 'feiniu',
+    id: FEINIU_ALL_TRACKS_ID,
+    type: 'playlist',
+    name: '全部歌曲',
+    trackCount,
+    isOwned: true,
 });
 
 /**
@@ -67,9 +83,13 @@ export const feiniuLibrary: OnlineLibraryProvider = {
     async getUserPlaylists(_userId, limit, offset) {
         const { items, total } = await feiniuList<unknown>('/playlist/list', {}, offset, limit);
         const playlists = items.map(item => normalizeFeiniuCollection(item, 'playlist'));
-        // 收藏放在最前面：界面上它和歌单并列，但没有真歌单 id。
-        const all = offset === 0 ? [favoriteCollection(), ...playlists] : playlists;
-        return feiniuPage(all, total + 1, offset, limit);
+        // 「全部歌曲」和「我喜欢的」放在最前面：界面上它们和歌单并列，但没有真歌单 id。
+        // 取总数失败（0）也不该让这一条消失 —— 它存在的意义就是「连上就有东西」。
+        // 取总数失败也不能让这一条消失（它存在的意义就是「连上就有东西」），更不能让整页报错。
+        const pinned = offset === 0
+            ? [allTracksCollection(await feiniuTrackCount().catch(() => 0)), favoriteCollection()]
+            : [];
+        return feiniuPage([...pinned, ...playlists], total + pinned.length, offset, limit);
     },
 
     async getUserAlbums(_userId, limit, offset) {
@@ -86,14 +106,14 @@ export const feiniuLibrary: OnlineLibraryProvider = {
 
     async getLikedSongs() {
         const items = await collectAll<unknown>('/favorite-track/list');
-        return items.map(normalizeFeiniuSong);
+        return backfillFeiniuCovers(items.map(normalizeFeiniuSong));
     },
 };
 
 /** 播放历史（首页「最近播放」用）。 */
 export const feiniuPlayHistory = async (limit = 100) => {
     const { items } = await feiniuList<unknown>('/play-history/list', {}, 0, limit);
-    return items.map(normalizeFeiniuSong);
+    return backfillFeiniuCovers(items.map(normalizeFeiniuSong));
 };
 
 /** 曲目总数，给「我的音乐」这类概览用。 */

@@ -2,12 +2,12 @@ import type { MediaId, OnlineMutationProvider, ProviderCollection } from '../../
 import type { SongResult } from '../../types';
 import { getPlaybackSourceRef } from '../../utils/appPlaybackGuards';
 import { OnlineProviderError } from '../../types/onlineMusic';
-import { FEINIU_FAVORITE_ID } from './feiniuCatalog';
+import { FEINIU_ALL_TRACKS_ID, FEINIU_FAVORITE_ID } from './feiniuCatalog';
 import { feiniuRequest } from './feiniuTransport';
 
 // src/services/onlineMusic/feiniuMutations.ts
 // 收藏与歌单增删。飞牛的收藏是独立的接口（不是某个歌单），所以「我喜欢的」那条伪歌单
-// 只接受收藏动作，不接受增删曲目。
+// 只接受收藏动作，不接受增删曲目。「全部歌曲」是曲目列表本身，同样不是真歌单。
 
 const trackGuidOf = (song: MediaId | SongResult): string => {
     if (typeof song === 'string' || typeof song === 'number') return String(song);
@@ -19,8 +19,12 @@ const trackGuidOf = (song: MediaId | SongResult): string => {
 };
 
 export const feiniuMutations: OnlineMutationProvider = {
-    /** 「我喜欢的」不是真歌单，往里加歌要走收藏接口。 */
-    canAddToPlaylist: playlist => String(playlist.id) !== FEINIU_FAVORITE_ID && playlist.isLiked !== true,
+    /** 两条伪歌单都不是真歌单（收藏 / 曲目列表本身），往里加歌要走各自的接口。 */
+    canAddToPlaylist: playlist => (
+        String(playlist.id) !== FEINIU_FAVORITE_ID
+        && String(playlist.id) !== FEINIU_ALL_TRACKS_ID
+        && playlist.isLiked !== true
+    ),
 
     async likeSong(song, liked) {
         await feiniuRequest(liked ? '/favorite-track/create' : '/favorite-track/delete', {
@@ -33,8 +37,8 @@ export const feiniuMutations: OnlineMutationProvider = {
         const guid = typeof playlist === 'string' || typeof playlist === 'number'
             ? String(playlist)
             : String(playlist.id);
-        if (guid === FEINIU_FAVORITE_ID) {
-            throw new OnlineProviderError('unsupported', 'FeiNiu favorites cannot be edited as a playlist', 'feiniu');
+        if (guid === FEINIU_FAVORITE_ID || guid === FEINIU_ALL_TRACKS_ID) {
+            throw new OnlineProviderError('unsupported', 'FeiNiu built-in collections cannot be edited as a playlist', 'feiniu');
         }
         const trackGUIDs = tracks.map(trackGuidOf);
         if (trackGUIDs.length === 0) return;
