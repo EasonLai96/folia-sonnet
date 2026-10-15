@@ -26,11 +26,37 @@ export interface AdminSessionRow {
   expires_at: string;
 }
 
+/**
+ * 出厂凭据。
+ *
+ * 只是「起得来就能登进去」的兜底。仓库是公开的，等于谁都看得到 —— 部署到公网前
+ * 必须用 ADMIN_USERNAME / ADMIN_PASSWORD 覆盖掉。没覆盖时启动日志会警告，
+ * 登录后的面板顶部也会挂一条提醒。
+ */
+export const DEFAULT_ADMIN_USERNAME = 'maimai993';
+export const DEFAULT_ADMIN_PASSWORD = 'IgFXYJPHtEB9eog6TqYRhjk6';
+
+/**
+ * 只读凭据那两个字段，不去碰 Env 上其余的绑定。
+ *
+ * 于是 Node 启动处可以在 `serve()` 之前就问到「生效的是哪一组」，用来打日志；
+ * 参数收窄之后 Env 依然可以原样传进来。
+ */
+type AdminCredentialEnv = {
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD?: string;
+};
+
 /** Credentials come from the environment; the defaults are the shipped ones. */
-export const readAdminCredentials = (env: Env): { username: string; password: string } => ({
-  username: String(env.ADMIN_USERNAME || 'maimai').trim(),
-  password: String(env.ADMIN_PASSWORD || '131425++'),
+export const readAdminCredentials = (env: AdminCredentialEnv): { username: string; password: string } => ({
+  username: String(env.ADMIN_USERNAME || DEFAULT_ADMIN_USERNAME).trim(),
+  password: String(env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD),
 });
+
+/** 两个变量但凡缺一个，就还算在吃出厂凭据。 */
+export const isUsingDefaultAdminCredentials = (env: AdminCredentialEnv): boolean => (
+  !String(env.ADMIN_USERNAME || '').trim() || !String(env.ADMIN_PASSWORD || '')
+);
 
 const newToken = (): string => {
   const cryptoRef = globalThis.crypto as Crypto | undefined;
@@ -135,6 +161,12 @@ admin.post('/login', async (c) => {
   }
 
   const token = await createAdminSession(c.env.FOLIA_SYNC_DB, expected.username);
+  const usingDefault = isUsingDefaultAdminCredentials(c.env);
+  if (usingDefault) {
+    console.warn(
+      '[admin] 面板正使用出厂默认凭据登录。请设置 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量后重启服务。',
+    );
+  }
   setCookie(c, ADMIN_COOKIE, token, {
     httpOnly: true,
     sameSite: 'Lax',
@@ -144,7 +176,7 @@ admin.post('/login', async (c) => {
     secure: c.req.url.startsWith('https://'),
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
-  return c.json({ ok: true, username: expected.username });
+  return c.json({ ok: true, username: expected.username, usingDefault });
 });
 
 admin.post('/logout', async (c) => {
@@ -156,7 +188,12 @@ admin.post('/logout', async (c) => {
 
 admin.get('/session', async (c) => {
   const username = await readAdminSession(c);
-  return c.json({ ok: true, signedIn: Boolean(username), username });
+  return c.json({
+    ok: true,
+    signedIn: Boolean(username),
+    username,
+    usingDefault: isUsingDefaultAdminCredentials(c.env),
+  });
 });
 
 export default admin;

@@ -111,6 +111,14 @@ const shell = (title: string, body: string, script: string): string => `<!DOCTYP
   .toolbar input, .toolbar select { width: auto; min-width: 140px; }
   .empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
   .err { color: #fca5a5; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .warn {
+    margin-bottom: 18px; padding: 12px 14px; border-radius: 14px; font-size: 12px; line-height: 1.6;
+    background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.32); color: #fcd34d;
+  }
+  .warn code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    background: rgba(0,0,0,.35); padding: 1px 5px; border-radius: 5px;
+  }
   .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; border: 1px solid var(--line); color: var(--muted); }
   pre.json {
     background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 10px;
@@ -184,6 +192,11 @@ export const renderPanelPage = (): string => shell('Folia 云服务后台', `
     <div class="sub">字体市场 · AI 云缓存</div>
   </div>
   <button id="logout">退出登录</button>
+</div>
+
+<!-- 出厂凭据还在用就在顶上挂一条，别让「能登进去」被误当成「已经配好了」 -->
+<div class="warn" id="default-credential-warning" hidden>
+  正在使用出厂默认凭据。请设置 <code>ADMIN_USERNAME</code> 与 <code>ADMIN_PASSWORD</code> 环境变量后重启服务。
 </div>
 
 <div class="stats" id="stats"></div>
@@ -355,6 +368,20 @@ const refreshAll = async () => {
   await Promise.all([loadStats(), loadFonts(), loadCache()]);
 };
 
+/* 还在吃出厂凭据就把顶上那条警告放出来。失败也无所谓，只是少一句提醒。 */
+const flagDefaultCredentials = async () => {
+  try {
+    const response = await fetch('/admin/session', { headers: { Accept: 'application/json' } });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data?.signedIn && data?.usingDefault) {
+      document.getElementById('default-credential-warning').hidden = false;
+    }
+  } catch {
+    // ignore
+  }
+};
+
 /* ---------------------------------------------------------------- preview */
 let previewBlob = null;
 
@@ -449,6 +476,8 @@ document.getElementById('logout').addEventListener('click', async () => {
   await fetch('/admin/logout', { method: 'POST' }).catch(() => {});
   window.location.reload();
 });
+
+void flagDefaultCredentials();
 
 document.getElementById('make-preview').addEventListener('click', () => { void buildPreview(); });
 document.getElementById('do-upload').addEventListener('click', () => { void uploadFont(); });

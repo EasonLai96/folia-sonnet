@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { D1Emulator } from './d1-emulator.js';
 import app from './app.js';
+import { isUsingDefaultAdminCredentials, readAdminCredentials } from './admin.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -30,8 +31,9 @@ try {
 
 const SYNC_TOKEN = process.env.SYNC_TOKEN;
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN;
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'maimai';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '131425++';
+// 不在这里兜底：出厂凭据只在 admin.ts 里定义一份，否则两处各改一处就对不上了。
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../folia-sync.db');
 
@@ -75,7 +77,13 @@ if (DASHBOARD_TOKEN) {
 } else {
   console.log(`- Dashboard: Disabled (DASHBOARD_TOKEN not set)`);
 }
-console.log(`- Admin panel: \x1b[36mhttp://localhost:${PORT}/admin\x1b[0m (${ADMIN_USERNAME})`);
+const adminCredentials = readAdminCredentials({ ADMIN_USERNAME, ADMIN_PASSWORD });
+console.log(`- Admin panel: \x1b[36mhttp://localhost:${PORT}/admin\x1b[0m (${adminCredentials.username})`);
+if (isUsingDefaultAdminCredentials({ ADMIN_USERNAME, ADMIN_PASSWORD })) {
+  console.warn(
+    '\x1b[33m[WARN]\x1b[0m Admin panel is on the factory credentials — set ADMIN_USERNAME / ADMIN_PASSWORD before exposing this server.',
+  );
+}
 
 serve({
   fetch: (req) => app.fetch(req, {

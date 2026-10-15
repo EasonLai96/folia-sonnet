@@ -235,9 +235,9 @@ SYNC_TOKEN="你的_SYNC_TOKEN"
 # 选填：网页看板访问 Token (至少 16 位)
 DASHBOARD_TOKEN="你的_DASHBOARD_TOKEN"
 
-# 选填：可视化面板 /admin 的登录凭据（默认 maimai / 131425++）
-ADMIN_USERNAME="maimai"
-ADMIN_PASSWORD="131425++"
+# 选填：可视化面板 /admin 的登录凭据（不填就用出厂那一组，两个都要给才生效）
+ADMIN_USERNAME="你的账号"
+ADMIN_PASSWORD="你的密码"
 ```
 
 ### 2. 从仓库根目录启动服务
@@ -275,9 +275,9 @@ PORT=3000
 # 选填：SQLite 数据库保存路径（默认在当前目录生成 folia-sync.db）
 DB_PATH="./folia-sync.db"
 
-# 选填：可视化面板 /admin 的登录凭据（默认 maimai / 131425++）
-ADMIN_USERNAME="maimai"
-ADMIN_PASSWORD="131425++"
+# 选填：可视化面板 /admin 的登录凭据（不填就用出厂那一组，两个都要给才生效）
+ADMIN_USERNAME="你的账号"
+ADMIN_PASSWORD="你的密码"
 ```
 
 ### 2. 安装并启动
@@ -361,22 +361,27 @@ http://127.0.0.1:13000
 
 **访问地址**：`http://你的服务域名/admin`
 
-**默认账号密码**：
+**出厂账号密码**：
 
 | 项目 | 默认值 |
 | --- | --- |
-| 账号 | `maimai` |
-| 密码 | `131425++` |
+| 账号 | `maimai993` |
+| 密码 | `IgFXYJPHtEB9eog6TqYRhjk6` |
 
 > [!WARNING]
-> 部署到公网后请务必通过环境变量改掉默认凭据：
+> 这是**写在源码里的出厂凭据**，仓库公开 = 谁都看得到。它只保证「服务起得来就能登进去」，
+> **部署到公网前必须换成自己的**：
 >
 > ```env
 > ADMIN_USERNAME="你的账号"
 > ADMIN_PASSWORD="你的密码"
 > ```
 >
-> 登录态存在服务端的 `admin_sessions` 表里，浏览器只持有一个 httpOnly cookie，有效期 24 小时，活跃使用会自动续期；退出登录即从库中删除该条 session。
+> 环境变量一旦只配了一个（比如只配了账号），另一项仍会回落到出厂值，等于没换 ——
+> 两个都要给。还在用出厂值时，启动日志会打一条黄色警告，登录后的面板顶部也会挂一条提醒。
+>
+> 登录态存在服务端的 `admin_sessions` 表里，浏览器只持有一个 httpOnly cookie，有效期 12 小时，
+> 剩余不足 10 小时且仍在活跃使用时自动续期；退出登录即从库中删除该条 session。
 
 面板有两个页签：
 
