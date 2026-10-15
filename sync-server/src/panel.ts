@@ -247,6 +247,23 @@ export const renderPanelPage = (): string => shell('Folia 云服务后台', `
 
 <section id="view-cache" hidden>
   <div class="card">
+    <!-- 概况图：服务端现画的一张 SVG，同源 <img> 会带上会话 cookie，所以能直接嵌 -->
+    <div class="toolbar">
+      <h2 style="margin:0 12px 0 0;">概况</h2>
+      <label class="muted" style="font-size:12px;">最近
+        <select id="stats-minutes">
+          <option value="5" selected>5 分钟</option>
+          <option value="30">30 分钟</option>
+          <option value="60">1 小时</option>
+          <option value="1440">24 小时</option>
+        </select>
+      </label>
+      <button id="refresh-stats">刷新</button>
+    </div>
+    <img id="stats-image" src="/admin/api/stats.svg?minutes=5" alt="云缓存概况" style="width:100%;height:auto;display:block;border-radius:10px;" />
+  </div>
+
+  <div class="card">
     <div class="toolbar">
       <h2 style="margin:0 12px 0 0;">缓存条目（<span id="cache-count">0</span>）</h2>
       <select id="cache-kind">
@@ -503,6 +520,17 @@ document.getElementById('do-upload').addEventListener('click', () => { void uplo
 document.getElementById('font-search').addEventListener('input', renderFonts);
 document.getElementById('refresh-fonts').addEventListener('click', () => { void loadFonts(); });
 document.getElementById('refresh-cache').addEventListener('click', () => { void loadCache(); });
+
+/* 概况图是服务端按 minutes 现画的，换窗口就换一次 src；加个时间戳戳破缓存。 */
+const reloadStatsImage = (): void => {
+  const minutes = String(document.getElementById('stats-minutes')?.value || '5');
+  const image = document.getElementById('stats-image');
+  if (image instanceof HTMLImageElement) {
+    image.src = '/admin/api/stats.svg?minutes=' + encodeURIComponent(minutes) + '&t=' + Date.now();
+  }
+};
+document.getElementById('refresh-stats').addEventListener('click', reloadStatsImage);
+document.getElementById('stats-minutes').addEventListener('change', reloadStatsImage);
 document.getElementById('cache-search').addEventListener('input', renderCache);
 document.getElementById('cache-kind').addEventListener('change', renderCache);
 

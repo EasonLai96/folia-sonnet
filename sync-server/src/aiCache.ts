@@ -92,6 +92,26 @@ const readMetaText = (value: unknown, limit: number): string => (
   typeof value === 'string' ? value.trim().slice(0, limit) : ''
 );
 
+/*
+ * 命中流水。
+ *
+ * `ai_cache.hits` 只是个累加器 —— 它能告诉你「这条被拿过 37 次」，但说不出
+ * 是刚才还是上个月。概况图要的是时间分布（最近几分钟多少、几点到几点多少、
+ * 最近五条长什么样），所以每次命中另外记一行，只存时间戳与歌名。
+ *
+ * 只留七天：再久的历史对这个面板没有意义，表却会一直长。清理放在读的时候顺手做，
+ * 写路径上就不必为此多一条语句。
+ */
+const HIT_LOG_RETENTION_DAYS = 7;
+
+export const pruneHitLog = async (db: D1Database): Promise<void> => {
+  await db
+    .prepare("DELETE FROM ai_cache_hits WHERE at < datetime('now', ?)")
+    .bind(`-${HIT_LOG_RETENTION_DAYS} days`)
+    .run()
+    .catch(() => undefined);
+};
+
 /** GET /api/ai-cache/:kind/:key — the pull. Never fails hard; a miss is data. */
 const handleGet = async (db: D1Database, kind: string, key: string) => {
   const row = await db
@@ -105,11 +125,22 @@ const handleGet = async (db: D1Database, kind: string, key: string) => {
     .prepare('UPDATE ai_cache SET hits = hits + 1 WHERE kind = ? AND cache_key = ?')
     .bind(kind, key)
     .run();
+  await db
+    .prepare('INSERT INTO ai_cache_hits (kind, cache_key, song_title, at) VALUES (?, ?, ?, ?)')
+    .bind(kind, key, row.song_title ?? '', new Date().toISOString())
+    .run()
+    .catch(() => undefined);
 
   return { ok: true, hit: true, entry: mapRow(row) };
 };
 
-/** PUT /api/ai-cache/:kind/:key — the push, after a real generation. */
+/*
+ * PUT /api/ai-cache/:kind/:key — the push, after a real generation.
+ *
+ * 同键**覆盖**，不是「已存在就跳过」。用户点了「重新生成」说明他对云端那条
+ * 不满意，就是要拿新的把旧的换掉；累加器 `hits` 照旧留着（它记的是这条被拿过
+ * 多少次，换了内容也不该清零），`created_at` 也不动。
+ */
 const handlePut = async (db: D1Database, kind: string, key: string, body: unknown) => {
   const source = (body ?? {}) as { payload?: unknown; songTitle?: unknown; provider?: unknown; model?: unknown };
   const parsed = readPayload(source.payload);
