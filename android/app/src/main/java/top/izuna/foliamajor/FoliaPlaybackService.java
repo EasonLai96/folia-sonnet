@@ -733,6 +733,10 @@ public class FoliaPlaybackService extends android.app.Service {
             case "qq": return R.drawable.ic_provider_qq;
             case "kugou": return R.drawable.ic_provider_kugou;
             case "bodian": return R.drawable.ic_provider_bodian;
+            // 飞牛（自建服务）：图标是**白色剪影 + 透明底**，不是那张彩色图 ——
+            // 通知栏的 smallIcon 从 Android 5.0 起只认 alpha，彩色图会被整体染成一个
+            // 没有细节的色块。剪影由那张官方图标去掉红底得来（alpha 取三通道最小值）。
+            case "feiniu": return R.drawable.ic_provider_feiniu;
             default: return R.mipmap.ic_launcher;
         }
     }

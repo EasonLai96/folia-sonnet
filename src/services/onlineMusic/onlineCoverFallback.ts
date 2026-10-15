@@ -2,6 +2,8 @@ import type { SongResult, UnifiedSong } from '../../types';
 import type { OmniProviderId } from '../../types/onlineMusic';
 import { getPlaybackSourceRef } from '../../utils/appPlaybackGuards';
 import { announceLocalCoverReady } from '../localCoverReadyEvent';
+import { proxyNativeRemoteAudioUrl } from '../nativeRemoteAudio';
+import { feiniuResourceHeaders } from './feiniuTransport';
 
 // src/services/onlineMusic/onlineCoverFallback.ts
 // 缺封面的歌，按名字去网络平台搜一张来顶。
@@ -30,6 +32,12 @@ const SEARCH_BUDGET = 120;
 /** 一个列表一次最多同步等这么多首，剩下的交给异步那一路。 */
 const PER_PAGE_LIMIT = 6;
 
+/** 一个列表一次最多换这么多张封面地址（换地址很轻，但还是别一次几十个过桥）。 */
+const PROXY_PER_PAGE_LIMIT = 24;
+
+/** 一批最多处理这么多首：整页都过一遍，但别把一次翻页变成几百个请求。 */
+const MAX_PER_BATCH = 60;
+
 const coverCache = new Map<string, string>();
 const pendingKeys = new Set<string>();
 let budget = SEARCH_BUDGET;
@@ -56,6 +64,66 @@ const artistNameOf = (song: SongResult | null | undefined): string => (
     Array.isArray(song?.artists) ? String(song?.artists?.[0]?.name ?? '') : ''
 );
 
+// ---------------------------------------------------------------------------
+// 飞牛封面的「取得到」问题：地址是对的，但拿不到字节。
+//
+// 飞牛的封面地址形如 `http://NAS:5666/music/api/v1/static/cover?coverId=...`，
+// 服务端**要 Cookie（music-token）才给图**。而拿它的两个地方都带不上：
+//   · <img>/<audio> 这类元素根本没法挂请求头；
+//   · 通知栏那一路是原生自己去下载的，它同样不知道 music-token 是什么。
+// 于是界面上一片空、通知栏回落成 Folia 自己的图标 —— 看着就像「没有封面」。
+//
+// 项目里本来就有给音频用的回环代理（`registerRemoteAudio`）：注册一个地址，
+// 由本地服务代转并带上指定的请求头。它是纯粹的字节转发，对图片一样成立，
+// 而且换出来的地址是本机回环，原生下载它不需要任何凭据。
+// ---------------------------------------------------------------------------
+
+/** 代理地址按原地址缓存：注册一次就够了，别每渲染一次过一个桥。 */
+const proxiedCovers = new Map<string, string>();
+
+const isFeiniuAssetUrl = (url: string): boolean => (
+    url.includes('/music/api/v1/static/')
+);
+
+const proxyFeiniuCoverUrl = async (url: string): Promise<string> => {
+    const cached = proxiedCovers.get(url);
+    if (cached !== undefined) return cached;
+    try {
+        const proxied = await proxyNativeRemoteAudioUrl(url, {
+            headers: feiniuResourceHeaders() ?? undefined,
+            allowAnyHost: true,
+        });
+        const value = typeof proxied === 'string' && proxied ? proxied : url;
+        proxiedCovers.set(url, value);
+        return value;
+    } catch {
+        proxiedCovers.set(url, url);
+        return url;
+    }
+};
+
+/**
+ * 同步换出「能真正拿到字节」的封面地址。
+ *
+ * 缓存里有就用缓存里的；没有就先返回原地址，同时**排一次代理** —— 拿到之后写回歌曲
+ * 并广播，界面下一次渲染就是代理地址。渲染路径不能 await（那会把界面卡住），
+ * 列表出口那一侧（见 {@link backfillSongCovers}）是 await 的，所以首屏通常直接就是好的。
+ */
+export const resolveProxiedSongCover = (song: SongResult, coverUrl: string): string => {
+    if (!isFeiniuAssetUrl(coverUrl)) return coverUrl;
+    const cached = proxiedCovers.get(coverUrl);
+    if (cached !== undefined) {
+        if (cached !== coverUrl && song.album) song.album.coverUrl = cached;
+        return cached;
+    }
+    void proxyFeiniuCoverUrl(coverUrl).then((proxied) => {
+        if (proxied === coverUrl || !song.album) return;
+        song.album.coverUrl = proxied;
+        announceLocalCoverReady({ songId: String(song.id ?? ''), coverUrl: proxied });
+    });
+    return coverUrl;
+};
+
 /**
  * 搜一次，取**匹配最高**的那条的封面。
  *
@@ -77,8 +145,10 @@ const searchBestCover = async (name: string, artist: string): Promise<string> =>
                 if (withCover.length === 0) continue;
                 const exact = withCover.find(item => isSameSong(String(item.name ?? ''), name));
                 return String((exact ?? withCover[0]).album?.coverUrl ?? '');
-            } catch {
+            } catch (error) {
                 // 这个平台没登录 / 搜不到，换下一个，不该影响出列表。
+                // 但要留一句话：借不到封面时，这是唯一能看出「卡在哪个平台」的线索。
+                console.warn('[CoverFallback] search failed on', providerId, 'for', name, error);
             }
         }
     }
@@ -133,8 +203,26 @@ export const requestSongCoverFallback = (song: SongResult | null | undefined): v
  */
 export const backfillSongCovers = async <T extends UnifiedSong>(songs: T[], limit = PER_PAGE_LIMIT): Promise<T[]> => {
     let filled = 0;
+    // 先整批把「有地址但取不到」的换成代理地址：注册很轻（不下字节），
+    // 但一次几十个也会排队，所以还是给个上限，剩下的等翻页 / 渲染时那一路补。
+    let proxied = 0;
     for (const song of songs) {
-        if (filled >= limit) break;
+        if (proxied >= PROXY_PER_PAGE_LIMIT) break;
+        const coverUrl = typeof song?.album?.coverUrl === 'string' ? song.album.coverUrl : '';
+        if (!coverUrl || !isFeiniuAssetUrl(coverUrl)) continue;
+        const value = await proxyFeiniuCoverUrl(coverUrl);
+        if (value !== coverUrl && song.album) {
+            song.album = { ...song.album, coverUrl: value };
+            proxied += 1;
+        }
+    }
+
+    // 整页都过一遍：头几首同步等（首屏就有图），其余的挂到异步那一路排队补齐 ——
+    // 用户要的是「全部统一拉一遍缓存下来」，不是只补看得见的那几个。
+    let processed = 0;
+    for (const song of songs) {
+        if (processed >= MAX_PER_BATCH) break;
+        processed += 1;
         if (!song || song.album?.coverUrl) continue;
         const name = String(song.name ?? '').trim();
         if (!name || name === '未知标题') continue;
@@ -142,6 +230,11 @@ export const backfillSongCovers = async <T extends UnifiedSong>(songs: T[], limi
         const artist = artistNameOf(song);
         const key = cacheKey(name, artist);
         let cover = coverCache.get(key);
+        // 同步等的那几位用完了就交给异步：它们拿到之后也会广播，界面自己会重画。
+        if (cover === undefined && filled >= limit) {
+            requestSongCoverFallback(song);
+            continue;
+        }
         if (cover === undefined && budget > 0) {
             // 同步等头几首：异步那一路要等界面重画才看得到，而列表 / 墙面在拿到数据后
             // 未必会再重画一次 —— 只靠广播的话，用户看到的就是「刷新了还是一片占位」。

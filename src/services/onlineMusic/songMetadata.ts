@@ -3,7 +3,7 @@ import type { OnlineProviderId, ProviderSongMetadata } from '../../types/onlineM
 import { getPlaybackSourceRef } from '../../utils/appPlaybackGuards';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
 import { getOnlineMusicProvider } from './providerRegistry';
-import { requestSongCoverFallback } from './onlineCoverFallback';
+import { requestSongCoverFallback, resolveProxiedSongCover } from './onlineCoverFallback';
 
 // src/services/onlineMusic/songMetadata.ts
 
@@ -53,8 +53,13 @@ export const getSongDurationMs = (song: SongResult | null | undefined, providerI
 export const getSongCoverUrl = (song: SongResult | null | undefined, providerId?: OnlineProviderId): string | undefined => {
     if (!song) return undefined;
     const coverUrl = getProviderSongMetadata(song, providerId).coverUrl;
-    if (!coverUrl) requestSongCoverFallback(song);
-    return coverUrl || undefined;
+    if (!coverUrl) {
+        requestSongCoverFallback(song);
+        return undefined;
+    }
+    // 自建服务（飞牛）的封面要 Cookie 才给图，而 <img> 与通知栏那一路都带不上 ——
+    // 换成回环代理地址，两边就都能取到字节了。
+    return resolveProxiedSongCover(song, coverUrl) || undefined;
 };
 
 export const getProviderSongPageUrl = (song: SongResult | null | undefined, providerId?: OnlineProviderId): string | null => {
