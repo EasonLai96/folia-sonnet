@@ -120,6 +120,16 @@ const toBytes = (value: unknown): Uint8Array | null => {
   return null;
 };
 
+/*
+ * hono 的 `c.body()` 只收 `string | ArrayBuffer | ReadableStream`，
+ * `Uint8Array` 不在其中（TS 里 `Uint8Array<ArrayBufferLike>` 与 `ArrayBuffer`
+ * 并不兼容）。这里切出一份精确范围的 ArrayBuffer —— 不能直接拿
+ * `bytes.buffer`：那可能是整块共享内存，长度比这段数据大。
+ */
+const toBodyBuffer = (bytes: Uint8Array): ArrayBuffer => (
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+);
+
 const stripExtension = (name: string): string => {
   const trimmed = String(name ?? '').trim();
   const matched = SUPPORTED_FONT_EXTENSIONS.find((extension) => trimmed.toLowerCase().endsWith(extension));
@@ -167,9 +177,12 @@ export const fontRoutes = (() => {
       .first<{ mime_type: string | null; data: unknown }>();
     const bytes = toBytes(row?.data);
     if (!bytes) return c.json({ ok: false, error: 'not_found' }, 404);
-    c.header('Cache-Control', 'public, max-age=31536000, immutable');
-    return c.body(bytes, 200, {
-      'Content-Type': row?.mime_type || 'application/octet-stream',
+    return new Response(toBodyBuffer(bytes), {
+      status: 200,
+      headers: {
+        'Content-Type': row?.mime_type || 'application/octet-stream',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
     });
   });
 
@@ -181,8 +194,13 @@ export const fontRoutes = (() => {
       .first<{ mime: string | null; data: unknown }>();
     const bytes = toBytes(row?.data);
     if (!bytes) return c.json({ ok: false, error: 'not_found' }, 404);
-    c.header('Cache-Control', 'public, max-age=86400');
-    return c.body(bytes, 200, { 'Content-Type': row?.mime || 'image/png' });
+    return new Response(toBodyBuffer(bytes), {
+      status: 200,
+      headers: {
+        'Content-Type': row?.mime || 'image/png',
+        'Cache-Control': 'public, max-age=86400',
+      },
+    });
   });
 
   return routes;

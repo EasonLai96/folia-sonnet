@@ -4,6 +4,7 @@ import { bearerAuth } from 'hono/bearer-auth';
 import adminAuthRoutes, {
   pruneExpiredSessions,
   readAdminSession,
+  requireAdmin,
   touchAdminSession,
 } from './admin.js';
 import { renderLoginPage, renderPanelPage } from './panel.js';
