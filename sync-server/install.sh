@@ -13,6 +13,76 @@ echo -e "${CYAN}${BOLD}       Folia 同步服务端安装向导           ${RESE
 echo -e "${CYAN}${BOLD}==========================================${RESET}"
 echo ""
 
+have_cmd() {
+    command -v "$1" > /dev/null 2>&1
+}
+
+# better-sqlite3 是原生模块，npm 装它的时候要现场跑 node-gyp。
+#
+# 没有工具链时 npm 只会吐几十行 gyp 日志，真正的死因（not found: make）压在
+# 最底下，一眼看过去像是 better-sqlite3 本身坏了。所以这里先自己查一遍，
+# 缺什么就用什么包装上，装完再验一次 —— 别把这一步留给 npm 去报错。
+ensure_build_toolchain() {
+    local missing=()
+    have_cmd make || missing+=("make")
+    if ! have_cmd g++ && ! have_cmd c++ && ! have_cmd cc; then
+        missing+=("g++")
+    fi
+    have_cmd python3 || missing+=("python3")
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        echo -e "${GREEN}[*] 编译工具链已就绪（make / C++ 编译器 / python3）。${RESET}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}[!] 编译 better-sqlite3 还缺：${missing[*]}${RESET}"
+
+    local sudo_bin=""
+    have_cmd sudo && sudo_bin="sudo"
+
+    if have_cmd apt-get; then
+        echo -e "${CYAN}[*] 正在通过 apt-get 安装 build-essential...${RESET}"
+        # update 失败不拦：源抽风很常见，而 install 会给出真正有用的那条错误。
+        $sudo_bin apt-get update -y || true
+        if ! $sudo_bin apt-get install -y build-essential python3; then
+            return 1
+        fi
+    elif have_cmd dnf; then
+        echo -e "${CYAN}[*] 正在通过 dnf 安装编译工具链...${RESET}"
+        if ! $sudo_bin dnf install -y gcc-c++ make python3; then
+            return 1
+        fi
+    elif have_cmd yum; then
+        echo -e "${CYAN}[*] 正在通过 yum 安装编译工具链...${RESET}"
+        if ! $sudo_bin yum install -y gcc-c++ make python3; then
+            return 1
+        fi
+    elif have_cmd apk; then
+        echo -e "${CYAN}[*] 正在通过 apk 安装编译工具链...${RESET}"
+        if ! $sudo_bin apk add --no-cache build-base python3; then
+            return 1
+        fi
+    elif have_cmd pacman; then
+        echo -e "${CYAN}[*] 正在通过 pacman 安装编译工具链...${RESET}"
+        if ! $sudo_bin pacman -Sy --noconfirm base-devel python; then
+            return 1
+        fi
+    else
+        echo -e "${RED}[!] 无法识别包管理器（apt-get / dnf / yum / apk / pacman 都没有）。${RESET}"
+        echo -e "${RED}请手动安装 ${missing[*]} 后重新运行本脚本。${RESET}"
+        return 1
+    fi
+
+    # 再验一次：装了包也未必就在 PATH 上，别让 npm 去撞同一堵墙。
+    if ! have_cmd make; then
+        echo -e "${RED}[!] make 装完仍然不可用，请检查 PATH 后重新运行本脚本。${RESET}"
+        return 1
+    fi
+
+    echo -e "${GREEN}[*] 编译工具链安装完成。${RESET}"
+    return 0
+}
+
 print_sync_token_reminder() {
     local token="$1"
     if [ -n "$token" ]; then
@@ -99,6 +169,15 @@ case $deploy_choice in
         then
             echo -e "${CYAN}[*] 正在全局安装 PM2...${RESET}"
             sudo npm install -g pm2
+        fi
+
+        ensure_build_toolchain || exit 1
+
+        # engines 写的是 >=24。低版本 npm 默认只 warn 就放过去了，装得上但不在推荐
+        # 配置内 —— 把这句话说出来，免得后面出问题往别的方向查。
+        node_major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+        if [ "${node_major:-0}" -lt 24 ] 2>/dev/null; then
+            echo -e "${YELLOW}[!] 当前 Node $(node -v)，package.json 要求 >=24；可以继续，但不推荐。${RESET}"
         fi
 
         echo -e "${CYAN}[*] 正在安装项目依赖...${RESET}"
