@@ -169,12 +169,22 @@ export const fontRoutes = (() => {
 
   routes.get('/', async (c) => c.json({ ok: true, fonts: await listFonts(c.env.FOLIA_SYNC_DB, true) }));
 
+  /*
+   * 字体字节只存在 font_files(font_id, data) 里，mime 在 font_market 上 ——
+   * 所以这里必须 join 一次。直接查 font_files.mime_type 会撞
+   * "no such column: mime_type"（那张表压根没这一列），服务端就只剩一个裸 500。
+   */
   routes.get('/:id/file', async (c) => {
     const id = String(c.req.param('id') || '');
     const row = await c.env.FOLIA_SYNC_DB
-      .prepare('SELECT mime_type, data FROM font_files WHERE font_id = ?')
+      .prepare(`
+        SELECT f.data AS data, m.mime_type AS mime_type
+        FROM font_files f
+        LEFT JOIN font_market m ON m.id = f.font_id
+        WHERE f.font_id = ?
+      `)
       .bind(id)
-      .first<{ mime_type: string | null; data: unknown }>();
+      .first<{ data: unknown; mime_type: string | null }>();
     const bytes = toBytes(row?.data);
     if (!bytes) return c.json({ ok: false, error: 'not_found' }, 404);
     return new Response(toBodyBuffer(bytes), {
