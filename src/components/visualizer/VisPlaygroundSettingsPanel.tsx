@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CaptionsOff, Focus, Monitor, PanelTop, RotateCcw, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, CaptionsOff, Focus, Monitor, PanelTop, RotateCcw, Store, type LucideIcon } from 'lucide-react';
 import {
     type CappellaAvatarImage,
     type CappellaEmojiImage,
@@ -163,6 +163,8 @@ interface VisPlaygroundSettingsPanelProps {
     subtitleFontFallbackFamilies: string[];
     onSubtitleFontFallbackFamiliesChange?: (families: string[]) => void;
     onOpenSubtitleFontPicker?: () => void;
+    /** 打开字体市场（后台上架的字体），与「系统字体」那条并列。 */
+    onOpenFontMarket?: () => void;
     onResetSubtitleSettings?: () => void;
     onSliderPointerDown?: () => void;
     onSliderCommit?: () => void;
@@ -419,6 +421,7 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         subtitleFontFallbackFamilies,
         onSubtitleFontFallbackFamiliesChange,
         onOpenSubtitleFontPicker,
+        onOpenFontMarket,
         onResetSubtitleSettings,
         onSliderPointerDown,
         onSliderCommit,
@@ -512,15 +515,28 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                             theme={theme}
                         />
 
-                        <PresetGroup
-                            label={t('options.fontFamily')}
-                            value={fontStyleValue}
-                            options={fontStyleOptions}
-                            onChange={onFontStyleChange}
-                            isDaylight={isDaylight}
-                            theme={theme}
-                            isOptionActive={(option) => option.value === fontStyleValue}
-                        />
+                        <div className="space-y-2">
+                            <PresetGroup
+                                label={t('options.fontFamily')}
+                                value={fontStyleValue}
+                                options={fontStyleOptions}
+                                onChange={onFontStyleChange}
+                                isDaylight={isDaylight}
+                                theme={theme}
+                                isOptionActive={(option) => option.value === fontStyleValue}
+                            />
+                            {onOpenFontMarket && (
+                                <button
+                                    type="button"
+                                    onClick={onOpenFontMarket}
+                                    className={`flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${isDaylight ? 'border-black/15 hover:bg-black/5' : 'border-white/15 hover:bg-white/10'}`}
+                                    style={{ color: theme.primaryColor }}
+                                >
+                                    <Store size={13} />
+                                    {t('options.fontMarket')}
+                                </button>
+                            )}
+                        </div>
 
                         <fieldset
                             disabled={lyricsFontSizeAutoNoticeKey !== null}

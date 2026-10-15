@@ -4,6 +4,7 @@ import { selectDisplayLyrics, selectDisplaySong, usePlaybackStore } from '../../
 import { useAudioSettingsStore } from '../../stores/useAudioSettingsStore';
 import { setStatusMessage } from '../../stores/useStatusMessageStore';
 import { omni } from '../onlineMusic/omni';
+import { fingerprintLyricSource, pushAiCloudCache, withAiCloudCache } from '../aiCloudCache';
 import { describeAiTarget, requestAiCompletion, translateAiCompletionError } from '../aiCompletion';
 import type { AiCompletionTarget } from '../aiCompletion';
 import {
@@ -389,34 +390,91 @@ const requestDecision = async (input: {
             : null,
     });
 
-    const controller = new AbortController();
-    inFlight.add(controller);
-    try {
-        const { text } = await requestAiCompletion({
-            system,
-            prompt,
-            maxTokens: MAX_TOKENS,
-            json: true,
-            signal: controller.signal,
-        });
-        let parsed: unknown;
+    /*
+     * 云缓存的键：歌词正文 + 影响判断的那几个设置。
+     *
+     * 只按歌词做键是不对的 —— 用户把某个样式屏蔽掉、或者改了提示语之后，
+     * 同一份歌词的最优答案会变。把这些都并进 policy，设置一变就重新问，
+     * 不会拿到上一个设置下的旧答案。
+     */
+    const lyricSource = input.lines.map(line => line.fullText).join('\n');
+    const policy = JSON.stringify({
+        hint: settings.userHint,
+        blocked: [...settings.blockedModes].sort(),
+        modes: modes.map(mode => mode.id),
+        force: input.force,
+    });
+    const cacheFingerprint = fingerprintLyricSource('director', lyricSource, policy);
+
+    const generate = async (): Promise<{ mode: string; reason: string; params: Record<string, unknown> }> => {
+        const controller = new AbortController();
+        inFlight.add(controller);
         try {
-            parsed = JSON.parse(extractJsonText(text));
-        } catch (error) {
-            throw new Error(`AI 返回的内容无法解析为 JSON：${String((error as Error)?.message ?? error)}`);
+            const { text } = await requestAiCompletion({
+                system,
+                prompt,
+                maxTokens: MAX_TOKENS,
+                json: true,
+                signal: controller.signal,
+            });
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(extractJsonText(text));
+            } catch (error) {
+                throw new Error(`AI 返回的内容无法解析为 JSON：${String((error as Error)?.message ?? error)}`);
+            }
+            const raw = parsed as { mode?: unknown; reason?: unknown; params?: unknown } | null;
+            if (!raw || typeof raw !== 'object' || typeof raw.mode !== 'string') {
+                throw new Error('AI 返回的 JSON 里没有可用的 mode 字段。');
+            }
+            return {
+                mode: raw.mode,
+                reason: typeof raw.reason === 'string' ? raw.reason : '',
+                params: raw.params && typeof raw.params === 'object' ? raw.params as Record<string, unknown> : {},
+            };
+        } finally {
+            inFlight.delete(controller);
         }
-        const raw = parsed as { mode?: unknown; reason?: unknown; params?: unknown } | null;
-        if (!raw || typeof raw !== 'object' || typeof raw.mode !== 'string') {
-            throw new Error('AI 返回的 JSON 里没有可用的 mode 字段。');
-        }
-        return {
-            mode: raw.mode,
-            reason: typeof raw.reason === 'string' ? raw.reason : '',
-            params: raw.params && typeof raw.params === 'object' ? raw.params as Record<string, unknown> : {},
-        };
-    } finally {
-        inFlight.delete(controller);
+    };
+
+    /* 「重新判断」就是要一个新的答案 —— 这时候别去问缓存，直接生成。 */
+    if (input.force) {
+        const value = await generate();
+        void pushAiCloudCache('director', cacheFingerprint, value, {
+            songTitle: input.song?.title ?? '',
+        });
+        return value;
     }
+
+    const { value } = await withAiCloudCache({
+        kind: 'director',
+        fingerprint: cacheFingerprint,
+        validate: (payload) => validateCachedDecision(payload, settings.blockedModes),
+        generate,
+        songTitle: input.song?.title ?? '',
+    });
+    return value;
+};
+
+/*
+ * 缓存里的答案是别人机器上生成的，这里一律当不可信输入：
+ * mode 不认识、或者恰好是本机屏蔽掉的样式，就跟没命中一样重新问。
+ */
+const validateCachedDecision = (
+    payload: unknown,
+    blockedModes: readonly string[],
+): { mode: string; reason: string; params: Record<string, unknown> } | null => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const raw = payload as { mode?: unknown; reason?: unknown; params?: unknown };
+    if (typeof raw.mode !== 'string' || !raw.mode.trim()) return null;
+    const mode = raw.mode.trim();
+    if (!isKnownDirectorMode(mode)) return null;
+    if (isBlockedDirectorMode(mode, blockedModes)) return null;
+    return {
+        mode,
+        reason: typeof raw.reason === 'string' ? raw.reason.slice(0, REASON_MAX_CHARS) : '',
+        params: sanitizeParams(mode, raw.params),
+    };
 };
 
 const toast = (text: string, type: 'info' | 'success' | 'error') => {

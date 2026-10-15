@@ -290,13 +290,24 @@ export const setWallpaperFloatingPreview = async (on: boolean): Promise<void> =>
     }
 };
 
+/**
+ * 直接把字体字节（base64）交给原生落盘。
+ *
+ * 字体市场走这条：文件是后台上传的，本机没有 Uri，只能由网页把字节推下去。
+ * 与 `pickFont`（系统文件选择器那条路）落在同一个文件上，两者互斥 ——
+ * 谁后调谁生效。传 null / 空串 = 清除，回落到系统 sans-serif。
+ */
+export const setWallpaperFont = async (base64: string | null): Promise<void> => {
+    try {
+        await FoliaWallpaper.setFont({ font: base64 });
+    } catch {
+        // 桌面端 / 老版本原生没有这个方法，静默。
+    }
+};
+
 /** 清除壁纸歌词的自选字体，回落到系统 sans-serif。 */
 export const clearWallpaperFont = async (): Promise<void> => {
-    try {
-        await FoliaWallpaper.setFont({ font: null });
-    } catch {
-        // 同上。
-    }
+    await setWallpaperFont(null);
 };
 
 export const clearLyricsWallpaper = async (): Promise<void> => {

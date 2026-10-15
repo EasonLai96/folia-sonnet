@@ -3,7 +3,17 @@
 // 桌面版走的是主进程 store；这里用 localStorage 提供同一组字段，
 // 让共享的请求逻辑（shared/lyricSegmentationService.mjs 等）可以照常复用。
 
-export type AiProviderId = 'gemini' | 'openai';
+import { normalizeChatCompletionsUrl, resolveOpenAICompatibleModel } from '../../shared/openAICompatibleRequest.mjs';
+
+export type AiProviderId = 'gemini' | 'openai' | 'deepseek';
+
+/*
+ * DeepSeek is just an OpenAI-compatible endpoint, but it is offered as a
+ * provider of its own so the form only asks for a key: the URL is fixed here
+ * and the model falls back to the flash one when the field is left blank.
+ */
+export const DEEPSEEK_API_BASE = 'https://api.deepseek.com';
+export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 
 export interface AiSettings {
     provider: AiProviderId;
@@ -13,6 +23,8 @@ export interface AiSettings {
     openaiApiModel: string;
     openaiApiTemperature: string;
     openaiApiStream: boolean;
+    /** DeepSeek only needs the credential — URL and model are resolved. */
+    deepseekApiKey: string;
 }
 
 const STORAGE_KEY = 'foliaAiProviderSettings';
@@ -26,9 +38,16 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     openaiApiModel: '',
     openaiApiTemperature: '0.7',
     openaiApiStream: false,
+    deepseekApiKey: '',
 };
 
-const normalizeProvider = (value: unknown): AiProviderId => (value === 'openai' ? 'openai' : 'gemini');
+export const isOpenAiCompatibleProvider = (value: AiProviderId): boolean => (
+    value === 'openai' || value === 'deepseek'
+);
+
+const normalizeProvider = (value: unknown): AiProviderId => (
+    value === 'openai' || value === 'deepseek' ? value : 'gemini'
+);
 
 const asText = (value: unknown, fallback = ''): string => (
     typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value)
@@ -49,6 +68,7 @@ export const readAiSettings = (): AiSettings => {
             openaiApiModel: asText(parsed.openaiApiModel),
             openaiApiTemperature: asText(parsed.openaiApiTemperature, DEFAULT_AI_SETTINGS.openaiApiTemperature),
             openaiApiStream: parsed.openaiApiStream === true,
+            deepseekApiKey: asText(parsed.deepseekApiKey),
         };
     } catch {
         return { ...DEFAULT_AI_SETTINGS };
@@ -71,18 +91,49 @@ export const writeAiSettings = (patch: Partial<AiSettings>): AiSettings => {
 };
 
 /** 当前配置能不能真的发请求：选中的 provider 必须有对应凭据。 */
-export const isAiConfigured = (settings: AiSettings = readAiSettings()): boolean => (
-    settings.provider === 'openai'
-        ? Boolean(settings.openaiApiKey.trim())
-        : Boolean(settings.geminiApiKey.trim())
+export const isAiConfigured = (settings: AiSettings = readAiSettings()): boolean => {
+    if (settings.provider === 'openai') return Boolean(settings.openaiApiKey.trim());
+    if (settings.provider === 'deepseek') return Boolean(settings.deepseekApiKey.trim());
+    return Boolean(settings.geminiApiKey.trim());
+};
+
+/** 实际要打的那个 chat/completions 地址：DeepSeek 的地址是写死的。 */
+export const resolveAiChatCompletionsUrl = (settings: AiSettings = readAiSettings()): string => (
+    settings.provider === 'deepseek'
+        ? normalizeChatCompletionsUrl(DEEPSEEK_API_BASE)
+        : normalizeChatCompletionsUrl(settings.openaiApiUrl)
+);
+
+/** 实际要用的模型：DeepSeek 留空时回落到 flash。 */
+export const resolveAiModel = (settings: AiSettings = readAiSettings()): string => {
+    const apiUrl = resolveAiChatCompletionsUrl(settings);
+    if (settings.provider === 'deepseek') {
+        return settings.openaiApiModel.trim() || DEEPSEEK_DEFAULT_MODEL;
+    }
+    return resolveOpenAICompatibleModel(apiUrl, settings.openaiApiModel);
+};
+
+/** 当前 provider 对应的密钥（DeepSeek 与 OpenAI 分开存，互不覆盖）。 */
+export const resolveAiApiKey = (settings: AiSettings = readAiSettings()): string => (
+    settings.provider === 'deepseek'
+        ? settings.deepseekApiKey.trim()
+        : settings.openaiApiKey.trim()
 );
 
 /** 共享的歌词分词服务读的是 env 形状，这里把表单字段映射过去。 */
 export const buildAiEnv = (settings: AiSettings = readAiSettings()): Record<string, string | undefined> => ({
-    AI_PROVIDER: settings.provider,
+    // The shared transports only know "gemini" and "openai"; DeepSeek is the
+    // latter with its own endpoint, so it is announced as openai downstream.
+    AI_PROVIDER: settings.provider === 'deepseek' ? 'openai' : settings.provider,
     GEMINI_API_KEY: settings.geminiApiKey.trim() || undefined,
-    OPENAI_API_URL: settings.openaiApiUrl.trim() || undefined,
-    OPENAI_API_KEY: settings.openaiApiKey.trim() || undefined,
-    OPENAI_API_MODEL: settings.openaiApiModel.trim() || undefined,
+    OPENAI_API_URL: isOpenAiCompatibleProvider(settings.provider)
+        ? resolveAiChatCompletionsUrl(settings)
+        : undefined,
+    OPENAI_API_KEY: isOpenAiCompatibleProvider(settings.provider)
+        ? (resolveAiApiKey(settings) || undefined)
+        : undefined,
+    OPENAI_API_MODEL: isOpenAiCompatibleProvider(settings.provider)
+        ? resolveAiModel(settings)
+        : undefined,
     OPENAI_API_TEMPERATURE: settings.openaiApiTemperature,
 });

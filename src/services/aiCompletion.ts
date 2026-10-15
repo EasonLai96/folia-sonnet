@@ -1,9 +1,15 @@
 import { createAiFetch } from './aiNativeFetch';
-import { isAiConfigured, readAiSettings, type AiProviderId } from './aiSettings';
+import {
+    isAiConfigured,
+    isOpenAiCompatibleProvider,
+    readAiSettings,
+    resolveAiApiKey,
+    resolveAiChatCompletionsUrl,
+    resolveAiModel,
+    type AiProviderId,
+} from './aiSettings';
 import {
     detectOpenAICompatibleProvider,
-    normalizeChatCompletionsUrl,
-    resolveOpenAICompatibleModel,
     sendOpenAICompatibleRequest,
 } from '../../shared/openAICompatibleRequest.mjs';
 
@@ -55,12 +61,13 @@ const DEFAULT_TEMPERATURE = 0.7;
 export const readAiTarget = (): { target: AiCompletionTarget; configured: boolean } => {
     const settings = readAiSettings();
     const configured = isAiConfigured(settings);
-    if (settings.provider === 'openai') {
-        const apiUrl = normalizeChatCompletionsUrl(settings.openaiApiUrl);
+    // DeepSeek rides the OpenAI transport with a fixed endpoint: the target
+    // keeps its own id so the UI can say which provider answered.
+    if (isOpenAiCompatibleProvider(settings.provider)) {
         return {
             target: {
-                provider: 'openai',
-                model: resolveOpenAICompatibleModel(apiUrl, settings.openaiApiModel),
+                provider: settings.provider,
+                model: resolveAiModel(settings),
             },
             configured,
         };
@@ -136,11 +143,11 @@ const extractOpenAiText = (payload: unknown): string => {
 
 const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Promise<string> => {
     const settings = readAiSettings();
-    const apiKey = settings.openaiApiKey.trim();
+    const apiKey = resolveAiApiKey(settings);
     if (!apiKey) throw new Error('ai-not-configured');
 
-    const apiUrl = normalizeChatCompletionsUrl(settings.openaiApiUrl);
-    const model = resolveOpenAICompatibleModel(apiUrl, settings.openaiApiModel);
+    const apiUrl = resolveAiChatCompletionsUrl(settings);
+    const model = resolveAiModel(settings);
     const requested = Number(request.temperature);
     const configured = Number.parseFloat(settings.openaiApiTemperature);
     const temperature = Number.isFinite(requested)

@@ -1,11 +1,19 @@
 import React, { useState, useSyncExternalStore } from 'react';
-import { Check, Loader2, Sparkles, X } from 'lucide-react';
+import { Check, Cloud, Loader2, Sparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
     readAiSettings,
     writeAiSettings,
     type AiProviderId,
 } from '../../../services/aiSettings';
+import { resolveAiCloudCacheUrl } from '../../../services/aiCloudCache';
+import {
+    getFoliaCloudSettingsVersion,
+    readFoliaCloudSettings,
+    subscribeFoliaCloudSettings,
+    updateFoliaCloudSettings,
+} from '../../../services/foliaCloud';
+import { createAiFetch } from '../../../services/aiNativeFetch';
 import {
     getDirectorStateVersion,
     readDirectorSettings,
@@ -30,11 +38,26 @@ type AiProviderSettingsProps = {
 
 type TestState = 'idle' | 'running' | 'done';
 
+/*
+ * A probe key the cache can be asked about. It is a well-known MD5, never
+ * written to, so "connected" only ever means "the endpoint answered".
+ */
+const CLOUD_CACHE_PROBE_KEY = '00000000000000000000000000000000';
+
 const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardClass, isDaylight }) => {
     const { t } = useTranslation();
     const [settings, setSettings] = useState(() => readAiSettings());
     const [testState, setTestState] = useState<TestState>('idle');
     const [testResult, setTestResult] = useState<AiConnectionTestResult | null>(null);
+    // The cloud cache switch lives next to the credential because that is what
+    // it substitutes for — but it works with the credential left empty.
+    useSyncExternalStore(subscribeFoliaCloudSettings, getFoliaCloudSettingsVersion);
+    const cloudCache = readFoliaCloudSettings();
+    const [cacheProbe, setCacheProbe] = useState<{ state: TestState; ok: boolean; text: string }>({
+        state: 'idle',
+        ok: false,
+        text: '',
+    });
     // The director's own switches live in its own persistence, and the panel tab
     // can change them while this card is open — this is only the redraw trigger,
     // the values are read during render.
@@ -55,6 +78,37 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
         const result = await testConfiguredAiConnection();
         setTestResult(result);
         setTestState('done');
+    };
+
+    const runCacheProbe = async () => {
+        setCacheProbe({ state: 'running', ok: false, text: '' });
+        const startedAt = Date.now();
+        try {
+            const response = await createAiFetch()(
+                resolveAiCloudCacheUrl('theme', CLOUD_CACHE_PROBE_KEY),
+                { method: 'GET', headers: { Accept: 'application/json' } },
+            );
+            if (!response.ok) {
+                setCacheProbe({
+                    state: 'done',
+                    ok: false,
+                    text: `${t('options.cloudCacheProbeFailed')} HTTP ${response.status}`,
+                });
+                return;
+            }
+            await response.json().catch(() => null);
+            setCacheProbe({
+                state: 'done',
+                ok: true,
+                text: `${t('options.cloudCacheProbeOk')} · ${Date.now() - startedAt} ms`,
+            });
+        } catch (error) {
+            setCacheProbe({
+                state: 'done',
+                ok: false,
+                text: `${t('options.cloudCacheProbeFailed')} ${String((error as Error)?.message ?? error)}`,
+            });
+        }
     };
 
     const fieldClass = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-white/30 transition-colors';
@@ -130,12 +184,35 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                 </div>
                 <div className={`flex rounded-xl border p-1 shrink-0 ${isDaylight ? 'bg-black/[0.05] border-black/10' : 'bg-white/5 border-white/5'}`}>
                     {renderProviderOption('gemini', 'Google Gemini')}
+                    {renderProviderOption('deepseek', 'DeepSeek')}
                     {renderProviderOption('openai', t('options.otherCompatibleApi'))}
                 </div>
             </div>
 
             <div className={`p-4 space-y-3 border-b ${rowDividerClass}`}>
-                {settings.provider === 'gemini' ? (
+                {settings.provider === 'deepseek' ? (
+                    /* DeepSeek is an OpenAI-compatible endpoint with a fixed
+                     * address and a known flash model, so the whole form is
+                     * one field: the key. */
+                    <label className="block space-y-1 text-left">
+                        <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.deepseekApiKey')}
+                        </span>
+                        <input
+                            type="password"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={settings.deepseekApiKey}
+                            onChange={(event) => update({ deepseekApiKey: event.target.value })}
+                            placeholder="sk-..."
+                            className={fieldClass}
+                            style={{ color: 'var(--text-primary)' }}
+                        />
+                        <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.deepseekApiKeyDesc')}
+                        </span>
+                    </label>
+                ) : settings.provider === 'gemini' ? (
                     <label className="block space-y-1 text-left">
                         <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
                             {t('options.geminiApiKey')}
@@ -294,6 +371,82 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                                 </button>
                             );
                         })}
+                    </div>
+                </div>
+            </div>
+
+            {/* 云缓存：紧挨着 AI 歌词配置下面，默认打开；没填 Key 也能拉。 */}
+            <div className={`rounded-xl border overflow-hidden ${settingsCardClass}`}>
+                <div className={`flex flex-wrap items-center justify-between gap-4 p-4 border-b ${rowDividerClass}`}>
+                    <div className="space-y-1 text-left min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                            <Cloud size={15} className="opacity-70" aria-hidden="true" />
+                            {t('options.cloudCache')}
+                        </div>
+                        <div className="text-xs opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.cloudCacheDesc')}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => updateFoliaCloudSettings({ enabled: !cloudCache.enabled })}
+                        aria-pressed={cloudCache.enabled}
+                        aria-label={t('options.cloudCache')}
+                        className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${cloudCache.enabled
+                            ? 'bg-[rgba(114,119,134,1)]'
+                            : (isDaylight ? 'bg-black/15' : 'bg-white/15')}`}
+                    >
+                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${cloudCache.enabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
+                </div>
+
+                <div className="p-4 space-y-3">
+                    <label className="block space-y-1 text-left">
+                        <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.cloudCacheBaseUrl')}
+                        </span>
+                        <input
+                            type="text"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={cloudCache.baseUrl}
+                            onChange={(event) => updateFoliaCloudSettings({ baseUrl: event.target.value })}
+                            placeholder="https://apif.tangbot.xyz"
+                            className={fieldClass}
+                            style={{ color: 'var(--text-primary)' }}
+                        />
+                        <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.cloudCacheBaseUrlDesc')}
+                        </span>
+                    </label>
+
+                    <div className="flex flex-wrap items-center gap-3 text-left">
+                        <button
+                            type="button"
+                            onClick={() => void runCacheProbe()}
+                            disabled={cacheProbe.state === 'running'}
+                            className={ghostButtonClass}
+                            style={{ color: 'var(--text-primary)' }}
+                        >
+                            {cacheProbe.state === 'running'
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <Cloud size={13} />}
+                            {cacheProbe.state === 'running'
+                                ? t('options.aiTestRunning')
+                                : t('options.cloudCacheProbe')}
+                        </button>
+                        {cacheProbe.state === 'done' && (
+                            <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                                {cacheProbe.ok
+                                    ? <Check size={12} className="text-green-400" />
+                                    : <X size={12} className="text-red-400" />}
+                                {cacheProbe.text}
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="text-[10px] opacity-45 text-left" style={{ color: 'var(--text-secondary)' }}>
+                        {t('options.cloudCachePrivacy')}
                     </div>
                 </div>
             </div>

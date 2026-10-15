@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Gauge, MonitorCog, Video, Wallpaper } from 'lucide-react';
+import { Gauge, MonitorCog, Store, Video, Wallpaper } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import type { Theme, VisualizerFrameRate } from '../../../types';
@@ -30,7 +30,13 @@ import {
     pickWallpaperFont,
     pickWallpaperVideo,
     resetFloatingLyricsWindow,
+    setWallpaperFont,
 } from '../../../platform/foliaWallpaper';
+import FontMarketDialog from '../FontMarketDialog';
+import {
+    readFontMarketChoice,
+    type FontMarketSelection,
+} from '../../../services/fontMarket';
 import type { WallpaperLockScreenStatus } from '../../../platform/foliaWallpaper';
 
 // src/components/modal/settings/GraphicsSettingsSubview.tsx
@@ -338,6 +344,8 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     // 字体是原生落在私有目录里的文件，应用这边只缓存一个「有没有」用于按钮文案。
     const [hasWallpaperFont, setHasWallpaperFont] = useState(false);
     const [fontNotice, setFontNotice] = useState<'applied' | 'rejected' | null>(null);
+    const [isFontMarketOpen, setIsFontMarketOpen] = useState(false);
+    const [fontMarketChoice, setFontMarketChoice] = useState(() => readFontMarketChoice());
 
     React.useEffect(() => {
         if (!isAndroid) return;
@@ -377,6 +385,28 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
         setHasWallpaperFont(false);
         setFontNotice(null);
         void clearWallpaperFont();
+    };
+
+    /*
+     * 从字体市场挑一款：下载字体字节 → 网页侧注册（App 里能立刻看到）→
+     * 字节推给原生（壁纸 / 叠层那两层是自绘的，读不到网页注册的字体）。
+     */
+    const handleUseMarketFont = async (result: FontMarketSelection & { base64?: string }) => {
+        try {
+            await setWallpaperFont(result.base64 ?? null);
+            setFontMarketChoice({
+                id: result.id,
+                family: result.family,
+                label: result.label,
+                previewUrl: result.previewUrl,
+            });
+            setHasWallpaperFont(true);
+            setFontNotice('applied');
+        } catch (error) {
+            setFontNotice('rejected');
+            console.warn('[FontMarket] 安装字体失败', error);
+        }
+        window.setTimeout(() => setFontNotice(null), 3200);
     };
 
     const dividerClass = settingsDividerClassFor(isDaylight);
@@ -1195,16 +1225,27 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                                 title={t('options.lyricsWallpaperFont')}
                                 description={t('options.lyricsWallpaperFontDesc')}
                                 control={(
-                                    <button
-                                        type="button"
-                                        onClick={() => void handlePickWallpaperFont()}
-                                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                        style={{ color: 'var(--text-primary)' }}
-                                    >
-                                        {hasWallpaperFont
-                                            ? t('options.lyricsWallpaperReplaceFont')
-                                            : t('options.lyricsWallpaperPickFont')}
-                                    </button>
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => void handlePickWallpaperFont()}
+                                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
+                                            style={{ color: 'var(--text-primary)' }}
+                                        >
+                                            {hasWallpaperFont
+                                                ? t('options.lyricsWallpaperReplaceFont')
+                                                : t('options.lyricsWallpaperPickFont')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsFontMarketOpen(true)}
+                                            className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
+                                            style={{ color: 'var(--text-primary)' }}
+                                        >
+                                            <Store size={13} />
+                                            {t('options.fontMarket')}
+                                        </button>
+                                    </div>
                                 )}
                                 dividerClass={dividerClass}
                             >
@@ -1246,6 +1287,18 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                     </div>
                 </SettingsAnchor>
             )}
+
+            <FontMarketDialog
+                isOpen={isFontMarketOpen}
+                onClose={() => setIsFontMarketOpen(false)}
+                isDaylight={isDaylight}
+                currentFamily={fontMarketChoice?.family ?? null}
+                onUseFont={handleUseMarketFont}
+                onPickLocalFont={() => {
+                    setIsFontMarketOpen(false);
+                    void handlePickWallpaperFont();
+                }}
+            />
 
             <ThemedDialog
                 isOpen={isNativeBlurNoticeOpen}

@@ -14,6 +14,7 @@ export type AiThemeStage =
     | 'parse'
     | 'sanitize'
     | 'web-endpoint'
+    | 'cloud-cache'
     | 'skipped'
     | 'unknown';
 

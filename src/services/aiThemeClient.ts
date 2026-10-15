@@ -11,7 +11,14 @@ import { sanitizeDualTheme } from './themeSanitizer';
 import { applyStoredAnimationIntensityToDualTheme } from './themePreferences';
 import { parseAiThemeJsonInput, THEME_GENERATION_PROMPT_PREFIX, buildThemeSourcePrompt } from '../utils/aiThemePrompts';
 import { createAiFetch } from './aiNativeFetch';
-import { isAiConfigured, readAiSettings } from './aiSettings';
+import {
+    isAiConfigured,
+    isOpenAiCompatibleProvider,
+    readAiSettings,
+    resolveAiApiKey,
+    resolveAiChatCompletionsUrl,
+    resolveAiModel,
+} from './aiSettings';
 import {
     recordAiThemeAttempt,
     type AiThemeStage,
@@ -22,50 +29,18 @@ import { detectOpenAICompatibleProvider, sendOpenAICompatibleRequest } from '../
 export const GEMINI_THEME_ENDPOINT =
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
-const DEFAULT_OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
-const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_OPENAI_TEMPERATURE = 0.7;
 // 一份双主题 JSON 大约 1–2K token，但推理型模型会先把预算花在推理上（现场报告里 4096 的输出全部
 // 落在 stage=parse「Invalid AI theme JSON format」，与截断的表现一致）。放宽到 8192——DeepSeek
 // 与 OpenAI 均支持，若端点拒绝会在 400 里明确报出来，不会静默降级。
 const THEME_MAX_OUTPUT_TOKENS = 8192;
 
-/** 用户填的可能是基址、`/v1` 或完整地址，统一补成 chat/completions。 */
-export const normalizeChatCompletionsUrl = (rawUrl: string): string => {
-    const trimmed = String(rawUrl || '').trim();
-    if (!trimmed) return DEFAULT_OPENAI_CHAT_COMPLETIONS_URL;
-    try {
-        const parsed = new URL(trimmed);
-        const normalizedPath = parsed.pathname.replace(/\/+$/, '');
-        if (!normalizedPath || normalizedPath === '/') {
-            parsed.pathname = '/v1/chat/completions';
-            return parsed.toString();
-        }
-        if (/\/v\d+$/.test(normalizedPath)) {
-            parsed.pathname = `${normalizedPath}/chat/completions`;
-            return parsed.toString();
-        }
-        parsed.pathname = normalizedPath;
-        return parsed.toString();
-    } catch {
-        return trimmed.replace(/\/+$/, '');
-    }
-};
-
-const resolveOpenAiModel = (apiUrl: string, configuredModel: string): string => {
-    const trimmed = String(configuredModel || '').trim();
-    if (trimmed) return trimmed;
-    try {
-        const hostname = new URL(apiUrl).hostname.toLowerCase();
-        if (hostname === 'api.deepseek.com' || hostname.endsWith('.deepseek.com')) {
-            return DEEPSEEK_DEFAULT_MODEL;
-        }
-    } catch {
-        // 解析失败时用通用默认值。
-    }
-    return DEFAULT_OPENAI_MODEL;
-};
+/*
+ * The URL and model for an OpenAI-compatible provider are resolved in one
+ * place (services/aiSettings.ts) so DeepSeek — which needs nothing but a key —
+ * and a hand-filled endpoint behave the same everywhere.
+ */
+export { normalizeChatCompletionsUrl } from '../../shared/openAICompatibleRequest.mjs';
 
 const resolveTemperature = (value: string): number => {
     const temperature = Number.parseFloat(String(value ?? '').trim());
@@ -175,11 +150,11 @@ const requestGeminiThemeJson = async (systemPrompt: string, sourcePrompt: string
 
 const requestOpenAiThemeJson = async (systemPrompt: string, sourcePrompt: string): Promise<AiThemeRawResponse> => {
     const settings = readAiSettings();
-    const apiKey = settings.openaiApiKey.trim();
+    const apiKey = resolveAiApiKey(settings);
     if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
 
-    const apiUrl = normalizeChatCompletionsUrl(settings.openaiApiUrl);
-    const model = resolveOpenAiModel(apiUrl, settings.openaiApiModel);
+    const apiUrl = resolveAiChatCompletionsUrl(settings);
+    const model = resolveAiModel(settings);
     const provider = detectOpenAICompatibleProvider(apiUrl);
 
     const response = await sendOpenAICompatibleRequest({
@@ -235,15 +210,15 @@ export const generateThemeWithConfiguredAi = async (
     const snippet = String(lyricsText || '').slice(0, 2000);
     const sourcePrompt = buildThemeSourcePrompt(snippet, options?.isPureMusic === true, options?.songTitle);
     const provider = settings.provider;
-    const model = provider === 'openai'
-        ? resolveOpenAiModel(normalizeChatCompletionsUrl(settings.openaiApiUrl), settings.openaiApiModel)
+    const model = isOpenAiCompatibleProvider(provider)
+        ? resolveAiModel(settings)
         : 'gemini-3-flash-preview';
     const trigger: AiThemeTrigger = options?.trigger ?? 'unknown';
     const startedAt = Date.now();
     let stage: AiThemeStage = 'request';
 
     try {
-        const raw = provider === 'openai'
+        const raw = isOpenAiCompatibleProvider(provider)
             ? await requestOpenAiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt)
             : await requestGeminiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt);
 
@@ -312,13 +287,13 @@ export const testConfiguredAiConnection = async (): Promise<AiConnectionTestResu
     const settings = readAiSettings();
 
     try {
-        if (settings.provider === 'openai') {
-            const apiKey = settings.openaiApiKey.trim();
+        if (isOpenAiCompatibleProvider(settings.provider)) {
+            const apiKey = resolveAiApiKey(settings);
             if (!apiKey) {
                 return { ok: false, durationMs: 0, error: 'OPENAI_API_KEY is not configured' };
             }
-            const apiUrl = normalizeChatCompletionsUrl(settings.openaiApiUrl);
-            const model = resolveOpenAiModel(apiUrl, settings.openaiApiModel);
+            const apiUrl = resolveAiChatCompletionsUrl(settings);
+            const model = resolveAiModel(settings);
             const response = await sendOpenAICompatibleRequest({
                 apiUrl,
                 provider: detectOpenAICompatibleProvider(apiUrl),

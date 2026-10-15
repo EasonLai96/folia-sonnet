@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useMotionValueEvent } from 'framer-motion';
-import { ChevronLeft, Loader2, Pause, Play, Search, Sparkles, Upload, X } from 'lucide-react';
+import { ChevronLeft, Loader2, Pause, Play, Search, Sparkles, Store, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { List, useListRef } from 'react-window';
 import VisualizerRenderer from './VisualizerRenderer';
@@ -58,6 +58,12 @@ import {
 import { getVisualizerModeLabel, getVisualizerRegistryEntry, getVisualizerScopedSeed } from './registry';
 import VisPlaygroundPreviewHotspots, { type VisPlaygroundEditSection } from './VisPlaygroundPreviewHotspots';
 import VisPlaygroundSettingsPanel from './VisPlaygroundSettingsPanel';
+import FontMarketDialog from '../modal/FontMarketDialog';
+import {
+    readFontMarketChoice,
+    writeFontMarketChoice,
+    type FontMarketInstallResult,
+} from '../../services/fontMarket';
 import type { VisualizerBackgroundActions, VisualizerBackgroundConfig } from './backgrounds/definition';
 import { useVisPlaygroundPreviewPlayback } from './useVisPlaygroundPreviewPlayback';
 
@@ -416,6 +422,8 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
     const [currentLineIndex, setCurrentLineIndex] = useState(() => findPreviewPlaceholderLineIndex(previewPlaceholder.lines, 0));
     const [fontPickerTarget, setFontPickerTarget] = useState<'lyrics' | 'subtitle' | 'none'>('none');
     const isFontPickerOpen = fontPickerTarget !== 'none';
+    const [isFontMarketOpen, setIsFontMarketOpen] = useState(false);
+    const [fontMarketChoice, setFontMarketChoice] = useState(() => readFontMarketChoice());
     const setIsFontPickerOpen = (open: boolean) => setFontPickerTarget(open ? 'lyrics' : 'none');
     const [isLoadingSystemFonts, setIsLoadingSystemFonts] = useState(false);
     const [systemFonts, setSystemFonts] = useState<LocalFontEntry[]>([]);
@@ -682,6 +690,8 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
     };
 
     const handleSelectBuiltinFont = (next: Theme['fontStyle']) => {
+        writeFontMarketChoice(null);
+        setFontMarketChoice(null);
         onCustomFontChange(null);
         onFontStyleChange(next);
     };
@@ -726,6 +736,8 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
 
     const handleChooseSystemFont = (font: LocalFontEntry) => {
         if (fontPickerTarget === 'lyrics') {
+            writeFontMarketChoice(null);
+            setFontMarketChoice(null);
             onCustomFontChange({
                 source: 'system',
                 family: font.family,
@@ -749,6 +761,8 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
         try {
             const result = await onUploadCustomFont(file);
             if (result.ok) {
+                writeFontMarketChoice(null);
+                setFontMarketChoice(null);
                 setIsFontPickerOpen(false);
             } else {
                 setFontPickerError(result.error || (t('options.uploadFontFailed')));
@@ -756,6 +770,23 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
         } finally {
             setIsUploadingCustomFont(false);
         }
+    };
+
+    /* 字体市场：下载 / 注册 / 落盘都由弹窗内部做完，这里只把结果挂到当前预设上。 */
+    const handleUseMarketFont = (result: FontMarketInstallResult) => {
+        setFontMarketChoice({
+            id: result.id,
+            family: result.family,
+            label: result.label,
+            previewUrl: result.previewUrl,
+        });
+        onCustomFontChange({
+            source: 'uploaded',
+            family: result.family,
+            label: result.label,
+            fontId: result.id,
+        });
+        setIsFontMarketOpen(false);
     };
 
     useEffect(() => {
@@ -1346,6 +1377,7 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
                         subtitleFontFallbackFamilies={subtitleFontFallbackFamilies}
                         onSubtitleFontFallbackFamiliesChange={onSubtitleFontFallbackFamiliesChange}
                         onOpenSubtitleFontPicker={() => loadSystemFonts('subtitle')}
+                        onOpenFontMarket={() => setIsFontMarketOpen(true)}
                         onResetSubtitleSettings={handleResetSubtitleSettings}
                         onSliderPointerDown={handleSliderPointerDown}
                         onSliderCommit={handleSliderCommit}
@@ -1524,6 +1556,13 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
                     </div>
                 )}
             </motion.div>
+            <FontMarketDialog
+                isOpen={isFontMarketOpen}
+                onClose={() => setIsFontMarketOpen(false)}
+                isDaylight={isDaylight}
+                currentFamily={customFontFamily}
+                onUseFont={handleUseMarketFont}
+            />
         </motion.div>
     );
 };

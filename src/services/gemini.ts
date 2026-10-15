@@ -1,16 +1,35 @@
-import { DualTheme } from "../types";
+import { DualTheme, Theme } from "../types";
 import { applyStoredAnimationIntensityToDualTheme } from "./themePreferences";
 import { sanitizeDualTheme } from "./themeSanitizer";
 import { getWebAiProvider } from "./runtimeConfig";
 import { resolveFoliaApiUrl } from "./webApi";
 import { recordAiThemeAttempt, type AiThemeTrigger } from "../utils/aiThemeDiagnostics";
 import { generateThemeWithConfiguredAi, isLocalAiThemeAvailable } from "./aiThemeClient";
+import { fingerprintLyricSource, pullAiCloudCache, pushAiCloudCache } from "./aiCloudCache";
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
     return error.message;
   }
   return String(error ?? '');
+};
+
+/*
+ * Cloud cache entries are untrusted input: they came off a server anyone can
+ * push to. A shape check runs before they are let anywhere near the player —
+ * a malformed payload is treated as a miss rather than an error.
+ */
+const isThemeShaped = (value: unknown): value is Theme => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const theme = value as Record<string, unknown>;
+  return typeof theme.backgroundColor === 'string'
+    && typeof theme.primaryColor === 'string';
+};
+
+const isDualThemeShaped = (value: unknown): value is DualTheme => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return isThemeShaped(record.light) && isThemeShaped(record.dark);
 };
 
 export const isMissingAiApiKeyError = (error: unknown) => {
@@ -32,12 +51,38 @@ export const generateThemeFromLyrics = async (
   const startedAt = Date.now();
   // HTTP 失败那条在分支里已经记过，catch 只补没走到响应的（网络错误、解析失败），不重复记。
   let recorded = false;
+
+  /*
+   * 云缓存的键取的是「喂给模型的那段歌词原文」的 MD5，纯音乐时喂的是标题 ——
+   * 所以 policy 里要把这个区别带上，否则纯音乐和同名词曲会互相拿错答案。
+   */
+  const cacheFingerprint = fingerprintLyricSource(
+    'theme',
+    lyricsText,
+    `pure:${options?.isPureMusic === true}`,
+  );
+
   try {
+    /* 先问缓存。命中就不用 Key 了 —— 没填 Key 的人靠这个也能出主题。 */
+    const hit = await pullAiCloudCache('theme', cacheFingerprint);
+    if (hit.status === 'hit' && isDualThemeShaped(hit.payload)) {
+      recorded = true;
+      recordAiThemeAttempt({
+        provider,
+        trigger,
+        stage: 'cloud-cache',
+        ok: true,
+        durationMs: Date.now() - startedAt,
+      });
+      return applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(hit.payload));
+    }
+
     // Check if running in Electron environment
     if ((window as any).electron && typeof (window as any).electron.generateTheme === 'function') {
       const dualTheme = await (window as any).electron.generateTheme(lyricsText, options);
       const theme = sanitizeDualTheme(dualTheme);
       recordAiThemeAttempt({ provider, trigger, stage: 'request', ok: true, durationMs: Date.now() - startedAt });
+      void pushAiCloudCache('theme', cacheFingerprint, theme, { songTitle: options?.songTitle });
       return theme;
     }
 
@@ -48,7 +93,9 @@ export const generateThemeFromLyrics = async (
      * 绕开 CORS）。它自己会记诊断，这里不要再记一条。
      */
     if (isLocalAiThemeAvailable()) {
-      return await generateThemeWithConfiguredAi(lyricsText, options);
+      const dualTheme = await generateThemeWithConfiguredAi(lyricsText, options);
+      void pushAiCloudCache('theme', cacheFingerprint, dualTheme, { songTitle: options?.songTitle });
+      return dualTheme;
     }
 
     const endpoint = resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme');
@@ -86,7 +133,9 @@ export const generateThemeFromLyrics = async (
       status: response.status,
       durationMs: Date.now() - startedAt,
     });
-    return applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme as DualTheme));
+    const theme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme as DualTheme));
+    void pushAiCloudCache('theme', cacheFingerprint, theme, { songTitle: options?.songTitle });
+    return theme;
   } catch (error) {
     if (!recorded) {
       recordAiThemeAttempt({
