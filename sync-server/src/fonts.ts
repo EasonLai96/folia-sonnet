@@ -18,6 +18,28 @@ import type { D1Database, Env } from './app.js';
 
 const MAX_FONT_BYTES = 40 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+
+/*
+ * 分页。
+ *
+ * 市场是要往上堆东西的：条目一多，「一次性把整个目录连同几十张预览图拖下来」
+ * 就成了打开弹层慢的唯一原因 —— 而且是那种「慢得没有道理」的慢，用户只点开
+ * 一个列表，却要为几百 KB 的图片等上几秒。
+ *
+ * 所以目录默认一页 24 条（手机上两列差不多三屏），滚动到底再要下一页。
+ * 页大小封顶 60，免得有人拿 `pageSize=100000` 把整库拖走。
+ */
+const DEFAULT_PAGE_SIZE = 24;
+const MAX_PAGE_SIZE = 60;
+
+/*
+ * 预览图在后台烤成 720×240（见 src/panel.ts 的 buildPreview）。
+ *
+ * 把这个比例下发，客户端就能在图片还没到的时候先按同样的形状撑出一个坑，
+ * 图片来了直接填进去 —— 不然每张图加载完都要把下面的卡片顶一下，滚动条乱跳。
+ */
+const PREVIEW_ASPECT = 3;
+
 const SUPPORTED_FONT_EXTENSIONS = ['.woff2', '.woff', '.ttf', '.otf'];
 const SUPPORTED_FONT_MIME = new Set([
   'font/woff2',
@@ -61,6 +83,8 @@ export interface FontMarketEntry {
   fileSize: number;
   fileUrl: string;
   previewUrl: string;
+  /** 预览图的宽高比，用来在图片到位前先撑出位置。 */
+  previewAspect: number;
   enabled: boolean;
   sort: number;
   createdAt: string;
@@ -94,6 +118,7 @@ const mapRow = (row: FontRow): FontMarketEntry => ({
   fileSize: Number(row.file_size ?? 0),
   fileUrl: `/api/fonts/${encodeURIComponent(row.id)}/file`,
   previewUrl: `/api/fonts/${encodeURIComponent(row.id)}/preview`,
+  previewAspect: PREVIEW_ASPECT,
   enabled: Number(row.enabled ?? 0) === 1,
   sort: Number(row.sort ?? 0),
   createdAt: row.created_at,
@@ -105,12 +130,112 @@ const SELECT_FONTS = `
   FROM font_market
 `;
 
+/** 后台管理用：条目不多，一次性全给，翻页会让「改完刷新」变得别扭。 */
 const listFonts = async (db: D1Database, onlyEnabled: boolean) => {
   const query = onlyEnabled
     ? `${SELECT_FONTS} WHERE enabled = 1 ORDER BY sort ASC, created_at DESC`
     : `${SELECT_FONTS} ORDER BY sort ASC, created_at DESC`;
   const rows = await db.prepare(query).all<FontRow>();
   return (rows.results ?? []).map(mapRow);
+};
+
+export interface FontListQuery {
+  /** 'all' 或空 = 不过滤；分类 id 见 FONT_CATEGORIES。 */
+  category?: string;
+  /** 关键字，比字体名 / family / 分类。 */
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface FontListResult {
+  fonts: FontMarketEntry[];
+  /** 过滤之后的条数 —— 不是这一页的条数，分页控件要用它算「还有没有」。 */
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
+const clampInt = (value: unknown, fallback: number, max: number): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const truncated = Math.trunc(parsed);
+  if (truncated <= 0) return fallback;
+  return Math.min(truncated, max);
+};
+
+/** LIKE 的通配符要转义，否则搜个「_」就把全库翻出来了。 */
+const likePattern = (needle: string): string => (
+  `%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+);
+
+/**
+ * 客户端目录：带分页与过滤。
+ *
+ * 过滤必须放在服务端 —— 分页之后前端手上只有一页，再在前端筛，
+ * 用户看到的「黑体」只是「这一页里的黑体」，翻页还会漏掉后面几页的。
+ */
+const queryFonts = async (
+  db: D1Database,
+  onlyEnabled: boolean,
+  query: FontListQuery,
+): Promise<FontListResult> => {
+  const conditions: string[] = [];
+  const binds: unknown[] = [];
+
+  if (onlyEnabled) conditions.push('enabled = 1');
+
+  const category = String(query.category ?? '').trim();
+  if (category && category !== 'all') {
+    conditions.push('category = ?');
+    binds.push(category);
+  }
+
+  const needle = String(query.q ?? '').trim().toLowerCase();
+  if (needle) {
+    const pattern = likePattern(needle);
+    const clauses = [
+      'LOWER(name) LIKE ? ESCAPE \'\\\'',
+      'LOWER(family) LIKE ? ESCAPE \'\\\'',
+    ];
+    binds.push(pattern, pattern);
+
+    /*
+     * 分类标签是中文（「黑体 / 无衬线」），而库里存的是 id（'sans'）。
+     * 只比 name / family 的话，搜「黑体」什么也搜不到 —— 所以先把命中的
+     * 标签翻译成 id，再并进 OR 里。
+     */
+    const matchedCategories = FONT_CATEGORIES
+      .filter((entry) => entry.label.toLowerCase().includes(needle))
+      .map((entry) => entry.id);
+    if (matchedCategories.length) {
+      clauses.push(`category IN (${matchedCategories.map(() => '?').join(', ')})`);
+      binds.push(...matchedCategories);
+    }
+
+    conditions.push(`(${clauses.join(' OR ')})`);
+  }
+
+  const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+  const countRow = await db
+    .prepare(`SELECT COUNT(*) AS count FROM font_market${where}`)
+    .bind(...binds)
+    .first<{ count: number }>();
+  const total = Number(countRow?.count ?? 0);
+
+  const pageSize = clampInt(query.pageSize, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const page = clampInt(query.page, 1, 1_000_000);
+  const offset = (page - 1) * pageSize;
+
+  const rows = await db
+    .prepare(`${SELECT_FONTS}${where} ORDER BY sort ASC, created_at DESC LIMIT ? OFFSET ?`)
+    .bind(...binds, pageSize, offset)
+    .all<FontRow>();
+
+  const fonts = (rows.results ?? []).map(mapRow);
+  return { fonts, total, page, pageSize, hasMore: offset + fonts.length < total };
 };
 
 /* 运行时注入（Node 走文件、Workers 走 D1）；没有注入就按 Workers 处理。 */
@@ -155,7 +280,16 @@ const readFontFile = async (value: unknown): Promise<File | null> => {
 export const fontRoutes = (() => {
   const routes = new Hono<{ Bindings: Env }>();
 
-  routes.get('/', async (c) => c.json({ ok: true, fonts: await listFonts(c.env.FOLIA_SYNC_DB, true) }));
+  routes.get('/', async (c) => {
+    const search = c.req.query();
+    const result = await queryFonts(c.env.FOLIA_SYNC_DB, true, {
+      category: search.category,
+      q: search.q,
+      page: search.page,
+      pageSize: search.pageSize,
+    });
+    return c.json({ ok: true, ...result });
+  });
 
   routes.get('/:id/file', async (c) => {
     const id = String(c.req.param('id') || '');

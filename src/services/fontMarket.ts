@@ -28,6 +28,8 @@ export interface FontMarketFont {
     fileSize: number;
     fileUrl: string;
     previewUrl: string;
+    /** 预览图宽高比。图片还没到时先按这个比例撑住位置，免得加载完顶一下。 */
+    previewAspect: number;
     enabled: boolean;
     sort: number;
     createdAt: string;
@@ -118,7 +120,26 @@ const withTimeout = (timeoutMs: number): AbortSignal => {
 export interface FontMarketResult {
     fonts: FontMarketFont[];
     error: 'offline' | 'server' | null;
+    /** 服务端过滤后的总条数，不是这一页的条数。 */
+    total: number;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
 }
+
+const emptyResult = (error: FontMarketResult['error']): FontMarketResult => ({
+    fonts: [],
+    error,
+    total: 0,
+    page: 1,
+    pageSize: 0,
+    hasMore: false,
+});
+
+/** 老服务端还没有分页字段时，就拿这一页的条数当总数，界面不至于算出「0 款」。 */
+const readCount = (value: unknown, fallback: number): number => (
+    Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : fallback
+);
 
 const mapFont = (value: unknown): FontMarketFont | null => {
     const record = asRecord(value);
@@ -138,6 +159,7 @@ const mapFont = (value: unknown): FontMarketFont | null => {
         fileSize: Number(record.fileSize ?? 0) || 0,
         fileUrl: asText(record.fileUrl),
         previewUrl: asText(record.previewUrl),
+        previewAspect: Number(record.previewAspect ?? 0) || 0,
         enabled: record.enabled !== false,
         sort: Number(record.sort ?? 0) || 0,
         createdAt: asText(record.createdAt),
@@ -152,21 +174,54 @@ const fetchFonts = async (url: string): Promise<FontMarketResult> => {
             headers: { Accept: 'application/json' },
             signal: withTimeout(REQUEST_TIMEOUT_MS),
         });
-        if (!response.ok) return { fonts: [], error: 'server' };
-        const data = await response.json().catch(() => null) as { fonts?: unknown } | null;
+        if (!response.ok) return emptyResult('server');
+        const data = await response.json().catch(() => null) as {
+            fonts?: unknown;
+            total?: unknown;
+            page?: unknown;
+            pageSize?: unknown;
+            hasMore?: unknown;
+        } | null;
         const fonts = Array.isArray(data?.fonts)
             ? data.fonts.map(mapFont).filter((font): font is FontMarketFont => font !== null)
             : [];
-        return { fonts, error: null };
+        const total = readCount(data?.total, fonts.length);
+        return {
+            fonts,
+            error: null,
+            total,
+            page: Math.max(1, readCount(data?.page, 1)),
+            pageSize: readCount(data?.pageSize, fonts.length),
+            hasMore: data?.hasMore === true || (fonts.length > 0 && fonts.length < total),
+        };
     } catch {
-        return { fonts: [], error: 'offline' };
+        return emptyResult('offline');
     }
 };
 
-/** 拉一次目录。断网 / 服务端坏了都只是「列表为空」，不弹错。 */
-export const fetchFontMarket = async (): Promise<FontMarketResult> => (
-    fetchFonts(resolveCloudApiUrl('fonts'))
-);
+export interface FontMarketQuery {
+    page?: number;
+    pageSize?: number;
+    /** 'all' 或空 = 不过滤。 */
+    category?: string;
+    q?: string;
+}
+
+/**
+ * 拉一页目录。断网 / 服务端坏了都只是「列表为空」，不弹错。
+ *
+ * 分类和关键字交给服务端筛：分页之后前端手上只有一页，在前端筛等于只在这一页里筛。
+ */
+export const fetchFontMarket = async (query: FontMarketQuery = {}): Promise<FontMarketResult> => {
+    const params = new URLSearchParams();
+    if (query.page && query.page > 1) params.set('page', String(Math.trunc(query.page)));
+    if (query.pageSize && query.pageSize > 0) params.set('pageSize', String(Math.trunc(query.pageSize)));
+    if (query.category && query.category !== 'all') params.set('category', query.category);
+    const needle = query.q?.trim();
+    if (needle) params.set('q', needle);
+    const suffix = params.toString();
+    return fetchFonts(`${resolveCloudApiUrl('fonts')}${suffix ? `?${suffix}` : ''}`);
+};
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
     const CHUNK = 0x8000;
