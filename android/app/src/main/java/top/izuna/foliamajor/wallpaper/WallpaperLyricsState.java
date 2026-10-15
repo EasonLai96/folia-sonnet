@@ -222,7 +222,20 @@ public final class WallpaperLyricsState {
             if (!playing) {
                 return anchorPositionMs;
             }
-            return anchorPositionMs + (SystemClock.elapsedRealtime() - anchorElapsedMs);
+            long position = anchorPositionMs + (SystemClock.elapsedRealtime() - anchorElapsedMs);
+            /*
+             * 外推不许越过歌曲末尾。
+             *
+             * 只要漏掉一次 playing=false（Web 层在后台被挂起而没推过来、进程被杀、
+             * 命令丢失），这里就会一路加下去。越界之后 indexAt() 恒返回最后一行、
+             * progressAt() 恒为 1，屏幕上看到的就是「歌词停住不动」—— 而它看起来
+             * 跟「歌放完了」一模一样，很难一眼分辨。夹住之后，最坏也只是停在末尾
+             * 那一句，而不是跑到时间轴外面去；真正的修复在上面的同步点。
+             */
+            if (durationMs > 0L && position > durationMs) {
+                return durationMs;
+            }
+            return position;
         }
 
         /** 当前行下标：取最后一个 start <= position 的行。 */

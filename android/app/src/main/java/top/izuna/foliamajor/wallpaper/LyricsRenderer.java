@@ -204,6 +204,22 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
     /** 上一次解析过的颜色串。变了才重新 parse —— 字符串解析不该每帧走一遍。 */
     private String palettePrimary = null;
     private String paletteSecondary = null;
+    /*
+     * 歌词那条**渐变**的两个端点。
+     *
+     * 整行歌词的颜色几乎全由这一对决定（见 QUAD_FRAGMENT：`grad` 铺满整行，
+     * `uColor` 只掺 20%），而它们原来传的是 `coverTint` —— 那是从 `accent`
+     * 用 HSV 派生出来的一对**假色**（tintsFromTheme）。于是 App 换成 AI / 自定义主题后，
+     * 桌面这层还是照着 accent 自己算一条渐变出来，主题真正的配色一个字没参与：
+     * 用户看到的就是「整行被一层主题渐变盖住了，AI 主题的高亮色没有」。
+     *
+     * 这一对改用主题**自己的**真值：高亮色（accent）+ 主文本色（palette 那份）。
+     * 没有 palette（旧包 / 还没下发）时回落原来那套从 accent 派生的渐变，观感不变。
+     */
+    private final float[] lyricTint = new float[] { 0.62f, 0.66f, 0.72f };
+    private float[] lyricTintTarget = new float[] { 0.62f, 0.66f, 0.72f };
+    private final float[] lyricTint2 = new float[] { 0.70f, 0.74f, 0.82f };
+    private float[] lyricTint2Target = new float[] { 0.70f, 0.74f, 0.82f };
     /** 与 App 当前主题一致的底色与动效强度。 */
     private float[] base = new float[] { 0.035f, 0.035f, 0.043f };
     private float[] baseTarget = new float[] { 0.035f, 0.035f, 0.043f };
@@ -461,12 +477,32 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         }
         // 文本主色 / 次色跟主题走（见 primary / secondary 字段上的那段）。
         syncThemePalette();
+        /*
+         * 歌词渐变的两端（见 lyricTint 那段）。
+         *
+         * 有主题配色就用**主题的真值**：高亮色 + 主文本色，两端都是 App 那边
+         * 正在用的颜色 —— AI 主题换上去，整条渐变跟着换。
+         * 没有（旧包 / 还没下发）才退回上面那对从 accent 派生出来的色，观感与以前一致。
+         *
+         * 注意这里**不动** coverTint：那一对是给封面染色用的，换来源会把壁纸底图的
+         * 配色也一起改掉 —— 那是另一件事，不该被歌词这边的修复捎上。
+         */
+        if (palettePrimary == null) {
+            float[][] themeTints = tintsFromTheme(accentTarget);
+            lyricTintTarget = rgbOfHsv(themeTints[0]);
+            lyricTint2Target = rgbOfHsv(themeTints[1]);
+        } else {
+            lyricTintTarget = accentTarget;
+            lyricTint2Target = primaryTarget;
+        }
         float blend = Math.min(1f, deltaSeconds * 3f);
         for (int i = 0; i < 3; i++) {
             accent[i] += (accentTarget[i] - accent[i]) * blend;
             base[i] += (baseTarget[i] - base[i]) * blend;
             primary[i] += (primaryTarget[i] - primary[i]) * blend;
             secondary[i] += (secondaryTarget[i] - secondary[i]) * blend;
+            lyricTint[i] += (lyricTintTarget[i] - lyricTint[i]) * blend;
+            lyricTint2[i] += (lyricTint2Target[i] - lyricTint2[i]) * blend;
             coverTint[i] += (coverTintTarget[i] - coverTint[i]) * blend;
             coverTint2[i] += (coverTint2Target[i] - coverTint2[i]) * blend;
         }
@@ -1316,10 +1352,13 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform4f(GLES20.glGetUniformLocation(quadProgram, "uUvRect"),
                 uvX, uvY, uvW, uvH);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uColor"), r, g, b);
+        // 整行渐变的两个端点用**歌词专用**那一对，不再用封面的 coverTint：
+        // 后者是从 accent 的 HSV 派生出来的「主题假色」，跟 AI 主题真正的配色不是一回事，
+        // 而且着色器里 uColor 只掺 20%，端点色才是决定观感的那个。
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uActive"),
-                coverTint[0], coverTint[1], coverTint[2]);
+                lyricTint[0], lyricTint[1], lyricTint[2]);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uActive2"),
-                coverTint2[0], coverTint2[1], coverTint2[2]);
+                lyricTint2[0], lyricTint2[1], lyricTint2[2]);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uGlow"),
                 accent[0] * glowBoost, accent[1] * glowBoost, accent[2] * glowBoost);
         GLES20.glUniform1f(GLES20.glGetUniformLocation(quadProgram, "uAlpha"), alpha);

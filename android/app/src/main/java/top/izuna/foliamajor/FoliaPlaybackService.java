@@ -132,11 +132,25 @@ public class FoliaPlaybackService extends android.app.Service {
             @Override
             public void onPlay() {
                 sendCommand("play");
+                /*
+                 * 锚点**这里就切回播放**，不等 Web 层回话 —— 原因见 onSeekTo 那条注释。
+                 *
+                 * 具体到这里：通知栏的播放/暂停是**在后台**按下的，而后台 WebView 的 JS
+                 * 定时器会被系统挂起，`useLyricsWallpaperFeed` 里负责推 playing 的那几个
+                 * effect 一个都跑不起来。壁纸那一侧是「锚点 + 墙钟」自己往前推的，
+                 * 缺这一次同步，它就一直冻在暂停那个锚点上 —— 表现就是
+                 * 「暂停后重新播放，歌词进度不动」（用户原话）。
+                 */
+                syncWallpaperAnchor(true);
             }
 
             @Override
             public void onPause() {
                 sendCommand("pause");
+                // 同上，方向相反：不在这里冻结，壁纸会按 playing=true 一路外推到时间轴
+                // 尽头，那一句歌词就永远停在那儿 —— 这时候再点播放也回不来了，
+                // 因为锚点早就飞出去了。
+                syncWallpaperAnchor(false);
             }
 
             @Override
@@ -194,6 +208,34 @@ public class FoliaPlaybackService extends android.app.Service {
                 .setActions(supportedActions())
                 .setState(PlaybackStateCompat.STATE_NONE, 0, 1.0f)
                 .build());
+    }
+
+    /**
+     * 把「播 / 停」立刻同步给壁纸与悬浮小窗那一侧，不等 Web 层回话。
+     *
+     * 通知栏的播放 / 暂停是**在后台**按下的，而后台 WebView 的 JS 定时器会被系统挂起，
+     * `useLyricsWallpaperFeed` 里负责推 playing 的那几个 effect 一个都跑不起来，
+     * 命令发出去之后没人替壁纸更新状态。原生这一侧是「锚点 + 墙钟」自己往前推的，
+     * 所以漏一次同步就再也回不来：
+     *   暂停漏了 → 按 playing=true 一路外推到时间轴尽头，那一句歌词停在那儿；
+     *   播放漏了 → 冻在旧锚点上，进度纹丝不动。
+     *
+     * 位置取壁纸侧**此刻自己算出来的那个**（屏幕上正在显示的就是它，接着它走才不会跳），
+     * 再夹进 [0, 时长]：万一已经跑飞了，至少先落回一个合法位置。
+     */
+    private void syncWallpaperAnchor(boolean playing) {
+        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.Snapshot snapshot =
+                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.get();
+        long position = snapshot.positionMs();
+        if (snapshot.durationMs > 0L && position > snapshot.durationMs) {
+            position = snapshot.durationMs;
+        }
+        if (position < 0L) {
+            position = 0L;
+        }
+        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(position, playing);
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(this).invalidateOverlay();
     }
 
     @Override
