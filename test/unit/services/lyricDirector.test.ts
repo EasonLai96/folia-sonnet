@@ -18,17 +18,13 @@ import {
     MAX_LINES_IN_PROMPT,
 } from '../../../src/services/lyricDirector/prompt';
 import {
-    clearAllDecisions,
     clearSnapshot,
     DEFAULT_BLOCKED_DIRECTOR_MODES,
-    forgetDecision,
     noteRecentMode,
-    readDecision,
     readDirectorSettings,
     readRecentModes,
     readSnapshot,
     updateDirectorSettings,
-    writeDecision,
     writeSnapshotOnce,
 } from '../../../src/services/lyricDirector/state';
 import { BUILTIN_VISUALIZER_MODES } from '../../../src/types/visualizerModes';
@@ -175,21 +171,7 @@ describe('lyric director prompt', () => {
 
 describe('lyric director memory', () => {
     beforeEach(() => {
-        clearAllDecisions();
         clearSnapshot();
-    });
-
-    it('remembers a decision per song and forgets it again', () => {
-        writeDecision('online:netease:1', { mode: 'sonnet', reason: 'because', params: { cameraIntensity: 1 } });
-        const stored = readDecision('online:netease:1');
-        expect(stored?.mode).toBe('sonnet');
-        expect(stored?.params).toEqual({ cameraIntensity: 1 });
-        expect(stored?.at).toBeGreaterThan(0);
-        expect(readDecision('online:netease:2')).toBeNull();
-        expect(readDecision(null)).toBeNull();
-
-        forgetDecision('online:netease:1');
-        expect(readDecision('online:netease:1')).toBeNull();
     });
 
     it('keeps the recent modes newest first, deduplicated and capped', () => {

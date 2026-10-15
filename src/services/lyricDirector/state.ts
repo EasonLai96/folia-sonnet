@@ -1,19 +1,22 @@
 // src/services/lyricDirector/state.ts
-// The director's own persistence: behaviour settings, one decision per song, the
-// settings snapshot taken before it first touched anything, and the last few
-// modes it handed out.
+// The director's own persistence: behaviour settings, the settings snapshot
+// taken before it first touched anything, and the last few modes it handed out.
 //
-// A single localStorage key keeps it away from the app's settings stores — the
-// per-song memory is a cache, not a setting: it must never ride into an export,
-// a sync payload or an appearance code, and it is dropped (oldest first) long
-// before the storage quota is anywhere near.
+// It used to keep one decision per song here too. That memory is gone — a
+// generated result now lives only in the cloud cache (services/aiStage.ts).
+// Keeping a local copy meant two sources of truth, and the entries older
+// builds had already written were never uploaded, so nobody else could ever
+// benefit from work the app had already paid for.
+//
+// A single localStorage key keeps it away from the app's settings stores —
+// everything here is behavioural, and it must never ride into an export,
+// a sync payload or an appearance code.
 //
 // Subscribers get a version number, not the state: `useSyncExternalStore` needs
 // a value that is stable between writes, and every reader here is a plain
 // function call anyway.
 
 const STORAGE_KEY = 'folia_lyric_director_v1';
-const MEMORY_ENTRY_LIMIT = 300;
 const RECENT_LIMIT = 8;
 
 export interface LyricDirectorSettings {
@@ -38,13 +41,6 @@ export interface LyricDirectorSettings {
     userHint: string;
 }
 
-export interface LyricDirectorDecision {
-    mode: string;
-    reason: string;
-    params: Record<string, unknown>;
-    at: number;
-}
-
 export interface LyricDirectorSnapshot {
     mode: string;
     tunings: Record<string, Record<string, unknown>>;
@@ -53,9 +49,6 @@ export interface LyricDirectorSnapshot {
 
 interface PersistedState {
     settings: LyricDirectorSettings;
-    decisions: Record<string, LyricDirectorDecision>;
-    /** Song keys, newest first: the order entries are evicted in. */
-    index: string[];
     snapshot: LyricDirectorSnapshot | null;
     recentModes: string[];
 }
@@ -78,8 +71,6 @@ export const DEFAULT_DIRECTOR_SETTINGS: LyricDirectorSettings = {
 
 const emptyState = (): PersistedState => ({
     settings: { ...DEFAULT_DIRECTOR_SETTINGS },
-    decisions: {},
-    index: [],
     snapshot: null,
     recentModes: [],
 });
@@ -108,18 +99,6 @@ const notify = () => {
     });
 };
 
-const coerceDecision = (value: unknown): LyricDirectorDecision | null => {
-    if (!value || typeof value !== 'object') return null;
-    const raw = value as Record<string, unknown>;
-    if (typeof raw.mode !== 'string') return null;
-    return {
-        mode: raw.mode,
-        reason: typeof raw.reason === 'string' ? raw.reason : '',
-        params: raw.params && typeof raw.params === 'object' ? raw.params as Record<string, unknown> : {},
-        at: typeof raw.at === 'number' ? raw.at : 0,
-    };
-};
-
 const load = (): PersistedState => {
     if (loaded) return state;
     loaded = true;
@@ -144,18 +123,8 @@ const load = (): PersistedState => {
             }
             if (typeof candidate.userHint === 'string') settings.userHint = candidate.userHint;
         }
-        const decisions: Record<string, LyricDirectorDecision> = {};
-        const savedDecisions = parsed?.decisions;
-        if (savedDecisions && typeof savedDecisions === 'object') {
-            Object.entries(savedDecisions as Record<string, unknown>).forEach(([key, value]) => {
-                const decision = coerceDecision(value);
-                if (decision) decisions[key] = decision;
-            });
-        }
         state = {
             settings,
-            decisions,
-            index: Array.isArray(parsed?.index) ? (parsed.index as unknown[]).filter((key): key is string => typeof key === 'string') : [],
             snapshot: parsed?.snapshot && typeof parsed.snapshot === 'object'
                 ? parsed.snapshot as LyricDirectorSnapshot
                 : null,
@@ -180,18 +149,13 @@ const persist = () => {
     }
 };
 
-/** Writes, dropping the oldest third of the memory if the quota said no. */
+/** Writes, dropping the recent-mode history if the quota said no. */
 const persistWithEviction = () => {
-    // Nowhere to write (no localStorage): the in-memory copy still works, and
-    // evicting entries would only throw away decisions for nothing.
     if (!storage()) return;
     if (persist()) return;
-    const dropCount = Math.max(1, Math.floor(state.index.length / 3));
-    const dropped = state.index.slice(state.index.length - dropCount);
-    dropped.forEach((key) => {
-        delete state.decisions[key];
-    });
-    state.index = state.index.slice(0, state.index.length - dropCount);
+    // The only thing left that can grow without bound is the recent-mode list,
+    // so trim it before giving up on the write rather than losing the settings.
+    state.recentModes = state.recentModes.slice(0, Math.max(0, RECENT_LIMIT - 2));
     persist();
 };
 
@@ -206,51 +170,6 @@ export const updateDirectorSettings = (patch: Partial<LyricDirectorSettings>): L
     notify();
     return { ...state.settings };
 };
-
-// ---- per-song memory ----
-
-export const readDecision = (songKey: string | null): LyricDirectorDecision | null => {
-    if (!songKey) return null;
-    return load().decisions[songKey] ?? null;
-};
-
-/** Newest first, deduplicated, capped; entries past the cap are dropped here. */
-const touchIndex = (songKey: string) => {
-    const next = [songKey, ...state.index.filter((key) => key !== songKey)];
-    const dropped = next.slice(MEMORY_ENTRY_LIMIT);
-    state.index = next.slice(0, MEMORY_ENTRY_LIMIT);
-    dropped.forEach((key) => {
-        delete state.decisions[key];
-    });
-};
-
-export const writeDecision = (songKey: string, decision: Omit<LyricDirectorDecision, 'at'>): void => {
-    if (!songKey) return;
-    load();
-    state.decisions[songKey] = { ...decision, at: Date.now() };
-    touchIndex(songKey);
-    persistWithEviction();
-    notify();
-};
-
-export const forgetDecision = (songKey: string): void => {
-    if (!songKey) return;
-    load();
-    delete state.decisions[songKey];
-    state.index = state.index.filter((key) => key !== songKey);
-    persistWithEviction();
-    notify();
-};
-
-export const clearAllDecisions = (): void => {
-    load();
-    state.decisions = {};
-    state.index = [];
-    persistWithEviction();
-    notify();
-};
-
-export const countDecisions = (): number => load().index.length;
 
 // ---- settings snapshot ----
 

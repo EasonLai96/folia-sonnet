@@ -1,6 +1,6 @@
 import React, { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clapperboard, KeyRound, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { Clapperboard, KeyRound, RotateCcw, Sparkles } from 'lucide-react';
 import { setStatusMessage } from '../../stores/useStatusMessageStore';
 import {
     getDirectorRuntime,
@@ -9,7 +9,6 @@ import {
     subscribeDirectorRuntime,
 } from '../../services/lyricDirector/director';
 import {
-    clearAllDecisions,
     getDirectorStateVersion,
     readDirectorSettings,
     subscribeDirectorState,
@@ -91,11 +90,6 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
         setStatusMessage({ type: 'info', text: restoreLyricDirectorSnapshot(), nonce: Date.now() });
     };
 
-    const forgetEverything = () => {
-        clearAllDecisions();
-        setStatusMessage({ type: 'info', text: t('aiDirector.clearedMemory'), nonce: Date.now() });
-    };
-
     return (
         <div className="space-y-3">
             <div className={`rounded-xl border overflow-hidden ${cardClass}`}>
@@ -120,9 +114,6 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
                                 {t('aiDirector.openAiSettings')}
                             </button>
                         )}
-                    </div>
-                    <div className={muted}>
-                        {t('aiDirector.memoryCount', { count: runtime.rememberedSongCount })}
                     </div>
                     {settings.blockedModes.length > 0 && (
                         <div className={muted}>
@@ -156,14 +147,6 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
                     >
                         <RotateCcw size={11} />
                         {t('aiDirector.restore')}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={forgetEverything}
-                        className="flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs opacity-80"
-                    >
-                        <Trash2 size={11} />
-                        {t('aiDirector.clearMemory')}
                     </button>
                 </div>
             </div>

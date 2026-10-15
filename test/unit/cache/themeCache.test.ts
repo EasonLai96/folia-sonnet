@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getCachedThemeState, getLastDualTheme, getLastLegacyTheme } from '@/services/themeCache';
+import { getLastDualTheme, getLastLegacyTheme } from '@/services/themeCache';
 import { getFromCache } from '@/services/db';
 import { FALLBACK_AI_DUAL_THEME, normalizeThemeHexColor, sanitizeDualTheme, sanitizeTheme } from '@/services/themeSanitizer';
 import type { DualTheme, Theme } from '@/types';
@@ -41,36 +41,6 @@ describe('themeCache', () => {
 
     beforeEach(() => {
         getFromCacheMock.mockReset();
-    });
-
-    it('prefers cached dual themes over legacy theme entries', async () => {
-        getFromCacheMock.mockResolvedValueOnce(dualTheme);
-
-        await expect(getCachedThemeState(42)).resolves.toEqual({
-            kind: 'dual',
-            theme: sanitizeDualTheme(dualTheme)
-        });
-        expect(getFromCacheMock).toHaveBeenCalledWith('dual_theme_42');
-        expect(getFromCacheMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('falls back to legacy cached themes when dual themes are missing', async () => {
-        getFromCacheMock
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(legacyTheme);
-
-        await expect(getCachedThemeState(7)).resolves.toEqual({
-            kind: 'legacy',
-            theme: sanitizeTheme(legacyTheme, FALLBACK_AI_DUAL_THEME.dark)
-        });
-        expect(getFromCacheMock).toHaveBeenNthCalledWith(1, 'dual_theme_7');
-        expect(getFromCacheMock).toHaveBeenNthCalledWith(2, 'theme_7');
-    });
-
-    it('returns none when no cached theme exists', async () => {
-        getFromCacheMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
-
-        await expect(getCachedThemeState(9)).resolves.toEqual({ kind: 'none' });
     });
 
     it('reads the last dual theme from cache', async () => {

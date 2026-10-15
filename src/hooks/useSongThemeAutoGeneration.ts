@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import type { GenerateAIThemeOptions, GenerateAIThemeResult } from './useThemeController';
 import type { LyricData, SongResult } from '../types';
 import type { ThemeGenerationSource } from '../services/themePreferences';
-import { getCachedThemeStateForSong } from '../services/themeCache';
 import {
     getSongThemeAutoGenerationKey,
     hasSongThemePromptSource,
@@ -104,7 +103,6 @@ export function useSongThemeAutoGeneration({
                     return;
                 }
 
-                const cachedTheme = await getCachedThemeStateForSong(latestSong);
                 if (cancelled || !isSongThemeGenerationStillCurrent({
                     latestSongKey: latestSongKeyRef.current,
                     targetSongKey,
@@ -118,7 +116,8 @@ export function useSongThemeAutoGeneration({
                     lyrics: latestInput.lyrics,
                     isLyricsLoading: false,
                     hasAttempted: attemptedSongKeysRef.current.has(targetSongKey),
-                    hasCachedTheme: cachedTheme.kind !== 'none',
+                    /* 生成结果只存云端：命中时 generateThemeFromLyrics 已经直接返回。 */
+                    hasCachedTheme: false,
                     requiresPromptSource,
                 })) {
                     attemptedSongKeysRef.current.add(targetSongKey);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
-import { getCachedThemeState, getCachedThemeStateForSong, getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
+import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
 import { saveSyncedThemeForSong } from '../services/sync/syncRepository';
 import {
     applyStoredAnimationIntensityToDualTheme,
@@ -420,10 +420,6 @@ export function useThemeController({
         setBgMode('ai');
         void saveToCache('last_dual_theme', sanitized);
         const syncSong = songOrKey && typeof songOrKey === 'object' ? songOrKey : null;
-        const songKey = syncSong ? getPlaybackSongKey(syncSong) : songOrKey;
-        if (songKey != null) {
-            void saveToCache(`dual_theme_${songKey}`, sanitized);
-        }
         if (syncSong) {
             saveSyncedThemeWithoutBlocking(syncSong, sanitized, 'edited');
         }
@@ -525,22 +521,11 @@ export function useThemeController({
             return 'restored' as const;
         }
 
-        const cachedTheme = typeof songOrId === 'object'
-            ? await getCachedThemeStateForSong(songOrId)
-            : await getCachedThemeState(songOrId);
-
-        if (cachedTheme.kind === 'dual') {
-            setCurrentSongHasLocalAiTheme(true);
-            applyDualTheme(cachedTheme.theme, { respectCustomPreference: false });
-            return 'dual' as const;
-        }
-
-        if (cachedTheme.kind === 'legacy') {
-            setCurrentSongHasLocalAiTheme(true);
-            applyLegacyTheme(cachedTheme.theme, { respectCustomPreference: false });
-            return 'legacy' as const;
-        }
-
+        /*
+         * 以前在这里先翻本地缓存（`dual_theme_*` / `theme_*`）—— 那份缓存按用户要求删掉了。
+         * 生成结果现在只存在云端（services/aiStage.ts）：命中云端的那一次在
+         * generateThemeFromLyrics 里就已经返回，走不到这里。
+         */
         setCurrentSongHasLocalAiTheme(false);
 
         if (options?.allowLastUsedFallback) {
@@ -576,7 +561,6 @@ export function useThemeController({
         const coverTheme = applyStoredAnimationIntensityToDualTheme(buildBuiltinDualTheme({ coverColors }));
 
         if (currentSong) {
-            await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, coverTheme);
             saveSyncedThemeWithoutBlocking(currentSong, coverTheme, 'fallback');
             setCurrentSongHasLocalAiTheme(true);
         }
@@ -650,11 +634,25 @@ export function useThemeController({
             const dualTheme = await generateThemeFromLyrics(promptText, {
                 isPureMusic,
                 songTitle: songTitle || undefined,
+                /*
+                 * 艺人信息只为了提示词更准，不参与缓存指纹（同一份歌词换个人唱
+                 * 也会是同一个答案，没必要多存一份）。
+                 */
+                artist: currentSong?.artists?.map(artist => artist.name).filter(Boolean).join('、') || undefined,
+                /*
+                 * 歌词行一起传进去：云缓存的指纹由「歌词正文 + 设置」算出，
+                 * 导演那条链路算的是同一个值，两边才会共用一条缓存。
+                 */
+                lines: lyrics?.lines ?? [],
                 trigger: source,
             });
             const normalizedDualTheme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme));
             if (currentSong) {
-                await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, normalizedDualTheme);
+                /*
+                 * 只往云端同步一份。本地不再落 `dual_theme_*` 缓存 —— 生成结果
+                 * 只存在云端（services/aiStage.ts），本地再存一份就是两份真相，
+                 * 老版本攒下来的那份永远传不上去，等于白生成。
+                 */
                 saveSyncedThemeWithoutBlocking(currentSong, normalizedDualTheme, source === 'auto' ? 'auto' : 'manual');
                 setCurrentSongHasLocalAiTheme(true);
             }
