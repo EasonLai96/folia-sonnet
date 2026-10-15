@@ -2715,6 +2715,7 @@ export default {
     "openaiApiKey": "Kunci API OpenAI",
     "aiApiKeySavedPlaceholder": "Tersimpan (kosongkan untuk mempertahankan)",
     "aiApiKeySavedDesc": "Kunci disimpan terenkripsi di perangkat ini dan tidak ditampilkan lagi. Masukkan kunci baru lalu simpan untuk menggantinya.",
+    "aiApiKeyEndpointMismatchDesc": "Kunci tersimpan hanya dikirim ke {{endpoint}}. Masukkan kunci lagi untuk memakai alamat lain.",
     "aiApiKeyClear": "Hapus",
     "openaiApiUrl": "URL API OpenAI",
     "openaiApiModel": "Model OpenAI",

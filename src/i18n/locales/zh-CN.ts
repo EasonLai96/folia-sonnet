@@ -2850,6 +2850,7 @@ export default {
     "openaiApiKey": "密钥",
     "aiApiKeySavedPlaceholder": "已保存（留空则保持不变）",
     "aiApiKeySavedDesc": "密钥已加密保存在本机，不会再显示。输入新密钥并保存可替换。",
+    "aiApiKeyEndpointMismatchDesc": "已保存的密钥只会发往 {{endpoint}}。换用其他地址需要重新输入密钥。",
     "aiApiKeyClear": "清除",
     "openaiApiUrl": "OpenAI 接口链接",
     "openaiApiModel": "模型",

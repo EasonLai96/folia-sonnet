@@ -2849,6 +2849,7 @@ export default {
     "openaiApiKey": "OpenAI API Key",
     "aiApiKeySavedPlaceholder": "Saved (leave blank to keep it)",
     "aiApiKeySavedDesc": "The key is stored encrypted on this device and is not shown again. Enter a new key and save to replace it.",
+    "aiApiKeyEndpointMismatchDesc": "The saved key is only sent to {{endpoint}}. Enter the key again to use a different address.",
     "aiApiKeyClear": "Clear",
     "openaiApiUrl": "OpenAI API URL",
     "openaiApiModel": "OpenAI Model",
