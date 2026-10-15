@@ -5,16 +5,8 @@ import { getWebAiProvider } from "./runtimeConfig";
 import { resolveFoliaApiUrl } from "./webApi";
 import { recordAiThemeAttempt, type AiThemeTrigger } from "../utils/aiThemeDiagnostics";
 import { isLocalAiThemeAvailable } from "./aiThemeClient";
-import { pushAiCloudCache, type AiCloudCacheSource } from "./aiCloudCache";
-import {
-    STAGE_CACHE_KIND,
-    buildStagePolicy,
-    fingerprintStage,
-    requestStage,
-    resolveStageLyricSource,
-    type StageLyricLine,
-} from "./aiStage";
-import { readDirectorSettings } from "./lyricDirector/state";
+import { type AiCloudCacheSource } from "./aiCloudCache";
+import { requestStage, resolveStageLyricSource, type StageLyricLine } from "./aiStage";
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
@@ -63,12 +55,14 @@ export const generateThemeFromLyrics = async (
   // HTTP 失败那条在分支里已经记过，catch 只补没走到响应的（网络错误、解析失败），不重复记。
   let recorded = false;
 
-  const directorSettings = readDirectorSettings();
-  const blockedModes = directorSettings.blockedModes ?? [];
   /*
-   * 歌词正文优先用调用方给的歌词行，没有才退回 `lyricsText` 字符串 ——
-   * 两处必须拼出同一段文字，否则与导演链路的指纹对不上，一次请求省下的
-   * 那次模型调用就没了。
+   * 指纹**不在这里算**。
+   *
+   * 参与指纹的是「歌词正文 + policy（纯音乐 / 提示词 / 屏蔽的样式 / force）」，
+   * 全部由 services/aiStage.ts 的 buildStageContext 统一产出 —— 主题链路与导演链路
+   * 才会算出同一个值，一次请求省下的那次模型调用才真的省下来。
+   *
+   * 这里只负责把「是不是纯音乐」这个判断结果交给它，不再自己拼一份。
    */
   const lyricLines = options?.lines ?? [];
   const resolved = resolveStageLyricSource({
@@ -76,14 +70,6 @@ export const generateThemeFromLyrics = async (
       isPureMusic: options?.isPureMusic === true,
       songTitle: options?.songTitle ?? '',
   });
-  const cacheFingerprint = fingerprintStage(
-    resolved.lyricSource,
-    buildStagePolicy({
-      isPureMusic: resolved.isPureMusic,
-      hint: directorSettings.userHint,
-      blocked: blockedModes,
-    }),
-  );
 
   try {
     /*
@@ -103,6 +89,8 @@ export const generateThemeFromLyrics = async (
         isPureMusic: resolved.isPureMusic,
         songTitle: options?.songTitle,
         require: 'theme',
+        /* 「重新生成」同样要跳过缓存，否则桌面端点下去拿回的还是云端那条旧答案。 */
+        force: options?.force === true,
         generate: async () => ({
           theme: sanitizeDualTheme(await (window as any).electron.generateTheme(lyricsText, options)),
         }),
@@ -146,40 +134,69 @@ export const generateThemeFromLyrics = async (
       return { theme: applyStoredAnimationIntensityToDualTheme(stage.theme), source: stage.source };
     }
 
-    const endpoint = resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme');
+    /*
+     * 部署端点这条路也要先问云端，不能上来就去找服务器。
+     *
+     * 走这条的正是**没填 Key 的人** —— 云缓存这个开关默认打开就是为他准备的：
+     * 他自己一个主题都生成不出来，能撞上别人推上来的那份就是白赚。
+     *
+     * 所以顺序固定：先拉云端 → 命中就用 → 没命中再去找服务器 → 服务器也没 Key
+     * 才轮到报错。有缓存还报「没配置 Key」，那才是真的错。
+     *
+     * 地址也因此**延后**到 generate 里才算：缓存命中时压根不需要地址，
+     * 早早解析反而让「没填地址」这种无关问题挡在缓存前面。
+     */
+    const stage = await requestStage({
+        song: {
+            title: options?.songTitle ?? '',
+            artist: options?.artist ?? '',
+            album: options?.album ?? null,
+        },
+        lines: lyricLines as { fullText?: string }[],
+        isPureMusic: resolved.isPureMusic,
+        songTitle: options?.songTitle,
+        require: 'theme',
+        force: options?.force === true,
+        generate: async () => {
+            const response = await fetch(
+                resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme'),
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ lyricsText, ...options }),
+                },
+            );
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ lyricsText, ...options }),
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const message = (errorData as { error?: string }).error || `HTTP ${response.status}`;
+                recorded = true;
+                recordAiThemeAttempt({
+                    provider,
+                    trigger,
+                    stage: 'web-endpoint',
+                    ok: false,
+                    status: response.status,
+                    error: message,
+                    durationMs: Date.now() - startedAt,
+                });
+                throw new Error(message || 'Failed to generate theme');
+            }
+
+            return { theme: sanitizeDualTheme(await response.json() as DualTheme) };
+        },
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const message = (errorData as { error?: string }).error || `HTTP ${response.status}`;
-      recorded = true;
-      recordAiThemeAttempt({
+    if (!stage.theme) throw new Error('AI 没有返回可用的主题。');
+    recorded = true;
+    recordAiThemeAttempt({
         provider,
         trigger,
-        stage: 'web-endpoint',
-        ok: false,
-        status: response.status,
-        error: message,
+        stage: stage.source === 'cloud' ? 'cloud-cache' : 'web-endpoint',
+        ok: true,
         durationMs: Date.now() - startedAt,
-      });
-      throw new Error(message || 'Failed to generate theme');
-    }
-
-    const dualTheme = await response.json();
-    recordAiThemeAttempt({
-      provider,
-      trigger,
-      stage: 'request',
-      ok: true,
-      status: response.status,
-      durationMs: Date.now() - startedAt,
     });
     /*
      * 存进去的是「未经动画强度处理」的原始那份，取出来时才叠加。
@@ -189,9 +206,7 @@ export const generateThemeFromLyrics = async (
      * 歌词留两份缓存。缺的动画那半会被 require:'decision' 判成没命中，等有 Key
      * 的那次生成再补上。
      */
-    const theme = sanitizeDualTheme(dualTheme as DualTheme);
-    void pushAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint, { theme }, { songTitle: options?.songTitle });
-    return { theme: applyStoredAnimationIntensityToDualTheme(theme), source: 'ai' };
+    return { theme: applyStoredAnimationIntensityToDualTheme(stage.theme), source: stage.source };
   } catch (error) {
     if (!recorded) {
       recordAiThemeAttempt({
