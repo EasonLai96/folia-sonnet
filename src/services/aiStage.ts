@@ -42,7 +42,7 @@ export const STAGE_CACHE_KIND = 'stage';
 
 /** 主题 JSON 与动画 JSON 一起出，输出上限按更占地方的那份给。 */
 const STAGE_MAX_TOKENS = 8192;
-/** 同一首歌刚问过就别再问 —— 主题与导演是先后两次独立调用。 */
+/** 同一首歌刚问过就别再问 —— 切歌后主题与导演会各触发一次，指纹相同。 */
 const RECENT_TTL_MS = 10 * 60 * 1000;
 const RECENT_MAX_ENTRIES = 32;
 
@@ -320,12 +320,15 @@ export const generateStage = async (ctx: StageContext): Promise<StageParts> => {
 };
 
 /*
- * 进程内的两级去重。
+ * 进程内的两级去重 —— 这是「合并成一次请求」真正落地的地方。
  *
- * 主题链路和导演链路在切歌后先后各调一次，指纹相同（policy 由同一个函数算出来），
- * 但它们是两次独立的调用 —— 没有这层就会打两次模型。
+ * 切歌后主题链路（650ms 后）与导演链路（等歌词 250ms 后）都会调进来，指纹又是同一个
+ * （policy 与歌词正文都由上面那两个函数统一算）。没有这层就会打两次模型：
  *  - 在飞：后到的那个 await 同一个 Promise，只发一次请求；
  *  - 最近结果：前一次刚算完，后一次直接取答案，连缓存接口都不必再问。
+ *
+ * 两条链路谁先到都一样：先到的那次既拿到了主题也拿到了动画决策，后到的直接复用
+ * 自己需要的那一半。
  */
 const inFlight = new Map<string, Promise<StageParts>>();
 const recent = new Map<string, { parts: StageParts; at: number }>();
@@ -351,20 +354,23 @@ const rememberRecent = (fingerprint: string, parts: StageParts): void => {
 };
 
 /**
- * 云端命中提示。
+ * 结果来源提示：生成完一条，命中时另一条。
  *
  * 命中时结果来得很突然 —— 界面上只会看到主题一瞬间变了，既没有「生成中」也没有
- * 任何说明。给一条提示，用户才知道这次是复用别人的答案、没有烧调用。
+ * 任何说明。两条文案互斥，由 `source` 二选一，不会出现连着弹两次的情况。
+ *
+ * 放在这里（而不是服务内部），是因为同一次请求可能被主题、导演两条链路复用：
+ * 弹提示是「告知用户」这种只有调用方知道该不该做的事。
  */
-export const notifyCloudCacheHit = (): void => {
+export const notifyStageResolved = (source: AiCloudCacheSource): void => {
     setStatusMessage({
         type: 'info',
-        text: translate('options.cloudCacheHit'),
+        text: translate(source === 'cloud' ? 'options.cloudCacheHit' : 'status.themeGenerated'),
         nonce: Date.now(),
     });
 };
 
-/** 先问云端，没有（或不全）再生成，生成完回传。 */
+/** 先问云端，没有（或不全）再生成，生成完回传。一次往返，一条缓存。 */
 const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
     const { value, source } = await withAiCloudCache({
         kind: STAGE_CACHE_KIND,
@@ -378,7 +384,6 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
         },
         songTitle: ctx.songTitle,
     });
-    if (source === 'cloud') notifyCloudCacheHit();
     return { ...value, source };
 };
 
@@ -391,18 +396,25 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
 export const requestStage = async (request: StageRequest): Promise<StageResult> => {
     const ctx = buildStageContext(request);
 
+    /*
+     * 「重新判断」要跳过**每一层**，不是只跳过进程内缓存。
+     *
+     * 少跳一层，用户点「重新生成」拿到的还是服务器上那条旧答案 —— 他会觉得这个
+     * 按钮是坏的。所以 force 时：不看最近结果、不蹭在飞的请求、不拉云端，
+     * 直接生成，然后**覆盖**云端那条（写接口本来就是 upsert）。
+     */
     if (!request.force) {
         const cached = readRecent(ctx.fingerprint);
         if (cached && hasRequired(cached, ctx.requirement)) {
             return { ...cached, source: 'cloud' };
         }
-    }
 
-    const pending = inFlight.get(ctx.fingerprint);
-    if (pending) {
-        const shared = await pending.catch(() => null);
-        if (shared && hasRequired(shared, ctx.requirement)) {
-            return { ...shared, source: 'cloud' };
+        const pending = inFlight.get(ctx.fingerprint);
+        if (pending) {
+            const shared = await pending.catch(() => null);
+            if (shared && hasRequired(shared, ctx.requirement)) {
+                return { ...shared, source: 'cloud' };
+            }
         }
     }
 

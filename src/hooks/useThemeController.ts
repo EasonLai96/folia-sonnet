@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
+import { notifyStageResolved } from '../services/aiStage';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -42,6 +43,8 @@ type StatusSetter = Dispatch<SetStateAction<StatusMessage | null>>;
 export type GenerateAIThemeOptions = {
     source?: 'manual' | 'auto';
     shouldApply?: () => boolean;
+    /** 「重新生成」：不看缓存重新问一次模型，结果覆盖掉云端已有的那条。 */
+    force?: boolean;
 };
 
 export type GenerateAIThemeResult =
@@ -631,7 +634,7 @@ export function useThemeController({
                 return { status: 'skipped', reason: 'empty-prompt' };
             }
 
-            const dualTheme = await generateThemeFromLyrics(promptText, {
+            const { theme: dualTheme, source: themeSource } = await generateThemeFromLyrics(promptText, {
                 isPureMusic,
                 songTitle: songTitle || undefined,
                 /*
@@ -645,6 +648,13 @@ export function useThemeController({
                  */
                 lines: lyrics?.lines ?? [],
                 trigger: source,
+                /*
+                 * 手动点「生成 AI 主题」就是「我对现在这个不满意，再给一个」——
+                 * 所以不看缓存，直接重新问模型，生成完把云端那条**覆盖**掉。
+                 *
+                 * 自动触发（切歌）相反，必须走缓存：那正是云缓存要省掉的那次调用。
+                 */
+                force: options.force === true || source === 'manual',
             });
             const normalizedDualTheme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme));
             if (currentSong) {
@@ -664,13 +674,16 @@ export function useThemeController({
 
             applyDualTheme(normalizedDualTheme);
 
-            const selectedTheme = getSelectedDualTheme(normalizedDualTheme, isDaylight);
-            setStatusMsg({
-                type: 'success',
-                text: bgMode === 'custom' && customTheme
-                    ? t('notifications.aiThemeUpdatedCustomPreferred')
-                    : t('status.themeApplied', { themeName: selectedTheme.name }),
-            });
+            /*
+             * 一次生成，两种说法：这次真调了模型就说「主题生成成功，已缓存到云端」，
+             * 下一个人撞上同一段歌词时（source === 'cloud'）说「已从云端拉取缓存」。
+             * 两条互斥 —— 命中那次根本没走生成，不该报「生成成功」。
+             */
+            if (bgMode === 'custom' && customTheme) {
+                setStatusMsg({ type: 'success', text: t('notifications.aiThemeUpdatedCustomPreferred') });
+            } else {
+                notifyStageResolved(themeSource);
+            }
 
             return { status: 'generated', applied: true };
         } catch (error: unknown) {

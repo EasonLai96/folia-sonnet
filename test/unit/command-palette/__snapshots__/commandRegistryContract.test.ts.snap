@@ -209,6 +209,7 @@ exports[`command palette registry contract > keeps the registered command order 
   "panel-local",
   "panel-navi",
   "panel-onlineLyrics",
+  "panel-aiDirector",
   "mods",
   "lyric-segmentation",
   "visualizer-picker",
@@ -242,5 +243,8 @@ exports[`command palette registry contract > keeps the registered command order 
   "background-latent-both",
   "background-url",
   "background-sora",
+  "ai-director-decide",
+  "ai-director-decide-again",
+  "ai-director-restore",
 ]
 `;

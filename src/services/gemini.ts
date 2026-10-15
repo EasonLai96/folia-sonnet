@@ -4,14 +4,12 @@ import { sanitizeDualTheme } from "./themeSanitizer";
 import { getWebAiProvider } from "./runtimeConfig";
 import { resolveFoliaApiUrl } from "./webApi";
 import { recordAiThemeAttempt, type AiThemeTrigger } from "../utils/aiThemeDiagnostics";
-import { generateThemeWithConfiguredAi, isLocalAiThemeAvailable } from "./aiThemeClient";
-import { pullAiCloudCache, pushAiCloudCache } from "./aiCloudCache";
+import { isLocalAiThemeAvailable } from "./aiThemeClient";
+import { pushAiCloudCache, type AiCloudCacheSource } from "./aiCloudCache";
 import {
     STAGE_CACHE_KIND,
     buildStagePolicy,
     fingerprintStage,
-    normalizeStagePayload,
-    notifyCloudCacheHit,
     requestStage,
     resolveStageLyricSource,
     type StageLyricLine,
@@ -40,6 +38,12 @@ export const isMissingAiApiKeyError = (error: unknown) => {
  * AI 主题生成。每次尝试（成功或失败）都记一条可公开的记录：provider、阶段、HTTP 状态、
  * 截断后的错误原文与耗时 —— 「偶尔生成失败」这类反馈靠它定位，不记提示词、歌词与 Key。
  */
+export interface AiThemeGenerationResult {
+    theme: DualTheme;
+    /** 'cloud' = 这次没有调用模型，用的是别人推上去的那份答案。 */
+    source: AiCloudCacheSource;
+}
+
 export const generateThemeFromLyrics = async (
   lyricsText: string,
   options?: {
@@ -49,8 +53,10 @@ export const generateThemeFromLyrics = async (
     album?: string | null;
     trigger?: AiThemeTrigger;
     lines?: readonly StageLyricLine[];
+    /** 「重新生成」：不看缓存，生成完覆盖云端那条。 */
+    force?: boolean;
   }
-): Promise<DualTheme> => {
+): Promise<AiThemeGenerationResult> => {
   const provider = getWebAiProvider();
   const trigger = options?.trigger ?? 'unknown';
   const startedAt = Date.now();
@@ -81,36 +87,30 @@ export const generateThemeFromLyrics = async (
 
   try {
     /*
-     * 先问缓存 —— 命中就不用调模型了，没填 Key 的人靠这个也能出主题。
+     * 主题与动画合成一次请求发出去，回来一次解析两半（services/aiStage.ts）。
      *
-     * 这里自己拉一次、不直接进 requestStage，是因为「桌面版走 Electron 主进程」
-     * 这条路拿不到合并 prompt：它只能出主题，出不了动画决策，也就没法复用
-     * requestStage 内部的统一编排。
+     * 桌面版走 Electron 主进程时拿不到合并 prompt —— 那条路只能出主题，出不了动画
+     * 决策，所以自己给一个只产主题的实现，照样由同一个入口统一编排、统一上报。
      */
-    const hit = await pullAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint);
-    const cachedTheme = hit.status === 'hit'
-      ? normalizeStagePayload(hit.payload, blockedModes)?.theme ?? null
-      : null;
-    if (cachedTheme) {
-      recorded = true;
-      recordAiThemeAttempt({
-        provider,
-        trigger,
-        stage: 'cloud-cache',
-        ok: true,
-        durationMs: Date.now() - startedAt,
-      });
-      notifyCloudCacheHit();
-      return applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(cachedTheme));
-    }
-
-    // Check if running in Electron environment
     if ((window as any).electron && typeof (window as any).electron.generateTheme === 'function') {
-      const dualTheme = await (window as any).electron.generateTheme(lyricsText, options);
-      const theme = sanitizeDualTheme(dualTheme);
+      const stage = await requestStage({
+        song: {
+          title: options?.songTitle ?? '',
+          artist: options?.artist ?? '',
+          album: options?.album ?? null,
+        },
+        lines: lyricLines as { fullText?: string }[],
+        isPureMusic: resolved.isPureMusic,
+        songTitle: options?.songTitle,
+        require: 'theme',
+        generate: async () => ({
+          theme: sanitizeDualTheme(await (window as any).electron.generateTheme(lyricsText, options)),
+        }),
+      });
+      if (!stage.theme) throw new Error('AI 没有返回可用的主题。');
+      recorded = true;
       recordAiThemeAttempt({ provider, trigger, stage: 'request', ok: true, durationMs: Date.now() - startedAt });
-      void pushAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint, { theme }, { songTitle: options?.songTitle });
-      return theme;
+      return { theme: applyStoredAnimationIntensityToDualTheme(stage.theme), source: stage.source };
     }
 
     /*
@@ -132,6 +132,7 @@ export const generateThemeFromLyrics = async (
         isPureMusic: resolved.isPureMusic,
         songTitle: options?.songTitle,
         require: 'theme',
+        force: options?.force === true,
       });
       if (!stage.theme) throw new Error('AI 没有返回可用的主题。');
       recorded = true;
@@ -142,7 +143,7 @@ export const generateThemeFromLyrics = async (
         ok: true,
         durationMs: Date.now() - startedAt,
       });
-      return applyStoredAnimationIntensityToDualTheme(stage.theme);
+      return { theme: applyStoredAnimationIntensityToDualTheme(stage.theme), source: stage.source };
     }
 
     const endpoint = resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme');
@@ -183,10 +184,14 @@ export const generateThemeFromLyrics = async (
     /*
      * 存进去的是「未经动画强度处理」的原始那份，取出来时才叠加。
      * 存已处理的、取时再处理一遍，强度会被叠乘，越用越偏。
+     *
+     * 部署端点是单用途的，只能出主题 —— 但仍写进同一条 stage 条目，不给同一段
+     * 歌词留两份缓存。缺的动画那半会被 require:'decision' 判成没命中，等有 Key
+     * 的那次生成再补上。
      */
     const theme = sanitizeDualTheme(dualTheme as DualTheme);
     void pushAiCloudCache(STAGE_CACHE_KIND, cacheFingerprint, { theme }, { songTitle: options?.songTitle });
-    return applyStoredAnimationIntensityToDualTheme(theme);
+    return { theme: applyStoredAnimationIntensityToDualTheme(theme), source: 'ai' };
   } catch (error) {
     if (!recorded) {
       recordAiThemeAttempt({

@@ -24,7 +24,7 @@ export const aiDirectorCommands: CommandPaletteCommand[] = [
     {
         id: 'ai-director-decide',
         group: 'visualizer',
-        title: 'AI director: pick this song’s animation',
+        title: 'AI director: pick this song\'s animation',
         description: 'Let the AI choose and tune the lyric animation for the current song',
         keywords: ['ai', 'director', 'animation', 'visualizer', '动画', '歌词', '导演'],
         icon: Clapperboard,

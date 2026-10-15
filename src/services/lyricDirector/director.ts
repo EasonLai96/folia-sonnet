@@ -29,6 +29,7 @@ import {
     readSnapshot,
     writeSnapshotOnce,
 } from './state';
+import { readStoredThemeAutoGenerateEnabled } from '../themePreferences';
 import type { SongResult, VisualizerMode } from '../../types';
 
 // src/services/lyricDirector/director.ts
@@ -68,6 +69,8 @@ export type DirectorOutcome =
     | { kind: 'failed'; text: string }
     | { kind: 'queued' }
     | { kind: 'stale' }
+    /* 跑完了、也上传了，但「允许自动切换」是关的 —— 只当给云缓存添一块砖。 */
+    | { kind: 'produced'; text: string }
     | { kind: 'no-song' };
 
 export interface DirectorRuntime {
@@ -400,10 +403,21 @@ const toast = (text: string, type: 'info' | 'success' | 'error') => {
     setStatusMessage({ type, text, nonce: Date.now() });
 };
 
-export const runLyricDirectorDecision = async (options: { announce?: boolean; force?: boolean } = {}): Promise<DirectorOutcome> => {
+export const runLyricDirectorDecision = async (options: { announce?: boolean; force?: boolean; apply?: boolean } = {}): Promise<DirectorOutcome> => {
     const announce = options.announce !== false;
     const force = options.force === true;
     const settings = readDirectorSettings();
+    /*
+     * 「允许自动切换」只管**应用**，不管**生成**。
+     *
+     * 关掉它依然要把动画决策算出来传上云端 —— 否则这台机器白听一遍，别人撞上同一段
+     * 歌词还是得重新烧一次调用。它挡的是「AI 能不能动我当前在用的样式」，不是「AI
+     * 要不要想」。
+     *
+     * 但 `force` 是用户亲手点的「重新决策」—— 那一刻他要的就是换掉当前样式，
+     * 不该被同一个开关挡在门外。
+     */
+    const applyAllowed = options.apply !== false && (settings.autoOnSongChange || force);
     const songKey = currentSongKey();
     if (!songKey || !songInfoOf(displaySong())) return { kind: 'no-song' };
 
@@ -434,6 +448,11 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
         const nowKey = currentSongKey();
         if (nowKey !== inFlightSongKey) {
             return { kind: 'stale' };
+        }
+
+        /* 开关关着：答案已经躺在云端了，别动用户手上的样式。 */
+        if (!applyAllowed) {
+            return { kind: 'produced', text: decision.reason };
         }
 
         snapshotSettings();
@@ -498,7 +517,9 @@ const nextQueuedSong = (): unknown => {
 
 const prefetchNextSong = async (): Promise<void> => {
     const settings = readDirectorSettings();
-    if (!settings.autoOnSongChange || !settings.prefetchNext) return;
+    if (!settings.prefetchNext) return;
+    // 导演关着也要预先问 —— 见 scheduleLyricDirectorDecision 里那条纪律。
+    if (!settings.autoOnSongChange && !readStoredThemeAutoGenerateEnabled()) return;
     if (busy) return; // never race the song that is on screen
     const song = nextQueuedSong();
     if (!song) return;
@@ -539,7 +560,15 @@ const prefetchNextSong = async (): Promise<void> => {
  * "(这首歌没有歌词)" for a song that has them. The fallback timer covers tracks
  * whose lyrics never come. */
 export const scheduleLyricDirectorDecision = (): void => {
-    if (!readDirectorSettings().autoOnSongChange) return;
+    const settings = readDirectorSettings();
+    /*
+     * 生成**不看**「允许自动切换」这个开关。
+     *
+     * 它挡的是「AI 能不能改我当前在用的主题 / 动画」，不是「AI 要不要算」。算出来传上
+     * 云端，下一个人撞上同一段歌词就能白拿 —— 这才是云缓存的意义。所以只要导演开着
+     * **或者**主题自动生成开着，这一轮就得跑；两个都关才真的不必问模型。
+     */
+    if (!settings.autoOnSongChange && !readStoredThemeAutoGenerateEnabled()) return;
     if (lyricsTimer !== null) {
         clearTimeout(lyricsTimer);
         lyricsTimer = null;
