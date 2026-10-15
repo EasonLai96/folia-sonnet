@@ -1424,7 +1424,16 @@ public final class FloatingLyricsOverlay {
         }
 
         private void drawBackground(Canvas canvas, int width, int height, float appear) {
-            float radius = dp(14);
+            /*
+             * 贴在安全区上时不画圆角。
+             *
+             * 圆角的意义是「一块离屏漂浮的卡片」；而这一格的上下边缘本来就是贴着屏幕顶边
+             * （挖孔那一条）的，四角各挖掉一块之后，左上角 / 右上角就变成「背景缺了一角」
+             * —— 字还在、底色没了，看着就像显示不全。贴边和圆角是互相冲突的两件事，
+             * 所以这个模式一律走直角。
+             */
+            boolean overSafeArea = overSafeArea();
+            float radius = overSafeArea ? 0f : dp(14);
             frame.set(0f, 0f, width, height);
             /*
              * 底色浓度是设置里那根「简易 · 背景不透明度」滑条（wp.floatingBackgroundOpacity）。
@@ -1442,8 +1451,6 @@ public final class FloatingLyricsOverlay {
              * 它变成了一根横贯屏幕的细线，跟系统状态栏本身抢视觉 —— 用户要的就是
              * **只有字浮在那儿**。非安全区模式下照旧画（那里还要靠它兜住窗口轮廓）。
              */
-            boolean overSafeArea = overSafeArea();
-
             if (opacity > 0f) {
                 backgroundPaint.setStyle(Paint.Style.FILL);
                 backgroundPaint.setColor(withAlpha(baseColor, opacity * appear));
