@@ -408,6 +408,8 @@ export default {
     "songUnavailableAlternativeDefaultType": "Another version can be played",
     "playAlternativeVersion": "Play alternate",
     "playbackErrorPrompt": "Playback failed. Auto-skipping in {{seconds}}s",
+    "autoSkippedNext": "Skipped to the next track",
+    "playbackErrorAutoSkipped": "Playback failed. Skipped to the next track",
     "skipUnavailableAction": "Skip",
     "cancel": "Cancel",
     "confirm": "Confirm",

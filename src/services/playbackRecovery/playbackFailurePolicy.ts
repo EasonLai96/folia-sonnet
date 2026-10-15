@@ -11,22 +11,34 @@ import type {
 // src/services/playbackRecovery/playbackFailurePolicy.ts
 // 播放失败的集中策略表：每个原因对应的文案、是否停播、是否倒计时跳歌、给哪些按钮、是否静默重试、是否冷却。
 //
-// 默认「出错就自动下一首」：倒计时期间不停播，倒计时自带「跳过 / 取消」；连跳次数用尽
-// （usePlaybackQueueController 的 MAX_UNAVAILABLE_AUTO_SKIP_COUNT，现在是 2 —— 即跳两首，
-// 第三首还错就停）或没有下一首可播时，才落到停播 + 一条普通消息。
-// 少数原因是「整个平台都放不了」而不是「这一首放不了」（未登录、登录过期、服务没配置），
-// 跳到下一首照样错，这类不倒计时，直接停。
+// 一律「出错就自动下一首」：倒计时期间不停播，倒计时自带「跳过 / 取消」；连跳次数用尽
+// （见 maxAutoSkips 与 usePlaybackQueueController 的 MAX_UNAVAILABLE_AUTO_SKIP_COUNT）
+// 或没有下一首可播时，才落到停播 + 一条普通消息。
+//
+// 以前只有「就是这一首放不出来」的原因才跳，没登录、登录过期、断网这类整条链路的事停在
+// 原地带一句消息 —— 在手机上是灾难：人是把 App 丢在后台听的，停在那儿就是「放着放着没声
+// 了」，回到前台才看见一行字。现在全部跳：至少下一首可能是本地文件、也可能是另一个平台，
+// 值得一试；真的一首都放不出来时，连跳预算会把它停下来。
+//
+// 代价靠 maxAutoSkips 收敛：整条链路的原因跳一两首就够（再跳多半还是同一个平台），
+// 单曲的原因才给足预算。
 
 const NO_RETRY: readonly number[] = [];
 
 /** 出错后自动跳下一首的倒计时文案（与本地 / 转码那条旧路径同一条）。 */
 const AUTO_SKIP_COUNTDOWN_KEY = 'status.playbackErrorPrompt';
 
+/**
+ * 整条链路都放不了的原因：跳一两首碰碰运气（下一首可能是本地文件或别的平台），
+ * 再往后基本是重复同一个失败，不如停下来把话说清楚。
+ */
+const PLATFORM_WIDE_SKIP_BUDGET = 1;
+
 // 停播、只给“跳过”：账号、权限、试听、地区这类重试也不会变好的原因。
-// 默认倒计时跳歌；`autoSkipCountdown: false` 用于「整平台都放不了」的原因。
+// 一律倒计时跳歌；`maxAutoSkips` 收紧那些换了哪首都一样的原因。
 const stopWithSkip = (
     messageKey: PlaybackFailureMessageKey,
-    options: { autoSkipCountdown?: boolean } = {},
+    options: { autoSkipCountdown?: boolean; maxAutoSkips?: number } = {},
 ): PlaybackFailurePolicy => {
     const autoSkipCountdown = options.autoSkipCountdown !== false;
     return {
@@ -38,18 +50,18 @@ const stopWithSkip = (
         autoRetryDelaysMs: NO_RETRY,
         cooldown: null,
         offerReplacement: false,
+        ...(typeof options.maxAutoSkips === 'number' ? { maxAutoSkips: options.maxAutoSkips } : {}),
     };
 };
 
 // 停播、给“重试 / 跳过”：可能是暂时的，或证据不足的原因。
-// 默认不自动跳：网络、超时、限流、服务不可用都是「整条链路」的事，跳到下一首照样放不了，
-// 而且网一好，该放回去的是当前这首。只有证据指向「就是这一首放不出来」的原因
-// （invalid-response / unknown，含解码失败与源不支持）才给倒计时。
+// 同样一律倒计时跳歌：界面在后台时没人会去点「重试」，停在原地带一句消息等于静音。
+// 网络、超时这些还会先静默重试（autoRetryDelaysMs），重试成功了就不跳。
 const stopWithRetry = (
     messageKey: PlaybackFailureMessageKey,
-    overrides: Partial<Pick<PlaybackFailurePolicy, 'autoRetryDelaysMs' | 'cooldown'>> & { autoSkipCountdown?: boolean } = {},
+    overrides: Partial<Pick<PlaybackFailurePolicy, 'autoRetryDelaysMs' | 'cooldown' | 'maxAutoSkips'>> & { autoSkipCountdown?: boolean } = {},
 ): PlaybackFailurePolicy => {
-    const { autoSkipCountdown = false, ...rest } = overrides;
+    const { autoSkipCountdown = true, ...rest } = overrides;
     return {
         messageKey,
         ...(autoSkipCountdown ? { countdownKey: AUTO_SKIP_COUNTDOWN_KEY } : {}),
@@ -65,9 +77,10 @@ const stopWithRetry = (
 
 /** 每个原因的基础策略；用 Record 穷举，漏掉任何原因 tsc 都会报错。随 failure 变化的变体在 resolvePlaybackFailurePolicy 里解析。 */
 export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, PlaybackFailurePolicy>> = {
-    // 未登录 / 登录过期：换哪首都一样放不了，跳就是不试了，直接停。
-    'not-signed-in': stopWithSkip('status.songLoginRequired', { autoSkipCountdown: false }),
-    'session-expired': stopWithSkip('status.loginExpired', { autoSkipCountdown: false }),
+    // 未登录 / 登录过期：这一首肯定放不了，但下一首也许是本地文件或另一个平台，值得一试；
+    // 只是预算给到 1 —— 一个平台没登录时，同一个平台的歌连着来十首也一样放不了。
+    'not-signed-in': stopWithSkip('status.songLoginRequired', { maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
+    'session-expired': stopWithSkip('status.loginExpired', { maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
     'membership-required': stopWithSkip('status.songMembershipRequired'),
     'purchase-required': stopWithSkip('status.songPurchaseRequired'),
     'entitlement-required': stopWithSkip('status.songEntitlementRequired'),
@@ -84,14 +97,14 @@ export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, Pla
         cooldown: null,
         offerReplacement: true,
     },
-    network: stopWithRetry('status.songNetworkFailed', { autoRetryDelaysMs: [1000, 3000] }),
-    timeout: stopWithRetry('status.songRequestTimedOut', { autoRetryDelaysMs: [2000] }),
-    'service-unavailable': stopWithRetry('status.songServiceUnavailable', { cooldown: 'retry-after' }),
-    'rate-limited': stopWithRetry('status.songRateLimitedNoWait', { cooldown: 'retry-after' }),
+    network: stopWithRetry('status.songNetworkFailed', { autoRetryDelaysMs: [1000, 3000], maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
+    timeout: stopWithRetry('status.songRequestTimedOut', { autoRetryDelaysMs: [2000], maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
+    'service-unavailable': stopWithRetry('status.songServiceUnavailable', { cooldown: 'retry-after', maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
+    'rate-limited': stopWithRetry('status.songRateLimitedNoWait', { cooldown: 'retry-after', maxAutoSkips: PLATFORM_WIDE_SKIP_BUDGET }),
     // 响应不对 / 说不清为什么（含媒体元素解码失败、源不支持）：重试过一次还是不行，
     // 基本就是这一首的问题，交给倒计时跳下一首。
-    'invalid-response': stopWithRetry('status.songTemporarilyUnavailable', { autoSkipCountdown: true }),
-    unknown: stopWithRetry('status.songTemporarilyUnavailable', { autoSkipCountdown: true }),
+    'invalid-response': stopWithRetry('status.songTemporarilyUnavailable'),
+    unknown: stopWithRetry('status.songTemporarilyUnavailable'),
 };
 
 /** 文案及其变体：限流带等待秒数、服务未配置、证据不足但登录可能有用。 */
@@ -141,10 +154,10 @@ export const resolvePlaybackFailurePolicy = (
         ...(message.params ? { messageParams: message.params } : {}),
     };
 
-    // 未配置 / 需要桌面版：重试不会变好，只留“跳过”；也不是这一首的问题，别去跳下一首。
+    // 未配置 / 需要桌面版：重试不会变好，只留“跳过”。歌照样跳 —— 下一首可能是别的平台，
+    // 而停在原地只有一个没在响的播放器。
     if (failure.reason === 'service-unavailable' && failure.transient === false) {
-        policy = { ...policy, autoSkip: 'none', actions: ['skip'] };
-        delete policy.countdownKey;
+        policy = { ...policy, actions: ['skip'] };
     }
 
     if (context === 'restore') {
@@ -223,6 +236,22 @@ export const isPlaybackFailureStatus = (message: StatusMessage | null | undefine
 );
 
 /**
+ * 策略 + 插值 → 最终文案。
+ *
+ * 状态消息与后台气泡共用这一句：两处各拼一次的话，用户在气泡里看到的和回前台看到的
+ * 迟早会不一样。
+ */
+export const buildPlaybackFailureMessageText = (
+    policy: PlaybackFailurePolicy,
+    t: (key: string, options?: Record<string, unknown>) => string,
+    /** 额外插值（目前只有 {{provider}}：平台显示名）。策略自己带的 params 优先。 */
+    extraParams?: Record<string, unknown>,
+): string => {
+    const params = { ...(extraParams ?? {}), ...(policy.messageParams ?? {}) };
+    return Object.keys(params).length > 0 ? t(policy.messageKey, params) : t(policy.messageKey);
+};
+
+/**
  * 把策略变成一条状态消息：先过滤掉没有 handler 的按钮；有按钮时第一个是主按钮，
  * 第二个是副按钮（没有就用“取消”关闭消息），消息常驻；没有按钮时是一条普通错误消息。
  */
@@ -233,8 +262,7 @@ export const buildPlaybackFailureStatus = (
     /** 额外插值（目前只有 {{provider}}：平台显示名）。策略自己带的 params 优先。 */
     extraParams?: Record<string, unknown>,
 ): StatusMessage => {
-    const params = { ...(extraParams ?? {}), ...(policy.messageParams ?? {}) };
-    const text = Object.keys(params).length > 0 ? t(policy.messageKey, params) : t(policy.messageKey);
+    const text = buildPlaybackFailureMessageText(policy, t, extraParams);
     const actions = policy.actions.filter(action => Boolean(handlers[action]));
     if (actions.length === 0) return { type: 'error', text };
 

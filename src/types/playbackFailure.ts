@@ -56,6 +56,14 @@ export interface PlaybackFailurePolicy {
     stopPlayback: boolean;                   // 暂停旧音频、shouldAutoPlay=false；play 置 IDLE，mid-playback 置 PAUSED
     autoSkip: 'countdown' | 'none';
     actions: readonly PlaybackFailureAction[]; // 'skip' 只在有下一首可播歌曲时渲染
+    /**
+     * 这个原因允许连着跳几首（不设就用队列控制器的默认上限）。
+     *
+     * 「整条链路都放不了」的原因（没登录、登录过期、断网、超时、限流、音源没配置）给一个
+     * 很小的值：跳一两首多半还是同一个平台、同样的结果，真去把整个队列扫一遍只会让手机在
+     * 后台一首接一首地空转。单曲的问题（试听、会员、地区、下架）才值得多试几首。
+     */
+    maxAutoSkips?: number;
     autoRetryDelaysMs: readonly number[];    // [] = 不自动重试
     cooldown: 'retry-after' | null;
     offerReplacement: boolean;

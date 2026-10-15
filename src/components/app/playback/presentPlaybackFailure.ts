@@ -2,12 +2,24 @@ import { PlayerState, type StatusMessage } from '../../../types';
 import type { SkipPromptMessageKey } from '../../../types/appPlayback';
 import type { PlaybackFailure, PlaybackFailureContext } from '../../../types/playbackFailure';
 import type { StatusSetter } from '../../../stores/useStatusMessageStore';
-import { buildPlaybackFailureStatus, resolvePlaybackFailurePolicy } from '../../../services/playbackRecovery/playbackFailurePolicy';
+import {
+    buildPlaybackFailureMessageText,
+    buildPlaybackFailureStatus,
+    resolvePlaybackFailurePolicy,
+} from '../../../services/playbackRecovery/playbackFailurePolicy';
+import {
+    isPlaybackInterfaceHidden,
+    notifyBackgroundPlaybackNotice,
+} from '../../../services/playbackRecovery/backgroundFailureNotice';
 import { omni } from '../../../services/onlineMusic/omni';
 
 // src/components/app/playback/presentPlaybackFailure.ts
 // 播放失败的展示层：按策略表决定倒计时跳歌、停播，还是给出带“重试 / 跳过”的常驻消息。
 // 只负责展示和停播，不决定原因；队列控制器在点歌失败和播放中失败时都交给这里。
+//
+// 界面没人看时（后台）走另一条路：不排倒计时，直接跳下一首，并把原因交给系统小气泡。
+// 倒计时是 timer 驱动的，而 WebView 退到后台后 timer 会被节流甚至整页冻结 —— 一个“5 秒后
+// 自动跳过”在后台可以变成“再也没跳过”，用户只感觉到 App 放着放着就哑了。
 
 export interface PlaybackFailurePresentation {
     failure: PlaybackFailure;
@@ -37,13 +49,39 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
     const policy = resolvePlaybackFailurePolicy(failure, context);
     deps.setIsLyricsLoading(false);
 
-    // 只有 taken-down 会走到倒计时；次数用尽或没有下一首时落到下面的普通消息。
-    if (policy.autoSkip === 'countdown' && policy.countdownKey && skip && skipCount < deps.maxAutoSkipCount) {
+    // 连跳预算：整条链路的原因（没登录、断网…）只给一两首，单曲的问题用控制器的默认上限。
+    const maxAutoSkips = policy.maxAutoSkips ?? deps.maxAutoSkipCount;
+
+    /*
+     * 登录过期 / 未登录这类文案要带平台名（{{provider}}）。
+     * 平台名在这层才能取：策略表是纯函数，拿不到运行时的 provider 注册表。
+     */
+    const needsProviderLabel = policy.messageKey === 'status.songLoginRequiredForProvider'
+        || policy.messageKey === 'status.providerLoginExpired';
+    const providerLabel = needsProviderLabel && failure.providerId
+        ? omni.getProviderLabel(failure.providerId)
+        : undefined;
+    const extraParams = providerLabel ? { provider: providerLabel } : undefined;
+    const messageText = buildPlaybackFailureMessageText(policy, deps.t, extraParams);
+    const isHidden = isPlaybackInterfaceHidden();
+
+    // 能跳就跳（次数用尽或没有下一首可播时落到下面的停播 + 普通消息）。
+    // 后台不排倒计时：timer 在后台靠不住，等满 5 秒往往等于永远不跳 —— 当场跳走，
+    // 并用系统气泡说明原因，那是后台唯一看得见的东西。
+    if (policy.autoSkip === 'countdown' && policy.countdownKey && skip && skipCount < maxAutoSkips) {
+        if (isHidden) {
+            notifyBackgroundPlaybackNotice(`${messageText} · ${deps.t('status.autoSkippedNext')}`);
+            if (isCurrent()) skip();
+            return;
+        }
         deps.showTimedSkipPrompt(policy.countdownKey, () => {
             if (isCurrent()) skip();
         });
         return;
     }
+
+    // 跳不动了：同样在后台补一句气泡，否则用户连「为什么没声了」都无从知道。
+    if (isHidden) notifyBackgroundPlaybackNotice(messageText);
 
     if (policy.stopPlayback) {
         deps.shouldAutoPlayRef.current = false;
@@ -64,18 +102,12 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
     });
 
     /*
-     * 登录过期 / 未登录这类文案要带平台名（{{provider}}）。
-     * 平台名在这层才能取：策略表是纯函数，拿不到运行时的 provider 注册表。
+     * 平台名已经在上面取过了（气泡也要用同一句文案），这里复用。
      */
-    const needsProviderLabel = policy.messageKey === 'status.songLoginRequiredForProvider'
-        || policy.messageKey === 'status.providerLoginExpired';
-    const providerLabel = needsProviderLabel && failure.providerId
-        ? omni.getProviderLabel(failure.providerId)
-        : undefined;
     built = buildPlaybackFailureStatus(policy, deps.t, {
         retry: wrap(retry),
         skip: wrap(skip),
         dismiss: () => deps.setStatusMsg(null),
-    }, providerLabel ? { provider: providerLabel } : undefined);
+    }, extraParams);
     deps.setStatusMsg(built);
 };

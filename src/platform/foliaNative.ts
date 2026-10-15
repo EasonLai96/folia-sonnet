@@ -91,6 +91,13 @@ interface FoliaNativePlugin {
     }): Promise<{ ok?: boolean }>;
     /** 删一条 cookie（Max-Age=0）。 */
     cookiesRemove(options: { url: string; name: string }): Promise<{ ok?: boolean }>;
+    /**
+     * 弹一条系统小气泡（Toast）。
+     *
+     * 界面在后台时它是唯一看得见的提示方式：Web 层的提示条挂在页面里，回到前台才显示，
+     * 而播放出错（试听限制、登录过期、网络断了）恰恰都在后台发生。
+     */
+    showToast(options: { text: string; long?: boolean }): Promise<void>;
     addListener(
         eventName: 'updateDownloadProgress',
         listener: (progress: UpdateDownloadProgress) => void,
@@ -126,6 +133,21 @@ export const setScreenAwake = async (awake: boolean): Promise<void> => {
         await FoliaNative.setScreenAwake({ awake });
     } catch {
         // 桌面端 / 插件不可用：静默，屏幕常亮不该影响播放本身。
+    }
+};
+
+/**
+ * 弹一条系统小气泡。
+ *
+ * 失败一律静默：非 Android（桌面端 / 浏览器）本来就没有这个通道，插件没注册也一样 ——
+ * 这些平台上界面就在眼前，Web 层的提示条够用了。
+ */
+export const showNativeToast = async (text: string, options: { long?: boolean } = {}): Promise<void> => {
+    if (!isCapacitorAndroid() || !text) return;
+    try {
+        await FoliaNative.showToast({ text, ...(options.long ? { long: true } : {}) });
+    } catch (error) {
+        console.warn('[FoliaNative] showToast failed', error);
     }
 };
 

@@ -17,6 +17,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.util.Base64;
 import android.webkit.CookieManager;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
@@ -1579,6 +1580,36 @@ public class FoliaNativePlugin extends Plugin {
      *
      * 值由 Web 侧算好再传（开关 && 正在播放）：原生这边不该知道"什么算在播"。
      */
+    /**
+     * 弹一条系统小气泡（Toast）。
+     *
+     * 为什么需要它：应用退到后台后界面根本没人看 —— Web 层的提示条要等回到前台才显示，
+     * 那时用户只记得「放着放着就没声了」。播放出错偏偏是后台最要命的一类（没登录、试听
+     * 限制、网络断了），得当场说出来。Toast 由系统画在我们的窗口之外，后台也照常冒出来。
+     *
+     * 只用系统默认样式的**纯文本** Toast：Android 11 起后台不允许弹自定义 view 的 Toast，
+     * 纯文本这条路一直是通的。也不用通知渠道 —— 那是要授权、还会在通知栏留痕的重武器，
+     * 一句「已跳到下一首」不该有那么大动静。
+     *
+     * 走主线程的 Handler 而不是 Activity.runOnUiThread：Activity 这时多半已经 stop 甚至为
+     * 空，而 Toast 用的是 Application 上下文，只要有进程就能弹。
+     */
+    @PluginMethod
+    public void showToast(PluginCall call) {
+        final String text = call.getString("text", "");
+        final boolean longDuration = Boolean.TRUE.equals(call.getBoolean("long", false));
+        final String message = text == null ? "" : text;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                Toast.makeText(getContext(), message,
+                        longDuration ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {
+                // 上下文已经没了（进程正在收尾）：一句提示不值得再抛出点什么。
+            }
+        });
+        call.resolve();
+    }
+
     @PluginMethod
     public void setScreenAwake(PluginCall call) {
         boolean awake = Boolean.TRUE.equals(call.getBoolean("awake", false));

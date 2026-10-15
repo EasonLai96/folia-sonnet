@@ -48,6 +48,7 @@ import { hasBeforePlayHook, runBeforePlayHook } from '../services/hostExtensionH
 import { classifyPlaybackError, isTransientPlaybackFailure } from '../services/playbackRecovery/onlinePlaybackFailure';
 import { PLAYBACK_RETRYING_MESSAGE_KEY } from '../services/playbackRecovery/playbackFailurePolicy';
 import { presentPlaybackFailure, type PlaybackFailurePresenterDeps } from '../components/app/playback/presentPlaybackFailure';
+import { isPlaybackInterfaceHidden, notifyBackgroundPlaybackNotice } from '../services/playbackRecovery/backgroundFailureNotice';
 
 // src/hooks/usePlaybackQueueController.ts
 
@@ -138,7 +139,9 @@ type UsePlaybackQueueControllerParams = {
     endHeldTransition?: () => void;
 };
 
-const MAX_UNAVAILABLE_AUTO_SKIP_COUNT = 2;
+// 连着几首都放不出来就停在一条消息上，不再一首首往下试。
+// 「整条链路都放不了」的原因（没登录、断网、限流、音源没配置）在策略表里另有更小的预算。
+const MAX_UNAVAILABLE_AUTO_SKIP_COUNT = 4;
 const UNAVAILABLE_SKIP_CONFIRM_TIMEOUT_MS = 5000;
 const UNAVAILABLE_SKIP_CONFIRM_INTERVAL_MS = 1000;
 
@@ -411,9 +414,26 @@ export function usePlaybackQueueController({
     const showTimedSkipPrompt = useCallback((
         messageKey: SkipPromptMessageKey,
         onSkip: () => void,
-        onCancel?: () => void
+        onCancel?: () => void,
+        /** 后台直接跳时气泡上那句话；不传就用通用的「播放出错，已自动跳到下一首」。 */
+        noticeText?: string,
     ) => {
         clearPendingUnavailableSkip();
+
+        /*
+         * 后台不倒计时。
+         *
+         * 这个倒计时是 setTimeout 驱动的，而 WebView 退到后台后 timer 会被节流、页面甚至
+         * 会被整页冻结 —— 「5 秒后自动跳过」在后台可以变成「再也没跳过」，歌就那么停在那儿。
+         * 用户在后台要的也不是「再给我 5 秒决定」，而是要它接着响下去：当场跳，并用系统
+         * 气泡说一句（界面那会儿没人看，提示条要等回前台才显示）。
+         */
+        if (isPlaybackInterfaceHidden()) {
+            setStatusMsg(null);
+            notifyBackgroundPlaybackNotice(noticeText ?? t('status.playbackErrorAutoSkipped'));
+            onSkip();
+            return;
+        }
 
         let remainingSeconds = Math.ceil(UNAVAILABLE_SKIP_CONFIRM_TIMEOUT_MS / 1000);
         const skip = () => {

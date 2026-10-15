@@ -408,6 +408,8 @@ export default {
     "songUnavailableAlternativeDefaultType": "存在可播放的其他版本",
     "playAlternativeVersion": "播放其他版本",
     "playbackErrorPrompt": "播放出错，{{seconds}} 秒后自动跳过",
+    "autoSkippedNext": "已自动跳到下一首",
+    "playbackErrorAutoSkipped": "播放出错，已自动跳到下一首",
     "skipUnavailableAction": "跳过",
     "cancel": "取消",
     "confirm": "确定",

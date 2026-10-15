@@ -406,6 +406,8 @@ export default {
     "songUnavailableAlternativeDefaultType": "Versi lain bisa diputar",
     "playAlternativeVersion": "Putar versi alternatif",
     "playbackErrorPrompt": "Pemutaran gagal. Akan dilewati otomatis dalam {{seconds}} detik",
+    "autoSkippedNext": "Melewati ke lagu berikutnya",
+    "playbackErrorAutoSkipped": "Pemutaran gagal. Melewati ke lagu berikutnya",
     "skipUnavailableAction": "Lewati",
     "cancel": "Batal",
     "confirm": "Konfirmasi",
