@@ -81,6 +81,16 @@ interface FoliaNativePlugin {
         redirect: string;
         timeoutMs?: number;
     }): Promise<NativeHttpResponse>;
+    /** 往 WebView 的 cookie 罐里写一条。`<img>` / `<audio>` 加不了请求头，只能靠它带凭据。 */
+    cookiesSet(options: {
+        url: string;
+        name: string;
+        value: string;
+        path?: string;
+        domain?: string;
+    }): Promise<{ ok?: boolean }>;
+    /** 删一条 cookie（Max-Age=0）。 */
+    cookiesRemove(options: { url: string; name: string }): Promise<{ ok?: boolean }>;
     addListener(
         eventName: 'updateDownloadProgress',
         listener: (progress: UpdateDownloadProgress) => void,
@@ -150,6 +160,54 @@ export const decodeNativeBody = (bodyBase64?: string): string => {
 /** base64 里偶尔会带换行（Java 的 MIME 编码器），atob 不认，先清掉。 */
 const body64Safe = (value: string): string => value.replace(/\s+/g, '');
 
+/** 一次原生转发的结果：状态码 + 按 UTF-8 解出来的响应体。 */
+export type NativeHttpRequestResult = {
+    status: number;
+    text: string;
+    /** 响应头（含重复的 Set-Cookie），按原生给的原样传回。 */
+    headers?: Array<{ name?: string; value?: string }> | Record<string, string>;
+};
+
+/**
+ * 用原生 OkHttp 发一次完整请求（任意方法 / 自定义头 / 请求体）。
+ *
+ * 走它而不是 WebView 的 fetch，是因为页面跑在 `https://localhost` 上，而自建服务
+ * （飞牛这类用户自己的 NAS）几乎不会下发 `Access-Control-Allow-Origin` —— 同源检查
+ * 在最前面就把请求挡掉了，抛出来的是一句毫无特征的 `TypeError: Failed to fetch`，
+ * 跟「地址填错」「服务端没开」长得一模一样。原生侧没有同源策略这回事。
+ *
+ * 连不上 / TLS 握手失败这些真网络错误，插件会 reject，由调用方当网络故障处理。
+ */
+export const nativeHttpRequest = async (options: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    bodyText?: string;
+    timeoutMs?: number;
+}): Promise<NativeHttpRequestResult> => {
+    // 头名一律用小写：原生侧拼 OkHttp 请求时按 `content-type` 取 media type，
+    // 大小写不敏感的是浏览器的 Headers，不是 Capacitor 那个 JSONObject。
+    const headers: Record<string, string> = {};
+    Object.entries(options.headers ?? {}).forEach(([name, value]) => {
+        if (value == null || value === '') return;
+        headers[name.toLowerCase()] = String(value);
+    });
+    const response = await FoliaNative.httpRequest({
+        url: options.url,
+        method: options.method,
+        headers,
+        bodyText: options.bodyText ?? '',
+        bodyBase64: '',
+        redirect: 'follow',
+        ...(options.timeoutMs && options.timeoutMs > 0 ? { timeoutMs: options.timeoutMs } : {}),
+    });
+    return {
+        status: Number(response?.status) || 0,
+        text: decodeNativeBody(response?.bodyBase64),
+        ...(response?.headers ? { headers: response.headers } : {}),
+    };
+};
+
 /**
  * 用原生 OkHttp 取一份文本。
  *
@@ -158,22 +216,44 @@ const body64Safe = (value: string): string => value.replace(/\s+/g, '');
  * 显示一句「检查失败」。原生侧没有同源策略这回事。
  */
 export const nativeGetText = async (url: string, timeoutMs?: number): Promise<string> => {
-    const response = await FoliaNative.httpRequest({
-        url,
-        method: 'GET',
-        headers: {},
-        bodyText: '',
-        bodyBase64: '',
-        redirect: 'follow',
-        ...(timeoutMs && timeoutMs > 0 ? { timeoutMs } : {}),
-    });
-    if (!response || (response.status >= 400)) {
-        throw new Error(`Request failed with HTTP ${response?.status ?? 0}: ${url}`);
+    const response = await nativeHttpRequest({ url, method: 'GET', headers: {}, timeoutMs });
+    if (response.status >= 400) {
+        throw new Error(`Request failed with HTTP ${response.status}: ${url}`);
     }
-    return decodeNativeBody(response.bodyBase64);
+    return response.text;
 };
 
 /** 原生 HTTP 转发可用（仅 Capacitor Android 上插件注册了才算）。 */
 export const isNativeHttpAvailable = (): boolean => (
     isCapacitorAndroid() && typeof FoliaNative.httpRequest === 'function'
 );
+
+/**
+ * 往 WebView 的 cookie 罐里写一条。
+ *
+ * 自建服务（飞牛）的封面是 `<img src=...>` 直连的 —— 图片元素没法挂请求头，
+ * 服务端要的那个 `music-token` 只能靠 cookie 自动带上。登录成功后把 token 同步一份
+ * 进罐里，封面才不会全裂。写不进去不该影响登录本身，所以失败只记不抛。
+ */
+export const setNativeCookie = async (options: {
+    url: string;
+    name: string;
+    value: string;
+}): Promise<void> => {
+    if (!isCapacitorAndroid()) return;
+    try {
+        await FoliaNative.cookiesSet({ ...options, path: '/' });
+    } catch (error) {
+        console.warn('[FoliaNative] setNativeCookie failed', error);
+    }
+};
+
+/** 登出时把同步进去的那条清掉，免得下次换账号还带着旧凭据。 */
+export const removeNativeCookie = async (options: { url: string; name: string }): Promise<void> => {
+    if (!isCapacitorAndroid()) return;
+    try {
+        await FoliaNative.cookiesRemove(options);
+    } catch (error) {
+        console.warn('[FoliaNative] removeNativeCookie failed', error);
+    }
+};

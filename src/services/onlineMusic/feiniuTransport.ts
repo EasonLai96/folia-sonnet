@@ -1,12 +1,19 @@
 import { OnlineProviderError } from '../../types/onlineMusic';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { sha256Hex } from '../../utils/sha256';
+import { isNativeHttpAvailable, nativeHttpRequest, removeNativeCookie, setNativeCookie } from '../../platform/foliaNative';
 import { readProviderSessionValue, removeProviderSessionValue, writeProviderSessionValue } from './providerStorage';
 
 // src/services/onlineMusic/feiniuTransport.ts
 // 飞牛（FNOS）音乐服务的 HTTP 层：拼地址、带 Cookie、把响应体拆成 `data`。
 // 与网易 / 酷狗不同，飞牛没有中间的 API 服务器：它就是用户自己的 NAS，地址由用户在
 // 登录表单里填（构建期的 VITE_FEINIU_API_BASE 只是默认值，方便自部署）。
+//
+// 直连带来一个必须绕开的坑：App 里页面跑在 https://localhost 上，而 NAS 上的服务几乎
+// 不会下发 `Access-Control-Allow-Origin`。WebView 的 fetch 会在同源检查这一关被挡掉，
+// 抛出来的是一句毫无特征的 `TypeError: Failed to fetch` —— 与「地址填错」「NAS 没开机」
+// 长得完全一样，界面上只能干巴巴报「网络错误」。所以真机上整个飞牛的 HTTP 都改由原生
+// OkHttp 代发（没有同源策略这回事），桌面 / 网页端仍是浏览器 fetch。
 
 /** 接口前缀。用户填的地址不带它，发请求时才拼上。 */
 const API_PREFIX = '/music/api/v1';
@@ -78,6 +85,7 @@ export const isFeiniuRelayMode = (): boolean => readProviderSessionValue('feiniu
 
 export const setFeiniuRelayMode = (relay: boolean): void => {
     writeProviderSessionValue('feiniu', 'relay', relay ? '1' : '0');
+    syncFeiniuCookieJarForRelay(relay);
 };
 
 /** Cookie 的值：登录态全靠它，图片与音频流也要带同一个头。 */
@@ -95,6 +103,20 @@ export const feiniuResourceHeaders = (): Record<string, string> | null => {
 const assetBase = (): string => {
     const base = getFeiniuServerUrl();
     return base ? withScheme(base) : '';
+};
+
+/**
+ * 中继开关同样要落在 cookie 上：拉资源的那两个元素读不到代码里的变量，只看 cookie。
+ * 关掉时要真的删掉，否则服务端会一直按中继方式回包。
+ */
+const syncFeiniuCookieJarForRelay = (relay: boolean): void => {
+    const base = assetBase();
+    if (!base) return;
+    if (relay) {
+        void setNativeCookie({ url: `${base}/`, name: 'mode', value: 'relay' });
+        return;
+    }
+    void removeNativeCookie({ url: `${base}/`, name: 'mode' });
 };
 
 export const feiniuCoverUrl = (coverId?: string | null, size = 480): string => {
@@ -119,6 +141,25 @@ export type FeiniuRequestOptions = {
     timeoutMs?: number;
 };
 
+/** 日志里要说清连的是哪台机器：只取 `scheme://host:port`，不带路径与凭据。 */
+const describeFeiniuTarget = (url: URL): string => url.origin;
+
+/**
+ * 网页 / 桌面端这一路：浏览器 fetch 直连。
+ *
+ * 受同源策略约束 —— 服务端不下发 CORS 头就是一句 `Failed to fetch`；真机上不走它。
+ */
+const browserRequest = async (
+    url: string,
+    method: string,
+    headers: Record<string, string>,
+    payload: string | undefined,
+    timeoutMs: number,
+): Promise<{ status: number; text: string }> => {
+    const response = await fetchWithTimeout(url, { method, headers, body: payload, credentials: 'omit' }, timeoutMs);
+    return { status: response.status, text: await response.text() };
+};
+
 export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRequestOptions = {}): Promise<T> => {
     const base = getFeiniuServerUrl();
     if (!base) {
@@ -134,44 +175,56 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
         url.searchParams.set(key, String(value));
     });
 
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    // 头名用小写：原生侧按 `content-type` 取 media type，而 Capacitor 那个 JSONObject
+    // 取键名是大小写敏感的（浏览器的 Headers 才不敏感）。
+    const headers: Record<string, string> = { accept: 'application/json' };
     if (options.anonymous) {
         // 登录这一发只能靠地址本身，但中继模式仍要声明。
-        if (isFeiniuRelayMode()) headers.Cookie = 'mode=relay';
+        if (isFeiniuRelayMode()) headers.cookie = 'mode=relay';
     } else {
-        headers.Cookie = feiniuAuthCookie();
+        headers.cookie = feiniuAuthCookie();
     }
     const method = options.method ?? (options.body === undefined ? 'GET' : 'POST');
     let payload: string | undefined;
     if (options.body !== undefined) {
-        headers['Content-Type'] = 'application/json';
+        headers['content-type'] = 'application/json';
         payload = JSON.stringify(options.body);
     }
 
-    let response: Response;
+    const timeoutMs = options.timeoutMs ?? 20_000;
+    let status: number;
+    let text: string;
     try {
-        response = await fetchWithTimeout(
-            url.toString(),
-            { method, headers, body: payload, credentials: 'omit' },
-            options.timeoutMs ?? 20_000,
-        );
+        const result = isNativeHttpAvailable()
+            ? await nativeHttpRequest({ url: url.toString(), method, headers, bodyText: payload ?? '', timeoutMs })
+            : await browserRequest(url.toString(), method, headers, payload, timeoutMs);
+        status = result.status;
+        text = result.text;
     } catch (error) {
-        throw new OnlineProviderError('network', `FeiNiu request failed: ${path}`, 'feiniu', error);
+        if (error instanceof OnlineProviderError) throw error;
+        // 到底连的是哪台机器必须出现在日志里：地址填错、NAS 没开机、CORS 被挡，
+        // 三种原因在调用方看到的都是同一句「网络错误」。
+        throw new OnlineProviderError(
+            'network',
+            `FeiNiu request failed: ${path} (${describeFeiniuTarget(url)})`,
+            'feiniu',
+            error,
+        );
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (status === 401 || status === 403) {
         throw new OnlineProviderError(
             'auth-required',
-            `FeiNiu rejected the session (HTTP ${response.status})`,
+            `FeiNiu rejected the session (HTTP ${status})`,
             'feiniu',
             undefined,
-            response.status,
+            status,
         );
     }
 
     let envelope: FeiniuEnvelope<T>;
     try {
-        envelope = await response.json() as FeiniuEnvelope<T>;
+        envelope = JSON.parse(text) as FeiniuEnvelope<T>;
     } catch (error) {
         throw new OnlineProviderError('invalid-response', `FeiNiu returned a non-JSON response for ${path}`, 'feiniu', error);
     }
@@ -215,6 +268,19 @@ export type FeiniuLoginData = {
     user?: { name?: string; guid?: string; role?: string };
 };
 
+/**
+ * 飞牛的资源地址（封面 / 音频流）是由 `<img>` / `<audio>` 直接去拉的，
+ * 这两个元素都加不了请求头 —— 服务端要的 `music-token` 只能靠 cookie 自动带上。
+ * 所以登录成功、改地址、开中继，都要把这一份同步进 WebView 的 cookie 罐。
+ */
+const syncFeiniuCookieJar = (): void => {
+    const base = assetBase();
+    const token = getFeiniuToken();
+    if (!base) return;
+    if (token) void setNativeCookie({ url: `${base}/`, name: 'music-token', value: token });
+    syncFeiniuCookieJarForRelay(isFeiniuRelayMode());
+};
+
 /** 密码登录。成功就把 token 与地址落盘，之后所有请求自动带上。 */
 export const feiniuPasswordLogin = async (username: string, password: string, serverUrl?: string): Promise<FeiniuLoginData> => {
     if (serverUrl) setFeiniuServerUrl(serverUrl);
@@ -227,11 +293,17 @@ export const feiniuPasswordLogin = async (username: string, password: string, se
         throw new OnlineProviderError('invalid-response', 'FeiNiu login returned no token', 'feiniu', data);
     }
     writeProviderSessionValue('feiniu', 'token', data.userToken);
+    syncFeiniuCookieJar();
     return data;
 };
 
 /** 登出：只丢登录态，地址留着（飞牛音乐自己的做法）。 */
 export const clearFeiniuSession = (): void => {
+    const base = assetBase();
+    if (base) {
+        void removeNativeCookie({ url: `${base}/`, name: 'music-token' });
+        void removeNativeCookie({ url: `${base}/`, name: 'mode' });
+    }
     removeProviderSessionValue('feiniu', 'token');
     removeProviderSessionValue('feiniu', 'relay');
     removeProviderSessionValue('feiniu', 'user');
