@@ -1056,8 +1056,8 @@ export default {
     "suffixAdjusted": " (adjusted by the host)",
     "nothingToChange": "nothing to change",
     "fromMemory": " (reusing this song's last pick)",
-    "toastApplied": "AI director: {{text}}",
     "toastFailed": "AI director failed: {{text}}",
+    "toastUploaded": "Uploaded — thank you for your contribution.",
     "failed": "Failed: ",
     "restoreDone": "Restored the animation settings from before the AI director took over.",
     "restoreNone": "Nothing to restore yet: the AI director has not changed your animation settings."

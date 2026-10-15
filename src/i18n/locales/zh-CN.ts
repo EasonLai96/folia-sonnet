@@ -1056,8 +1056,8 @@ export default {
     "suffixAdjusted": "（宿主已按可用资源调整）",
     "nothingToChange": "没有需要改动的地方",
     "fromMemory": "（沿用这首歌上次的选择）",
-    "toastApplied": "AI 导演：{{text}}",
     "toastFailed": "AI 导演失败：{{text}}",
+    "toastUploaded": "上传成功，感谢你的贡献。",
     "failed": "失败：",
     "restoreDone": "已恢复 AI 导演接管之前的动画设置。",
     "restoreNone": "还没有可恢复的快照：AI 导演还没改过你的动画设置。"

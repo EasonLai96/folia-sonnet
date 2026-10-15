@@ -467,7 +467,12 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
         noteRecentMode(result.mode);
         const text = `${lastSummary}${lastReason ? `（${lastReason}）` : ''}`;
         refreshRuntime();
-        if (announce) toast(translate('aiDirector.toastApplied').replace('{{text}}', text), 'success');
+        /*
+         * 跑完这次，主题与动画决策已经推上云端了 —— 下一个人撞到同一段歌词
+         * 就是白捡。所以提示说的是「上传成功，感谢你的贡献」，而不是把
+         * 模型那串理由贴出来；理由在导演面板里还看得到。
+         */
+        if (announce) toast(translate('aiDirector.toastUploaded'), 'success');
         return { kind: 'applied', text };
     } catch (error) {
         const message = translateAiCompletionError(String((error as Error)?.message ?? error));

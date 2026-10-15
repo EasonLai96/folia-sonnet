@@ -1051,8 +1051,8 @@ export default {
     "suffixAdjusted": " (disesuaikan host)",
     "nothingToChange": "tidak ada yang perlu diubah",
     "fromMemory": " (memakai pilihan terakhir lagu ini)",
-    "toastApplied": "Sutradara AI: {{text}}",
     "toastFailed": "Sutradara AI gagal: {{text}}",
+    "toastUploaded": "Unggahan berhasil — terima kasih atas kontribusimu.",
     "failed": "Gagal: ",
     "restoreDone": "Pengaturan animasi sebelum sutradara AI mengambil alih telah dipulihkan.",
     "restoreNone": "Belum ada yang bisa dipulihkan: sutradara AI belum mengubah pengaturan animasimu."
