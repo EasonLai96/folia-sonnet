@@ -637,6 +637,37 @@ app.get('/admin/api/stats', requireAdmin, async (c) => {
   return c.json({ ok: true, ...fonts, ...cache });
 });
 
+/*
+ * favicon 必须挂在 `/` 那张兜底网**之前**。
+ *
+ * 最后那句 `app.route('/', api)` 会给所有剩下没匹配上的路径套上 bearer 校验，
+ * 浏览器自动请求的 /favicon.ico 也掉进去了 —— 于是每次进后台控制台都留一条
+ * 401，看着像哪儿坏了，其实只是没人认领这个请求。
+ *
+ * 声明了 <link rel="icon"> 之后现代浏览器多半直接取 svg，.ico 这条只是兜底。
+ */
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="folia_gradient" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#48828E"/>
+      <stop offset="1" stop-color="#B6BAF3"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="120" fill="url(#folia_gradient)"/>
+  <path d="M160 128 C 160 110 175 110 190 110 H 220 C 235 110 250 125 250 140 V 372 C 250 388 235 402 220 402 H 190 C 175 402 160 388 160 372 V 128 Z" fill="white"/>
+  <path d="M240 110 H 340 C 380 110 400 140 400 170 C 400 200 360 200 340 200 H 250 V 110 Z" fill="white"/>
+  <path d="M250 240 H 320 C 350 240 360 260 360 280 C 360 300 340 300 320 300 H 250 V 240 Z" fill="white"/>
+</svg>`;
+
+app.get('/favicon.svg', (c) => c.body(FAVICON_SVG, 200, {
+  'Content-Type': 'image/svg+xml; charset=utf-8',
+  'Cache-Control': 'public, max-age=604800',
+}));
+
+app.get('/favicon.ico', (c) => c.body(null, 204, {
+  'Cache-Control': 'public, max-age=604800',
+}));
+
 app.route('/', api);
 
 export default app;
