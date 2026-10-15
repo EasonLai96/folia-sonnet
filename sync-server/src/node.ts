@@ -5,6 +5,8 @@ import { isUsingDefaultAdminCredentials, readAdminCredentials } from './admin.js
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createNodeFontBlobStore } from './fontBlobs.node.js';
+import { createD1FontBlobStore } from './fontBlobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,6 +38,8 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../folia-sync.db');
+// 字体字节默认挨着数据库文件放：整机迁移时只要带着这一个目录，两边都不会散。
+const FONT_DIR = process.env.FONT_DIR || path.resolve(path.dirname(DB_PATH), 'font-files');
 
 if (!SYNC_TOKEN) {
   console.error('\x1b[31m[ERROR]\x1b[0m SYNC_TOKEN environment variable is missing.');
@@ -49,6 +53,8 @@ if (SYNC_TOKEN.length < 8) {
 }
 
 const db = new D1Emulator(DB_PATH);
+/* 落到文件；老数据还在数据库里，读的时候会自己回退（见 fontBlobs.node.ts）。 */
+const fontBlobs = createNodeFontBlobStore(FONT_DIR, createD1FontBlobStore(db));
 
 const logo = `
 \x1b[35m  _____    _ _          \x1b[36m ____                  \x1b[0m
@@ -72,6 +78,7 @@ console.log(logo);
 console.log(`\x1b[32m[Folia Sync Server]\x1b[0m Starting Node.js standalone server (v${version})...`);
 console.log(`- Port: \x1b[33m${PORT}\x1b[0m`);
 console.log(`- Database: \x1b[33m${DB_PATH}\x1b[0m`);
+console.log(`- Font files: \x1b[33m${FONT_DIR}\x1b[0m`);
 if (DASHBOARD_TOKEN) {
   console.log(`- Dashboard: \x1b[36mhttp://localhost:${PORT}/?token=${DASHBOARD_TOKEN}\x1b[0m`);
 } else {
@@ -92,6 +99,14 @@ serve({
     DASHBOARD_TOKEN,
     ADMIN_USERNAME,
     ADMIN_PASSWORD,
+    FONT_BLOBS: fontBlobs,
+    readDatabaseBytes: () => {
+      try {
+        return fs.statSync(DB_PATH).size;
+      } catch {
+        return null;
+      }
+    },
   }),
   port: PORT,
 });

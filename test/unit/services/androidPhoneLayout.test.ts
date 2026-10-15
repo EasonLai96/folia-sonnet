@@ -76,7 +76,10 @@ describe('device profile', () => {
     it('lets the explicit choice override the inference', () => {
         stubDevice(844, 390);
         const setAttribute = vi.fn();
-        vi.stubGlobal('document', { documentElement: { setAttribute } });
+        // applyDeviceProfile 除了属性还会往根节点写 `--folia-ui-scale-*` CSS 变量，
+        // stub 里少了 style 就会在 setProperty 上炸掉。
+        const setProperty = vi.fn();
+        vi.stubGlobal('document', { documentElement: { setAttribute, style: { setProperty } } });
 
         applyDeviceProfile('tablet');
         expect(attributesOf(setAttribute.mock.calls)).toMatchObject({ 'data-folia-ui-scale': 'normal' });

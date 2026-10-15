@@ -10,6 +10,8 @@ import adminAuthRoutes, {
 import { renderLoginPage, renderPanelPage } from './panel.js';
 import { aiCacheRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
 import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
+import { adminStatsImageRoutes } from './statsImage.js';
+import type { FontBlobStore } from './fontBlobs.js';
 
 export type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement;
@@ -30,6 +32,10 @@ export type Env = {
   /** Panel credentials. Defaults to the shipped account when unset. */
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD?: string;
+  /** Where the font bytes go. Absent means "fall back to D1". See src/fontBlobs.ts. */
+  FONT_BLOBS?: FontBlobStore;
+  /** Database file size in bytes; Workers have no filesystem, so this stays unset there. */
+  readDatabaseBytes?: () => number | null;
 };
 
 // Bumped to 2 by the font market + AI cloud cache tables.
@@ -133,6 +139,18 @@ const ensureSchema = async (db: D1Database) => {
         PRIMARY KEY (kind, cache_key)
       )
     `),
+    // 每次命中记一行。`ai_cache.hits` 只是个累加器，看不出「什么时候命中的」，
+    // 而概况图要的正是时间分布 —— 几点到几点命中多少、最近几分钟有多少。
+    // 这里只留时间戳，不记歌词、不记提示词，也不留任何凭据。
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_cache_hits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        song_title TEXT,
+        at TEXT NOT NULL
+      )
+    `),
     db.prepare(`
       CREATE TABLE IF NOT EXISTS admin_sessions (
         token TEXT PRIMARY KEY,
@@ -143,6 +161,7 @@ const ensureSchema = async (db: D1Database) => {
     `),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_font_market_enabled ON font_market(enabled)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_updated_at ON ai_cache(updated_at)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_hits_at ON ai_cache_hits(at)'),
   ]);
   schemaEnsured = true;
 };
@@ -608,6 +627,8 @@ app.get('/admin', async (c) => {
 });
 app.route('/admin/api/fonts', adminFontRoutes);
 app.route('/admin/api/ai-cache', adminCacheRoutes);
+// 概况图：`GET /admin/api/stats.svg`，挂在 /admin/api 下，跟面板同一道门。
+app.route('/admin/api', adminStatsImageRoutes);
 app.get('/admin/api/stats', requireAdmin, async (c) => {
   const [fonts, cache] = await Promise.all([
     readFontStats(c.env.FOLIA_SYNC_DB),

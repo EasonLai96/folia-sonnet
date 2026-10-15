@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { requireAdmin } from './admin.js';
+import { createD1FontBlobStore, toBodyBuffer, type FontBlobStore } from './fontBlobs.js';
 import type { D1Database, Env } from './app.js';
 
 // src/fonts.ts
@@ -11,6 +12,9 @@ import type { D1Database, Env } from './app.js';
 // line would cost more traffic than the feature is worth. The panel rasterises
 // the preview once, in the operator's browser, and the player only ever fetches
 // the font file once the user actually picks it.
+//
+// The bytes themselves do not go through D1 on the Node build — see
+// src/fontBlobs.ts for why and for the two implementations.
 
 const MAX_FONT_BYTES = 40 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
@@ -109,25 +113,9 @@ const listFonts = async (db: D1Database, onlyEnabled: boolean) => {
   return (rows.results ?? []).map(mapRow);
 };
 
-const toBindable = (bytes: Uint8Array): unknown => (
-  typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes
-);
-
-const toBytes = (value: unknown): Uint8Array | null => {
-  if (!value) return null;
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  return null;
-};
-
-/*
- * hono 的 `c.body()` 只收 `string | ArrayBuffer | ReadableStream`，
- * `Uint8Array` 不在其中（TS 里 `Uint8Array<ArrayBufferLike>` 与 `ArrayBuffer`
- * 并不兼容）。这里切出一份精确范围的 ArrayBuffer —— 不能直接拿
- * `bytes.buffer`：那可能是整块共享内存，长度比这段数据大。
- */
-const toBodyBuffer = (bytes: Uint8Array): ArrayBuffer => (
-  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+/* 运行时注入（Node 走文件、Workers 走 D1）；没有注入就按 Workers 处理。 */
+const blobsOf = (env: Env): FontBlobStore => (
+    env.FONT_BLOBS ?? createD1FontBlobStore(env.FOLIA_SYNC_DB)
 );
 
 const stripExtension = (name: string): string => {
@@ -169,28 +157,17 @@ export const fontRoutes = (() => {
 
   routes.get('/', async (c) => c.json({ ok: true, fonts: await listFonts(c.env.FOLIA_SYNC_DB, true) }));
 
-  /*
-   * 字体字节只存在 font_files(font_id, data) 里，mime 在 font_market 上 ——
-   * 所以这里必须 join 一次。直接查 font_files.mime_type 会撞
-   * "no such column: mime_type"（那张表压根没这一列），服务端就只剩一个裸 500。
-   */
   routes.get('/:id/file', async (c) => {
     const id = String(c.req.param('id') || '');
-    const row = await c.env.FOLIA_SYNC_DB
-      .prepare(`
-        SELECT f.data AS data, m.mime_type AS mime_type
-        FROM font_files f
-        LEFT JOIN font_market m ON m.id = f.font_id
-        WHERE f.font_id = ?
-      `)
-      .bind(id)
-      .first<{ data: unknown; mime_type: string | null }>();
-    const bytes = toBytes(row?.data);
-    if (!bytes) return c.json({ ok: false, error: 'not_found' }, 404);
-    return new Response(toBodyBuffer(bytes), {
+    const entry = await blobsOf(c.env).read(id, 'file').catch((error: unknown) => {
+      console.error('[Fonts] failed to read font bytes:', error);
+      return null;
+    });
+    if (!entry) return c.json({ ok: false, error: 'not_found' }, 404);
+    return new Response(toBodyBuffer(entry.bytes), {
       status: 200,
       headers: {
-        'Content-Type': row?.mime_type || 'application/octet-stream',
+        'Content-Type': entry.mime || 'application/octet-stream',
         'Cache-Control': 'public, max-age=31536000, immutable',
       },
     });
@@ -198,16 +175,15 @@ export const fontRoutes = (() => {
 
   routes.get('/:id/preview', async (c) => {
     const id = String(c.req.param('id') || '');
-    const row = await c.env.FOLIA_SYNC_DB
-      .prepare('SELECT mime, data FROM font_previews WHERE font_id = ?')
-      .bind(id)
-      .first<{ mime: string | null; data: unknown }>();
-    const bytes = toBytes(row?.data);
-    if (!bytes) return c.json({ ok: false, error: 'not_found' }, 404);
-    return new Response(toBodyBuffer(bytes), {
+    const entry = await blobsOf(c.env).read(id, 'preview').catch((error: unknown) => {
+      console.error('[Fonts] failed to read font preview:', error);
+      return null;
+    });
+    if (!entry) return c.json({ ok: false, error: 'not_found' }, 404);
+    return new Response(toBodyBuffer(entry.bytes), {
       status: 200,
       headers: {
-        'Content-Type': row?.mime || 'image/png',
+        'Content-Type': entry.mime || 'image/png',
         'Cache-Control': 'public, max-age=86400',
       },
     });
@@ -240,20 +216,23 @@ export const adminFontRoutes = (() => {
     const previewBytes = new Uint8Array(await preview.arrayBuffer());
     const mimeType = String(file.type || '').trim() || 'font/ttf';
 
-    await c.env.FOLIA_SYNC_DB.batch([
-      c.env.FOLIA_SYNC_DB
-        .prepare(`
-          INSERT INTO font_market (id, name, family, category, license, file_name, mime_type, file_size, enabled, sort, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-        `)
-        .bind(id, name, `FoliaMarket_${id}`, category, license, file.name, mimeType, fontBytes.byteLength, now, now),
-      c.env.FOLIA_SYNC_DB
-        .prepare('INSERT INTO font_files (font_id, data) VALUES (?, ?)')
-        .bind(id, toBindable(fontBytes)),
-      c.env.FOLIA_SYNC_DB
-        .prepare('INSERT INTO font_previews (font_id, mime, data) VALUES (?, ?, ?)')
-        .bind(id, String(preview.type || 'image/png'), toBindable(previewBytes)),
-    ]);
+    /*
+     * 字节与元数据分两处写：字节进 FONT_BLOBS（文件 / D1），元数据进 font_market。
+     *
+     * 顺序上先落字节再落元数据 —— 反过来的话，元数据先进去、字节写失败，库里就
+     * 会留一条点开是 404 的条目，而页面上看不出任何异常。
+     */
+    const blobs = blobsOf(c.env);
+    await blobs.write(id, 'file', fontBytes, mimeType);
+    await blobs.write(id, 'preview', previewBytes, String(preview.type || 'image/png'));
+
+    await c.env.FOLIA_SYNC_DB
+      .prepare(`
+        INSERT INTO font_market (id, name, family, category, license, file_name, mime_type, file_size, enabled, sort, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+      `)
+      .bind(id, name, `FoliaMarket_${id}`, category, license, file.name, mimeType, fontBytes.byteLength, now, now)
+      .run();
 
     return c.json({ ok: true, font: mapRow({
       id,
@@ -315,11 +294,12 @@ export const adminFontRoutes = (() => {
 
   routes.delete('/:id', async (c) => {
     const id = String(c.req.param('id') || '');
-    await c.env.FOLIA_SYNC_DB.batch([
-      c.env.FOLIA_SYNC_DB.prepare('DELETE FROM font_market WHERE id = ?').bind(id),
-      c.env.FOLIA_SYNC_DB.prepare('DELETE FROM font_files WHERE font_id = ?').bind(id),
-      c.env.FOLIA_SYNC_DB.prepare('DELETE FROM font_previews WHERE font_id = ?').bind(id),
-    ]);
+    await c.env.FOLIA_SYNC_DB
+      .prepare('DELETE FROM font_market WHERE id = ?')
+      .bind(id)
+      .run();
+    // 字节也一起清掉，否则删了条目、文件还留在磁盘上，日积月累全是孤儿。
+    await blobsOf(c.env).remove(id).catch(() => undefined);
     return c.json({ ok: true });
   });
 
