@@ -52,6 +52,8 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -566,28 +568,56 @@ public class FoliaNativePlugin extends Plugin {
                     .build();
             }
 
+            // 回调里要用，必须是 final：上面这两段按条件重建过 client。
+            final OkHttpClient executeClient = requestClient;
             String requestUrl = url;
-            try (Response response = requestClient.newCall(builder.build()).execute()) {
-                // 重复出现的响应头（Set-Cookie）要给 JS 一个数组，用对象会把重复的折叠掉。
-                JSArray responseHeaders = new JSArray();
-                for (String name : response.headers().names()) {
-                    for (String value : response.headers().values(name)) {
-                        JSObject headerEntry = new JSObject();
-                        headerEntry.put("name", name);
-                        headerEntry.put("value", value);
-                        responseHeaders.put(headerEntry);
+            /*
+             * 必须用 enqueue 而不是 execute。
+             *
+             * execute() 是在**插件所在的桥线程**上同步阻塞的：一个请求从发出到拿到响应
+             * （最坏要等满读超时）会一直占着那个线程。桥线程就那么几条，占满之后其它
+             * 插件方法全部排队 —— 表现为登录飞牛之后 cookies.getAll / cookies.get 成片
+             * 超时（日志里几十条 "timed out after 4000ms" 挤在同一秒），而那些 cookie
+             * 调用本身只是毫秒级的事。跟着遭殃的是所有走桥的平台：登录态读不到 cookie
+             * 就判成超时，二维码也取不出来。退出飞牛重启即恢复，正是运行时争用的样子。
+             *
+             * enqueue 把等待交给 OkHttp 自己的线程池，桥线程立刻空出来。
+             */
+            call.setKeepAlive(true);
+            executeClient.newCall(builder.build()).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call httpCall, IOException error) {
+                    call.reject(error.getMessage(), error);
+                }
+
+                @Override
+                public void onResponse(Call httpCall, Response response) {
+                    try (Response body = response) {
+                        // 重复出现的响应头（Set-Cookie）要给 JS 一个数组，用对象会把重复的折叠掉。
+                        JSArray responseHeaders = new JSArray();
+                        for (String name : response.headers().names()) {
+                            for (String value : response.headers().values(name)) {
+                                JSObject headerEntry = new JSObject();
+                                headerEntry.put("name", name);
+                                headerEntry.put("value", value);
+                                responseHeaders.put(headerEntry);
+                            }
+                        }
+                        storeResponseCookies(requestUrl, response);
+                        ResponseBody responseBody = response.body();
+                        byte[] bytes = responseBody == null ? new byte[0] : responseBody.bytes();
+                        JSObject result = new JSObject();
+                        result.put("status", response.code());
+                        result.put("headers", responseHeaders);
+                        result.put("bodyBase64", Base64.encodeToString(bytes, Base64.NO_WRAP));
+                        call.resolve(result);
+                    } catch (IOException | IllegalArgumentException error) {
+                        call.reject(error.getMessage(), error);
                     }
                 }
-                storeResponseCookies(requestUrl, response);
-                ResponseBody responseBody = response.body();
-                byte[] bytes = responseBody == null ? new byte[0] : responseBody.bytes();
-                JSObject result = new JSObject();
-                result.put("status", response.code());
-                result.put("headers", responseHeaders);
-                result.put("bodyBase64", Base64.encodeToString(bytes, Base64.NO_WRAP));
-                call.resolve(result);
-            }
-        } catch (IOException | IllegalArgumentException error) {
+            });
+        } catch (IllegalArgumentException error) {
+            // 拼 URL / 建请求这一步才会抛（响应相关的 IOException 在回调里各自处理）。
             call.reject(error.getMessage(), error);
         }
     }
