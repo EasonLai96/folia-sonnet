@@ -135,6 +135,21 @@ public final class FloatingLyricsOverlay {
     /** 预览的租约时长。前端在设置页期间会定期续约。 */
     private static final long PREVIEW_LEASE_MS = 45_000L;
     /**
+     * 「应用在前台」这份状态的心跳租约。
+     *
+     * 问「App 现在在前台吗」的不止一个进程：壁纸服务（LyricsWallpaperService）
+     * 跑着**同一份** FloatingLyricsOverlay，而它永远收不到 Activity 的 onResume / onPause。
+     * 于是它的 appForeground 恒为 false —— App 开在前台、播放页自己正画着
+     * 可视化歌词，壁纸那边还挂了一颗悬浮窗，屏幕上就是两份一模一样的（用户原话）。
+     *
+     * 租约而不是一个布尔开关：应用被杀时不会有机会把开关写成 false，
+     * 留给壁纸进程的就是一个永远的 true，桌面歌词从此再也不出来。
+     * 心跳过期 = 「没人来续了」= 应用不在前台了 —— 这条推论不需要任何人来收尾。
+     */
+    private static final long FOREGROUND_LEASE_MS = 5000L;
+    /** 心跳落在盘上的键。只有应用进程会写，壁纸进程读。 */
+    private static final String KEY_FOREGROUND_PING = "fg_ping";
+    /**
      * 预览又没有歌词可显示时画的占位。
      *
      * 挑一行「什么语言都认识」的：它只是让人看清位置 / 大小 / 避开区域，
@@ -174,6 +189,13 @@ public final class FloatingLyricsOverlay {
     private WindowManager.LayoutParams chipParams = null;
     private boolean chipAdded = false;
     private boolean appForeground = false;
+    /**
+     * 本进程是不是**有 Activity 的那个**（= 应用进程）。
+     *
+     * 只有应用进程会被 MainActivity 调 setAppForeground，所以它那份 appForeground
+     * 才是真话；壁纸进程没人调，那个字段恒为 false，不能拿来用（见 FOREGROUND_LEASE_MS）。
+     */
+    private boolean appForegroundKnown = false;
     /** 上一次量到的屏幕尺寸（0 = 还没量过）。转屏时用来把位置按比例搬过去。 */
     private int lastScreenW = 0;
     private int lastScreenH = 0;
@@ -192,7 +214,12 @@ public final class FloatingLyricsOverlay {
 
     /** 应用在前台时收起来：桌面歌词是给「不在应用里」的时候看的。 */
     public void setAppForeground(boolean foreground) {
-        if (appForeground == foreground) return;
+        appForegroundKnown = true;
+        if (appForeground == foreground) {
+            // 状态没变也要续一次：这是心跳，壁纸进程全靠它（见 appForeground()）。
+            if (foreground) pingForeground();
+            return;
+        }
         appForeground = foreground;
         /*
          * 退到后台就把预览掐掉。
@@ -203,10 +230,39 @@ public final class FloatingLyricsOverlay {
          * 关预览调用一次都没送达，用户切走再回来也是干净的：
          * 小窗重新按正常规则挂，壁纸那层的原生歌词也跟着回来。
          */
-        if (!foreground) {
+        if (foreground) {
+            pingForeground();
+        } else {
+            // 退后台要**立刻作废**，不能让壁纸那边再等一个租约期 ——
+            // 那几秒里桌面歌词会晚出来，看着像反应迟钝。
+            prefs.edit().remove(KEY_FOREGROUND_PING).apply();
             previewUntilMs = 0L;
         }
         evaluate();
+    }
+
+    /**
+     * 应用是不是在前台。
+     *
+     * 本进程就是应用进程时，直接说自己那份（它是 Activity 回调喂出来的真话）；
+     * 壁纸进程则看盘上那个心跳过没过期（见 FOREGROUND_LEASE_MS 上那段）。
+     */
+    private boolean appForeground() {
+        if (appForegroundKnown) return appForeground;
+        return SystemClock.elapsedRealtime()
+                - prefs.getLong(KEY_FOREGROUND_PING, 0L) < FOREGROUND_LEASE_MS;
+    }
+
+    /**
+     * 续一次前台心跳。
+     *
+     * 过半才真的写盘：巡检是 600ms 一趟，每趟都去动 SharedPreferences 是白烧
+     * （apply 虽然异步，但每次都是整份重写）。租约 5 秒、2.5 秒续一次，够稳。
+     */
+    private void pingForeground() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - prefs.getLong(KEY_FOREGROUND_PING, 0L) < FOREGROUND_LEASE_MS / 2) return;
+        prefs.edit().putLong(KEY_FOREGROUND_PING, now).apply();
     }
 
     /**
@@ -337,7 +393,7 @@ public final class FloatingLyricsOverlay {
          * 预览窗口同时被强制成不吃触摸（见 buildParams），不会挡住底下的滑条。
          */
         boolean preview = previewMode();
-        if (appForeground && !preview) return false;
+        if (appForeground() && !preview) return false;
 
         WallpaperLyricsState.Snapshot snapshot = WallpaperLyricsState.get();
         // 只有「精简」样式挂这一层：跟随样式走的是 WebView 叠层（那一层不挂是另一套逻辑）。
@@ -376,6 +432,8 @@ public final class FloatingLyricsOverlay {
             });
             return;
         }
+        // 前台心跳：壁纸进程（同一个类、另一个进程）全靠它知道 App 在不在前台。
+        if (appForegroundKnown && appForeground) pingForeground();
         boolean want = shouldShow();
         if (want && !added) {
             attach();
@@ -422,8 +480,23 @@ public final class FloatingLyricsOverlay {
         view.invalidate();
     }
 
+    /**
+     * 叠加安全区模式下把那份**持久化**下来的锁清掉。
+     *
+     * 光改 `isLocked()` 的返回值不够：那份锁是写进 prefs 的。已经误锁的用户切到这个模式，
+     * isLocked() 虽然返回 false，可只要他拨回普通模式，那份 true 又活过来、整层继续穿透；
+     * 而 syncLockTouchable 每次都是照 isLocked() 现设 flags —— 不清掉盘上那份，
+     * 窗口一重建就再吃一次。这里在巡检里清一次，清完就不再进这个分支。
+     */
+    private void clearLockWhenOverSafeArea() {
+        if (!overSafeArea() || !prefs.contains(KEY_LOCKED)) return;
+        prefs.edit().remove(KEY_LOCKED).apply();
+        syncLockTouchable();
+    }
+
     private void reclampIfNeeded() {
         applyModeChangeIfNeeded();
+        clearLockWhenOverSafeArea();
         if (params == null) return;
         int screenW = context.getResources().getDisplayMetrics().widthPixels;
         int screenH = context.getResources().getDisplayMetrics().heightPixels;
@@ -679,10 +752,15 @@ public final class FloatingLyricsOverlay {
         /*
          * 上着锁的话整层不收触摸：让手指直接落到下面的桌面 / 应用上（见 syncLockTouchable）。
          *
-         * 预览同理、而且更必要：这一层此刻正压在设置页上面，吃了触摸就等于
-         * 底下那几根滑条 / 列表划不动。预览是「只看不动」，拖动本来就该走设置里的滑条。
+         * 预览**不在此列**。这里原本也强制不吃触摸（怕这一层压在设置页上、挡住底下滑条），
+         * 但那条理由站不住：预览的全部意义就是「当场看见、当场调」，
+         * 而调的手段恰恰是拖 —— 连拖都不让，用户面对一条拖不动的窗口只会认为功能坏了
+         * （用户原话：点不了，触摸穿过去了）。
+         * 怕挡设置页的话把它拖开就是了，那本来就是用户此刻要做的事；
+         * 更实际的是：锁上之后唯一能解锁的入口（右上角那颗锁）也一起没了，
+         * 一旦误锁就再无出口。
          */
-        if (isLocked() || previewMode()) {
+        if (isLocked()) {
             flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         }
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -726,7 +804,26 @@ public final class FloatingLyricsOverlay {
     }
 
     private boolean isLocked() {
+        /*
+         * 叠加安全区模式下**一律当没锁**。
+         *
+         * 这个模式下 `showControls` 为 false —— 那颗锁压根不画（窗口只有状态栏那么高，
+         * 画上去就是压在歌词上的一坨），可命中区里 MODE_LOCK 却还在。
+         * 于是「看不见、却点得到」：用户在右上角随手一碰就把整层设成
+         * FLAG_NOT_TOUCHABLE，从此彻底穿透、什么也点不到、也拖不动，
+         * 而那条锁还是**持久化**的，切回普通模式照样锁着（用户原话：点不了，触摸穿过去了）。
+         *
+         * 更根本的是这个模式压根不需要锁：位置、宽度、避开区域全由设置里的滑条管，
+         * 锁唯一的作用就是「锁上之后连滑条也动不了它」—— 纯害无利。
+         * 那份持久化的锁在 applyModeChangeIfNeeded 里顺手清掉。
+         */
+        if (overSafeArea()) return false;
         return prefs.getBoolean(KEY_LOCKED, false);
+    }
+
+    /** 壁纸那边要拿它决定自己还画不画歌词，见 LyricsRenderer。 */
+    public boolean isOverSafeArea() {
+        return overSafeArea();
     }
 
     private void setLocked(boolean locked) {
@@ -1766,12 +1863,14 @@ public final class FloatingLyricsOverlay {
              * 出了锁那一小块之外一律按拖动处理。
              */
             if (overSafeArea()) {
-                float lockX = width - dp(13);
-                float lockY = dp(13);
-                float reach = dp(9) + dp(4);
-                if (Math.abs(x - lockX) <= reach && Math.abs(y - lockY) <= reach) {
-                    return MODE_LOCK;
-                }
+                /*
+                 * 这个模式下**没有任何命中区**：控件一个都不画（见 showControls），
+                 * 锁也不存在（见 isLocked）。整层一律按拖动处理。
+                 *
+                 * 曾经这里留了一小块锁的命中区，结果就是「画都不画却能点中」——
+                 * 用户在右上角随手一碰就上了锁，整层立刻 FLAG_NOT_TOUCHABLE。
+                 * 画出来的东西和能点的地方必须一致，这是这类控件唯一不能破的规矩。
+                 */
                 return MODE_MOVE;
             }
             // 锁（右上角，命中区比画出来的大一圈：手指没那么准）

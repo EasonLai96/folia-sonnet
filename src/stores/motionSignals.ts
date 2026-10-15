@@ -30,6 +30,18 @@ export type AudioBandSignals = {
 /** Playback position of the deck the listener actually hears, in seconds. */
 export const currentTime = motionValue(0);
 
+/**
+ * 音频**真的**在不在播（1 / 0）。
+ *
+ * 和 `playerState` 严格不是一回事：状态机只记「用户 / 程序自己发起的动作」，
+ * 任何外部打断（别的 App 抢走音频焦点，系统直接把 media 暂停）都进不了状态机 ——
+ * 于是状态机停在 PLAYING，音频却已经停了。
+ *
+ * 壁纸 / 悬浮小窗那一路只关心「位置会不会自己往前走」，它认的是音频本身，
+ * 不是状态机：认错就会在歌曲已经停住的时候继续按墙钟外推，把歌词推到实际位置前面去。
+ */
+export const actuallyPlaying = motionValue(0);
+
 /** The lyric clock. Separate from `currentTime`: it carries the per-song timeline offset. */
 export const lyricCurrentTime = motionValue(0);
 

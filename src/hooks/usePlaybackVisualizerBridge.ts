@@ -6,7 +6,7 @@ import { PlayerState } from '../types';
 import type { AudioBands, LyricData } from '../types';
 import { setCurrentLineIndex, setPlayerState } from '../stores/usePlaybackStore';
 import { selectDisplayLyrics, usePlaybackStore } from '../stores/usePlaybackStore';
-import { audioBands, audioPower, currentTime, lyricCurrentTime } from '../stores/motionSignals';
+import { actuallyPlaying, audioBands, audioPower, currentTime, lyricCurrentTime } from '../stores/motionSignals';
 
 // src/hooks/usePlaybackVisualizerBridge.ts
 
@@ -19,17 +19,6 @@ const EMPTY_SPECTRUM = new Uint8Array(0);
 
 // ~21.5 Hz per bin at the analyser's fixed 44.1kHz / fftSize configuration.
 const SPECTRUM_HZ_PER_BIN = 21.5;
-
-/**
- * 认定「被外部打断」之前，音频必须**持续**停着多久。
- *
- * 只看一帧就下结论会出大事：点下播放的那一瞬间，状态机已经翻成 PLAYING，
- * 而 audio 元素可能还没真正跑起来（play() 要 loading、paused 得等一会儿才落 false）。
- * 那一帧的「状态说在播、音频却停着」如果被当成打断拽回暂停，歌就再也放不起来了。
- * 反过来，真正的外部打断（别的 App 抢走焦点）是**一直**停着的 ——
- * 用「持续」把这两种区分开，比猜「是谁按的暂停」可靠。
- */
-const EXTERNAL_PAUSE_GRACE_MS = 600;
 
 const computeBandEnergy = (buffer: Uint8Array, minHz: number, maxHz: number): number => {
     const start = Math.floor(minHz / SPECTRUM_HZ_PER_BIN);
@@ -110,8 +99,6 @@ export function usePlaybackVisualizerBridge({
     const lyrics = usePlaybackStore(selectDisplayLyrics);
 
     const currentLineIndexRef = useRef(-1);
-    /** 「状态机说在播、音频却停着」是从哪一刻开始的。0 = 目前没有这回事。 */
-    const stalledSinceMsRef = useRef(0);
 
     const updateLoop = useCallback(() => {
         // Normally the active deck; the outgoing one for as long as a blend holds the picture on
@@ -256,46 +243,23 @@ export function usePlaybackVisualizerBridge({
         }
 
         /*
-         * 外部打断：把状态机拽回真实状态。
+         * 把「音频真的在不在播」广播出去（见 motionSignals.actuallyPlaying）。
          *
          * 全项目**没有一处**给主播放的 <audio> 挂过 pause 事件 —— 状态机只记
          * 「用户或程序自己发起的动作」（点暂停、切歌、ended）。于是任何外部中断
          * （别的 App 抢走音频焦点，系统把 media 暂停：通知音、来电、另一个播放器）
-         * 都进不了状态机，后果有三层：
+         * 都进不了状态机：playerState 停在 PLAYING，而音频其实已经停了。
+         * 壁纸 / 悬浮小窗那一路原来读的就是这个 playerState，于是原生锚点
+         * playing 恒真、继续按墙钟往前外推，歌词一路跑到实际位置前面去。
          *
-         *   ① isActuallyPlaying 变 false → 上面那一串 if/else if 一个都不进 →
-         *      currentTime（进度条、歌词读头、壁纸那一路取的位置）**彻底停止更新**
-         *      （用户原话：播放被其他东西打断了进度就不会更新了）；
-         *   ② playerState 还停在 PLAYING → 界面显示"正在播放"，进度条却一动不动，
-         *      用户点暂停没反应（本来就已经停了），要点两下才继续；
-         *   ③ 壁纸 / 悬浮小窗那一路读的也是这个 playerState，playing 恒真 →
-         *      原生锚点继续按墙钟往前外推，歌词一路跑到实际位置前面去。
-         *
-         * 不监听事件而是每帧比对：主播放走的是 automix 的双 deck，
-         * 「当前该显示哪一个」每帧都可能变（见 getDisplayElement），
-         * 事件监听得跟着重新挂载，反而更容易漏。
-         *
-         * 只往下拽（PLAYING → PAUSED），**不往上抬**：
-         * 用户点暂停时状态机本来就会翻成 PAUSED，不存在"该抬"的情况；
-         * 反过来乱抬会在用户点暂停的那一帧把它救回 PLAYING，暂停就永远不生效了。
+         * 这里**只广播事实，不去动状态机**。让状态机归位（PLAYING → PAUSED）
+         * 看着更直接，但它会在「用户刚点播放、audio 还在 loading、paused 尚未落
+         * false」那一瞬把状态拽回暂停 —— 歌就再也放不起来了。这正是上一版
+         * 改出来的回归（用户报的：暂停后重新播放，歌词进度不会动了）。
+         * 状态机有它自己的语义（用户意图），音频有音频的事实，
+         * 谁需要这个事实自己来读，各自按各自的语义处理。
          */
-        if (activePlaybackContext === 'main'
-            && playerState === PlayerState.PLAYING
-            && audioElement
-            && !audioElement.ended) {
-            if (audioElement.paused) {
-                if (stalledSinceMsRef.current === 0) {
-                    stalledSinceMsRef.current = performance.now();
-                } else if (performance.now() - stalledSinceMsRef.current > EXTERNAL_PAUSE_GRACE_MS) {
-                    stalledSinceMsRef.current = 0;
-                    setPlayerState(PlayerState.PAUSED);
-                }
-            } else {
-                stalledSinceMsRef.current = 0;
-            }
-        } else {
-            stalledSinceMsRef.current = 0;
-        }
+        actuallyPlaying.set(isActuallyPlaying ? 1 : 0);
 
         animationFrameRef.current = requestAnimationFrame(updateLoop);
     }, [
@@ -326,7 +290,6 @@ export function usePlaybackVisualizerBridge({
         lyricCurrentTime,
         isTransitionAudible,
         getDisplayElement,
-        stalledSinceMsRef,
     ]);
 
     useEffect(() => {

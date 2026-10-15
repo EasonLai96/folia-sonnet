@@ -10,6 +10,7 @@ import { useMotionSettingsStore } from '../stores/useMotionSettingsStore';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { useStageSettingsStore } from '../stores/useStageSettingsStore';
 import { findLatestActiveLineIndex } from '../utils/appPlaybackHelpers';
+import { actuallyPlaying } from '../stores/motionSignals';
 import type { Line, Theme } from '../types';
 
 // src/hooks/useLyricsWallpaperFeed.ts
@@ -566,6 +567,36 @@ export const useLyricsWallpaperFeed = ({
             playing,
         });
     }, [active, playing]);
+
+    /*
+     * 「音频**真的**在不在播」一变，就立刻把锚点同步过去。
+     *
+     * 光看上面那个 playerState 不够 —— 状态机只记「用户 / 程序自己发起的动作」，
+     * 外部打断（别的 App 抢走音频焦点，系统直接把 media 暂停）进不了状态机：
+     * 状态机还停在 PLAYING，音频其实已经停了。而原生那边是「锚点 + 墙钟」自己往前推的，
+     * 拿到 playing = true 就会一路把歌词推到实际位置**前面**去，而且不会自己回来
+     * （用户原话：播放被其他东西打断了进度就不会更新了 —— 是推过头了，不是没推）。
+     *
+     * 反过来也走这一条：暂停后重新播放，锚点跟着重启。
+     *
+     * actuallyPlaying 是个 MotionValue，读它不会触发重渲染，所以只能自己轮询。
+     * 500ms 对「开不开始外推」这件事完全够：差半秒的歌词位置看不出来，
+     * 差半秒的「停没停」才要命。
+     */
+    React.useEffect(() => {
+        if (!active) return undefined;
+        let lastPushed = actuallyPlaying.get() > 0.5;
+        const timer = window.setInterval(() => {
+            const now = actuallyPlaying.get() > 0.5;
+            if (now === lastPushed) return;
+            lastPushed = now;
+            void publishLyricsWallpaper({
+                positionMs: Math.round(getCurrentTime() * 1000),
+                playing: now,
+            });
+        }, TICK_MS);
+        return () => window.clearInterval(timer);
+    }, [active]);
 
     // 换行**只在真的跑偏了的时候**才校正锚点。
     //

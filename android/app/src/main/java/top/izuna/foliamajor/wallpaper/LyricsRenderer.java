@@ -182,6 +182,28 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
 
     private float[] accent = new float[] { 0.49f, 0.36f, 1.0f };
     private float[] accentTarget = new float[] { 0.49f, 0.36f, 1.0f };
+    /*
+     * 文本的**主色 / 次色**（没唱到的那些行、以及翻译行）。
+     *
+     * 这两样原来在这里是写死的灰白（0.62/0.66/0.72 与 0.70/0.74/0.82）：
+     * 只有高亮那部分跟着 `snapshot.accent` 走。于是 App 里换成 AI / 自定义主题之后，
+     * 桌面这层的歌词只是「高亮那一段变了个色」，整行字还是那套灰白 ——
+     * 而叠层（WebView 那层）读的是 App 整份主题，主色次色都跟着换，
+     * 两边摆在一起就是「桌面歌词没有 AI 主题的高亮色」（用户原话）。
+     *
+     * 现在跟叠层一样去读 `WallpaperThemePalette` 那份（主 WebView 下发的
+     * primaryColor / secondaryColor）。没有（旧包 / 还没下发）时回落原来那对灰白，
+     * 行为不变。
+     */
+    private static final int FALLBACK_PRIMARY = 0xFF9EA8B8;
+    private static final int FALLBACK_SECONDARY = 0xFFB3BDD1;
+    private final float[] primary = new float[] { 0.62f, 0.66f, 0.72f };
+    private float[] primaryTarget = new float[] { 0.62f, 0.66f, 0.72f };
+    private final float[] secondary = new float[] { 0.70f, 0.74f, 0.82f };
+    private float[] secondaryTarget = new float[] { 0.70f, 0.74f, 0.82f };
+    /** 上一次解析过的颜色串。变了才重新 parse —— 字符串解析不该每帧走一遍。 */
+    private String palettePrimary = null;
+    private String paletteSecondary = null;
     /** 与 App 当前主题一致的底色与动效强度。 */
     private float[] base = new float[] { 0.035f, 0.035f, 0.043f };
     private float[] baseTarget = new float[] { 0.035f, 0.035f, 0.043f };
@@ -437,10 +459,14 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             loadedCoverKey = null;
             loadedImageKey = null;
         }
+        // 文本主色 / 次色跟主题走（见 primary / secondary 字段上的那段）。
+        syncThemePalette();
         float blend = Math.min(1f, deltaSeconds * 3f);
         for (int i = 0; i < 3; i++) {
             accent[i] += (accentTarget[i] - accent[i]) * blend;
             base[i] += (baseTarget[i] - base[i]) * blend;
+            primary[i] += (primaryTarget[i] - primary[i]) * blend;
+            secondary[i] += (secondaryTarget[i] - secondary[i]) * blend;
             coverTint[i] += (coverTintTarget[i] - coverTint[i]) * blend;
             coverTint2[i] += (coverTint2Target[i] - coverTint2[i]) * blend;
         }
@@ -494,8 +520,61 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
          * 还在中间画一整块的话，同一句会同时出现在两个地方 —— 扫光还不同步，看着像重影。
          * 背景照旧画：用户选的封面 / 渐变还在，中间空出来的那一块正好留给小窗。
          */
-        if (!tb("wp.hideNativeLyrics", false) && !FloatingLyricsOverlay.shared(context).isShowing()) {
+        if (!tb("wp.hideNativeLyrics", false) && !nativeLyricsShadowedByFloating()) {
             drawLyrics(snapshot);
+        }
+    }
+
+    /**
+     * 悬浮小窗是不是把壁纸这块歌词挡住了。
+     *
+     * 原来判据只有 `isShowing()` —— 小窗一挂，壁纸这边就整块停画。
+     * 这在**普通**模式是对的：那颗小窗是屏幕中上部一个两行高的方块，
+     * 正好压在壁纸画歌词的那一片上，两边同时画就是同一句出现两次、扫光还不同步
+     * （用户看着就是重影）。
+     *
+     * 但**叠加安全区**那一路完全不是一回事：小窗只有状态栏那么高、贴在屏幕最顶上，
+     * 而壁纸这块的歌词是以屏高 47% 为中心排的 —— 两者根本不重叠。
+     * 那一路被一起停掉，用户看到的就是「开了个安全区，壁纸中间整块空了」
+     * （用户原话：精简模式原生歌词也不显示）。
+     *
+     * 所以判据收紧成「小窗在显示**并且**它不是贴在安全区那一条上」。
+     */
+    private boolean nativeLyricsShadowedByFloating() {
+        FloatingLyricsOverlay overlay = FloatingLyricsOverlay.shared(context);
+        return overlay.isShowing() && !overlay.isOverSafeArea();
+    }
+
+    /**
+     * 读主 WebView 下发下来的文本主色 / 次色（见 primary / secondary 字段上那段）。
+     *
+     * 只在这两个**字符串**变了的时候才 parse：这里的 update 是每帧跑的，
+     * 而 `Color.parseColor` 是字符串解析 —— 每帧解析两遍纯属白烧。
+     * 换主题走的是 setAppearance 那条路，字符串一次就变，跟得上。
+     */
+    private void syncThemePalette() {
+        String[] palette = WallpaperThemePalette.read(context);
+        String nextPrimary = palette[0] == null || palette[0].isEmpty() ? null : palette[0];
+        String nextSecondary = palette[1] == null || palette[1].isEmpty() ? null : palette[1];
+        if (nextPrimary == null ? palettePrimary != null : !nextPrimary.equals(palettePrimary)) {
+            palettePrimary = nextPrimary;
+            primaryTarget = rgbFromColor(nextPrimary == null
+                    ? FALLBACK_PRIMARY : safeParseColor(nextPrimary, FALLBACK_PRIMARY));
+        }
+        if (nextSecondary == null ? paletteSecondary != null : !nextSecondary.equals(paletteSecondary)) {
+            paletteSecondary = nextSecondary;
+            secondaryTarget = rgbFromColor(nextSecondary == null
+                    ? FALLBACK_SECONDARY : safeParseColor(nextSecondary, FALLBACK_SECONDARY));
+        }
+    }
+
+    /** 颜色串可能来自 App 的任意一处：解析不了就回落，别把整层渲染拖挂。 */
+    private static int safeParseColor(String value, int fallback) {
+        if (value == null || value.isEmpty()) return fallback;
+        try {
+            return android.graphics.Color.parseColor(value);
+        } catch (Throwable error) {
+            return fallback;
         }
     }
 
@@ -1059,7 +1138,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             // 翻译不做高亮：主行已经在亮了，两行一起推会显得很吵。
             drawTinted(subTexture, y + height * 0.5f + subHeight * 0.5f,
                     subWidth, subHeight, alpha * 0.86f,
-                    0.70f, 0.74f, 0.82f);
+                    secondary[0], secondary[1], secondary[2]);
         }
     }
 
@@ -1113,7 +1192,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         // 没点亮的底色用暗白；整行模式下整行铺主题渐变，进度把亮度推上去。
         // 边缘光的强度跟着光晕走：这就是「歌词有多亮」的观感来源之一。
         drawTexturedQuad(texture.textureId, left, top, widthPx, heightPx,
-                0.62f, 0.66f, 0.72f, alpha, progress, 0f, highlightBoost(), wholeLine);
+                primary[0], primary[1], primary[2], alpha, progress, 0f, highlightBoost(), wholeLine);
     }
 
     /**
@@ -1147,7 +1226,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             float charWidth = Math.max(1f, (u1 - u0) * widthPx);
             float rise = -lineStep * CHAR_RISE * easeOutCubic(t);
             drawTexturedQuad(texture.textureId, left + u0 * widthPx, top + rise,
-                    charWidth, heightPx, 0.62f, 0.66f, 0.72f, alpha,
+                    charWidth, heightPx, primary[0], primary[1], primary[2], alpha,
                     t, 0f, highlightBoost(), true, u0, 0f, u1 - u0, 1f);
         }
     }
