@@ -256,7 +256,14 @@ export const requestAiCompletion = async (request: AiCompletionRequest): Promise
 
     const send = createAiFetch();
     try {
-        const text = target.provider === 'openai'
+        /*
+         * 不能写成 `target.provider === 'openai'`。
+         *
+         * DeepSeek 是 OpenAI 兼容端点，但它是**自己的** provider id —— 上面那句会把
+         * 它判成 Gemini，于是去读空的 geminiApiKey 并抛「未配置」。表现就是：测试连接
+         * 明明成功（那条路认的是 isOpenAiCompatibleProvider），点生成却说没配置密钥。
+         */
+        const text = isOpenAiCompatibleProvider(target.provider)
             ? await runOpenAi(request, send)
             : await runGemini(request, send);
         return { text, target };
