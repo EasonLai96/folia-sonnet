@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AI_NOT_CONFIGURED } from '@/services/aiCompletion';
 import { withAiCloudCache } from '@/services/aiCloudCache';
-import { combineStageParts, normalizeStagePayload } from '@/services/aiStage';
+import { combineStageParts, normalizeStagePayload, type StageParts } from '@/services/aiStage';
 import { isMissingAiApiKeyError } from '@/services/gemini';
 import { runLyricDirectorDecision } from '@/services/lyricDirector/director';
 import { usePlaybackStore } from '@/stores/usePlaybackStore';
 import { useStatusMessageStore } from '@/stores/useStatusMessageStore';
+import type { DualTheme } from '@/types';
 
 // 当前文件：**没配置 AI 密钥时的行为**。
 //
@@ -66,10 +67,15 @@ vi.mock('@/services/aiCompletion', async (importOriginal) => {
     };
 });
 
-const dualTheme = (name: string) => ({
+/*
+ * 假主题：只填 `normalizeTheme` 认形状要的那两个字段（backgroundColor / primaryColor），
+ * 其余必填项对这条测试没有意义，用断言跳过 —— 别让一份假数据把 Theme 的全套字段
+ * 也钉在这里。
+ */
+const dualTheme = (name: string): DualTheme => ({
     light: { name: `${name}-light`, backgroundColor: '#ffffff', primaryColor: '#111111' },
     dark: { name: `${name}-dark`, backgroundColor: '#000000', primaryColor: '#eeeeee' },
-});
+} as unknown as DualTheme);
 
 beforeEach(() => {
     state.payload = null;
@@ -78,12 +84,17 @@ beforeEach(() => {
         enabled: true,
         baseUrl: 'https://cloud.test',
     }));
+    /*
+     * 假歌只填导演真正会读的那几个字段（id / name / artists 用来算 songKey，
+     * lines 用来算指纹）。补全 SongResult 与 LyricData 的全套字段对这条测试
+     * 没有意义，断言跳过。
+     */
     usePlaybackStore.setState({
         currentSong: { id: 7, name: '测试曲', artists: [{ name: '测试歌手' }] },
         lyrics: { lines: [{ fullText: '一句歌词' }, { fullText: '又一句歌词' }] },
         playQueue: [],
         transitionDisplay: null,
-    });
+    } as never);
     useStatusMessageStore.setState({ message: null });
 });
 
@@ -109,7 +120,8 @@ describe('没有配置密钥时', () => {
          * 部署端点与 Electron 那条路只能出主题 —— 拿到手的「新答案」天生只有半份。
          * 整条回传就会把云端已有的动画决策抹掉。
          */
-        const result = await withAiCloudCache({
+        /* 显式给泛型：只出一半时 T 会被推断成「只有 theme」，合并不回另一半就说不通。 */
+        const result = await withAiCloudCache<StageParts>({
             kind: 'stage',
             fingerprint: 'f'.repeat(32),
             generate: async () => ({ theme: dualTheme('new') }),

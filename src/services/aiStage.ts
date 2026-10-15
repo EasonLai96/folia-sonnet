@@ -364,23 +364,33 @@ export const generateStage = async (ctx: StageContext): Promise<StageParts> => {
  *
  * 两条链路谁先到都一样：先到的那次既拿到了主题也拿到了动画决策，后到的直接复用
  * 自己需要的那一半。
+ *
+ * 命中这一层时**沿用那次真实的来源**，不能一律说成「云端」。这台机器刚自己算出来的
+ * 答案被标成 cloud，界面就会对刚生成完的用户说「已从云端拉取缓存」—— 而那一句本来
+ * 是留给「这会儿没调模型、用的是别人推的那份」的。
  */
-const inFlight = new Map<string, Promise<StageParts>>();
-const recent = new Map<string, { parts: StageParts; at: number }>();
+const inFlight = new Map<string, Promise<StageResult>>();
+const recent = new Map<string, { parts: StageParts; at: number; source: AiCloudCacheSource }>();
 
-const readRecent = (fingerprint: string): StageParts | null => {
+const readRecent = (
+    fingerprint: string,
+): { parts: StageParts; source: AiCloudCacheSource } | null => {
     const entry = recent.get(fingerprint);
     if (!entry) return null;
     if (Date.now() - entry.at > RECENT_TTL_MS) {
         recent.delete(fingerprint);
         return null;
     }
-    return entry.parts;
+    return { parts: entry.parts, source: entry.source };
 };
 
-const rememberRecent = (fingerprint: string, parts: StageParts): void => {
+const rememberRecent = (
+    fingerprint: string,
+    parts: StageParts,
+    source: AiCloudCacheSource,
+): void => {
     recent.delete(fingerprint);
-    recent.set(fingerprint, { parts, at: Date.now() });
+    recent.set(fingerprint, { parts, at: Date.now(), source });
     while (recent.size > RECENT_MAX_ENTRIES) {
         const oldest = recent.keys().next();
         if (oldest.done) break;
@@ -442,15 +452,15 @@ export const requestStage = async (request: StageRequest): Promise<StageResult> 
      */
     if (!request.force) {
         const cached = readRecent(ctx.fingerprint);
-        if (cached && hasRequired(cached, ctx.requirement)) {
-            return { ...cached, source: 'cloud' };
+        if (cached && hasRequired(cached.parts, ctx.requirement)) {
+            return { ...cached.parts, source: cached.source };
         }
 
         const pending = inFlight.get(ctx.fingerprint);
         if (pending) {
             const shared = await pending.catch(() => null);
             if (shared && hasRequired(shared, ctx.requirement)) {
-                return { ...shared, source: 'cloud' };
+                return { ...shared, source: shared.source };
             }
         }
     }
@@ -463,7 +473,7 @@ export const requestStage = async (request: StageRequest): Promise<StageResult> 
         rememberRecent(ctx.fingerprint, {
             ...(result.theme ? { theme: result.theme } : {}),
             ...(result.decision ? { decision: result.decision } : {}),
-        });
+        }, result.source);
         return result;
     } finally {
         inFlight.delete(ctx.fingerprint);
