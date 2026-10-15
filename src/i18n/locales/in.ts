@@ -2636,6 +2636,8 @@ export default {
     "playbackFadeDesc": "Kecilkan suara sebentar sebelum menjeda dan naikkan kembali saat melanjutkan, bukan memotongnya. Fade dilewati bila audio tidak melalui mesin audio.",
     "keepScreenOnWhilePlaying": "Jaga layar tetap menyala saat memutar",
     "keepScreenOnWhilePlayingDesc": "Cegah layar mati hanya saat audio sedang diputar, dan kembalikan kendali ke sistem begitu pemutaran dijeda. Hanya berlaku saat aplikasi di latar depan; sistem tetap akan menidurkan layar setelah Anda keluar.",
+    "mixWithOtherAudio": "Putar bersama audio lain",
+    "mixWithOtherAudioDesc": "Jika aktif, aplikasi lain yang mengeluarkan suara di latar belakang (efek game, navigasi, video pendek) tidak lagi menjeda musik - keduanya berbunyi bersamaan. Jika nonaktif, perilaku sistem berlaku: pemutaran berhenti begitu aplikasi lain mulai memutar audio.",
     "deviceTypeSection": "Jenis perangkat",
     "deviceType": "Ponsel atau tablet",
     "deviceTypeDesc": "Di ponsel, seluruh layar diperkecil sedikit saat lanskap agar kontrol tidak saling menutupi. Tablet ditampilkan ukuran penuh di kedua orientasi.",

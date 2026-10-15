@@ -58,6 +58,14 @@ interface FoliaNativePlugin {
      */
     setScreenAwake(options: { awake: boolean }): Promise<void>;
     /**
+     * 音频焦点策略：是否允许后台与其他音源同时播放。
+     *
+     * 值要**落盘**（见原生 FoliaAudioFocus）：WebView 是在下一次请求音频焦点时才来
+     * 向 Application 要 AudioManager 的，启动时 Web 侧根本还没跑到，只有磁盘上的值
+     * 能决定第一次给出去的是哪一个。
+     */
+    setAudioFocusPolicy(options: { mixWithOthers: boolean }): Promise<void>;
+    /**
      * 下载更新包。
      *
      * 落在 App 私有缓存目录（无需存储权限），进度通过 `updateDownloadProgress` 事件
@@ -133,6 +141,19 @@ export const setScreenAwake = async (awake: boolean): Promise<void> => {
         await FoliaNative.setScreenAwake({ awake });
     } catch {
         // 桌面端 / 插件不可用：静默，屏幕常亮不该影响播放本身。
+    }
+};
+
+/**
+ * 告诉原生「要不要允许与其他音源同时播放」。
+ *
+ * 非 Android 没有这一层（桌面端没有音频焦点这回事），失败一律静默。
+ */
+export const setAudioFocusPolicy = async (mixWithOthers: boolean): Promise<void> => {
+    try {
+        await FoliaNative.setAudioFocusPolicy({ mixWithOthers });
+    } catch {
+        // 同上：策略推不过去最多是保持现状，不该打断设置流程。
     }
 };
 

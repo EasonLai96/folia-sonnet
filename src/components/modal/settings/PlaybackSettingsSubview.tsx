@@ -61,6 +61,8 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
         onToggleNeteaseScrobble,
         onTogglePlaybackFade,
         onToggleKeepScreenOnWhilePlaying,
+        mixWithOtherAudio,
+        onToggleMixWithOtherAudio,
         onQueueAddBehaviorChange,
     } = useAudioSettingsStore(useShallow(state => ({
         audioOutputDeviceId: state.audioOutputDeviceId,
@@ -73,6 +75,8 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
         onToggleNeteaseScrobble: state.handleToggleNeteaseScrobble,
         onTogglePlaybackFade: state.handleTogglePlaybackFade,
         onToggleKeepScreenOnWhilePlaying: state.handleToggleKeepScreenOnWhilePlaying,
+        mixWithOtherAudio: state.mixWithOtherAudio,
+        onToggleMixWithOtherAudio: state.handleToggleMixWithOtherAudio,
         onQueueAddBehaviorChange: state.handleSetQueueAddBehavior,
     })));
     // Subscribed to rather than read once: the panel has to grey out the moment the NetEase account
@@ -476,6 +480,21 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
                             </div>
                             {renderToggle(keepScreenOnWhilePlaying,
                                 () => onToggleKeepScreenOnWhilePlaying(!keepScreenOnWhilePlaying))}
+                        </div>
+                    )}
+                    {/* 同时播放是 Android 的音频焦点那一层的事，桌面端没有对应的开关。 */}
+                    {isCapacitorAndroid() && (
+                        <div className="flex items-start justify-between gap-3 border-b border-current/10 pb-4">
+                            <div className="space-y-1">
+                                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                                    {t('options.mixWithOtherAudio')}
+                                </div>
+                                <div className="text-[11px] opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
+                                    {t('options.mixWithOtherAudioDesc')}
+                                </div>
+                            </div>
+                            {renderToggle(mixWithOtherAudio,
+                                () => onToggleMixWithOtherAudio(!mixWithOtherAudio))}
                         </div>
                     )}
                     {window.electron?.requestTranscodeFallback && (

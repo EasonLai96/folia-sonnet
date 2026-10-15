@@ -2770,6 +2770,8 @@ export default {
     "playbackFadeDesc": "Fade the sound out briefly before pausing and back in when resuming, instead of cutting it. Skips the fade when audio is not routed through the audio engine.",
     "keepScreenOnWhilePlaying": "Keep screen awake while playing",
     "keepScreenOnWhilePlayingDesc": "Prevent the screen from turning off only while audio is playing, and hand control back to the system as soon as playback pauses. Applies to the foreground app only; the system still sleeps the screen once you leave it.",
+    "mixWithOtherAudio": "Play alongside other audio",
+    "mixWithOtherAudioDesc": "When on, another app making sound in the background (game effects, turn-by-turn navigation, short videos) no longer pauses the music - both play at once. When off, the system default applies: playback pauses as soon as another app starts playing.",
     "deviceTypeSection": "Device type",
     "deviceType": "Phone or tablet",
     "deviceTypeDesc": "On a phone, the whole screen is scaled down a little in landscape so controls stop overlapping. A tablet is shown at full size in both orientations.",

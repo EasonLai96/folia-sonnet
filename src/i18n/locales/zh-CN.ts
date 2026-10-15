@@ -2771,6 +2771,8 @@ export default {
     "playbackFadeDesc": "暂停前先短暂淡出声音，恢复播放时再淡入，而不是瞬间切断。音频未接入音频引擎时会直接暂停。",
     "keepScreenOnWhilePlaying": "播放时保持屏幕常亮",
     "keepScreenOnWhilePlayingDesc": "只在播放中让屏幕不自动熄灭，暂停或空闲时立即交还给系统。仅在前台生效，退到后台后系统仍会正常熄屏。",
+    "mixWithOtherAudio": "与其他音源同时播放",
+    "mixWithOtherAudioDesc": "开启后，后台播放时其他应用出声（游戏音效、导航播报、短视频）不再把音乐暂停，两边一起响。关闭时按系统默认：别的应用一出声就先停下。",
     "deviceTypeSection": "设备类型",
     "deviceType": "这是手机还是平板",
     "deviceTypeDesc": "选了手机的话，横屏时自动把整屏缩小一点，避免控件互相遮挡。平板上横竖屏都按原始尺寸显示。",

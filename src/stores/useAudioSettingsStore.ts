@@ -13,6 +13,7 @@ import { getAudioEqualizerCustomSlotIndex, isAudioEqualizerCustomSlotId, readSto
 import { AUDIO_SOUND_PRESETS } from '../utils/audioPresets';
 import { getStoredBoolean, setStoredBoolean } from './storagePrimitives';
 import { setStatusMessage } from './useStatusMessageStore';
+import { setAudioFocusPolicy } from '../platform/foliaNative';
 import i18n from '../i18n/config';
 
 export const CACHE_SIZE_KEY = 'folia_cache_size';
@@ -40,6 +41,18 @@ export const PLAYBACK_FADE_KEY = 'folia_playback_fade_enabled';
  * 而且开着等于放弃了系统那套自动熄屏，属于该由用户点头的事。
  */
 export const KEEP_SCREEN_ON_WHILE_PLAYING_KEY = 'folia_keep_screen_on_while_playing';
+
+/**
+ * 后台与其他音源同时播放（Android）。
+ *
+ * 关（默认）：别的应用一出声，系统就把 WebView 持有的音频焦点收走，Chromium 收到
+ * 焦点丢失会**直接把 `<audio>` 暂停** —— 游戏音效、导航播报、短视频都可能打断，
+ * 而且打断之后经常叫不醒（见 usePlaybackAudioBridge 里的自动恢复）。
+ * 开：WebView 感知不到「焦点丢了」这件事，两边一起响（见原生 FoliaAudioManager）。
+ *
+ * 默认关：会让人家的声音也被压着 / 互相抢焦点，这是用户能听见的行为，该由他点头。
+ */
+export const MIX_WITH_OTHER_AUDIO_KEY = 'folia_mix_with_other_audio';
 
 /** Gigabytes of cached audio to keep. Zero is the listener asking for no ceiling at all. */
 export const DEFAULT_MEDIA_CACHE_LIMIT_GB = 5;
@@ -152,6 +165,8 @@ export type AudioSettingsState = {
     playbackFadeEnabled: boolean;
     /** 播放时保持屏幕常亮（Android 的 FLAG_KEEP_SCREEN_ON）。Off by default. */
     keepScreenOnWhilePlaying: boolean;
+    /** 后台与其他音源同时播放（Android）。Off by default，见 MIX_WITH_OTHER_AUDIO_KEY。 */
+    mixWithOtherAudio: boolean;
     audioOutputDeviceId: string;
     audioEqualizerSettings: AudioEqualizerSettings;
     isAudioEqualizerOpen: boolean;
@@ -167,6 +182,7 @@ export type AudioSettingsState = {
     handleToggleNeteaseScrobble: (enable: boolean) => void;
     handleTogglePlaybackFade: (enable: boolean) => void;
     handleToggleKeepScreenOnWhilePlaying: (enable: boolean) => void;
+    handleToggleMixWithOtherAudio: (enable: boolean) => void;
     handleSetAudioOutputDeviceId: (deviceId: string) => void;
     handleSetAudioEqualizerSettings: (settings: AudioEqualizerSettings) => void;
     handleApplyAudioSoundPreset: (modeId: AudioEqualizerModeId) => void;
@@ -192,6 +208,7 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     playbackFadeEnabled: getStoredBoolean(PLAYBACK_FADE_KEY, true),
     // 默认关：常亮等于放弃系统那套自动熄屏，该由用户点头，不该替他决定。
     keepScreenOnWhilePlaying: getStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, false),
+    mixWithOtherAudio: getStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, false),
     audioOutputDeviceId: readStoredAudioOutputDeviceId(),
     audioEqualizerSettings: readStoredAudioEqualizerSettings(),
     isAudioEqualizerOpen: false,
@@ -248,6 +265,17 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     handleToggleKeepScreenOnWhilePlaying: (enable) => {
         setStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, enable);
         set({ keepScreenOnWhilePlaying: enable });
+    },
+    handleToggleMixWithOtherAudio: (enable) => {
+        setStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, enable);
+        set({ mixWithOtherAudio: enable });
+        /*
+         * 立刻过桥一次，别等下次播放才写：原生那边（FoliaApplication 决定给 WebView
+         * 哪一种 AudioManager）读的是**落盘的**开关，而 WebView 只有在下一次**开始播放**
+         * 时才会重新来问 —— 正在响的这首拿到的还是切换前那一个，新策略要到下一次
+         * 开始播放才生效。被打断后的自动恢复走的是 JS 那条路，不依赖它，拨过去就管用。
+         */
+        void setAudioFocusPolicy(enable);
     },
     handleSetAudioOutputDeviceId: (deviceId) => {
         set({ audioOutputDeviceId: deviceId });

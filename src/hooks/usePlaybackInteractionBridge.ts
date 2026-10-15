@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import type React from 'react';
 import type { MotionValue } from 'framer-motion';
 import { omni } from '../services/onlineMusic/omni';
-import { playbackFade } from '../services/playbackFade';
+import { consumeProgrammaticPause, playbackFade } from '../services/playbackFade';
 import { PlayerState } from '../types';
 import type { ReplayGainMode, SongResult, StageLoopMode, StatusMessage } from '../types';
 import { getReplayGainModeLabel } from '../utils/appPlaybackHelpers';
@@ -20,6 +20,17 @@ import { currentTime } from '../stores/motionSignals';
 // src/hooks/usePlaybackInteractionBridge.ts
 
 type PlayerEscapeAction = 'ignore' | 'allow-fullscreen-exit' | 'close-panel' | 'navigate-back';
+
+/*
+ * 后台被别的音源打断之后自动恢复播放的节流（见下面那个 effect）。
+ *
+ * 两个上限都是为了别让两边「抢焦点」打起来：对面一直在放的话，我们恢复一次它就可能
+ * 再收一次焦点丢失，一秒之内反复 play 只会互相打断，两边都听不清。
+ */
+const AUTO_RESUME_COOLDOWN_MS = 1500;
+const AUTO_RESUME_MAX_ATTEMPTS = 3;
+/** 安静了这么久才又被打断，算新的一轮，重新给机会。 */
+const AUTO_RESUME_RESET_MS = 10_000;
 
 export const resolvePlayerEscapeAction = ({
     currentView,
@@ -130,6 +141,53 @@ export function usePlaybackInteractionBridge({
             });
         });
     }, [audioRef, audioSrc, currentSong, playerState, resumePlayback]);
+
+    /*
+     * 后台被别的音源打断之后自动恢复（「与其他音源同时播放」开着时才生效）。
+     *
+     * Chromium 收到 AUDIOFOCUS_LOSS 会**直接把 `<audio>` 暂停**，不等 Web 层表态 ——
+     * 状态机于是还停在 PLAYING：界面显示「正在播」但没声音，而用户去点播放键会先走
+     * 一次 pause 再 play，经常就这么卡住（用户原话：「无法正常唤醒」）。
+     *
+     * 判据是「状态机认为在播 + 元素却被暂停了」：用户自己按暂停时
+     * usePlaybackTransportController 会先把状态置成 PAUSED，所以那一类 pause 事件
+     * 不命中这里；淡出那条路还会给元素打个标记（consumeProgrammaticPause），一并排除。
+     */
+    const mixWithOtherAudio = useAudioSettingsStore(state => state.mixWithOtherAudio);
+    useEffect(() => {
+        if (!mixWithOtherAudio) {
+            return undefined;
+        }
+        const audio = audioRef.current;
+        if (!audio) {
+            return undefined;
+        }
+        let lastResumeAt = 0;
+        let attempts = 0;
+        const onPause = () => {
+            if (consumeProgrammaticPause(audio)) {
+                return;
+            }
+            if (usePlaybackStore.getState().playerState !== PlayerState.PLAYING) {
+                return;
+            }
+            const now = Date.now();
+            if (now - lastResumeAt > AUTO_RESUME_RESET_MS) {
+                attempts = 0;
+            }
+            if (now - lastResumeAt < AUTO_RESUME_COOLDOWN_MS) {
+                return;
+            }
+            if (attempts >= AUTO_RESUME_MAX_ATTEMPTS) {
+                return;
+            }
+            attempts += 1;
+            lastResumeAt = now;
+            void resumePlayback().catch(() => undefined);
+        };
+        audio.addEventListener('pause', onPause);
+        return () => audio.removeEventListener('pause', onPause);
+    }, [audioRef, mixWithOtherAudio, resumePlayback]);
 
     const togglePlay = useCallback((event?: React.MouseEvent | KeyboardEvent) => {
         event?.stopPropagation();

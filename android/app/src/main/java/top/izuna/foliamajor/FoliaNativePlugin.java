@@ -1662,6 +1662,20 @@ public class FoliaNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /*
+     * 音频焦点策略：后台要不要允许与其它音源同时播放。
+     *
+     * 值**落盘**（见 FoliaAudioFocus 的说明）：WebView 是在它自己要请求音频焦点时才来
+     * 向 Application 要 AudioManager 的，冷启动后第一次播放就发生在这之前 —— 那时
+     * Web 层还没跑到，只有磁盘上的值能决定给出去的是哪一种 AudioManager。
+     */
+    @PluginMethod
+    public void setAudioFocusPolicy(PluginCall call) {
+        boolean mixWithOthers = Boolean.TRUE.equals(call.getBoolean("mixWithOthers", false));
+        top.izuna.foliamajor.audio.FoliaAudioFocus.setMixWithOthers(getContext(), mixWithOthers);
+        call.resolve();
+    }
+
     @PluginMethod
     public void getPhoneFitLayout(PluginCall call) {
         JSObject result = new JSObject();
