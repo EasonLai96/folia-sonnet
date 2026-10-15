@@ -202,6 +202,8 @@ public final class FloatingLyricsOverlay {
     /** 上一次生效的模式。变了就整套重摆，见 applyModeChangeIfNeeded。 */
     private Boolean lastOverSafeArea = null;
     private boolean lastFillSafeArea = false;
+    /** 上一次窗口是不是「不吃触摸」的状态。避免 600ms 一次的巡检重复调 updateViewLayout。 */
+    private Boolean lastTouchable = null;
     private volatile boolean screenOn = true;
     private boolean receiverRegistered = false;
     private boolean polling = false;
@@ -327,9 +329,9 @@ public final class FloatingLyricsOverlay {
                     WindowManager.LayoutParams fresh = buildParams();
                     applyLayout(fresh.x, fresh.y, fresh.width, fresh.height);
                 }
-                // 锁也一起解了：buildParams 只按「现在锁不锁」决定 FLAG_NOT_TOUCHABLE，
-                // 所以这里要单独把那个标记清掉，否则重置完小窗还是点不动。
-                syncLockTouchable();
+                // 锁也一起解了：模式 / 锁 / 预览 三者决定这一层是否吃触摸，
+                // 同步一次确保 flags 跟上当前状态，否则重置完小窗还是点不动。
+                syncTouchable();
                 syncLockChip();
                 if (view != null) view.invalidate();
             }
@@ -442,6 +444,9 @@ public final class FloatingLyricsOverlay {
         } else if (want && added) {
             // 转屏 / 换分辨率之后原来那个坐标可能已经出屏了，拉回来（不然小窗"消失"了）。
             reclampIfNeeded();
+            // 模式 / 锁 / 预览租约 三者都可能在两次巡检之间变，它们自己不带布局动作，
+            // 在这里把「是否吃触摸」同步一次；syncTouchable 内部有去重，不会重复调 update。
+            syncTouchable();
         }
     }
 
@@ -475,6 +480,8 @@ public final class FloatingLyricsOverlay {
         if (params == null || view == null || !added) return;
         WindowManager.LayoutParams fresh = buildParams();
         applyLayout(fresh.x, fresh.y, fresh.width, fresh.height);
+        // 模式切换会改「该不该吃触摸」，applyLayout 只搬了 x/y/w/h，flags 要单独同步。
+        syncTouchable();
         // 尺寸刚换过，可能又被系统夹下来（安全区那一路），再顶一次。
         nudgeIntoCutout();
         view.invalidate();
@@ -485,13 +492,13 @@ public final class FloatingLyricsOverlay {
      *
      * 光改 `isLocked()` 的返回值不够：那份锁是写进 prefs 的。已经误锁的用户切到这个模式，
      * isLocked() 虽然返回 false，可只要他拨回普通模式，那份 true 又活过来、整层继续穿透；
-     * 而 syncLockTouchable 每次都是照 isLocked() 现设 flags —— 不清掉盘上那份，
+     * 而 syncTouchable 每次都是按当前模式重设 flags —— 不清掉盘上那份，
      * 窗口一重建就再吃一次。这里在巡检里清一次，清完就不再进这个分支。
      */
     private void clearLockWhenOverSafeArea() {
         if (!overSafeArea() || !prefs.contains(KEY_LOCKED)) return;
         prefs.edit().remove(KEY_LOCKED).apply();
-        syncLockTouchable();
+        syncTouchable();
     }
 
     private void reclampIfNeeded() {
@@ -573,6 +580,8 @@ public final class FloatingLyricsOverlay {
             added = true;
             // 上过锁的话还得把那颗解锁按钮单独挂起来（主窗已经整体不吃触摸了）。
             syncLockChip();
+            // 模式 / 锁 / 预览 三者决定这一层是否吃触摸；attach 后同步一次。
+            syncTouchable();
             // 叠加模式下按实际量到的位置再往上顶一次（有些 ROM 会把这一层夹到状态栏之下）。
             nudgeIntoCutout();
         } catch (Throwable error) {
@@ -594,6 +603,7 @@ public final class FloatingLyricsOverlay {
         }
         view = null;
         added = false;
+        lastTouchable = null;
     }
 
     // ------------------------------------------------------------------
@@ -601,16 +611,32 @@ public final class FloatingLyricsOverlay {
     // ------------------------------------------------------------------
 
     /**
-     * 锁定时把主窗设成 `FLAG_NOT_TOUCHABLE`。
+     * 判断此刻该不该让整层「不吃触摸、直接穿透到下面那一层」。
+     *
+     * 锁定时当然穿透；叠加安全区且非预览时也穿透 —— 预览需要保留拖拽调位置的能力。
+     */
+    private boolean passThroughTouch() {
+        if (isLocked()) return true;
+        return overSafeArea() && !previewMode();
+    }
+
+    /**
+     * 按当前模式重设 `FLAG_NOT_TOUCHABLE`。
      *
      * 这是唯一能让触摸**真的穿过去**的办法 —— `onTouchEvent` 返回 false 不管用：
      * 输入分发是**先按窗口挑一层**的，挑中了我们这一层，事件就落在这一层里，
      * 我们不处理它就只是丢掉，不会退给底下那一层（NOT_TOUCH_MODAL 只管窗口**外面**）。
      * 而 FLAG_NOT_TOUCHABLE 是整窗生效，所以那颗解锁按钮必须另开一个小窗口来接。
+     *
+     * 巡检每一趟都问一次：模式 / 锁 / 预览租约都可能在中途变，而它们三个都不带
+     * 自己的布局动作。用 `lastTouchable` 避免没变化时重复调 updateViewLayout。
      */
-    private void syncLockTouchable() {
+    private void syncTouchable() {
         if (params == null || !added) return;
-        if (isLocked()) {
+        boolean passThrough = passThroughTouch();
+        if (lastTouchable != null && lastTouchable == passThrough) return;
+        lastTouchable = passThrough;
+        if (passThrough) {
             params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         } else {
             params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
@@ -750,17 +776,17 @@ public final class FloatingLyricsOverlay {
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
         /*
-         * 上着锁的话整层不收触摸：让手指直接落到下面的桌面 / 应用上（见 syncLockTouchable）。
+         * 这一层此刻该不该「整层不吃触摸」。
          *
-         * 预览**不在此列**。这里原本也强制不吃触摸（怕这一层压在设置页上、挡住底下滑条），
-         * 但那条理由站不住：预览的全部意义就是「当场看见、当场调」，
-         * 而调的手段恰恰是拖 —— 连拖都不让，用户面对一条拖不动的窗口只会认为功能坏了
-         * （用户原话：点不了，触摸穿过去了）。
-         * 怕挡设置页的话把它拖开就是了，那本来就是用户此刻要做的事；
-         * 更实际的是：锁上之后唯一能解锁的入口（右上角那颗锁）也一起没了，
-         * 一旦误锁就再无出口。
+         * 两种情形需要穿透：
+         *  · 上着锁 —— 锁的含义就是「别再动它」，手指直接落到下面的桌面 / 应用上；
+         *  · 叠加在安全区上、又不是在预览 —— 那一条压在别的应用顶上（状态栏那一条），
+         *    它只是层装饰，不该替底下那一层把触摸吃掉。
+         *
+         * 预览是例外：预览的全部意义就是「当场看见、当场调」，调的手段恰恰是拖 ——
+         * 整层穿透就等于把唯一能调它的入口也一块儿关了。
          */
-        if (isLocked()) {
+        if (passThroughTouch()) {
             flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         }
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -830,7 +856,7 @@ public final class FloatingLyricsOverlay {
         prefs.edit().putBoolean(KEY_LOCKED, locked).apply();
         if (view != null) view.invalidate();
         // 顺序有讲究：先把主窗的触摸开关翻过来，再决定那颗解锁按钮挂不挂。
-        syncLockTouchable();
+        syncTouchable();
         syncLockChip();
     }
 

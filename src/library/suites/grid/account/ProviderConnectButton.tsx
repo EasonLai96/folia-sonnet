@@ -88,12 +88,16 @@ export default function ProviderConnectButton({ providers, isDaylight, getAction
                             />
                         )}
                         {hasAppIcon ? (
-                            /* App 本尊图自带圆角与留白，直接铺满徽章位即可，不必再套彩色圆底。 */
+                            /*
+                             * App 本尊图直接铺满徽章位，不必再套彩色圆底。
+                             * 这里显式裁成圆形：飞牛音乐的图标带黑色方形背景，不裁会露出直角，
+                             * 其他平台图标虽然本身有圆角/透明，一起裁也不影响。
+                             */
                             <img
                                 src={getProviderAppIcon(provider.providerId)}
                                 alt=""
                                 aria-hidden="true"
-                                className={`relative h-7 w-7 shrink-0 object-contain transition-opacity ${
+                                className={`relative h-7 w-7 shrink-0 rounded-full object-contain transition-opacity ${
                                     !configured ? 'opacity-35 grayscale' : active ? '' : 'opacity-90'
                                 }`}
                             />
