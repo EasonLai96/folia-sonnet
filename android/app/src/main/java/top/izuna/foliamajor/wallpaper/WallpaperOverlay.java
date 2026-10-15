@@ -32,6 +32,7 @@ import org.json.JSONObject;
 import top.izuna.foliamajor.FoliaNativePlugin;
 import top.izuna.foliamajor.LockScreenMusicActivity;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
@@ -61,6 +62,8 @@ public final class WallpaperOverlay {
     /** 叠层页面的加载地址。host 只是为了对得上拦截规则，不真的发网络请求。 */
     private static final String PAGE_URL = "https://localhost/wallpaper.html";
     private static final String LOCAL_HOST = "localhost";
+    /** 歌词字体在这个假域名下的地址：叠层页面自己来取，见 shouldInterceptRequest。 */
+    private static final String LYRICS_FONT_PATH = "/__folia/lyrics-font";
     /**
      * 检查间隔。注意它只是**多久看一眼有没有变化**，不是推送间隔 ——
      * 没变化就不注入 JS。
@@ -2902,6 +2905,27 @@ public final class WallpaperOverlay {
             if (path == null || path.isEmpty() || "/".equals(path)) {
                 path = "/wallpaper.html";
             }
+            /*
+             * 歌词字体单独伺候：它不在打包的 assets 里，是落在私有目录里的文件
+             * （「单独」模式用户挑的 / 「跟随」模式网页托管过来的，见 WallpaperLyricsFont）。
+             *
+             * 为什么必须开这条路：叠层是**另一个 document**，主窗口那边用 FontFace
+             * 注册的字体在这里根本不存在 —— 而主题里的 `fontFamily` 写的正是那个名字，
+             * 于是叠层的歌词永远落在兜底字体上（用户原话：桌面叠层歌词没有[字体]）。
+             * 由页面自己 fetch 这个地址、在本 document 里注册同样的族名，才对得上。
+             */
+            if (LYRICS_FONT_PATH.equals(path)) {
+                File font = WallpaperLyricsFont.activeFile(view.getContext());
+                if (font != null && font.exists()) {
+                    try {
+                        InputStream fontStream = new java.io.FileInputStream(font);
+                        return new WebResourceResponse(guessMime(font.getName()), "utf-8", fontStream);
+                    } catch (IOException error) {
+                        return null;
+                    }
+                }
+                return null;
+            }
             String asset = "public" + path;
             try {
                 InputStream stream = view.getContext().getAssets().open(asset);
@@ -2923,6 +2947,8 @@ public final class WallpaperOverlay {
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
         if (lower.endsWith(".woff2")) return "font/woff2";
         if (lower.endsWith(".woff")) return "font/woff";
+        if (lower.endsWith(".ttf")) return "font/ttf";
+        if (lower.endsWith(".otf")) return "font/otf";
         if (lower.endsWith(".wasm")) return "application/wasm";
         return "application/octet-stream";
     }

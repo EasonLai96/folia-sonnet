@@ -48,7 +48,7 @@ public final class WallpaperLyricsFont {
      * 判据是「字体来路」那个开关（wp.lyricsFontCustom）。缺这个 key（还没推过配置）
      * 时按「单独」处理：老用户自己挑过的字体不该悄悄失效。
      */
-    private static File activeFile(Context context) {
+    public static File activeFile(Context context) {
         java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
         Float custom = tuning == null ? null : tuning.get("wp.lyricsFontCustom");
         boolean isCustom = custom == null || custom >= 0.5f;

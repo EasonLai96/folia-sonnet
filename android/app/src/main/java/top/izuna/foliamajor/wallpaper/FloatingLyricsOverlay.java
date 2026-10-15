@@ -151,6 +151,9 @@ public final class FloatingLyricsOverlay {
     /** 上一次量到的屏幕尺寸（0 = 还没量过）。转屏时用来把位置按比例搬过去。 */
     private int lastScreenW = 0;
     private int lastScreenH = 0;
+    /** 上一次生效的模式。变了就整套重摆，见 applyModeChangeIfNeeded。 */
+    private Boolean lastOverSafeArea = null;
+    private boolean lastFillSafeArea = false;
     private volatile boolean screenOn = true;
     private boolean receiverRegistered = false;
     private boolean polling = false;
@@ -341,7 +344,35 @@ public final class FloatingLyricsOverlay {
         }
     }
 
+    /**
+     * 「叠加安全区」/「占满整条」翻了面就**整套重摆一次**。
+     *
+     * 只改开关不重摆的话，窗口会**留在上一个模式的几何里**：从安全区拨回普通模式，
+     * 它还是「状态栏那么高、占屏 80% 宽」的一条 —— 右下角那个拉伸把手和右上角那颗锁
+     * 全被压在这一条里（看着就是「不打开开关反而没有把手和锁」）；
+     * 反过来从普通拨到安全区，它又是两行高的大方块，压住整条状态栏还不贴顶。
+     *
+     * 位置 / 尺寸是按 `buildParams()` 算的，而它只在挂窗口时走一次 ——
+     * 开关本身不带任何布局动作，所以这里必须自己盯一次。
+     */
+    private void applyModeChangeIfNeeded() {
+        boolean overSafe = overSafeArea();
+        boolean fill = fillSafeArea();
+        if (lastOverSafeArea != null && lastOverSafeArea == overSafe && lastFillSafeArea == fill) {
+            return;
+        }
+        lastOverSafeArea = overSafe;
+        lastFillSafeArea = fill;
+        if (params == null || view == null || !added) return;
+        WindowManager.LayoutParams fresh = buildParams();
+        applyLayout(fresh.x, fresh.y, fresh.width, fresh.height);
+        // 尺寸刚换过，可能又被系统夹下来（安全区那一路），再顶一次。
+        nudgeIntoCutout();
+        view.invalidate();
+    }
+
     private void reclampIfNeeded() {
+        applyModeChangeIfNeeded();
         if (params == null) return;
         int screenW = context.getResources().getDisplayMetrics().widthPixels;
         int screenH = context.getResources().getDisplayMetrics().heightPixels;
@@ -364,7 +395,21 @@ public final class FloatingLyricsOverlay {
             int x = clampInt(Math.round(ratioX * spanW), 0, spanW);
             int y = clampInt(Math.round(ratioY * spanH), 0, spanH);
             applyLayout(x, y, params.width, params.height);
-            persistLayout();
+            /*
+             * 安全区模式下**不能落盘**。
+             *
+             * KEY_X/Y/W/H 是普通模式「用户自己拖出来的窗口」那一份：
+             * 宽度是拖的、高度是两行字、位置是手指放的。而安全区模式下这四个数是
+             * **按模式算出来的**（高度锁死成状态栏那一条，宽度是滑条给的屏幕比例，
+             * 位置由左右滑条 / 拖动比例推得）—— 两套量纲根本不是一回事。
+             *
+             * 混着写，等用户把开关拨回普通模式，`buildParams()` 读到的就是安全区那份：
+             * 一条贴着屏幕顶、又宽又扁的窗口，右下角把手和右上角那颗锁上下压在一起
+             * （状态栏只有二十几 dp，把手的 16dp 和锁的 18dp 根本放不下）——
+             * 看着就是「不打开开关反而没有把手和锁」。普通模式自己的尺寸也得留着，
+             * 所以这里只摆不存。
+             */
+            if (!overSafeArea()) persistLayout();
         }
         lastScreenW = screenW;
         lastScreenH = screenH;
@@ -767,6 +812,8 @@ public final class FloatingLyricsOverlay {
     public void applyOverlayTuning() {
         runOnUi(() -> {
             if (view != null && added) view.invalidate();
+            // 开关刚拨过：先把整套几何按新模式重摆，再谈位置（不然上面那一帧白敲）。
+            applyModeChangeIfNeeded();
             if (!overSafeArea() || params == null || !added) return;
             dropDragRatioWhenFilled();
             int screenW = context.getResources().getDisplayMetrics().widthPixels;

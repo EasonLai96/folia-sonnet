@@ -60,6 +60,7 @@ import { useThemeSettingsStore } from '../stores/useThemeSettingsStore';
 import type { AudioBands, Line, Theme, VisualizerMode } from '../types';
 import { syncLyricFlatAttribute, useLyricFlatSettingsStore } from '../stores/useLyricFlatSettingsStore';
 import { applyPushedPhoneInsets } from '../services/phoneInsets';
+import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
 
 /*
  * 挂「歌词改为纯色扁平」这个开关。
@@ -489,6 +490,73 @@ const toLines = (payload: WallpaperPayload): Line[] => {
     return result;
 };
 
+/*
+ * 歌词字体。
+ *
+ * 叠层是**另一个 document**：主窗口那边用 `FontFace` 注册的字体在这里一个都不存在
+ * （FontFace 是按 document 注册的，localStorage / IndexedDB 同源共享也不管用）。
+ * 而主题里的 `fontFamily` 写的正是那个名字 —— 于是叠层的歌词永远落在兜底字体上，
+ * 看着就是「桌面叠层歌词没有[字体]」。所以这一页得自己再注册一遍。
+ *
+ * 两个来路：
+ *  - **跟随播放页**：播放页那个字体是存到 IndexedDB 里的（同源共享，这一页读得到），
+ *    按它自己的族名注册，主题里的名字正好对上，不需要额外覆盖。
+ *  - **单独**：那份是原生私有目录里的文件，网页够不着 —— 由原生经假域名
+ *    `https://localhost/__folia/lyrics-font` 拦下来喂给这一页
+ *    （见 WallpaperOverlay.shouldInterceptRequest），注册成一个固定的族名，
+ *    再把这个族名覆盖到主题上。
+ */
+/** 「单独」那份字体经原生取回来的地址。 */
+const NATIVE_LYRICS_FONT_URL = '/__folia/lyrics-font';
+/** 「单独」那份注册到本 document 时用的族名。 */
+const WALLPAPER_LYRICS_FONT_FAMILY = 'FoliaLyricsFont';
+
+type FontFaceConstructorLike = new (family: string, source: ArrayBuffer | ArrayBufferView) => FontFace;
+
+const getFontFaceConstructor = (): FontFaceConstructorLike | null =>
+    (globalThis as typeof globalThis & { FontFace?: FontFaceConstructorLike }).FontFace ?? null;
+
+const registerFontFace = async (family: string, source: ArrayBuffer): Promise<boolean> => {
+    const FontFaceConstructor = getFontFaceConstructor();
+    const documentFonts = typeof document !== 'undefined' ? document.fonts : null;
+    if (!FontFaceConstructor || !documentFonts || !source.byteLength) return false;
+    try {
+        const face = new FontFaceConstructor(family, source);
+        await face.load();
+        documentFonts.add(face);
+        return true;
+    } catch {
+        // 字体文件坏了 / 不支持：退回主题自带那套，别把整页拖住。
+        return false;
+    }
+};
+
+/**
+ * 解析出这一页该用的歌词字体族名。null = 没有可用的自定义字体。
+ *
+ * 跟着「字体来路」那个设置走（useVisualizerSettingsStore.wallpaperLyricsFontMode）——
+ * 它和设置页里「歌词字体」那一组是同一个开关，叠层与主窗口同源，直接读 store 就有。
+ */
+const resolveLyricsFontFamily = async (mode: 'follow' | 'custom'): Promise<string | null> => {
+    if (mode === 'follow') {
+        const meta = useTypographySettingsStore.getState().lyricsCustomFont;
+        const stored = await getStoredUploadedLyricsFont();
+        if (!meta?.fontId || !stored || stored.id !== meta.fontId) return null;
+        const buffer = await stored.blob.arrayBuffer();
+        return (await registerFontFace(stored.family, buffer)) ? stored.family : null;
+    }
+    try {
+        const response = await fetch(NATIVE_LYRICS_FONT_URL);
+        if (!response.ok) return null;
+        const buffer = await response.arrayBuffer();
+        return (await registerFontFace(WALLPAPER_LYRICS_FONT_FAMILY, buffer))
+            ? WALLPAPER_LYRICS_FONT_FAMILY
+            : null;
+    } catch {
+        return null;
+    }
+};
+
 const WallpaperSurface: React.FC = () => {
     // 全量订阅设置：壁纸页面没有性能敏感的交互，多渲染几次无所谓。
     // 这三个 store 和播放页读的是同一份（叠层 origin 与主 WebView 相同，localStorage 共享），
@@ -508,6 +576,29 @@ const WallpaperSurface: React.FC = () => {
     const { audioPower, audioBands } = useBridgedAudio();
     const [currentLineIndex, setCurrentLineIndex] = React.useState(-1);
     const [isDaylight, setIsDaylight] = React.useState(false);
+    /*
+     * 本 document 里注册好的歌词字体族名（还没有 / 没有自定义字体时是 null）。
+     *
+     * 顺序有讲究：它必须**早于**下面那个「等字体就绪再报首帧」的判定 ——
+     * 那份判定等的是 `document.fonts.ready`，字体是这里注册进去的，
+     * 注册晚了首帧信号会先放行，原生开始淡入，等字体落地时窗口已经不透明 ——
+     * 用户看到的就是「歌词突然蹦出来」。
+     */
+    const [lyricsFontFamily, setLyricsFontFamily] = React.useState<string | null>(null);
+    const lyricsFontMode = settings.wallpaperLyricsFontMode;
+    const lyricsFontId = typography.lyricsCustomFont?.fontId ?? null;
+    /* 缺字时的兜底栈：自定义字体常常不含全部字形，靠它接住。 */
+    const lyricsFallbackFamilies = typography.lyricsFontFallbackFamilies;
+    React.useEffect(() => {
+        let cancelled = false;
+        void resolveLyricsFontFamily(lyricsFontMode).then(family => {
+            if (cancelled) return;
+            setLyricsFontFamily(family);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [lyricsFontMode, lyricsFontId]);
 
     // 主题色的平滑值（见 stepColorTowards）：null 表示还没有首份颜色，走 payload 原值。
     const [smoothAccent, setSmoothAccent] = React.useState<string | null>(null);
@@ -576,10 +667,24 @@ const WallpaperSurface: React.FC = () => {
              * 朝白色混一档，既和主色同源，又保证在任何底色上都看得见。
              */
             secondaryColor: smoothSecondary || payload.secondaryColor || lightenColor(accent, 0.5),
+            /*
+             * 歌词字体：只在**这一页注册成功了**才往主题上写。
+             *
+             * 叠层是另一个 document，主窗口 `FontFace` 注册的那份字体在这里一个字都不算 ——
+             * 主题里写着一个本页没注册的族名，浏览器会静默退到默认字体，
+             * 表现就是「设置里选了字体，桌面叠层一点没变」。
+             * 所以这里认的是 `lyricsFontFamily`（resolveLyricsFontFamily 在本页注册成功后返回的名字），
+             * 它还是 null（没选字体 / 加载失败 / 正在加载）时保持 base 原样，不去猜。
+             *
+             * fallback 栈同样要带上：自定义字体常常不含标点或某些字形，
+             * 缺字时靠它兜住，否则那几个字会掉成豆腐块。
+             */
+            fontFamily: lyricsFontFamily ?? base.fontFamily,
+            fontFamilyStack: lyricsFallbackFamilies.length ? lyricsFallbackFamilies : base.fontFamilyStack,
         };
     }, [dualTheme, isDaylight, smoothAccent, smoothBase, smoothPrimary, smoothSecondary,
         payload.accent, payload.backgroundColor, payload.primaryColor, payload.secondaryColor,
-        payload.theme]);
+        payload.theme, lyricsFontFamily, lyricsFallbackFamilies]);
 
     React.useEffect(() => {
         // 主题跟随系统深浅色，和播放页的判定保持一致。
