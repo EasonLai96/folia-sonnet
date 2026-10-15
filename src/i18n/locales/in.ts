@@ -1053,6 +1053,7 @@ export default {
     "fromMemory": " (memakai pilihan terakhir lagu ini)",
     "toastFailed": "Sutradara AI gagal: {{text}}",
     "toastUploaded": "Unggahan berhasil — terima kasih atas kontribusimu.",
+    "unavailable": "AI belum dikonfigurasi, jadi tidak ada yang bisa dibuat — dan cache awan juga tidak punya keputusan animasi untuk lagu ini.",
     "failed": "Gagal: ",
     "restoreDone": "Pengaturan animasi sebelum sutradara AI mengambil alih telah dipulihkan.",
     "restoreNone": "Belum ada yang bisa dipulihkan: sutradara AI belum mengubah pengaturan animasimu."

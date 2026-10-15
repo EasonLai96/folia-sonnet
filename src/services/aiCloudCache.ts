@@ -161,6 +161,17 @@ export const withAiCloudCache = async <T>(options: {
     fingerprint: string;
     generate: () => Promise<T>;
     validate: (value: unknown) => T | null;
+    /**
+     * 只生成出一半时，把云端已有的另一半并进去再回传。
+     *
+     * 部署端点与 Electron 这两条路只能出主题，出不了动画决策。不合并就整条覆盖，
+     * 等于把别人推上来的完整条目抹成半截 —— 之后不管谁拉这条，动画那半永远是空的，
+     * 导演于是再也没法切换样式，而缓存里明明有别人做好的决策。
+     *
+     * 传进来的 `previous` 是**没通过 validate** 的 payload（缺的正是这次要的那半），
+     * 所以它照样要过一遍校验，脏数据不能跟着一起回传。
+     */
+    combine?: (previous: unknown, fresh: T) => T;
     songTitle?: string;
     /**
      * 别去问云端，直接生成 —— 「重新判断」就是要一个跟缓存里不一样的答案。
@@ -170,15 +181,26 @@ export const withAiCloudCache = async <T>(options: {
      */
     skipPull?: boolean;
 }): Promise<{ value: T; source: AiCloudCacheSource }> => {
-    const { kind, fingerprint, generate, validate, songTitle, skipPull } = options;
+    const { kind, fingerprint, generate, validate, combine, songTitle, skipPull } = options;
 
+    let previous: unknown = null;
     if (!skipPull && isFoliaCloudCacheEnabled()) {
         const pulled = await pullAiCloudCache(kind, fingerprint);
         const validated = pulled.status === 'hit' ? validate(pulled.payload) : null;
         if (validated !== null) return { value: validated, source: 'cloud' };
+        /*
+         * 没通过校验的那份也要留着 —— 它缺的正是这次要问的那一半，但它**有**这次
+         * 生成不出来的那一半。丢掉就等于把已有的成果擦掉。
+         */
+        if (pulled.status === 'hit') previous = pulled.payload;
     }
 
     const value = await generate();
-    void pushAiCloudCache(kind, fingerprint, value, { songTitle, target: describeAiTarget() });
+    void pushAiCloudCache(
+        kind,
+        fingerprint,
+        combine ? combine(previous, value) : value,
+        { songTitle, target: describeAiTarget() },
+    );
     return { value, source: 'ai' };
 };

@@ -18,6 +18,8 @@ const report = async (announce: Announce) => {
     if (outcome.kind === 'no-song') announce('aiDirector.noSong');
     else if (outcome.kind === 'queued') announce('aiDirector.queued');
     else if (outcome.kind === 'stale') announce('aiDirector.stale');
+    /* 手动点的：本机发不出去就说清楚，别让人以为点了没反应。 */
+    else if (outcome.kind === 'unavailable') announce('aiDirector.unavailable');
 };
 
 export const aiDirectorCommands: CommandPaletteCommand[] = [
@@ -56,6 +58,7 @@ export const aiDirectorCommands: CommandPaletteCommand[] = [
             if (outcome.kind === 'no-song') announce('aiDirector.noSong');
             else if (outcome.kind === 'queued') announce('aiDirector.queued');
             else if (outcome.kind === 'stale') announce('aiDirector.stale');
+            else if (outcome.kind === 'unavailable') announce('aiDirector.unavailable');
             return true;
         },
     },

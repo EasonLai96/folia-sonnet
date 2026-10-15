@@ -4,6 +4,7 @@ import { sanitizeDualTheme } from "./themeSanitizer";
 import { getWebAiProvider } from "./runtimeConfig";
 import { resolveFoliaApiUrl } from "./webApi";
 import { recordAiThemeAttempt, type AiThemeTrigger } from "../utils/aiThemeDiagnostics";
+import { AI_NOT_CONFIGURED, isAiNotConfiguredError } from "./aiCompletion";
 import { isLocalAiThemeAvailable } from "./aiThemeClient";
 import { type AiCloudCacheSource } from "./aiCloudCache";
 import { requestStage, resolveStageLyricSource, type StageLyricLine } from "./aiStage";
@@ -20,8 +21,22 @@ const getErrorMessage = (error: unknown) => {
  * 先校验再用，形状不对就跟没命中一样。
  */
 
+/*
+ * 「不是这一次没跑通，而是这台机器根本发不出去」。
+ *
+ * 两类错误落在这里：
+ *  - services/aiCompletion 抛的 ai-not-configured：设置里没填密钥；
+ *  - 部署端点地址解析不出来：安卓构建没配 VITE_FOLIA_API_BASE。
+ *
+ * 它们都不是「生成失败」。调用方拿它走封面取色兜底，而不是弹一条
+ * 「主题生成失败」—— 后者会让没配置的人以为功能是坏的。
+ *
+ * 服务端回的「密钥无效 / 没配置」是另一回事（那一次请求确实发出去了、
+ * 被拒了），仍然走兜底但不算不可用，见调用方。
+ */
 export const isMissingAiApiKeyError = (error: unknown) => {
   const message = getErrorMessage(error);
+  if (isAiNotConfiguredError(error)) return true;
   return /(?:openai_api_key|gemini_api_key|api key)/i.test(message)
     && /(?:not configured|missing|configure)/i.test(message);
 };
@@ -158,8 +173,21 @@ export const generateThemeFromLyrics = async (
         require: 'theme',
         force: options?.force === true,
         generate: async () => {
+            /*
+             * 解析不出地址 = 这条路根本不通：安卓构建必须显式配后端地址，
+             * 没配的时候 resolveFoliaApiUrl 会抛。那是配置问题，不是「生成失败」，
+             * 统一成 ai-not-configured，好让上层认得出「本机不可用」。
+             */
+            let endpoint = '';
+            try {
+                endpoint = resolveFoliaApiUrl(
+                    provider === 'openai' ? 'generate-theme_openai' : 'generate-theme',
+                );
+            } catch {
+                throw new Error(AI_NOT_CONFIGURED);
+            }
             const response = await fetch(
-                resolveFoliaApiUrl(provider === 'openai' ? 'generate-theme_openai' : 'generate-theme'),
+                endpoint,
                 {
                     method: 'POST',
                     headers: {

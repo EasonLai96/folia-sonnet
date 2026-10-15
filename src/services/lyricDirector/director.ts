@@ -5,7 +5,12 @@ import { useAudioSettingsStore } from '../../stores/useAudioSettingsStore';
 import { setStatusMessage } from '../../stores/useStatusMessageStore';
 import { omni } from '../onlineMusic/omni';
 import { requestStage } from '../aiStage';
-import { describeAiTarget, translateAiCompletionError } from '../aiCompletion';
+import type { AiCloudCacheSource } from '../aiCloudCache';
+import {
+    describeAiTarget,
+    isAiNotConfiguredError,
+    translateAiCompletionError,
+} from '../aiCompletion';
 import type { AiCompletionTarget } from '../aiCompletion';
 import {
     formatParamValue,
@@ -71,6 +76,8 @@ export type DirectorOutcome =
     | { kind: 'stale' }
     /* 跑完了、也上传了，但「允许自动切换」是关的 —— 只当给云缓存添一块砖。 */
     | { kind: 'produced'; text: string }
+    /* 这台机器现在没有可以用的 AI 连接：请求根本发不出去，重试也一样。 */
+    | { kind: 'unavailable'; text: string }
     | { kind: 'no-song' };
 
 export interface DirectorRuntime {
@@ -160,6 +167,15 @@ let lastReason = '';
 let lastSummary = '';
 let aiTarget: AiCompletionTarget | null = null;
 let aiKnown = false;
+/*
+ * 「这台机器发不出去 AI 请求」已经确认过一次。
+ *
+ * 缓存命中的那次根本走不到生成，所以这个标记**不挡** requestStage —— 它只挡
+ * 提示：自动切歌这条路没有调用方在等结果，弹出来的「失败」既没人请求也没法处理，
+ * 每切一首歌来一遍。手动点「重新决策」的人不一样，他要的就是反馈 —— 那种情况由
+ * 调用方拿 `unavailable` 自己弹。
+ */
+let aiUnavailable = false;
 const inFlight = new Set<AbortController>();
 const listeners = new Set<() => void>();
 
@@ -207,6 +223,8 @@ export const refreshDirectorAiStatus = (): void => {
         aiTarget = null;
     }
     aiKnown = true;
+    /* 设置刚被改过：上一次的「不可用」结论可能已经过期，给一次重新尝试的机会。 */
+    aiUnavailable = false;
     refreshRuntime();
 };
 
@@ -368,7 +386,10 @@ const requestDecision = async (input: {
     lines: DirectorLyricLine[];
     targetSongKey: string | null;
     force: boolean;
-}): Promise<{ mode: string; reason: string; params: Record<string, unknown> }> => {
+}): Promise<{
+    decision: { mode: string; reason: string; params: Record<string, unknown> };
+    source: AiCloudCacheSource;
+}> => {
     const settings = readDirectorSettings();
     /*
      * 请求自己不带中止，登记到 inFlight 里，好让 abortLyricDirectorRequests()
@@ -378,7 +399,7 @@ const requestDecision = async (input: {
     const controller = new AbortController();
     inFlight.add(controller);
     try {
-        const { decision } = await requestStage({
+        const { decision, source } = await requestStage({
             song: input.song,
             lines: input.lines,
             /* 没歌词就是纯音乐，和主题那条链路同一个判定 —— 指纹要对得上。 */
@@ -393,7 +414,7 @@ const requestDecision = async (input: {
             require: 'decision',
         });
         if (!decision) throw new Error('AI 没有返回可用的动画决策。');
-        return decision;
+        return { decision, source };
     } finally {
         inFlight.delete(controller);
     }
@@ -434,7 +455,7 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
     inFlightSongKey = liveKey;
     refreshRuntime();
     try {
-        const decision = await requestDecision({
+        const { decision, source } = await requestDecision({
             song: songInfoOf(displaySong()),
             lines: currentLines(),
             targetSongKey: liveKey,
@@ -471,10 +492,30 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
          * 跑完这次，主题与动画决策已经推上云端了 —— 下一个人撞到同一段歌词
          * 就是白捡。所以提示说的是「上传成功，感谢你的贡献」，而不是把
          * 模型那串理由贴出来；理由在导演面板里还看得到。
+         *
+         * 命中缓存那次一个字节都没上传，也就不能说「上传成功」—— 那正是
+         * 云缓存替用户省掉的那次调用。
          */
-        if (announce) toast(translate('aiDirector.toastUploaded'), 'success');
+        if (announce && source !== 'cloud') toast(translate('aiDirector.toastUploaded'), 'success');
         return { kind: 'applied', text };
     } catch (error) {
+        /*
+         * 「没配 AI」不是失败，是这台机器根本发不出去。
+         *
+         * 云缓存的用处就是让没配密钥的人白拿别人生成好的结果：缓存里有动画决策时
+         * 他照常切换样式；缓存里只有主题（部署端点那条路只出主题）时他这一半天生
+         * 拿不到 —— 那不是这一次出了问题，是重来多少次都一样。
+         *
+         * 自动切歌这条路上没人等结果，弹一条「AI 导演失败」既不是用户要的，也没人
+         * 处理；手动点的那种由调用方拿 kind:'unavailable' 自己说。
+         */
+        if (isAiNotConfiguredError(error)) {
+            aiUnavailable = true;
+            lastSummary = translate('aiDirector.unavailable');
+            lastReason = '';
+            refreshRuntime();
+            return { kind: 'unavailable', text: '' };
+        }
         const message = translateAiCompletionError(String((error as Error)?.message ?? error));
         lastSummary = `${translate('aiDirector.failed')}${message}`;
         lastReason = '';
@@ -525,6 +566,11 @@ const prefetchNextSong = async (): Promise<void> => {
     if (!settings.prefetchNext) return;
     // 导演关着也要预先问 —— 见 scheduleLyricDirectorDecision 里那条纪律。
     if (!settings.autoOnSongChange && !readStoredThemeAutoGenerateEnabled()) return;
+    /*
+     * 本机发不出去请求 —— 预取这条路只是为了「等它开播时缓存里已经有答案」，
+     * 现在注定问不出结果，再排一次只是白跑一趟网络。
+     */
+    if (aiUnavailable) return;
     if (busy) return; // never race the song that is on screen
     const song = nextQueuedSong();
     if (!song) return;

@@ -57,6 +57,21 @@ const GEMINI_ENDPOINT =
 const GEMINI_MODEL = 'gemini-3-flash-preview';
 const DEFAULT_TEMPERATURE = 0.7;
 
+/**
+ * 「这台机器现在没有可以用的 AI 连接」。
+ *
+ * 它跟 Key 过期、接口报错不是一类：那两件是**这一次调用出了问题**，换个时间重试
+ * 有可能过；这一件是**请求根本发不出去**，重来多少次结果都一样。调用方必须能分辨
+ * 它 —— 拿它当普通失败报出去，每切一首歌弹一遍「失败」，用户只会觉得功能坏了。
+ *
+ * 消息以它开头，后面可以跟给人看的原因（见 translateAiCompletionError）。
+ */
+export const AI_NOT_CONFIGURED = 'ai-not-configured';
+
+export const isAiNotConfiguredError = (error: unknown): boolean => (
+    String((error as Error)?.message ?? error ?? '').trim().startsWith(AI_NOT_CONFIGURED)
+);
+
 /** What the host would ask right now, and whether it has the credential to do it. */
 export const readAiTarget = (): { target: AiCompletionTarget; configured: boolean } => {
     const settings = readAiSettings();
@@ -144,7 +159,7 @@ const extractOpenAiText = (payload: unknown): string => {
 const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Promise<string> => {
     const settings = readAiSettings();
     const apiKey = resolveAiApiKey(settings);
-    if (!apiKey) throw new Error('ai-not-configured');
+    if (!apiKey) throw new Error(AI_NOT_CONFIGURED);
 
     const apiUrl = resolveAiChatCompletionsUrl(settings);
     const model = resolveAiModel(settings);
@@ -191,7 +206,7 @@ const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Prom
 
 const runGemini = async (request: AiCompletionRequest, send: typeof fetch): Promise<string> => {
     const apiKey = readAiSettings().geminiApiKey.trim();
-    if (!apiKey) throw new Error('ai-not-configured');
+    if (!apiKey) throw new Error(AI_NOT_CONFIGURED);
 
     const response = await send(GEMINI_ENDPOINT, {
         method: 'POST',
@@ -223,12 +238,21 @@ const runGemini = async (request: AiCompletionRequest, send: typeof fetch): Prom
     return text;
 };
 
+/**
+ * 「这台机器现在没有可以用的 AI 连接」。
+ *
+ * 它跟 Key 过期、接口报错不是一类：那两件是**这一次调用出了问题**，换个时间重试
+ * 有可能过；这一件是**请求根本发不出去**，重来多少次结果都一样。调用方必须能分辨
+ * 它 —— 拿它当普通失败报给用户，每切一首歌弹一遍「失败」，用户只会觉得功能坏了。
+ *
+ * 消息以它开头，后面的细节是给人看的原因（见 translateAiCompletionError）。
+ */
 export const requestAiCompletion = async (request: AiCompletionRequest): Promise<AiCompletionResult> => {
     if (!request || typeof request.system !== 'string' || typeof request.prompt !== 'string') {
         throw new Error('ai-complete requires { system: string, prompt: string }');
     }
     const { target, configured } = readAiTarget();
-    if (!configured) throw new Error('ai-not-configured');
+    if (!configured) throw new Error(AI_NOT_CONFIGURED);
 
     const send = createAiFetch();
     try {
@@ -249,7 +273,7 @@ export const requestAiCompletion = async (request: AiCompletionRequest): Promise
  */
 export const translateAiCompletionError = (message: string): string => {
     const text = String(message ?? '');
-    if (text.startsWith('ai-not-configured')) {
+    if (text.startsWith(AI_NOT_CONFIGURED)) {
         return '还没有配置 AI：请在「设置 → AI」里选好服务商并填写密钥。';
     }
     if (text.startsWith('ai-aborted')) return '请求已被中止。';

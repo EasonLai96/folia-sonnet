@@ -233,7 +233,17 @@ export const normalizeStagePayload = (
 ): StageParts | null => {
     if (!isRecord(payload)) return null;
     const theme = normalizeTheme(payload.theme) ?? undefined;
-    const decision = normalizeDecision(payload, blockedModes) ?? undefined;
+    /*
+     * 动画决策有两种来处，形状不一样：
+     *  - 模型刚答出来的：mode / reason / params 与 theme 并列在顶层；
+     *  - 缓存条目里的：已经收进 decision 那半。
+     *
+     * 以前只认前一种。于是任何人推上去的决策，被下一个人拉回来时一律认成
+     * 「没有决策」—— 导演链路 require:'decision' 因此永远判成未命中，每切一首歌
+     * 都重新问一次模型；没配密钥的人每次都撞一次「AI 导演失败」，而缓存里明明
+     * 躺着别人做好的那一份。
+     */
+    const decision = normalizeDecision(payload.decision ?? payload, blockedModes) ?? undefined;
     /* 两半都没认出来 = 脏数据，当没命中。 */
     if (!theme && !decision) return null;
     return { ...(theme ? { theme } : {}), ...(decision ? { decision } : {}) };
@@ -303,6 +313,31 @@ const parseJsonAnswer = (text: string): unknown => {
     } catch (error) {
         throw new Error(`AI 返回的内容无法解析为 JSON：${String((error as Error)?.message ?? error)}`);
     }
+};
+
+/**
+ * 把两份 stage 答案并成一份，新的优先。
+ *
+ * 部署端点与 Electron 那条路只能出主题，它们拿到的「新答案」天生只有半份。整条覆盖
+ * 会把云端已有的动画决策抹掉 —— 之后不管谁拉这条，动画那半永远是空的，导演于是再也
+ * 不切换样式，而缓存里明明放着别人做好的那一份。
+ *
+ * 所以回传前先把已有的那半捞回来：这条条目始终是「到目前为止知道的全部」。
+ *
+ * `previous` 是缓存里的原始内容，一律当不可信输入 —— 照样过一遍校验，脏数据不跟着回传。
+ */
+export const combineStageParts = (
+    previous: unknown,
+    fresh: StageParts,
+    blockedModes: readonly string[] = [],
+): StageParts => {
+    const known = normalizeStagePayload(previous, blockedModes) ?? {};
+    const theme = fresh.theme ?? known.theme;
+    const decision = fresh.decision ?? known.decision;
+    return {
+        ...(theme ? { theme } : {}),
+        ...(decision ? { decision } : {}),
+    };
 };
 
 /** 一次调用问两件事：主题 + 歌词动画。 */
@@ -382,6 +417,8 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
             const parts = normalizeStagePayload(payload, ctx.blockedModes);
             return parts && hasRequired(parts, ctx.requirement) ? parts : null;
         },
+        /* 回传前先把云端已有的那半捞回来，别让只出一半的生成结果把它抹掉。 */
+        combine: (previous, fresh) => combineStageParts(previous, fresh, ctx.blockedModes),
         songTitle: ctx.songTitle,
     });
     return { ...value, source };

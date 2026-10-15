@@ -83,6 +83,8 @@ const AiDirectorTab: React.FC<AiDirectorTabProps> = ({ isDaylight, onOpenSetting
             setStatusMessage({ type: 'info', text: t('aiDirector.queued'), nonce: Date.now() });
         } else if (outcome.kind === 'stale') {
             setStatusMessage({ type: 'info', text: t('aiDirector.stale'), nonce: Date.now() });
+        } else if (outcome.kind === 'unavailable') {
+            setStatusMessage({ type: 'info', text: t('aiDirector.unavailable'), nonce: Date.now() });
         }
     };
 
