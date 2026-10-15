@@ -746,7 +746,7 @@ Folium 1.5: which AI the host will ask, as configured in the host's own AI setti
 
 | 成员 | 类型 | 说明 |
 | --- | --- | --- |
-| `provider` | `'gemini' \| 'openai'` | The provider selected in Settings → AI. |
+| `provider` | `'gemini' \| 'openai' \| 'deepseek'` | The provider selected in Settings → AI. `deepseek` is an OpenAI-compatible endpoint with a fixed address, exposed as its own provider because the form then only has to ask for a key — the request still goes out through the OpenAI transport. |
 | `model` | `string` | The model actually sent; where the settings leave it blank the host fills in its own default. |
 
 ### FoliumAiCompletionRequest
