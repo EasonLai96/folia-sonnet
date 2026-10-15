@@ -13,9 +13,51 @@ import android.app.Application;
  */
 public class FoliaApplication extends Application {
 
+    /** 关着「同时播放」时给出去的那个：系统原装的 AudioManager。 */
+    private volatile Object plainAudioManager;
+    /** 开着时给出去的那个：把焦点回调换成空实现的 FoliaAudioManager。 */
+    private volatile Object mixedAudioManager;
+
     @Override
     public void onCreate() {
         super.onCreate();
         FoliaCrashHandler.install(this);
+    }
+
+    /**
+     * WebView 是通过 `getApplicationContext().getSystemService(AUDIO_SERVICE)` 拿
+     * AudioManager 的（Chromium 的 `AudioFocusDelegate`），所以这里是唯一能换掉它的地方。
+     *
+     * **只在 AUDIO_SERVICE 这一支上做区分**，其余一律走 super —— 这个方法是所有
+     * 系统服务的入口，任何多余的动作都会波及一大批调用方。
+     *
+     * 两个实例各自缓存：开关切换后 WebView 下一次请求焦点时会重新来问，那一问拿到
+     * 的就是新的那一个（正在响的那首仍沿用切换前的，见 FoliaAudioFocus 的说明）。
+     */
+    @Override
+    public Object getSystemService(String name) {
+        if (!android.content.Context.AUDIO_SERVICE.equals(name)) {
+            return super.getSystemService(name);
+        }
+        if (!top.izuna.foliamajor.audio.FoliaAudioFocus.mixWithOthers(this)) {
+            if (plainAudioManager == null) {
+                plainAudioManager = super.getSystemService(name);
+            }
+            return plainAudioManager;
+        }
+        if (mixedAudioManager == null) {
+            Object created;
+            try {
+                created = new top.izuna.foliamajor.audio.FoliaAudioManager(this);
+            } catch (Throwable error) {
+                /*
+                 * 继承 / 构造走不通（ROM 改过 AudioManager、hidden 构造被拦下）时
+                 * 退回原装那个：那不过是「同时播放」不生效，总好过整个应用起不来。
+                 */
+                created = super.getSystemService(name);
+            }
+            mixedAudioManager = created;
+        }
+        return mixedAudioManager;
     }
 }
