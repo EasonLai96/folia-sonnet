@@ -144,8 +144,9 @@ export interface FontListQuery {
   category?: string;
   /** 关键字，比字体名 / family / 分类。 */
   q?: string;
-  page?: number;
-  pageSize?: number;
+  /** 查询参数拿上来是字符串；`clampInt` 会把它归一成正整数。 */
+  page?: number | string;
+  pageSize?: number | string;
 }
 
 export interface FontListResult {

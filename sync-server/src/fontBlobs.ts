@@ -42,6 +42,16 @@ export const toBytes = (value: unknown): Uint8Array | null => {
     return null;
 };
 
+/*
+ * hono 的 `c.body()` 只收 `string | ArrayBuffer | ReadableStream`，
+ * `Uint8Array` 不在其中（TS 里 `Uint8Array<ArrayBufferLike>` 与 `ArrayBuffer`
+ * 并不兼容）。这里切出一份精确范围的 ArrayBuffer —— 不能直接拿
+ * `bytes.buffer`：那可能是整块共享内存，长度比这段数据大。
+ */
+export const toBodyBuffer = (bytes: Uint8Array): ArrayBuffer => (
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+);
+
 const tableOf = (kind: FontBlobKind): string => (kind === 'preview' ? 'font_previews' : 'font_files');
 
 /** Workers / 兜底：字节进 D1 自己的两张表。 */
