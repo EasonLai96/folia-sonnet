@@ -67,15 +67,20 @@ const readStoredSleepTimerEndAction = (): SleepTimerEndAction => {
 };
 
 /** `HH:MM` 还原成两个数；没存过给 23:00（一个不用解释的默认值）。 */
-const readStoredSleepTimerClock = (): { clockHour: number; clockMinute: number } => {
+/*
+ * 这里的键名必须和 `SleepTimerState` 里的字段名一致 —— 返回值是整体展开进 store 的
+ * （见下面 return 里的 `...readStoredSleepTimerClock()`），叫 clockHour 只会多出两个
+ * 没人读的字段，真正的 sleepTimerClockHour / sleepTimerClockMinute 反而一直是 undefined。
+ */
+const readStoredSleepTimerClock = (): { sleepTimerClockHour: number; sleepTimerClockMinute: number } => {
     const raw = typeof window === 'undefined' ? null : localStorage.getItem(SLEEP_TIMER_CLOCK_STORAGE_KEY);
     const matched = raw ? /^(\d{1,2}):(\d{2})$/.exec(raw) : null;
     if (!matched) {
-        return { clockHour: 23, clockMinute: 0 };
+        return { sleepTimerClockHour: 23, sleepTimerClockMinute: 0 };
     }
     return {
-        clockHour: clampSleepTimerClockHour(Number(matched[1])),
-        clockMinute: clampSleepTimerClockMinute(Number(matched[2])),
+        sleepTimerClockHour: clampSleepTimerClockHour(Number(matched[1])),
+        sleepTimerClockMinute: clampSleepTimerClockMinute(Number(matched[2])),
     };
 };
 
