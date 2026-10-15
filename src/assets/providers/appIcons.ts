@@ -2,7 +2,7 @@ import neteaseIcon from './netease.png';
 import qqMusicIcon from './qqmusic.webp';
 import kugouIcon from './kugou.webp';
 import bodianIcon from './bodian.webp';
-import feiniuIcon from './feiniu.svg';
+import feiniuIcon from './feiniu.png';
 import foliaIcon from './folia.svg';
 
 // src/assets/providers/appIcons.ts
