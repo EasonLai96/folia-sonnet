@@ -3,6 +3,7 @@ import { DualTheme, Theme } from '../types';
 // Shared helpers for persisted theme preferences and applied theme selection.
 
 export type ThemeAnimationIntensity = Theme['animationIntensity'];
+
 // Where a song theme comes from: the AI model reading the lyrics, or the cover's own palette.
 export type ThemeGenerationSource = 'ai' | 'cover';
 export type LastAppliedThemePointer = 'default' | 'ai' | 'custom';
@@ -15,7 +16,12 @@ export type ThemePreferenceSwitchState = {
 const THEME_ANIMATION_INTENSITY_KEY = 'theme_animation_intensity';
 const THEME_GENERATION_SOURCE_KEY = 'theme_generation_source';
 const THEME_AUTO_SWITCH_KEY = 'theme_auto_switch_enabled';
-const THEME_AUTO_GENERATE_KEY = 'theme_auto_generate_enabled';
+/*
+ * 键名升过版本：老版本把 `theme_auto_generate_enabled` 存成关闭，沿用旧键会让新版
+ * 的「默认打开」永远轮不到生效。改成 `.v2` 后读不到旧值，首次安装 / 升级用户都走
+ * 新的默认 `true`。
+ */
+const THEME_AUTO_GENERATE_KEY = 'theme_auto_generate_enabled.v2';
 const LAST_APPLIED_THEME_POINTER_KEY = 'last_applied_theme_pointer';
 
 const isBrowser = () => typeof window !== 'undefined';
@@ -94,10 +100,10 @@ export const saveStoredThemeAutoSwitchEnabled = (enabled: boolean) => {
 
 export const readStoredThemeAutoGenerateEnabled = () => {
     if (!isBrowser()) {
-        return false;
+        return true;
     }
 
-    return window.localStorage.getItem(THEME_AUTO_GENERATE_KEY) === 'true';
+    return window.localStorage.getItem(THEME_AUTO_GENERATE_KEY) !== 'false';
 };
 
 export const saveStoredThemeAutoGenerateEnabled = (enabled: boolean) => {

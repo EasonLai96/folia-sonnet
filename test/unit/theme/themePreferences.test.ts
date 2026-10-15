@@ -73,11 +73,21 @@ describe('themePreferences', () => {
         delete (globalThis as { window?: unknown; }).window;
     });
 
-    it('defaults automatic song theme generation to disabled', () => {
+    it('defaults automatic song theme generation to enabled', () => {
         (globalThis as { window?: { localStorage: Storage; }; }).window = {
             localStorage: createLocalStorageMock(),
         };
 
+        // 键名带 `.v2`：老版本落盘的 `false` 读不到，新默认值才轮得上生效。
+        expect(readStoredThemeAutoGenerateEnabled()).toBe(true);
+    });
+
+    it('lets a stored opt-out win over the new default', () => {
+        const localStorage = createLocalStorageMock();
+        (globalThis as { window?: { localStorage: Storage; }; }).window = { localStorage };
+
+        saveStoredThemeAutoGenerateEnabled(false);
+        expect(localStorage.getItem('theme_auto_generate_enabled.v2')).toBe('false');
         expect(readStoredThemeAutoGenerateEnabled()).toBe(false);
     });
 

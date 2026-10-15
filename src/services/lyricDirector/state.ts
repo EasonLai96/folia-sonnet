@@ -15,8 +15,11 @@
 // Subscribers get a version number, not the state: `useSyncExternalStore` needs
 // a value that is stable between writes, and every reader here is a plain
 // function call anyway.
+//
+// 键名从 _v1 升到 _v2：之前已经把全部布尔开关默认值改成 `true`，但没有换键名，
+// 导致老版本落盘的 `false` 继续生效，升级上来的用户看不见新默认值。
 
-const STORAGE_KEY = 'folia_lyric_director_v1';
+const STORAGE_KEY = 'folia_lyric_director_v2';
 const RECENT_LIMIT = 8;
 
 export interface LyricDirectorSettings {
