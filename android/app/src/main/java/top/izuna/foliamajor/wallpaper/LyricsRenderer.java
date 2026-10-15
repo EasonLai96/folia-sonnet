@@ -205,6 +205,28 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
     private String palettePrimary = null;
     private String paletteSecondary = null;
     /*
+     * AI 主题给**指定词**上的色（主题的 `wordColors`）。
+     *
+     * 这才是「AI 主题的效果」最显眼的那一块：生成 AI 主题时，模型会把歌词里有情绪的
+     * 那几个词各挑一个颜色，播放页画到那些字时**换成那个颜色**。这一层是原生 GLES
+     * 自绘的，原来只认「主文本色 + 高亮色」两个颜色，主题里的 wordColors 一个都没看，
+     * 于是 App 里换成 AI 主题之后桌面这层纹丝不动 —— 也就是用户说的
+     * 「AI 主题的高亮色没有」。
+     *
+     * 匹配规则复用悬浮小窗那一套（FloatingWordColors），同一个词在两边才会是同一个颜色。
+     */
+    private FloatingWordColors.Rule[] wordRules = FloatingWordColors.EMPTY;
+    /** 解析 wordRules 时用的那份 JSON，用来判断主题换没换。 */
+    private String wordThemeJson = null;
+    /** 上一次为哪一行摊过逐字颜色（见 charColorsFor）。 */
+    private WallpaperLyricsState.TimedLine charColorLine = null;
+    /** 那一次用的规则表：同一行但主题换过也要重算。 */
+    private FloatingWordColors.Rule[] charColorRules = null;
+    /** 行文本每个字符位置的颜色；NO_COLOR = 这个位置没被标色。 */
+    private int[] charColors = null;
+    /** endpointFor 的返回值容器：逐字画时每个字都要取一次，别每次新建数组。 */
+    private final float[] wordEndpoint = new float[3];
+    /*
      * 歌词那条**渐变**的两个端点。
      *
      * 整行歌词的颜色几乎全由这一对决定（见 QUAD_FRAGMENT：`grad` 铺满整行，
@@ -477,24 +499,21 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         }
         // 文本主色 / 次色跟主题走（见 primary / secondary 字段上的那段）。
         syncThemePalette();
+        // AI 主题给指定词上的色（见 wordRules 那段）。
+        syncWordRules();
         /*
          * 歌词渐变的两端（见 lyricTint 那段）。
          *
-         * 有主题配色就用**主题的真值**：高亮色 + 主文本色，两端都是 App 那边
-         * 正在用的颜色 —— AI 主题换上去，整条渐变跟着换。
-         * 没有（旧包 / 还没下发）才退回上面那对从 accent 派生出来的色，观感与以前一致。
+         * 高亮端**恒取主题的高亮色**：它是跟着 publish 一起下来的（Snapshot.accent），
+         * 不像主文本色那样要靠 Web 层额外下发那份 palette —— 依赖后者的话，那份缺席
+         * 时整个退回 HSV 派生的假色，AI 主题等于白换。另一端用主文本色，那份没下发
+         * 时退化成纯色，至少颜色本身是对的。
          *
          * 注意这里**不动** coverTint：那一对是给封面染色用的，换来源会把壁纸底图的
          * 配色也一起改掉 —— 那是另一件事，不该被歌词这边的修复捎上。
          */
-        if (palettePrimary == null) {
-            float[][] themeTints = tintsFromTheme(accentTarget);
-            lyricTintTarget = rgbOfHsv(themeTints[0]);
-            lyricTint2Target = rgbOfHsv(themeTints[1]);
-        } else {
-            lyricTintTarget = accentTarget;
-            lyricTint2Target = primaryTarget;
-        }
+        lyricTintTarget = accentTarget;
+        lyricTint2Target = palettePrimary == null ? accentTarget : primaryTarget;
         float blend = Math.min(1f, deltaSeconds * 3f);
         for (int i = 0; i < 3; i++) {
             accent[i] += (accentTarget[i] - accent[i]) * blend;
@@ -612,6 +631,93 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         } catch (Throwable error) {
             return fallback;
         }
+    }
+
+    /**
+     * 主题换过就重新解析一次 `wordColors`。
+     *
+     * 不能挂在 `Snapshot.stamp` 上：换主题走的是 setAppearance 那条路，它不动 stamp
+     * （stamp 只在换歌时变）—— 只认 stamp 的话，「暂停时换个 AI 主题」这边永远看不到。
+     * 所以每帧自己比一次 JSON 串：SharedPreferences 读出来的是同一份缓存对象，
+     * 绝大多数帧只是比个引用。
+     */
+    private void syncWordRules() {
+        String themeJson = WallpaperThemePalette.readThemeJson(context);
+        if (themeJson == null ? wordThemeJson == null : themeJson.equals(wordThemeJson)) {
+            return;
+        }
+        wordThemeJson = themeJson;
+        wordRules = FloatingWordColors.parse(themeJson);
+    }
+
+    /**
+     * 这一行**每个字符位置**各该是什么颜色（没被标到的位置是 NO_COLOR）。
+     *
+     * `FloatingWordColors.segments` 给的是「每个词占行文本哪一段」，而 drawPerChar 是按
+     * code point 逐个画的，所以要先摊平到字符位置上。
+     * 结果按行缓存：同一句在换行后的动画期间会被画几十帧，每帧摊一遍纯属浪费。
+     */
+    private int[] charColorsFor(WallpaperLyricsState.TimedLine line) {
+        if (wordRules.length == 0 || line == null) {
+            return null;
+        }
+        if (charColors != null && charColorLine == line && charColorRules == wordRules) {
+            return charColors;
+        }
+        String text = line.text;
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        int[] result = new int[text.length()];
+        java.util.Arrays.fill(result, FloatingWordColors.NO_COLOR);
+        FloatingWordColors.Segment[] segments =
+                FloatingWordColors.segments(text, line.words, wordRules);
+        for (int i = 0; i < segments.length; i++) {
+            FloatingWordColors.Segment segment = segments[i];
+            if (segment == null || segment.color == FloatingWordColors.NO_COLOR) {
+                continue;
+            }
+            int start = Math.max(0, segment.startOffset);
+            int end = Math.min(result.length, segment.endOffset);
+            for (int k = start; k < end; k++) {
+                result[k] = segment.color;
+            }
+        }
+        charColorLine = line;
+        charColorRules = wordRules;
+        charColors = result;
+        return result;
+    }
+
+    /**
+     * 第 codePointIndex 个字有没有被 AI 主题单独标色。
+     *
+     * @return null = 没有，走整行渐变；否则返回一个长度 3 的 rgb（容器复用）。
+     */
+    private float[] endpointFor(String text, int[] colors, int codePointIndex) {
+        if (colors == null || text == null || text.isEmpty()) {
+            return null;
+        }
+        int offset;
+        try {
+            // charBounds 是按 code point 切的，而 colors 是按 Java char 下标摊的。
+            offset = text.offsetByCodePoints(0, codePointIndex);
+        } catch (IndexOutOfBoundsException error) {
+            return null;
+        }
+        if (offset < 0 || offset >= colors.length) {
+            return null;
+        }
+        int color = colors[offset];
+        if (color == FloatingWordColors.NO_COLOR) {
+            return null;
+        }
+        // 不掺上面那套缓动、直接取目标值：词的专色是「有或没有」的离散事实，
+        // 走插值只会让换主题的那一瞬冒出一段谁都没选过的中间色。
+        wordEndpoint[0] = ((color >> 16) & 0xFF) / 255f;
+        wordEndpoint[1] = ((color >> 8) & 0xFF) / 255f;
+        wordEndpoint[2] = (color & 0xFF) / 255f;
+        return wordEndpoint;
     }
 
     /**
@@ -1146,7 +1252,8 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             float progress = (isSinging && style.textEffect <= 1) ? rowProgress : -1f;
 
             if (isSinging && style.textEffect == 3) {
-                drawPerChar(texture, y, width, height, alpha, rowProgress, lineStep);
+                drawPerChar(texture, y, width, height, alpha, rowProgress, lineStep,
+                        text, charColorsFor(snapshot.lines[i]));
             } else {
                 drawCentered(texture, y, width, height, alpha, progress, style.textEffect == 1);
             }
@@ -1243,7 +1350,8 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
      * 一整首歌），而按 UV 切只多几次 draw call。
      */
     private void drawPerChar(TextTexture texture, float centerYPx, float widthPx, float heightPx,
-                             float alpha, float lineProgress, float lineStep) {
+                             float alpha, float lineProgress, float lineStep,
+                             String lineText, int[] colors) {
         float[] bounds = texture.charBounds;
         int count = bounds == null ? 0 : bounds.length - 1;
         if (count <= 0 || widthPx <= 0f) {
@@ -1261,9 +1369,15 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             float u1 = bounds[c + 1] / texW;
             float charWidth = Math.max(1f, (u1 - u0) * widthPx);
             float rise = -lineStep * CHAR_RISE * easeOutCubic(t);
+            /*
+             * AI 主题给这个词单独指定的颜色：有就整条渐变的两端都换成它
+             * （两端同值 = 这个字是纯色，不再掺行渐变），没有就走整行那条。
+             * 和悬浮小窗同一个语义 —— 命中词的**唱过去的那一段**用它，没唱到的仍偏主文本色。
+             */
             drawTexturedQuad(texture.textureId, left + u0 * widthPx, top + rise,
                     charWidth, heightPx, primary[0], primary[1], primary[2], alpha,
-                    t, 0f, highlightBoost(), true, u0, 0f, u1 - u0, 1f);
+                    t, 0f, highlightBoost(), true, u0, 0f, u1 - u0, 1f,
+                    endpointFor(lineText, colors, c));
         }
     }
 
@@ -1331,6 +1445,19 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
                                   float heightPx, float r, float g, float b, float alpha,
                                   float progress, float useTextureColor, float glowBoost,
                                   boolean wholeLine, float uvX, float uvY, float uvW, float uvH) {
+        drawTexturedQuad(textureId, leftPx, topPx, widthPx, heightPx, r, g, b, alpha,
+                progress, useTextureColor, glowBoost, wholeLine, uvX, uvY, uvW, uvH, null);
+    }
+
+    /**
+     * @param endpoints 非 null 时整行渐变的**两个端点都换成它**（AI 主题给某个词的专色）。
+     *                  两端给同一个值 = 这一次画的东西是纯色，不再掺行渐变。
+     */
+    private void drawTexturedQuad(int textureId, float leftPx, float topPx, float widthPx,
+                                  float heightPx, float r, float g, float b, float alpha,
+                                  float progress, float useTextureColor, float glowBoost,
+                                  boolean wholeLine, float uvX, float uvY, float uvW, float uvH,
+                                  float[] endpoints) {
         if (quadProgram == 0) {
             return;
         }
@@ -1355,10 +1482,12 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         // 整行渐变的两个端点用**歌词专用**那一对，不再用封面的 coverTint：
         // 后者是从 accent 的 HSV 派生出来的「主题假色」，跟 AI 主题真正的配色不是一回事，
         // 而且着色器里 uColor 只掺 20%，端点色才是决定观感的那个。
+        float[] activeTint = endpoints == null ? lyricTint : endpoints;
+        float[] activeTint2 = endpoints == null ? lyricTint2 : endpoints;
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uActive"),
-                lyricTint[0], lyricTint[1], lyricTint[2]);
+                activeTint[0], activeTint[1], activeTint[2]);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uActive2"),
-                lyricTint2[0], lyricTint2[1], lyricTint2[2]);
+                activeTint2[0], activeTint2[1], activeTint2[2]);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(quadProgram, "uGlow"),
                 accent[0] * glowBoost, accent[1] * glowBoost, accent[2] * glowBoost);
         GLES20.glUniform1f(GLES20.glGetUniformLocation(quadProgram, "uAlpha"), alpha);
