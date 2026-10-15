@@ -2,15 +2,17 @@ import React from 'react';
 import { Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import SettingsSectionHeading from './navigation/SettingsSectionHeading';
-import { useDeviceProfileStore } from '../../../stores/useDeviceProfileStore';
-import type { DeviceType } from '../../../services/androidPhoneLayout';
+import { resolveCurrentUiScale, useDeviceProfileStore } from '../../../stores/useDeviceProfileStore';
+import UiScaleSlider from '../../shared/UiScaleSlider';
+import { resolveDeviceType, type DeviceType } from '../../../services/androidPhoneLayout';
 import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
 
 // src/components/modal/settings/DeviceTypeSetting.tsx
-// 设备类型（手机 / 平板）。首启引导里问过一次，这里随时改。
+// 设备类型（手机 / 平板）+ 界面缩放。首启引导里问过一次，这里随时改。
 //
-// 只影响横屏：选了手机的话横屏时整屏缩一档，同一块屏才塞得下桌面那套布局（见
-// services/androidPhoneLayout）。桌面端不问也不显示 —— 窗口多宽自己说了算。
+// 设备类型只影响横屏：选了手机的话横屏时再收一档，同一块屏才塞得下桌面那套布局（见
+// services/androidPhoneLayout）。缩放是另一回事，由滑条定，拉过一次就以它为准。
+// 桌面端不问也不显示 —— 窗口多宽自己说了算。
 
 const DEVICE_TYPES: readonly DeviceType[] = ['phone', 'tablet'];
 
@@ -28,6 +30,8 @@ const DeviceTypeSetting: React.FC<DeviceTypeSettingProps> = ({
     const { t } = useTranslation();
     const deviceType = useDeviceProfileStore(state => state.deviceType);
     const setDeviceType = useDeviceProfileStore(state => state.setDeviceType);
+    const uiScale = useDeviceProfileStore(state => state.uiScale);
+    const setUiScale = useDeviceProfileStore(state => state.setUiScale);
 
     if (!isAndroidNativeRuntime()) return null;
 
@@ -65,6 +69,14 @@ const DeviceTypeSetting: React.FC<DeviceTypeSettingProps> = ({
                         );
                     })}
                 </div>
+                <UiScaleSlider
+                    className="mt-4"
+                    isDaylight={isDaylight}
+                    accentColor={theme?.secondaryColor}
+                    value={resolveCurrentUiScale(uiScale, deviceType)}
+                    onChange={setUiScale}
+                    showCompactHint={resolveDeviceType(deviceType) === 'phone'}
+                />
             </div>
         </div>
     );

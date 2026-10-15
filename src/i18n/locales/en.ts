@@ -3987,6 +3987,11 @@ export default {
       "description": "Wide enough already — shown at full size in both orientations."
     }
   },
+  "uiScale": {
+    "title": "Interface scale",
+    "desc": "Shrinks the whole interface by this ratio — the smaller the number, the smaller the elements and the more that fits on one screen.",
+    "landscapeHint": "Phone landscape goes one step further ({{value}})."
+  },
   "userGuide": {
     "title": "Welcome to Folia",
     "subtitle": "Here are some tips to help you navigate.",

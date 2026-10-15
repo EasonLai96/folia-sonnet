@@ -3986,6 +3986,11 @@ export default {
       "description": "屏幕够宽，横竖屏都按原始尺寸显示。"
     }
   },
+  "uiScale": {
+    "title": "界面缩放",
+    "desc": "整屏按这个比例缩小 —— 数字越小，元素越小，同一块屏放得下的内容越多。",
+    "landscapeHint": "手机横屏时在这个基础上再收一档（{{value}}）。"
+  },
   "userGuide": {
     "title": "欢迎使用 Folia",
     "subtitle": "这里有一些提示，希望能帮到你。",

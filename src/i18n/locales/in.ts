@@ -3872,6 +3872,11 @@ export default {
       "description": "Layarnya sudah cukup lebar — ditampilkan ukuran penuh di kedua orientasi."
     }
   },
+  "uiScale": {
+    "title": "Skala antarmuka",
+    "desc": "Mengecilkan seluruh antarmuka sesuai rasio ini — makin kecil angkanya, makin kecil elemennya dan makin banyak yang muat di satu layar.",
+    "landscapeHint": "Lanskap ponsel turun satu tingkat lagi dari sini ({{value}})."
+  },
   "userGuide": {
     "title": "Selamat datang di Folia",
     "subtitle": "Berikut beberapa tips untuk membantu Anda menavigasi.",

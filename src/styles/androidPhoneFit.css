@@ -540,18 +540,25 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
 /* 手机上的 UI 尺度缩一档（等价于把这台机器的 dpi 调小：每一格元素变小，同一块屏反而放得下更多）。
  *
  * 两档：
- *   ① 在引导里明确选了「手机」→ 86%。竖屏也生效 —— 桌面那套按宽屏排的布局在这块屏上普遍偏大，
- *      一行放不下几个字、一屏摆不了几个控件。
- *   ② 手机横屏（compact）→ 76%，更紧一档：横过来之后元素互相遮挡得厉害。
- *      两条同时命中时以 ② 为准（同样特异性，靠书写顺序，所以 ② 必须写在后面）。
+ *   ① 竖屏 → `--folia-ui-scale-normal`（默认 86%，用户可调）。
+ *      竖屏也生效 —— 桌面那套按宽屏排的布局在这块屏上普遍偏大，一行放不下几个字、一屏摆不了几个控件。
+ *   ② 手机横屏（compact）→ `--folia-ui-scale-compact`（在 ① 上再收 10%，默认 76%）。
+ *      横过来之后元素互相遮挡得厉害。两条同时命中时以 ② 为准（同样特异性，靠书写顺序，
+ *      所以 ② 必须写在后面）。
  *
- * 早先是 92% / 86%，实测下来等于没缩：一档 8% 在 6 寸屏上就是几个像素，用户原话
- * 「缩出来的只有一点点，没什么区别」。这里各再往下压 6 个百分点 —— 再小就开始
- * 影响可点了（图标与文字一起缩），所以这已经是能一眼看出差别、又不至于戳不中的量。
+ * 数值**不写在这里**：机器之间差别太大（6 寸到 7 寸、系统字号调到最大的都有），写死一个数
+ * 必然两头不讨好 —— 早先写死 92% / 86%，实测下来等于没缩，用户原话「缩出来的只有一点点，
+ * 没什么区别」。现在改成引导 / 设置里的滑条（useDeviceProfileStore 的 uiScale，落在
+ * `folia_ui_scale`），由 androidPhoneLayout.applyDeviceProfile 写进这两个变量。
+ * 这里只负责**要不要**缩（按属性判定），不负责缩多少。
  *
  * ① 挂在 `data-folia-device-resolved` 而不是 `data-folia-device` 上：后者记的是用户的选择，
  * 没选过就是 `auto`，那批人（机器本来就是手机、只是没答过引导）竖屏就漏掉了 —— 而他们恰恰是
  * 最需要缩一档的人。resolved 是推断之后的结论，无论选没选都一样，竖屏横屏才不会跳档。
+ *
+ * 平板也挂一条：默认 100%（等于没缩，与加这条之前完全一致），但平板上想再小一点的
+ * 也能拉滑条 —— 同一个滑条就该对所有设备类型生效，否则「选了平板就怎么拉都没反应」
+ * 又是个说不清的坑。
  *
  * 缩的是根字号（rem 基准），不是整个文档。早先用的是 `html { zoom: 0.86 }`，实测下来是错的：
  * zoom 只把元素画小，layout viewport 一点没变 —— 776px 的视口里，100vw 的元素算出来只有 667px，
@@ -561,11 +568,15 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
  * 改成动 rem 基准就干净了：Tailwind 的间距、字号、圆角几乎全是 rem，会按比例缩小；
  * % / flex / dvh 这类弹性布局原样保留，该铺满的继续铺满，fixed 弹层也不受影响。 */
 html[data-folia-device-resolved='phone'] {
-  font-size: 86%;
+  font-size: var(--folia-ui-scale-normal, 86%);
+}
+
+html[data-folia-device-resolved='tablet'] {
+  font-size: var(--folia-ui-scale-normal, 100%);
 }
 
 html[data-folia-ui-scale='compact'] {
-  font-size: 76%;
+  font-size: var(--folia-ui-scale-compact, 76%);
 }
 
 /* 横屏（compact）下被打穿的三处 —— 都是「竖向空间按桌面那套 px 算」。
