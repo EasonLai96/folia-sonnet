@@ -464,10 +464,10 @@ const buildPreview = async () => {
  * 一个明确的落点 —— 否则界面只是把表单清空，看不出成功没成功。
  */
 let thanksTimer = 0;
-const showUploadThanks = (fontName) => {
+const showUploadThanks = () => {
   const node = document.getElementById('upload-thanks');
   if (!node) return;
-  node.textContent = '感谢你的贡献，' + fontName + ' 已上架';
+  node.textContent = '上传成功，感谢你的贡献。';
   node.hidden = false;
   window.clearTimeout(thanksTimer);
   thanksTimer = window.setTimeout(() => { node.hidden = true; }, 6000);
@@ -499,7 +499,7 @@ const uploadFont = async () => {
     document.getElementById('preview-holder').innerHTML = '';
     previewBlob = null;
     errorNode.textContent = '';
-    showUploadThanks(fontName);
+    showUploadThanks();
     await refreshAll();
   } catch (error) {
     errorNode.textContent = '上传失败：' + String(error?.message || error);
