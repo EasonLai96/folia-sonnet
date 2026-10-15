@@ -26,6 +26,7 @@ import {
     replacePlaybackSongInQueue,
     resolveNavidromePlaybackCarrier,
 } from '../utils/appPlaybackGuards';
+import { freshFmSongs } from '../utils/fmQueue';
 import { applyQueueAddBehavior } from '../utils/queueAddBehavior';
 import { moveQueueItem } from '../utils/queueReorder';
 import { buildShuffledQueue } from '../utils/playbackShuffle';
@@ -1028,7 +1029,9 @@ export function usePlaybackQueueController({
 
         if (isFmMode && currentIndex >= playQueue.length - 2) {
             try {
-                const fmSongs = await omni.getPersonalFm();
+                // 只接队列里还没有的歌：重复的歌会让按歌曲键找当前曲目时跳回前一次的位置。整批都重复就当这次没续上，
+                // 照常往下走，下一首时再续。
+                const fmSongs = freshFmSongs(playQueue, await omni.getPersonalFm());
                 if (fmSongs.length > 0) {
                     const nextQueue = [...playQueue, ...fmSongs];
                     setPlayQueue(nextQueue);

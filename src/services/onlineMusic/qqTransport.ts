@@ -10,12 +10,17 @@ export const QQ_OPERATIONS = [
     'login_qr_key', 'login_qr_create', 'login_qr_check', 'login_qr_cancel', 'login_status', 'logout',
     'login_channels',
     'user_detail', 'user_playlist', 'user_albums', 'user_liked_songs', 'user_playlist_detail',
+    'user_guess_you_like', 'user_daily_songs', 'recommend_playlists',
+    'user_playlist_tracks', 'user_playlist_subscribe', 'user_subscription_status',
     'music_play', 'song_list_detail', 'song_info',
     'album_info', 'artist_albums', 'artist_songs',
 ] as const;
 
 export type QqOperation = typeof QQ_OPERATIONS[number];
 export type QqParams = Record<string, string | number | boolean | undefined>;
+
+// 3.3.0 的写入路由只收 POST + JSON 正文；GET 会回 405。
+const POST_OPERATIONS: ReadonlySet<QqOperation> = new Set<QqOperation>(['user_playlist_tracks', 'user_playlist_subscribe']);
 
 const ENDPOINTS: Record<QqOperation, string> = {
     login_qr_key: '/login/qr/key',
@@ -33,6 +38,14 @@ const ENDPOINTS: Record<QqOperation, string> = {
     // 带凭据地读登录用户自己的歌单。匿名的 `song_list_detail` 读不了不公开的歌单，这条可以。
     // 与 `login_channels` 同样的处境：旧后端没有这条路由，回 404，调用方要当成「没有声明」。
     user_playlist_detail: '/user/playlist-detail',
+    // 以下是 3.2.0 / 3.3.0 新增的路由：推荐三条要登录（推荐歌单可匿名），写入两条只对本人的歌单生效。
+    // 旧后端一律 404，transport 照例报成 `unsupported`，由调用方决定回落还是报错。
+    user_guess_you_like: '/user/guess-you-like',
+    user_daily_songs: '/user/daily-songs',
+    recommend_playlists: '/recommend/playlists',
+    user_playlist_tracks: '/user/playlist/tracks',
+    user_playlist_subscribe: '/user/playlist/subscribe',
+    user_subscription_status: '/user/subscription-status',
     music_play: '/getMusicPlay',
     song_list_detail: '/getSongListDetail',
     song_info: '/getSongInfo',
@@ -191,11 +204,20 @@ const readJsonBody = async (response: Response): Promise<any> => {
 };
 
 // 后端失败正文的原文：多数路由写在 `message`，播放等路由的 500 只给 `{ error }`（observability.js），两处都认。
+// 3.2.0 起的新路由另带固定的 `errorKey`（如 `playlist.already-applied`）与可选的上游数字码，`message` 只是通用英文，
+// 所以把这两样一起写进原文，诊断里才看得出是哪一类失败。
 const readBackendMessage = (failure: any): string => {
+    let text = '';
     for (const candidate of [failure?.message, failure?.error]) {
-        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+        if (typeof candidate === 'string' && candidate.trim()) {
+            text = candidate.trim();
+            break;
+        }
     }
-    return '';
+    const errorKey = typeof failure?.errorKey === 'string' ? failure.errorKey.trim() : '';
+    const upstreamCode = Number.isSafeInteger(failure?.upstreamCode) ? ` upstream ${failure.upstreamCode}` : '';
+    if (!errorKey) return text;
+    return `${errorKey}${upstreamCode}${text ? `: ${text}` : ''}`;
 };
 
 // 后端对没配好的能力回 501（serverless 入口缺少配置），重试不会变好，与普通 5xx 分开。
@@ -304,12 +326,15 @@ const endpointFor = (operation: QqOperation, params: QqParams): { path: string; 
 };
 
 // Routes one provider request through the embedded Electron server or the configured Web base URL.
+// 写入路由（POST_OPERATIONS）的参数放在 JSON 正文 `payload` 里；会话照旧走 header 或 `?cookie=`，后端两条路由都认。
 const requestQqOnce = async <T = unknown>(
     operation: QqOperation,
     params: QqParams,
     base: string,
     style: QqEndpointStyle,
+    payload?: Record<string, unknown>,
 ): Promise<T> => {
+    const isPost = POST_OPERATIONS.has(operation);
     const endpoint = endpointFor(operation, params);
     const query = new URLSearchParams();
     Object.entries(endpoint.query).forEach(([key, value]) => {
@@ -332,11 +357,14 @@ const requestQqOnce = async <T = unknown>(
     // Same-origin serverless calls must retain deployment-protection cookies; external qq-music-api instances
     // answer with `Access-Control-Allow-Origin: *`, so those requests still omit browser credentials.
     const credentials: RequestCredentials = isSameOriginBase(base) ? 'same-origin' : 'omit';
+    const init: RequestInit = isPost
+        ? { method: 'POST', credentials, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+        : { credentials, headers };
     let response: Response;
     try {
         response = await fetchWithTimeout(
             buildRequestUrl(base, style, endpoint.path, query.toString()),
-            { credentials, headers },
+            init,
         );
     } catch (error) {
         // 连后端本身都没连上（内嵌后端退出、远端不可达），与后端回了错误码分开。
@@ -370,9 +398,13 @@ const requestQqOnce = async <T = unknown>(
                 response.status,
             );
         }
-        const upstreamCode = response.status === 500 ? readUpstreamRefusalCode(backendText) : undefined;
+        // 3.2.0 起网关码与凭证拒绝码同时出现时，带凭证的旧路由（取链、歌单、登录态）改回 502，正文仍是同一个协议模板
+        // （GatewayCredentialConflictError）。新路由的 502 带 errorKey，是另一套信封，不在这里认。
+        const isLegacyRefusalStatus = response.status === 500
+            || (response.status === 502 && typeof failure?.errorKey !== 'string');
+        const upstreamCode = isLegacyRefusalStatus ? readUpstreamRefusalCode(backendText) : undefined;
         if (upstreamCode !== undefined) {
-            // 这个 500 只是后端的外壳，上游其实应答了：与酷狗 Web 端的 502 同理不传 httpStatus、带上 upstreamCode，
+            // 这个 500 / 502 只是后端的外壳，上游其实应答了：与酷狗 Web 端的 502 同理不传 httpStatus、带上 upstreamCode，
             // 分类器读成 unknown（暂时无法播放），汇总也不把它算作服务异常，不触发 provider 冷却。
             throw new OnlineProviderError(
                 'network',
@@ -416,10 +448,22 @@ const isNetworkLevelFailure = (error: unknown): boolean => {
         && /failed to fetch|networkerror|network request failed|load failed/i.test(error.message);
 };
 
-export const requestQq = async <T = unknown>(operation: QqOperation, params: QqParams = {}): Promise<T> => {
+export const requestQq = async <T = unknown>(
+    operation: QqOperation,
+    params: QqParams = {},
+    payload?: Record<string, unknown>,
+): Promise<T> => {
+    // 写入路由必须带正文、读路由不能带：早报出来，别等后端回一个看不懂的错误。
+    if (POST_OPERATIONS.has(operation) !== (payload !== undefined)) {
+        throw new OnlineProviderError(
+            'invalid-response',
+            `QQMusicApi ${operation} ${POST_OPERATIONS.has(operation) ? 'requires' : 'does not take'} a request body`,
+            'qq',
+        );
+    }
     const { base, embedded } = await resolveApiBase();
     // 内嵌的 qq-music-api 就是一个 Express 应用，只有路径式一种拼法，不需要试错。
-    if (embedded) return requestQqOnce<T>(operation, params, base, 'path');
+    if (embedded) return requestQqOnce<T>(operation, params, base, 'path', payload);
 
     // 本地登录：请求交给内置在 App 里的接口代码，不出网、也不经过任何自建后端。
     if (isFoliaExtensionBridgeConfigured(base)) {
@@ -428,9 +472,10 @@ export const requestQq = async <T = unknown>(operation: QqOperation, params: QqP
             const body = await requestFoliaExtension<any>({
                 provider: 'qq',
                 operation,
-                method: 'GET',
+                method: POST_OPERATIONS.has(operation) ? 'POST' : 'GET',
                 path: endpoint.path,
                 params: endpoint.query,
+                ...(payload === undefined ? {} : { body: payload }),
             });
             if (body?.__foliaBridgeError) {
                 if (body.__foliaBridgeError === 'AUTH_REQUIRED') {
@@ -452,7 +497,7 @@ export const requestQq = async <T = unknown>(operation: QqOperation, params: QqP
     const preferred = webEndpointStyle;
     const fallback: QqEndpointStyle = preferred === 'query' ? 'path' : 'query';
     try {
-        return await requestQqOnce<T>(operation, params, base, preferred);
+        return await requestQqOnce<T>(operation, params, base, preferred, payload);
     } catch (error) {
         // 值得换拼法的只有两种：「后端根本没有这条路由」的 404，以及拼错地址时被
         // 浏览器吞掉、只剩网络级错误的情况。其余失败（401 / 429 / 上游拒收）如实上抛。
@@ -463,7 +508,7 @@ export const requestQq = async <T = unknown>(operation: QqOperation, params: QqP
             ? error.httpStatus === 404 || (error.code === 'network' && isNetworkLevelFailure(error))
             : isNetworkLevelFailure(error);
         if (!worthRetrying) throw error;
-        const result = await requestQqOnce<T>(operation, params, base, fallback);
+        const result = await requestQqOnce<T>(operation, params, base, fallback, payload);
         // 仅在备用拼法真的成功时才改偏好：路由本身不存在的 404 两边都会失败，不会走到这里。
         webEndpointStyle = fallback;
         return result;

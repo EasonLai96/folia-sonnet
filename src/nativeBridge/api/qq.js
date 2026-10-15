@@ -1803,3 +1803,243 @@ export async function handleQQLyric(mid, id, cookieHeader) {
 
 export { getQQCookie, mapQQTrack, qqSongDetail };
 export { qqMusicRequest, qqGetJSON, buildQQAuthComm, qqSongDetailsBatch };
+
+// ---- qq-music-api 3.2.0 / 3.3.0 的新路由：推荐与写入 ----
+//
+// module / method / param 一字不改照抄上游后端的 services/recommend 与 services/user，
+// 差别只在凭据：上游后端是 Android 端会话（comm 里带设备信息），本地桥手里只有网页 /
+// 扫码登录拿到的 cookie，所以沿用曲库一直在用的 buildQQAuthComm。推荐歌单实测匿名可读，
+// 日推与猜你喜欢要登录 —— 没有会话时上游回 401，本地桥同样报 AUTH_REQUIRED，
+// 不让「没登录」伪装成「没有推荐」。
+//
+// 与上游同一条约定：读不出来就是空结果（上游是 422 / 404，本地桥回空数组），
+// 只有「明确说了没改动」才回 changed:false —— 前端据此报错，不会假装成功。
+
+/** QQ 上游表示「不认这个凭据」的业务码。 */
+const QQ_LOGIN_REQUIRED_CODE = 1000;
+
+/**
+ * musicu 的两层码：整体一个，req_0 里还有一个（外加 subcode）。
+ * 任一层非零都不是成功；1000 单独认出来，交给调用方当成「登录失效」而不是空数据。
+ */
+function qqMusicuRead(json) {
+  const gatewayCode = Number(json && json.code);
+  if (!json || !Number.isFinite(gatewayCode) || gatewayCode !== 0) {
+    return { ok: false, loginRequired: false, code: gatewayCode, data: null };
+  }
+  const block = json.req_0;
+  if (!block || typeof block !== 'object') return { ok: false, loginRequired: false, code: -1, data: null };
+  const code = Number(block.code);
+  const subcode = block.subcode === undefined ? 0 : Number(block.subcode);
+  if (!Number.isFinite(code) || code !== 0 || (Number.isFinite(subcode) && subcode !== 0)) {
+    return { ok: false, loginRequired: code === QQ_LOGIN_REQUIRED_CODE, code, data: null };
+  }
+  return { ok: true, loginRequired: false, code: 0, data: block.data };
+}
+
+async function qqMusicuCall(module, method, param, cookieHeader, extraComm) {
+  const json = await qqMusicRequest({
+    comm: buildQQAuthComm(cookieHeader, extraComm),
+    req_0: { module, method, param },
+  }, cookieHeader);
+  return qqMusicuRead(json);
+}
+
+const qqAuthRequired = (where) => ({
+  __foliaBridgeError: 'AUTH_REQUIRED',
+  message: `QQ ${where}: login required`,
+});
+
+const qqBridgeFailure = (where, code) => ({
+  __foliaBridgeError: 'NETWORK',
+  message: `QQ ${where} failed (code ${code})`,
+});
+
+/** 私人 FM（猜你喜欢）。上游实测 num 再大也只回 5 首，参数照抄。 */
+export async function handleQQGuessYouLike(cookieHeader) {
+  const result = await qqMusicuCall(
+    'music.radioProxy.MbTrackRadioSvr', 'get_radio_track',
+    { id: 99, firstplay: 1, num: 15 },
+    cookieHeader,
+  );
+  if (!result.ok) return result.loginRequired ? qqAuthRequired('guess-you-like') : { code: 0, songs: [] };
+  const tracks = Array.isArray(result.data && result.data.tracks) ? result.data.tracks : [];
+  return { code: 0, songs: tracks };
+}
+
+/** 每日 30 首。dirid 202 是上游实测的「日推」目录。 */
+export async function handleQQDailySongs(cookieHeader) {
+  const result = await qqMusicuCall(
+    'music.srfDissInfo.aiDissInfo', 'uniform_get_Dissinfo',
+    { dirid: 202, optype: 3, tag: 1, userinfo: 0, pic_dpi: 300 },
+    cookieHeader,
+  );
+  if (!result.ok) return result.loginRequired ? qqAuthRequired('daily-songs') : { code: 0, songs: [] };
+  const songs = Array.isArray(result.data && result.data.songlist) ? result.data.songlist : [];
+  return { code: 0, songs };
+}
+
+/** 推荐歌单一次最多 60 张（上游实测）。 */
+const QQ_RECOMMEND_PLAYLISTS_MAX = 60;
+
+/**
+ * `/recommend/playlists` 的条目摊平成歌单列表认得的样子（tid / title / picurl / songnum /
+ * creator）。没有可用 tid 的条目读不了歌，跳过 —— 与上游同一个判定。
+ */
+function qqRecommendPlaylistRow(entry) {
+  const basic = entry && entry.Playlist && entry.Playlist.basic;
+  const tid = Number(basic && basic.tid);
+  if (!Number.isSafeInteger(tid) || tid <= 0) return null;
+  const cover = basic.cover && typeof basic.cover === 'object' ? basic.cover : {};
+  const creator = basic.creator && typeof basic.creator === 'object' ? basic.creator : {};
+  const songnum = Number(basic.song_cnt);
+  const playCount = Number(basic.play_cnt);
+  return {
+    tid,
+    title: String(basic.title || ''),
+    desc: String(basic.desc || ''),
+    picurl: String(cover.default_url || cover.big_url || cover.medium_url || cover.small_url || ''),
+    ...(Number.isSafeInteger(songnum) && songnum >= 0 ? { songnum } : {}),
+    ...(Number.isSafeInteger(playCount) && playCount >= 0 ? { play_cnt: playCount } : {}),
+    creator: {
+      ...(creator.uin !== undefined ? { uin: creator.uin } : {}),
+      ...(creator.encrypt_uin !== undefined ? { encrypt_uin: creator.encrypt_uin } : {}),
+      ...(creator.nick !== undefined ? { nick: creator.nick } : {}),
+      ...(creator.avatar !== undefined ? { avatar: creator.avatar } : {}),
+    },
+  };
+}
+
+export async function handleQQRecommendPlaylists(limit, cookieHeader) {
+  const size = Math.min(
+    QQ_RECOMMEND_PLAYLISTS_MAX,
+    Math.max(1, Math.floor(Number(limit)) || 25),
+  );
+  const result = await qqMusicuCall(
+    'music.playlist.PlaylistSquare', 'GetRecommendFeed',
+    { From: 0, Size: size },
+    cookieHeader,
+  );
+  if (!result.ok) {
+    return result.loginRequired ? qqAuthRequired('recommend-playlists') : { code: 0, playlists: [] };
+  }
+  const list = Array.isArray(result.data && result.data.List) ? result.data.List : [];
+  return {
+    code: 0,
+    playlists: list.map(qqRecommendPlaylistRow).filter(Boolean).slice(0, size),
+    more: result.data.HasMore === true,
+  };
+}
+
+/**
+ * 往自建歌单加歌删歌。与上游同一条准入：先按 uin 取回本人目录，只有目录号 1–199、
+ * 没有系统类型标记、tid 对得上的歌单才写 —— 「我喜欢」是 201，另有红心接口，不走这里。
+ */
+export async function handleQQPlaylistTracksWrite(input, cookieHeader) {
+  const tid = Number(input && input.tid);
+  const op = String((input && input.op) || '');
+  const songs = Array.isArray(input && input.songs) ? input.songs : [];
+  if (!Number.isSafeInteger(tid) || tid <= 0 || (op !== 'add' && op !== 'del')
+    || songs.length === 0 || songs.length > 100) {
+    return { __foliaBridgeError: 'UNSUPPORTED', message: 'QQ playlist tracks: bad input' };
+  }
+  const uin = qqCookieUin(cookieHeader);
+  if (!uin) return qqAuthRequired('playlist-tracks');
+  const vSongInfo = songs.map((song) => ({
+    songId: Number(song && song.id),
+    songType: Number(song && song.type) || 0,
+  }));
+  if (vSongInfo.some((song) => !Number.isSafeInteger(song.songId) || song.songId <= 0)) {
+    return { __foliaBridgeError: 'UNSUPPORTED', message: 'QQ playlist tracks: bad song id' };
+  }
+
+  const owned = await qqMusicuCall(
+    'music.musicasset.PlaylistBaseRead', 'GetPlaylistByUin',
+    { uin: Number(uin) || uin },
+    cookieHeader,
+  );
+  if (!owned.ok) return owned.loginRequired ? qqAuthRequired('playlist-tracks') : { code: 0, changed: false };
+  const rows = Array.isArray(owned.data && owned.data.v_playlist) ? owned.data.v_playlist : [];
+  const playlist = rows.find((row) => Number(row && row.tid) === tid);
+  const dirId = Number(playlist && playlist.dirId);
+  if (!playlist || !Number.isSafeInteger(dirId) || dirId < 1 || dirId >= 200) return { code: 0, changed: false };
+  if (playlist.dirType !== undefined && Number(playlist.dirType) !== 0) return { code: 0, changed: false };
+
+  const write = await qqMusicuCall(
+    'music.musicasset.PlaylistDetailWrite',
+    op === 'add' ? 'AddSonglist' : 'DelSonglist',
+    { dirId, v_songInfo: vSongInfo },
+    cookieHeader,
+  );
+  if (!write.ok) {
+    return write.loginRequired ? qqAuthRequired('playlist-tracks') : { code: 0, changed: false };
+  }
+  const data = write.data && typeof write.data === 'object' ? write.data : {};
+  // 上游的逐首 existed 实测不能说明歌曲原本在不在，所以只看整体：回了同一个目录 / 歌单才算改动，
+  // 全零是「删空了」那种成功。前端遇到 changed:false 会报错，不会假装更新成功。
+  const changed = (Number(data.dirId) === dirId && Number(data.tid) === tid)
+    || (Number(data.dirId) === 0 && (data.tid === 0 || String(data.tid) === '0'));
+  return { code: 0, changed };
+}
+
+/** 收藏 / 取消收藏歌单（不是「我喜欢」，那是目录 201）。 */
+export async function handleQQPlaylistSubscribe(input, cookieHeader) {
+  const tid = Number(input && input.tid);
+  const subscribed = (input && input.subscribed) === true || String((input && input.subscribed)) === 'true';
+  if (!Number.isSafeInteger(tid) || tid <= 0) {
+    return { __foliaBridgeError: 'UNSUPPORTED', message: 'QQ playlist subscribe: bad tid' };
+  }
+  const uin = qqCookieUin(cookieHeader);
+  if (!uin) return qqAuthRequired('playlist-subscribe');
+  const result = await qqMusicuCall(
+    'music.musicasset.PlaylistFavWrite',
+    subscribed ? 'FavPlaylist' : 'CancelFavPlaylist',
+    { uin: Number(uin) || uin, v_playlistId: [tid] },
+    cookieHeader,
+  );
+  if (!result.ok) {
+    return result.loginRequired
+      ? qqAuthRequired('playlist-subscribe')
+      : qqBridgeFailure('playlist-subscribe', result.code);
+  }
+  return { code: 0, subscribed };
+}
+
+/**
+ * 查收藏状态。查不出来回 unknown，前端会报错而不是当成「没收藏」—— 收藏按钮宁可空着，
+ * 也不能显示成未收藏然后一点就取消。
+ */
+export async function handleQQSubscriptionStatus(type, ids, cookieHeader) {
+  const requested = String(ids || '').split(',').map((id) => id.trim()).filter(Boolean);
+  if (requested.length === 0 || requested.length > 100) return { code: 0, items: [] };
+  const uin = qqCookieUin(cookieHeader);
+  if (!uin) return qqAuthRequired('subscription-status');
+
+  const protocol = type === 'playlist'
+    ? {
+      module: 'music.musicasset.PlaylistFavRead',
+      method: 'IsPlaylistFan',
+      param: { v_tid: requested.map((id) => Number(id)).filter((id) => Number.isSafeInteger(id) && id > 0) },
+    }
+    : {
+      module: 'music.musicasset.AlbumFavRead',
+      method: 'IsAlbumFan',
+      param: { uin: Number(uin) || uin, v_albumMid: requested },
+    };
+  if (protocol.param.v_tid && protocol.param.v_tid.length === 0) return { code: 0, items: [] };
+
+  const result = await qqMusicuCall(protocol.module, protocol.method, protocol.param, cookieHeader);
+  if (!result.ok) {
+    return result.loginRequired ? qqAuthRequired('subscription-status') : { code: 0, items: [] };
+  }
+  const fan = result.data && result.data.m_fan && typeof result.data.m_fan === 'object'
+    ? result.data.m_fan
+    : {};
+  return {
+    code: 0,
+    items: requested.map((id) => ({
+      id,
+      status: fan[id] === true ? 'subscribed' : fan[id] === false ? 'not-subscribed' : 'unknown',
+    })),
+  };
+}

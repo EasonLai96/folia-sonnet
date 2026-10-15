@@ -70,6 +70,19 @@ describe('presentPlaybackFailure', () => {
         expect(input.skip).toHaveBeenCalledOnce();
     });
 
+    it('counts down for a network failure as well, with a one-song budget', () => {
+        const { deps, present } = setup();
+        present();
+        expect(deps.showTimedSkipPrompt).toHaveBeenCalledWith('status.playbackErrorPrompt', expect.any(Function));
+        expect(deps.audioRef.current.pause).not.toHaveBeenCalled();
+
+        // 断网的预算只有一首：跳走之后还错就停在消息上，不在后台一首接一首地空转。
+        const again = setup({ skipCount: 1 });
+        again.present();
+        expect(again.deps.showTimedSkipPrompt).not.toHaveBeenCalled();
+        expect(again.deps.setPlayerState).toHaveBeenCalledWith(PlayerState.IDLE);
+    });
+
     it.each([
         ['the automatic skips are used up', { skipCount: 2 }],
         ['there is no next song', { skip: undefined }],
@@ -82,7 +95,8 @@ describe('presentPlaybackFailure', () => {
     });
 
     it('stops playback and offers retry and skip for a network failure', () => {
-        const { deps, message, present } = setup();
+        // 断网也先跳一首（后台停在原地就是「放着放着没声了」），预算用尽后才落到这条带按钮的消息。
+        const { deps, message, present } = setup({ skipCount: 1 });
         present();
         expect(deps.shouldAutoPlayRef.current).toBe(false);
         expect(deps.audioRef.current.pause).toHaveBeenCalledOnce();
@@ -95,13 +109,13 @@ describe('presentPlaybackFailure', () => {
     });
 
     it('pauses rather than idles for a mid-playback failure', () => {
-        const { deps, present } = setup({ context: 'mid-playback' });
+        const { deps, present } = setup({ context: 'mid-playback', skipCount: 1 });
         present();
         expect(deps.setPlayerState).toHaveBeenCalledWith(PlayerState.PAUSED);
     });
 
     it('re-checks the request and clears the message before running a button action', () => {
-        const { calls, message, present } = setup();
+        const { calls, message, present } = setup({ skipCount: 1 });
         present();
         const shown = message()!;
 
@@ -113,7 +127,7 @@ describe('presentPlaybackFailure', () => {
 
     it('lets a stale button dismiss its own message without running the action', () => {
         let current = true;
-        const { input, message, present } = setup({ isCurrent: () => current });
+        const { input, message, present } = setup({ isCurrent: () => current, skipCount: 1 });
         present();
         const shown = message()!;
 
@@ -128,7 +142,7 @@ describe('presentPlaybackFailure', () => {
 
     it('leaves a newer message alone when a stale button is pressed', () => {
         let current = true;
-        const { deps, input, message, present } = setup({ isCurrent: () => current });
+        const { deps, input, message, present } = setup({ isCurrent: () => current, skipCount: 1 });
         present();
         const shown = message()!;
         const newer: StatusMessage = { type: 'info', text: 'status.loadingSong' };
@@ -152,7 +166,7 @@ describe('presentPlaybackFailure', () => {
     });
 
     it('offers only skip when retrying cannot help', () => {
-        const { message, present } = setup({ failure: { reason: 'not-signed-in', stage: 'resolve-url' } });
+        const { message, present } = setup({ failure: { reason: 'not-signed-in', stage: 'resolve-url' }, skipCount: 1 });
         present();
         expect(message()).toMatchObject({
             text: 'status.songLoginRequired', actionLabel: 'status.skipUnavailableAction', cancelLabel: 'status.cancel',

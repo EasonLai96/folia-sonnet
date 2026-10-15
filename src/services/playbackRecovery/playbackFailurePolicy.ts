@@ -107,7 +107,7 @@ export const PLAYBACK_FAILURE_POLICY: Readonly<Record<PlaybackFailureReason, Pla
     unknown: stopWithRetry('status.songTemporarilyUnavailable'),
 };
 
-/** 文案及其变体：限流带等待秒数、服务未配置、证据不足但登录可能有用。 */
+/** 文案及其变体：限流带等待秒数、服务未配置、证据不足但登录可能有用或后端认出了「可能」原因。 */
 export const getPlaybackFailureMessage = (
     failure: PlaybackFailure,
 ): { key: PlaybackFailureMessageKey; params?: { seconds: number } } => {
@@ -132,7 +132,13 @@ export const getPlaybackFailureMessage = (
         case 'service-unavailable':
             return { key: failure.transient === false ? 'status.songServiceNotConfigured' : 'status.songServiceUnavailable' };
         case 'unknown':
-            return { key: failure.hint ? 'status.songTemporarilyUnavailableSignInHint' : 'status.songTemporarilyUnavailable' };
+            // 「可能」原因只换一句带「可能」的话，原因与策略仍是 unknown（证据不足，保留重试）。
+            switch (failure.hint) {
+                case 'sign-in-may-help': return { key: 'status.songTemporarilyUnavailableSignInHint' };
+                case 'maybe-membership': return { key: 'status.songTemporarilyUnavailableMaybeMembership' };
+                case 'maybe-region-restricted': return { key: 'status.songTemporarilyUnavailableMaybeRegion' };
+                default: return { key: 'status.songTemporarilyUnavailable' };
+            }
         default:
             return { key: PLAYBACK_FAILURE_POLICY[failure.reason].messageKey };
     }
@@ -190,6 +196,8 @@ const MESSAGE_KEY_REGISTRY: Record<PlaybackFailureMessageKey, true> = {
     'status.songRateLimitedNoWait': true,
     'status.songTemporarilyUnavailable': true,
     'status.songTemporarilyUnavailableSignInHint': true,
+    'status.songTemporarilyUnavailableMaybeMembership': true,
+    'status.songTemporarilyUnavailableMaybeRegion': true,
 };
 
 /**

@@ -32,6 +32,12 @@ import {
   qqGetJSON,
   buildQQAuthComm,
   qqSongDetailsBatch,
+  handleQQGuessYouLike,
+  handleQQDailySongs,
+  handleQQRecommendPlaylists,
+  handleQQPlaylistTracksWrite,
+  handleQQPlaylistSubscribe,
+  handleQQSubscriptionStatus,
 } from './qq.js';
 import {
   qqWechatGetLoginQr,
@@ -981,6 +987,32 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
       },
     }, cookie);
     return { code: 0, response: { singer: json?.singer || { code: 0, data: {} } } };
+  }
+
+  // ---- 推荐（qq-music-api 3.2.0 / 3.3.0）—— 与自建后端同一套字段，读不出来就是空结果 ----
+  if (operation === 'user_guess_you_like') {
+    return await handleQQGuessYouLike(cookie);
+  }
+  if (operation === 'user_daily_songs') {
+    return await handleQQDailySongs(cookie);
+  }
+  if (operation === 'recommend_playlists') {
+    const limit = numberValue(params.limit, 25);
+    return await handleQQRecommendPlaylists(limit, cookie);
+  }
+  // ---- 写入：正文已经在 mergeOperationParams 里并进 params，不重试 ----
+  if (operation === 'user_playlist_tracks') {
+    return await handleQQPlaylistTracksWrite(params, cookie);
+  }
+  if (operation === 'user_playlist_subscribe') {
+    return await handleQQPlaylistSubscribe(params, cookie);
+  }
+  if (operation === 'user_subscription_status') {
+    return await handleQQSubscriptionStatus(
+      firstValue(params.type, 'playlist'),
+      firstValue(params.ids, ''),
+      cookie,
+    );
   }
 
   return {
