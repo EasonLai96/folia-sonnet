@@ -6,6 +6,7 @@ import {
     resolveAiApiKey,
     resolveAiChatCompletionsUrl,
     resolveAiModel,
+    resolveGeminiGenerateContentUrl,
     type AiProviderId,
 } from './aiSettings';
 import {
@@ -49,11 +50,10 @@ export interface AiCompletionResult {
     target: AiCompletionTarget;
 }
 
-// Same endpoint the host's own AI features use. The Gemini model is a host
-// decision — its settings expose no model field for that provider — so it is
-// pinned here rather than left to each caller.
-const GEMINI_ENDPOINT =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+// The Gemini model is a host decision — its settings expose no model field for
+// that provider — so it is pinned here rather than left to each caller.
+// The address is not: it comes from Settings → AI, so a network that cannot reach
+// the official host can point at a reverse proxy instead.
 const GEMINI_MODEL = 'gemini-3-flash-preview';
 const DEFAULT_TEMPERATURE = 0.7;
 
@@ -205,10 +205,11 @@ const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Prom
 };
 
 const runGemini = async (request: AiCompletionRequest, send: typeof fetch): Promise<string> => {
-    const apiKey = readAiSettings().geminiApiKey.trim();
+    const settings = readAiSettings();
+    const apiKey = settings.geminiApiKey.trim();
     if (!apiKey) throw new Error(AI_NOT_CONFIGURED);
 
-    const response = await send(GEMINI_ENDPOINT, {
+    const response = await send(resolveGeminiGenerateContentUrl(settings), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

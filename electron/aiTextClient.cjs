@@ -18,8 +18,9 @@ const DEFAULT_OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/comp
 const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_OPENAI_TEMPERATURE = 0.7;
-const GEMINI_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+// Gemini 的端点由设置里的 GEMINI_API_URL 决定（留空用默认的反代地址），
+// 拼地址的规则与渲染进程共用一份，见 shared/geminiEndpoint.cjs。
+const { resolveGeminiGenerateContentUrl, sanitizeApiUrlInput, GEMINI_DEFAULT_MODEL } = require('../shared/geminiEndpoint.cjs');
 
 // Nothing on this path had a deadline before. A base URL pointing at something unreachable — a
 // local server that is not running, a proxy that black-holes the connection — left the renderer
@@ -587,7 +588,7 @@ async function runGeminiCompletion({ store, systemPrompt, sourcePrompt, response
 
   let response;
   try {
-    response = await customFetch(GEMINI_ENDPOINT, {
+    response = await customFetch(resolveGeminiGenerateContentUrl(store.get('GEMINI_API_URL')), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -701,7 +702,10 @@ function validateAiConnectionTestInput(raw) {
     return value.trim();
   };
   const apiKey = readString('apiKey');
-  const apiUrl = provider === 'openai' ? readString('apiUrl') : '';
+  // Gemini 也有地址字段（它的官方域名在部分网络里连不上，用户可以填反代前缀）。
+  // 两个 provider 用同一个字段名，省得渲染层分两套。
+  const rawApiUrl = readString('apiUrl');
+  const apiUrl = rawApiUrl === null ? null : sanitizeApiUrlInput(rawApiUrl);
   const model = provider === 'openai' ? readString('model') : '';
   if (apiKey === null || apiUrl === null || model === null) {
     return { error: 'A setting value is too long or has the wrong type.' };
@@ -784,10 +788,14 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
   }
 
   if (provider === 'gemini') {
-    console.log('[ai-test] POST gemini-3-flash-preview');
+    // 地址由用户填（留空即默认反代）。注意这里的变量名是 rawApiUrl —— 它还没经过
+    // OpenAI 那套补 `/chat/completions` 的规整，Gemini 的补法完全不同，必须交给
+    // resolveGeminiGenerateContentUrl。
+    const endpoint = resolveGeminiGenerateContentUrl(rawApiUrl);
+    console.log(`[ai-test] POST ${redactUrl(endpoint)} model=${GEMINI_DEFAULT_MODEL}`);
     let response;
     try {
-      response = await customFetch(GEMINI_ENDPOINT, {
+      response = await customFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify({
@@ -826,7 +834,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
     const text = Array.isArray(parts)
       ? parts.filter((part) => part && typeof part.text === 'string').map((part) => part.text).join('')
       : '';
-    const modelName = data && typeof data.modelVersion === 'string' ? data.modelVersion : 'gemini-3-flash-preview';
+    const modelName = data && typeof data.modelVersion === 'string' ? data.modelVersion : GEMINI_DEFAULT_MODEL;
     if (!text.trim()) {
       const reason = candidate && candidate.finishReason === 'MAX_TOKENS' ? 'reasoning' : 'empty';
       return finish({ ok: true, status: response.status, model: modelName, text: '', emptyReason: reason });
@@ -886,6 +894,7 @@ module.exports = {
   formatOpenAICompatibleError,
   normalizeOpenAIChatCompletionsUrl,
   providerSupportsStructuredOutputs,
+  resolveGeminiGenerateContentUrl,
   resolveOpenAICompatibleModel,
   resolveOpenAICompatibleTemperature,
   runAiConnectionTest,

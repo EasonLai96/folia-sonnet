@@ -6,6 +6,7 @@ import {
     writeAiSettings,
     type AiProviderId,
 } from '../../../services/aiSettings';
+import { GEMINI_DEFAULT_API_BASE } from '../../../../shared/geminiEndpoint.mjs';
 import { resolveAiCloudCacheUrl } from '../../../services/aiCloudCache';
 import { STAGE_CACHE_KIND } from '../../../services/aiStage';
 import {
@@ -247,21 +248,41 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                         </span>
                     </label>
                 ) : settings.provider === 'gemini' ? (
-                    <label className="block space-y-1 text-left">
-                        <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                            {t('options.geminiApiKey')}
-                        </span>
-                        <input
-                            type="password"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={settings.geminiApiKey}
-                            onChange={(event) => update({ geminiApiKey: event.target.value })}
-                            placeholder="AIza..."
-                            className={fieldClass}
-                            style={{ color: 'var(--text-primary)' }}
-                        />
-                    </label>
+                    <>
+                        <label className="block space-y-1 text-left">
+                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.geminiApiKey')}
+                            </span>
+                            <input
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                                value={settings.geminiApiKey}
+                                onChange={(event) => update({ geminiApiKey: event.target.value })}
+                                placeholder="AIza..."
+                                className={fieldClass}
+                                style={{ color: 'var(--text-primary)' }}
+                            />
+                        </label>
+                        <label className="block space-y-1 text-left">
+                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.geminiApiUrl')}
+                            </span>
+                            <input
+                                type="text"
+                                autoComplete="off"
+                                spellCheck={false}
+                                value={settings.geminiApiUrl}
+                                onChange={(event) => update({ geminiApiUrl: event.target.value })}
+                                placeholder={GEMINI_DEFAULT_API_BASE}
+                                className={fieldClass}
+                                style={{ color: 'var(--text-primary)' }}
+                            />
+                            <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.geminiApiUrlDesc')}
+                            </span>
+                        </label>
+                    </>
                 ) : (
                     <>
                         <label className="block space-y-1 text-left">

@@ -23,6 +23,7 @@ import SettingsRow, { SettingsToggle } from './SettingsRow';
 import { settingsDividerClassFor } from './settingsCardClasses';
 import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
 import { openAIEndpointOf } from '../../../utils/openAIEndpoint';
+import { GEMINI_DEFAULT_API_BASE } from '../../../../shared/geminiEndpoint.mjs';
 
 // src/components/modal/settings/DesktopSettingsSubview.tsx
 // Desktop-only window, tray, update, and AI settings separated from the global settings modal.
@@ -34,6 +35,8 @@ type AiApiKeyName = 'GEMINI_API_KEY' | 'OPENAI_API_KEY';
 type ElectronSettingsState = {
     /** Draft of a replacement key; the saved key never reaches the renderer. */
     GEMINI_API_KEY: string;
+    /** Gemini 的请求地址（留空用默认的反代），主进程拿它拼 generateContent 端点。 */
+    GEMINI_API_URL: string;
     OPENAI_API_KEY: string;
     OPENAI_API_URL: string;
     OPENAI_API_MODEL: string;
@@ -633,12 +636,29 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                                 t('options.geminiApiKey') || 'Gemini API Key',
                                 'AI Theme Generation Key',
                             )}
+                            {renderField(
+                                t('options.geminiApiUrl') || 'Gemini API URL',
+                                <input
+                                    type="text"
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    value={electronSettings.GEMINI_API_URL || ''}
+                                    onChange={(e) => setElectronSettings({ ...electronSettings, GEMINI_API_URL: e.target.value })}
+                                    placeholder={GEMINI_DEFAULT_API_BASE}
+                                    className={fieldClass}
+                                    style={{ color: 'var(--text-primary)' }}
+                                />,
+                                t('options.geminiApiUrlDesc') || 'Leave blank to use the default address.',
+                            )}
                             <AiConnectionTest
                                 // Remount when the saved key changes so a result from the old key does not linger.
                                 key={`gemini-${savedAiApiKeys.GEMINI_API_KEY}`}
                                 payload={{
                                     provider: 'gemini',
                                     apiKey: electronSettings.GEMINI_API_KEY || '',
+                                    // 地址也要带上：主进程只按这个测试，不带就测的是默认地址，
+                                    // 「我填了反代、测试连接却说连不上官方域名」的误报就是这么来的。
+                                    apiUrl: electronSettings.GEMINI_API_URL || '',
                                     useSystemProxy: electronSettings.USE_SYSTEM_PROXY_FOR_AI === true,
                                 }}
                                 buttonClassName={ghostButtonClass}

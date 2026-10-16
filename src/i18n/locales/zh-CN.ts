@@ -2869,6 +2869,8 @@ export default {
     "useSystemProxyAI": "为AI使用系统代理",
     "useSystemProxyAIDesc": "仅将AI相关的网络请求通过系统代理路由。",
     "geminiApiKey": "Gemini 密钥",
+    "geminiApiUrl": "Gemini 接口地址",
+    "geminiApiUrlDesc": "留空用默认地址。官方域名连不上时可以填自己的反向代理，只填域名或前缀即可，后面会按官方路径补全。",
     "openaiApiKey": "密钥",
     "aiApiKeySavedPlaceholder": "已保存（留空则保持不变）",
     "aiApiKeySavedDesc": "密钥已加密保存在本机，不会再显示。输入新密钥并保存可替换。",

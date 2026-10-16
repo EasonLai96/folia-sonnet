@@ -487,6 +487,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const [isElectron, setIsElectron] = useState(hasElectronBridge);
     const [electronSettings, setElectronSettings] = useState({
         GEMINI_API_KEY: '',
+        GEMINI_API_URL: '',
         OPENAI_API_KEY: '',
         OPENAI_API_URL: '',
         OPENAI_API_MODEL: '',
@@ -644,6 +645,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             if (geminiKeyDraft) {
                 await (window as any).electron.saveSettings('GEMINI_API_KEY', geminiKeyDraft);
             }
+            // Gemini 的地址没有 key 绑定，随便什么顺序；留空存空串 = 用默认地址。
+            await (window as any).electron.saveSettings('GEMINI_API_URL', electronSettings.GEMINI_API_URL);
             // URL before key: a new OpenAI-compatible key is bound to the URL saved at that moment.
             await (window as any).electron.saveSettings('OPENAI_API_URL', electronSettings.OPENAI_API_URL);
             if (openaiKeyDraft) {

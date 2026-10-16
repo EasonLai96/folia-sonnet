@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 // the result mapping and the input validation.
 
 const client = createRequire(import.meta.url)('../../../electron/aiTextClient.cjs');
+const { GEMINI_DEFAULT_API_BASE, GEMINI_DEFAULT_MODEL } = createRequire(import.meta.url)('../../../shared/geminiEndpoint.cjs');
 
 type Call = { url: string; init: any; body: any };
 
@@ -217,6 +218,23 @@ describe('runAiConnectionTest (Gemini)', () => {
         const result = await client.runAiConnectionTest({ provider: 'gemini', apiKey: 'g-key' }, { customFetch: empty.customFetch });
         expect(result).toMatchObject({ ok: true, text: '', emptyReason: 'reasoning' });
     });
+
+    // 官域在部分网络里连不上，用户会自己反代一层 —— 地址留空必须是那层默认反代，
+    // 填了就必须真的发到填的那个（发到默认去的话，测出来的「成功」说明不了他自己那台）。
+    it('falls back to the default reverse-proxy address when the field is blank', async () => {
+        const { calls, customFetch } = makeFetch(() => json({ candidates: [{ content: { parts: [{ text: 'hi' }] } }] }));
+        await client.runAiConnectionTest({ provider: 'gemini', apiKey: 'g-key', apiUrl: '' }, { customFetch });
+        expect(calls[0].url).toBe(`${GEMINI_DEFAULT_API_BASE}/v1beta/models/${GEMINI_DEFAULT_MODEL}:generateContent`);
+    });
+
+    it('uses the custom address when one is filled in', async () => {
+        const { calls, customFetch } = makeFetch(() => json({ candidates: [{ content: { parts: [{ text: 'hi' }] } }] }));
+        await client.runAiConnectionTest(
+            { provider: 'gemini', apiKey: 'g-key', apiUrl: 'https://my-proxy.example.com' },
+            { customFetch },
+        );
+        expect(calls[0].url).toBe(`https://my-proxy.example.com/v1beta/models/${GEMINI_DEFAULT_MODEL}:generateContent`);
+    });
 });
 
 describe('validateAiConnectionTestInput', () => {
@@ -251,5 +269,20 @@ describe('validateAiConnectionTestInput', () => {
         const result = await client.runAiConnectionTest({ provider: 'openai', apiKey: 'k', apiUrl: 'file:///x' }, { customFetch });
         expect(calls).toHaveLength(0);
         expect(result).toMatchObject({ ok: false, errorKind: 'invalid' });
+    });
+
+    // 手抄地址会带前后空格和中文输入法的全角冒号，两种都会让 new URL 抛错。
+    // 不清洗的话，「测试连接」会说地址不合法 —— 而用户看着自己填的地址是对的。
+    it('cleans up a hand-typed Gemini address instead of rejecting it', () => {
+        const spaced = client.validateAiConnectionTestInput({ provider: 'gemini', apiKey: 'k', apiUrl: '  https://my-proxy.example.com  ' });
+        expect(spaced.error).toBeUndefined();
+        expect(spaced.config.apiUrl).toBe('https://my-proxy.example.com');
+
+        const fullWidth = client.validateAiConnectionTestInput({ provider: 'gemini', apiKey: 'k', apiUrl: 'https://my-proxy.example.com：8443' });
+        expect(fullWidth.error).toBeUndefined();
+        expect(fullWidth.config.apiUrl).toBe('https://my-proxy.example.com:8443');
+
+        // 仍然拦真正的坏地址（清洗不该把校验一起放过）。
+        expect(bad({ provider: 'gemini', apiKey: 'k', apiUrl: 'ftp://x.example.com' })).toBeTruthy();
     });
 });

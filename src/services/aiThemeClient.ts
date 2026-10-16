@@ -18,7 +18,9 @@ import {
     resolveAiApiKey,
     resolveAiChatCompletionsUrl,
     resolveAiModel,
+    resolveGeminiGenerateContentUrl,
 } from './aiSettings';
+import { GEMINI_DEFAULT_MODEL } from '../../shared/geminiEndpoint.mjs';
 import {
     recordAiThemeAttempt,
     type AiThemeStage,
@@ -26,8 +28,11 @@ import {
 } from '../utils/aiThemeDiagnostics';
 import { detectOpenAICompatibleProvider, sendOpenAICompatibleRequest } from '../../shared/openAICompatibleRequest.mjs';
 
-export const GEMINI_THEME_ENDPOINT =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+/*
+ * 端点由设置决定（见 services/aiSettings.ts 的 resolveGeminiGenerateContentUrl）：
+ * 官方域名连不上时，填一个反代地址就能救回来。模型名是宿主定的，跟着默认那份走。
+ */
+export const GEMINI_THEME_MODEL = GEMINI_DEFAULT_MODEL;
 
 const DEFAULT_OPENAI_TEMPERATURE = 0.7;
 // 一份双主题 JSON 大约 1–2K token，但推理型模型会先把预算花在推理上（现场报告里 4096 的输出全部
@@ -117,7 +122,7 @@ const requestGeminiThemeJson = async (systemPrompt: string, sourcePrompt: string
     const apiKey = settings.geminiApiKey.trim();
     if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
 
-    const response = await createAiFetch()(GEMINI_THEME_ENDPOINT, {
+    const response = await createAiFetch()(resolveGeminiGenerateContentUrl(settings), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -212,7 +217,7 @@ export const generateThemeWithConfiguredAi = async (
     const provider = settings.provider;
     const model = isOpenAiCompatibleProvider(provider)
         ? resolveAiModel(settings)
-        : 'gemini-3-flash-preview';
+        : GEMINI_THEME_MODEL;
     const trigger: AiThemeTrigger = options?.trigger ?? 'unknown';
     const startedAt = Date.now();
     let stage: AiThemeStage = 'request';
@@ -337,7 +342,7 @@ export const testConfiguredAiConnection = async (): Promise<AiConnectionTestResu
         if (!apiKey) {
             return { ok: false, durationMs: 0, error: 'GEMINI_API_KEY is not configured' };
         }
-        const response = await createAiFetch()(GEMINI_THEME_ENDPOINT, {
+        const response = await createAiFetch()(resolveGeminiGenerateContentUrl(settings), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -352,7 +357,7 @@ export const testConfiguredAiConnection = async (): Promise<AiConnectionTestResu
                 ok: false,
                 durationMs,
                 status: response.status,
-                model: 'gemini-3-flash-preview',
+                model: GEMINI_THEME_MODEL,
                 error: detail || `HTTP ${response.status}`,
             };
         }
@@ -368,7 +373,7 @@ export const testConfiguredAiConnection = async (): Promise<AiConnectionTestResu
             ok: true,
             durationMs,
             status: response.status,
-            model: 'gemini-3-flash-preview',
+            model: GEMINI_THEME_MODEL,
             reply: reply.trim().slice(0, 200),
         };
     } catch (error) {

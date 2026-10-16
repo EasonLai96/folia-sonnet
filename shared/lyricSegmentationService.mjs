@@ -3,6 +3,7 @@ import {
   rejectsOpenAICompatibleParameter,
   sendOpenAICompatibleRequest,
 } from './openAICompatibleRequest.mjs';
+import { resolveGeminiGenerateContentUrl } from './geminiEndpoint.mjs';
 
 // shared/lyricSegmentationService.mjs
 // Server-side lyric word segmentation, shared by the Vercel edge handler and the Cloudflare
@@ -28,8 +29,8 @@ const DEFAULT_OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/comp
 const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_OPENAI_TEMPERATURE = 0.7;
-const GEMINI_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+// 端点由 env.GEMINI_API_URL 决定（见 ./geminiEndpoint.mjs），留空用默认地址。
+// 渲染进程从 Settings → AI 把它传进来，部署端从自己的环境变量读。
 
 // An edge function has its own platform deadline, but a request with no signal can still burn the
 // whole budget on one stalled upstream and return nothing useful. Failing at a deadline we chose
@@ -265,7 +266,7 @@ const runOpenAICompatible = async (lines, env, fetchImpl) => {
 const runGemini = async (lines, env, fetchImpl) => {
   let response;
   try {
-    response = await fetchImpl(GEMINI_ENDPOINT, {
+    response = await fetchImpl(resolveGeminiGenerateContentUrl(env.GEMINI_API_URL), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

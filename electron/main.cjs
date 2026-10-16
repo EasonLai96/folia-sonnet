@@ -55,6 +55,7 @@ const { sanitizeDualTheme: sanitizeGeneratedDualTheme } = require('../shared/the
 const {
   detectOpenAICompatibleProvider,
   normalizeOpenAIChatCompletionsUrl,
+  resolveGeminiGenerateContentUrl,
   runAiConnectionTest,
   runAiJsonCompletion,
 } = require('./aiTextClient.cjs');
@@ -3648,8 +3649,8 @@ function getGeminiResponseSchema() {
   };
 }
 
-async function generateGeminiTheme({ apiKey, systemPrompt, sourcePrompt, customFetch }) {
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+async function generateGeminiTheme({ apiKey, systemPrompt, sourcePrompt, customFetch, endpointUrl }) {
+  const endpoint = resolveGeminiGenerateContentUrl(endpointUrl);
   const response = await customFetch(endpoint, {
     method: 'POST',
     headers: {
@@ -6587,7 +6588,9 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
         apiKey,
         systemPrompt,
         sourcePrompt,
-        customFetch
+        customFetch,
+        // 地址可配：官方域名连不上时用户会填一层反代，留空就是默认的那个。
+        endpointUrl: aiCredentials.get('GEMINI_API_URL'),
       }));
 
       dualTheme.light.provider = 'Google Gemini (Local)';

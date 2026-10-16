@@ -4,6 +4,10 @@
 // 让共享的请求逻辑（shared/lyricSegmentationService.mjs 等）可以照常复用。
 
 import { normalizeChatCompletionsUrl, resolveOpenAICompatibleModel } from '../../shared/openAICompatibleRequest.mjs';
+import {
+    GEMINI_DEFAULT_MODEL,
+    resolveGeminiGenerateContentUrl as resolveGeminiUrl,
+} from '../../shared/geminiEndpoint.mjs';
 
 export type AiProviderId = 'gemini' | 'openai' | 'deepseek';
 
@@ -18,6 +22,13 @@ export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 export interface AiSettings {
     provider: AiProviderId;
     geminiApiKey: string;
+    /**
+     * Gemini 的 API 请求地址，留空走默认（官方域名的反向代理）。
+     *
+     * 官方域名在不少网络里连不上，所以这个地址是可改的；模型不跟着变 ——
+     * 设置里没有 Gemini 的模型字段，端点里的模型名由宿主决定（见 GEMINI_DEFAULT_MODEL）。
+     */
+    geminiApiUrl: string;
     openaiApiUrl: string;
     openaiApiKey: string;
     openaiApiModel: string;
@@ -33,6 +44,8 @@ export const AI_SETTINGS_CHANGED_EVENT = 'folia-ai-settings-changed';
 export const DEFAULT_AI_SETTINGS: AiSettings = {
     provider: 'gemini',
     geminiApiKey: '',
+    // 留空 = 用默认地址。写成常量反而会让「用户清空输入框」和「用默认」变成两回事。
+    geminiApiUrl: '',
     openaiApiUrl: '',
     openaiApiKey: '',
     openaiApiModel: '',
@@ -63,6 +76,7 @@ export const readAiSettings = (): AiSettings => {
         return {
             provider: normalizeProvider(parsed.provider),
             geminiApiKey: asText(parsed.geminiApiKey),
+            geminiApiUrl: asText(parsed.geminiApiUrl),
             openaiApiUrl: asText(parsed.openaiApiUrl),
             openaiApiKey: asText(parsed.openaiApiKey),
             openaiApiModel: asText(parsed.openaiApiModel),
@@ -104,6 +118,17 @@ export const resolveAiChatCompletionsUrl = (settings: AiSettings = readAiSetting
         : normalizeChatCompletionsUrl(settings.openaiApiUrl)
 );
 
+/**
+ * 实际要打的那条 generateContent 端点。
+ *
+ * 拼地址的规则在 shared/geminiEndpoint.mjs 里（渲染进程与主进程共用一份），
+ * 这里只负责把当前设置喂进去 —— 别在任何调用点自己拼一次，那会让「填了地址却没生效」
+ * 变成最难查的一类问题：一半功能走新地址、另一半还打官方域名。
+ */
+export const resolveGeminiGenerateContentUrl = (settings: AiSettings = readAiSettings()): string => (
+    resolveGeminiUrl(settings.geminiApiUrl, GEMINI_DEFAULT_MODEL)
+);
+
 /** 实际要用的模型：DeepSeek 留空时回落到 flash。 */
 export const resolveAiModel = (settings: AiSettings = readAiSettings()): string => {
     const apiUrl = resolveAiChatCompletionsUrl(settings);
@@ -126,6 +151,11 @@ export const buildAiEnv = (settings: AiSettings = readAiSettings()): Record<stri
     // latter with its own endpoint, so it is announced as openai downstream.
     AI_PROVIDER: settings.provider === 'deepseek' ? 'openai' : settings.provider,
     GEMINI_API_KEY: settings.geminiApiKey.trim() || undefined,
+    /*
+     * 共享的分词服务（shared/lyricSegmentationService.mjs）读的是 env：它不在渲染层，
+     * 拿不到 localStorage。留空它也走默认地址，与这条设置「留空 = 默认」的语义一致。
+     */
+    GEMINI_API_URL: settings.geminiApiUrl.trim() || undefined,
     OPENAI_API_URL: isOpenAiCompatibleProvider(settings.provider)
         ? resolveAiChatCompletionsUrl(settings)
         : undefined,
