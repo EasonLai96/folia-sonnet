@@ -165,6 +165,7 @@ import { useLibraryOcclusionSettled } from './hooks/useLibraryOcclusionSettled';
 import { useWallHandoffStore } from './stores/useWallHandoffStore';
 import { countRender } from './dev/renderCount';
 import { resolveSongLiked } from './utils/resolveSongLiked';
+import { resolveLikeAvailability } from './utils/playerLikeAvailability';
 import StageSessionEmptyState from './components/app/stage/StageSessionEmptyState';
 import { useVisualizerRendererModel } from './components/visualizer/useVisualizerRendererModel';
 import { useVisualizerTunings } from './components/visualizer/useVisualizerTunings';
@@ -1514,6 +1515,15 @@ export default function App() {
     // seekMainAudio 定义在下面（它依赖这批 transport 回调），而通知栏的拖动事件
     // 是异步来的，所以用 ref 接过声明顺序，不把它提前。
     const seekMainAudioRef = useRef<(time: number) => void>(() => { });
+    // 通知栏那颗心要的两个值：这首歌现在喜不喜欢、这个动作现在能不能用。
+    //
+    // 「能不能用」必须和侧边面板同一份判定（resolveLikeAvailability）—— 各平台支不支持
+    // 收藏、正由外部 Stage 播放时归谁管，都在那一份里。分头判的话会出现面板置灰、
+    // 通知栏却能点，点下去只得到一个「收藏失败」。
+    // 「混音过渡中 / 无音源」那一档传 false：它是面板里的一瞬间，通知栏感知不到，
+    // 而且它会随下一次元数据推送自己纠正回来。
+    const nativeSongLiked = resolveSongLiked(displaySong, { isLocalSongLiked, starredNavidromeSongIds, likedSongIds });
+    const nativeCanLikeSong = !resolveLikeAvailability(displaySong, false, isNowPlayingStageActive).disabled;
     useCapacitorPlaybackBridge({
         currentSong: displaySong,
         cachedCoverUrl: displayCoverUrl ?? cachedCoverUrl,
@@ -1524,6 +1534,10 @@ export default function App() {
         mediaSessionNextRef,
         getCurrentTime: () => currentTime.get(),
         onSeek: (seconds) => seekMainAudioRef.current(seconds),
+        isLiked: nativeSongLiked,
+        canLike: nativeCanLikeSong,
+        // 与面板里的喜爱按钮同一个动作：能不能用、状态怎么存都归它，原生不自己记账。
+        onToggleLike: handleLike,
     });
 
     // Capacitor Android 专有：把当前行与行内进度喂给原生歌词动态壁纸。

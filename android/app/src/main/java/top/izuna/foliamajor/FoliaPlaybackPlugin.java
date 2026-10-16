@@ -88,6 +88,12 @@ public class FoliaPlaybackPlugin extends Plugin {
         // 当前这首歌的身份：服务端拿它判断是不是换歌了，换歌时要先丢掉上一首的封面。
         String songKey = call.getString("songKey");
         if (songKey != null) intent.putExtra(FoliaPlaybackService.EXTRA_SONG_KEY, songKey);
+        // 「喜欢」状态：通知栏那颗心画实心还是空心，以及这颗心该不该出现。
+        // 用 hasExtra 语义（JS 侧显式传 boolean 才有这个 extra），不传就是「这次不改」。
+        Boolean liked = call.getBoolean("liked");
+        if (liked != null) intent.putExtra(FoliaPlaybackService.EXTRA_LIKED, liked.booleanValue());
+        Boolean canLike = call.getBoolean("canLike");
+        if (canLike != null) intent.putExtra(FoliaPlaybackService.EXTRA_CAN_LIKE, canLike.booleanValue());
 
         startServiceCompat(activity, intent);
         call.resolve();

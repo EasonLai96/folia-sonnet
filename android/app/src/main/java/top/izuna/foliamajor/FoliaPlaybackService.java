@@ -79,6 +79,20 @@ public class FoliaPlaybackService extends android.app.Service {
     private long cachedPositionMs = 0L;
     private float cachedSpeed = 1.0f;
     private boolean cachedPlaying = false;
+    /**
+     * 当前这首歌是不是「已喜欢」。
+     *
+     * Web 层每次推 metadata 都会带上它。通知栏那颗心的**形状**（实心 / 空心）与
+     * MediaSession 的「喜欢」按钮标题都读这里 —— 原生不自己记状态，点了只发命令，
+     * 真正改状态的是 Web 层，改完再推回来。
+     */
+    private boolean cachedLiked = false;
+    /**
+     * 「喜欢」这个动作当前能不能用（平台不支持收藏、正由外部 Stage 播放时为 false）。
+     *
+     * false 时通知栏不画那颗心：通知按钮没有「置灰」这一说，画出来点了没反应比不画更糟。
+     */
+    private boolean cachedCanLike = false;
     /** 封面角标（通知 small icon）的资源 id；0 = 还没收到过，用缺省。 */
     private int cachedBadgeRes = 0;
     /**
@@ -198,6 +212,24 @@ public class FoliaPlaybackService extends android.app.Service {
                 }
                 stopForegroundCompat();
                 stopSelf();
+            }
+
+            /**
+             * 「喜欢 / 取消喜欢」。
+             *
+             * 系统媒体控制器（锁屏、Android Auto、蓝牙与车机）按下我们自己声明的那颗心时
+             * 走这里。原生**不自己改 cachedLiked** —— 真正知道这首歌在各平台「我喜欢」里
+             * 是什么状态的只有 Web 层（本地歌、Navidrome、各家在线平台各一套），点了只发
+             * 命令，等那边把新状态推回来（见 updateMetadata）。
+             *
+             * 提前把 cachedLiked 翻过来的话，请求失败时通知栏会一直停在错的状态上，
+             * 而且没有任何东西会再来纠正它。
+             */
+            @Override
+            public void onCustomAction(String action, android.os.Bundle extras) {
+                if (ACTION_TOGGLE_LIKE.equals(action)) {
+                    sendCommand("like");
+                }
             }
         });
         mediaSession.setActive(true);
@@ -454,6 +486,20 @@ public class FoliaPlaybackService extends android.app.Service {
             cachedDurationMs = 0L;
             // 让这次的 artworkUrl 能重新触发下载（同一个地址在同一首歌里只下一次）。
             pendingArtworkUrl = null;
+            // 「喜欢」是**这首歌**的属性，换歌时不能沿用上一首的：Web 层这一次 update
+            // 里带的就是新歌的值，所以先清、紧接着下面再按 extras 覆盖。
+            cachedLiked = false;
+            cachedCanLike = false;
+        }
+
+        // 「喜欢」与否跟着 metadata 一起到：它是当前歌曲的属性，不是播放状态。
+        // 用 hasExtra 而不是 getBooleanExtra 的缺省值 —— 缺省 false 会让「没带这个字段」
+        // 和「带了 false」分不开，于是任何一次没带的 update 都会把已喜欢抹成未喜欢。
+        if (intent.hasExtra(EXTRA_LIKED)) {
+            cachedLiked = intent.getBooleanExtra(EXTRA_LIKED, false);
+        }
+        if (intent.hasExtra(EXTRA_CAN_LIKE)) {
+            cachedCanLike = intent.getBooleanExtra(EXTRA_CAN_LIKE, false);
         }
 
         // 先更新缓存，再重建通知：metadata 与 state 是两次独立调用，
@@ -627,6 +673,15 @@ public class FoliaPlaybackService extends android.app.Service {
                     "翻译",
                     translationActionIcon()).build());
         }
+        // 「喜欢」：给系统媒体控制器用的那一颗（锁屏、Android Auto、Wear OS 等）。
+        // 通知栏那颗心是 NotificationCompat.Action，两条路都发同一条 "like" 命令。
+        // 只在真的能用时挂上：挂了却点不出结果，比不给这个按钮更让人困惑。
+        if (cachedCanLike) {
+            builder.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                    ACTION_TOGGLE_LIKE,
+                    cachedLiked ? "取消喜欢" : "喜欢",
+                    cachedLiked ? R.drawable.folia_heart_filled : R.drawable.folia_heart).build());
+        }
         if (mediaSession != null) {
             mediaSession.setPlaybackState(builder.build());
         }
@@ -654,9 +709,14 @@ public class FoliaPlaybackService extends android.app.Service {
         public final long durationMs;
         public final long positionMs;
         public final boolean playing;
+        /** 当前这首歌是不是「已喜欢」。 */
+        public final boolean liked;
+        /** 「喜欢」这个动作现在能不能用（平台不支持时为 false）。 */
+        public final boolean canLike;
 
         MediaSnapshot(String title, String artist, String album, Bitmap artwork,
-                long durationMs, long positionMs, boolean playing) {
+                long durationMs, long positionMs, boolean playing,
+                boolean liked, boolean canLike) {
             this.title = title;
             this.artist = artist;
             this.album = album;
@@ -664,6 +724,8 @@ public class FoliaPlaybackService extends android.app.Service {
             this.durationMs = durationMs;
             this.positionMs = positionMs;
             this.playing = playing;
+            this.liked = liked;
+            this.canLike = canLike;
         }
     }
 
@@ -676,7 +738,8 @@ public class FoliaPlaybackService extends android.app.Service {
 
     private void publishSnapshot() {
         lastSnapshot = new MediaSnapshot(cachedTitle, cachedArtist, cachedAlbum,
-                cachedArtwork, cachedDurationMs, cachedPositionMs, cachedPlaying);
+                cachedArtwork, cachedDurationMs, cachedPositionMs, cachedPlaying,
+                cachedLiked, cachedCanLike);
     }
 
     /**
@@ -774,7 +837,7 @@ public class FoliaPlaybackService extends android.app.Service {
                 // 通知属于前台服务，用户无法手动划掉它（划掉就等于杀掉播放）。
                 .setOngoing(true);
 
-        // 通知栏的三个按钮：上一首 / 播放暂停 / 下一首。
+        // 通知栏的按钮：上一首 / 播放暂停 / 下一首 /（可用时）喜欢。
         // 必须真的 addAction —— MediaStyle 的紧凑视图只是「从第 0/1/2 个 action 里挑出来显示」，
         // 不 addAction 就写 setShowActionsInCompactView(0,1,2) 是越界引用，等于白写。
         boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
@@ -783,6 +846,15 @@ public class FoliaPlaybackService extends android.app.Service {
                 ? buildAction(android.R.drawable.ic_media_pause, "暂停", "pause")
                 : buildAction(android.R.drawable.ic_media_play, "播放", "play"));
         builder.addAction(buildAction(android.R.drawable.ic_media_next, "下一首", "next"));
+        // 「喜欢」放第四位：紧凑视图（收起那条通知）只显示前三个，上一首 / 播停 / 下一首
+        // 是任何时候都得在的，喜欢只能退到展开态。它同时在 MediaSession 上挂了
+        // CustomAction（见 applyPlaybackState），锁屏与车机那类控制器照样看得到。
+        if (cachedCanLike) {
+            builder.addAction(buildAction(
+                    cachedLiked ? R.drawable.folia_heart_filled : R.drawable.folia_heart,
+                    cachedLiked ? "取消喜欢" : "喜欢",
+                    "like"));
+        }
 
         MediaSessionCompat.Token token = mediaSession == null ? null : mediaSession.getSessionToken();
         if (token != null) {
@@ -872,6 +944,19 @@ public class FoliaPlaybackService extends android.app.Service {
     static final String EXTRA_PROVIDER_BADGE = "providerBadge";
     /** 当前这首歌的身份：与上一次不同就是换歌了，换歌时先丢掉上一首的封面。 */
     static final String EXTRA_SONG_KEY = "songKey";
+    /** 当前这首歌是不是「已喜欢」（通知栏那颗心画实心还是空心）。 */
+    static final String EXTRA_LIKED = "liked";
+    /** 「喜欢」这个动作当前能不能用；false 时通知栏不画那颗心。 */
+    static final String EXTRA_CAN_LIKE = "canLike";
+    /**
+     * MediaSession 的自定义动作名：「喜欢 / 取消喜欢」。
+     *
+     * 走 CustomAction 而不是 PlaybackState 的标准动作，是因为 MediaSessionCompat
+     * 没有「喜欢」这一档 —— 系统媒体控制器（锁屏、Android Auto、蓝牙设备）看见的是
+     * 我们自己声明的这个字符串。通知栏那颗心是**另外**加的 NotificationCompat.Action，
+     * 两条路都通向同一个 sendCommand("like")。
+     */
+    static final String ACTION_TOGGLE_LIKE = "top.izuna.foliamajor.action.TOGGLE_LIKE";
     static final String EXTRA_STATE = "state";
     static final String EXTRA_POSITION = "position";
     /** 拖动通知栏进度条时带回的目标位置（毫秒）。 */

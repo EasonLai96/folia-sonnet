@@ -44,6 +44,11 @@ final class LockScreenControlPanel {
     /** 上滑退出在面板上也照样生效：这一条不设的话，面板那块区域就成了"滑不动的死区"。 */
     private static final float SWIPE_UP_DP = 64f;
     private static final float SWIPE_MAX_SIDE_RATIO = 0.6f;
+    /**
+     * 已喜欢那颗心的颜色：与面板里喜爱按钮按下去的 red-500 同一个色。
+     * 通知栏那颗做不到（系统只按 alpha 染色），这条面板是我们自己画的，可以。
+     */
+    private static final int LIKE_TINT = 0xFFEF4444;
     /** 每秒刷一次：封面与歌名是换歌才变的慢字段，播放位置在这条面板上只到秒。 */
     static final long REFRESH_INTERVAL_MS = 1000L;
 
@@ -56,6 +61,8 @@ final class LockScreenControlPanel {
     private TextView titleView = null;
     private TextView subtitleView = null;
     private TextView durationView = null;
+    /** 「喜欢」那颗心。不能收藏时整颗隐藏 —— 这条面板上也没有"置灰"这回事。 */
+    private ImageView likeButton = null;
 
     /** 进度条：整条可拖，抬手才真的 seek（拖动中只本地预览，不打扰播放器）。 */
     private android.widget.FrameLayout progressHost = null;
@@ -163,6 +170,8 @@ final class LockScreenControlPanel {
         int buttonSize = Math.round(40f * density);
         root.addView(buildButton("previous", buttonSize));
         root.addView(buildButton("next", buttonSize));
+        likeButton = buildLikeButton(buttonSize);
+        root.addView(likeButton);
 
         /*
          * 面板本身要接住上滑：它是一块可触摸的窗口，事件到这里就为止了，
@@ -243,6 +252,7 @@ final class LockScreenControlPanel {
         durationView = null;
         progressHost = null;
         progressFill = null;
+        likeButton = null;
         seeking = false;
         seekPreviewMs = -1L;
     }
@@ -286,6 +296,21 @@ final class LockScreenControlPanel {
         durationView.setVisibility(durationView.getText().length() > 0 ? View.VISIBLE : View.GONE);
 
         artworkView.setImageBitmap(info == null ? null : info.artwork);
+
+        // 「喜欢」：当前这首歌能收藏才显示。这条面板是我们自己画的，颜色说了算，
+        // 所以这里能真的画成红的 —— 通知栏那颗不行，系统只按 alpha 给图标染一个色，
+        // 那边只能靠实心 / 空心表达状态。
+        if (likeButton != null) {
+            boolean canLike = info != null && info.canLike;
+            likeButton.setVisibility(canLike ? View.VISIBLE : View.GONE);
+            if (canLike) {
+                likeButton.setImageDrawable(tintedDrawable(
+                        info.liked ? R.drawable.folia_heart_filled : R.drawable.folia_heart,
+                        info.liked ? LIKE_TINT : Color.WHITE));
+                likeButton.setContentDescription(info.liked ? "取消喜欢" : "喜欢");
+            }
+        }
+
         // 拖动中不覆盖：那一段位置由手指说了算，被推过来的旧位置盖掉会跳回去。
         if (!seeking) {
             applyProgress();
@@ -437,6 +462,35 @@ final class LockScreenControlPanel {
         button.setOnClickListener(view ->
                 FoliaPlaybackService.sendPlaybackCommand(activity, command));
         return button;
+    }
+
+    /**
+     * 「喜欢」那颗心。
+     *
+     * 与上一首 / 下一首走同一条广播（"like"），最终落到 Web 层那个 handleLike ——
+     * 和面板里的喜爱按钮是同一个动作。这里**不自己切换图标**：状态由服务推回来的
+     * 快照决定（见 refresh），自己先翻的话，请求失败时这颗心会一直停在错的状态上。
+     */
+    private ImageView buildLikeButton(int size) {
+        ImageView button = new ImageView(activity);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+        params.setMarginStart(Math.round(4f * activity.getResources().getDisplayMetrics().density));
+        button.setLayoutParams(params);
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setContentDescription("喜欢");
+        button.setOnClickListener(view ->
+                FoliaPlaybackService.sendPlaybackCommand(activity, "like"));
+        return button;
+    }
+
+    private Drawable tintedDrawable(int drawableId, int color) {
+        Drawable icon = androidx.core.content.ContextCompat.getDrawable(activity, drawableId);
+        if (icon == null) {
+            return null;
+        }
+        Drawable tinted = DrawableCompat.wrap(icon).mutate();
+        DrawableCompat.setTint(tinted, color);
+        return tinted;
     }
 
     private boolean isSwipeUp(MotionEvent event) {

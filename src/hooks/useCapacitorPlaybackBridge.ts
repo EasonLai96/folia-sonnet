@@ -38,6 +38,16 @@ interface FoliaPlaybackPlugin {
      * 通知栏于是先画出上一首的图，等原生按 URL 下载完才换成当前的。
      */
     songKey?: string | null;
+    /**
+     * 这首歌是不是「已喜欢」：通知栏那颗心画实心还是空心就看它。
+     * 不传 = 这次不改（原生保留上一个值）。
+     */
+    liked?: boolean | null;
+    /**
+     * 「喜欢」这个动作现在能不能用。false 时通知栏干脆不画那颗心 —— 通知按钮没有置灰，
+     * 画出来点了没反应比不画更让人困惑。不传 = 这次不改。
+     */
+    canLike?: boolean | null;
   }): Promise<void>;
   /** 更新播放状态。playing=true 时服务会真正进入前台。 */
   setState(options: {
@@ -126,6 +136,12 @@ type UseCapacitorPlaybackBridgeOptions = {
   getCurrentTime?: () => number;
   /** 用户拖动通知栏进度条后回传的目标位置（秒）。 */
   onSeek?: (seconds: number) => void;
+  /** 当前这首歌是不是「已喜欢」：通知栏那颗心的形状跟它走。 */
+  isLiked?: boolean;
+  /** 「喜欢」现在能不能用；false 时通知栏不画那颗心。 */
+  canLike?: boolean;
+  /** 通知栏 / 锁屏 / 耳机那颗心被按下。与面板里的喜爱按钮同一个动作。 */
+  onToggleLike?: () => void;
 };
 
 /**
@@ -144,12 +160,15 @@ export const useCapacitorPlaybackBridge = ({
   mediaSessionNextRef,
   getCurrentTime,
   onSeek,
+  isLiked = false,
+  canLike = false,
+  onToggleLike,
 }: UseCapacitorPlaybackBridgeOptions): void => {
   const enabled = isCapacitorAndroid();
 
-  // 这两个回调是每次渲染都可能换身份的内联函数，进 effect 依赖会把订阅反复重建。
-  const callbacksRef = React.useRef({ getCurrentTime, onSeek });
-  callbacksRef.current = { getCurrentTime, onSeek };
+  // 这三个回调是每次渲染都可能换身份的内联函数，进 effect 依赖会把订阅反复重建。
+  const callbacksRef = React.useRef({ getCurrentTime, onSeek, onToggleLike });
+  callbacksRef.current = { getCurrentTime, onSeek, onToggleLike };
 
   // 通知栏/锁屏/耳机的控制键走这里回到 Web 层。
   React.useEffect(() => {
@@ -176,6 +195,12 @@ export const useCapacitorPlaybackBridge = ({
         case 'seek':
           // 拖动通知栏进度条。原生只在 actions 里带了 ACTION_SEEK_TO 时才派发这个。
           callbacksRef.current.onSeek?.(Math.max(0, (positionMs ?? 0) / 1000));
+          break;
+        case 'like':
+          // 通知栏 / 锁屏 / 耳机那颗心。与面板里的喜爱按钮走同一个 handleLike：
+          // 能不能用、成功与否、状态怎么存都归 Web 层那一份判断，原生不自己记账。
+          // 状态变了会随下一次元数据推送回到通知栏，那颗心自己换形状。
+          callbacksRef.current.onToggleLike?.();
           break;
       }
     }).then((off) => {
@@ -207,6 +232,8 @@ export const useCapacitorPlaybackBridge = ({
       durationMs: getDurationMs(currentSong),
       providerBadge: resolveProviderBadge(currentSong),
       songKey,
+      liked: isLiked,
+      canLike,
     };
 
     // 分两次发：先不带封面发一次，让原生立刻换标题并把上一首的封面丢掉，再等封面抓到补一次。
@@ -225,7 +252,7 @@ export const useCapacitorPlaybackBridge = ({
     return () => {
       cancelled = true;
     };
-  }, [enabled, currentSong, cachedCoverUrl]);
+  }, [enabled, currentSong, cachedCoverUrl, isLiked, canLike]);
 
   // 播放状态：playing 时服务进入前台，这是后台网络不被节流的关键。
   //
