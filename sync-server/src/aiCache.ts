@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { requireAdmin } from './admin.js';
 import type { D1Database, Env } from './app.js';
+import { verifyStageUpload } from './stageVerifier.js';
 
 // src/aiCache.ts
 // The AI cloud cache: a shared shelf of "this lyric file already got an answer".
@@ -11,12 +12,18 @@ import type { D1Database, Env } from './app.js';
 // who has not filled in an API key still gets a hit, which is the whole point
 // of shipping the switch on by default.
 //
+// Pulling stays keyed by MD5 alone, even though pushing now carries a platform
+// name: an entry written before that field existed must still be reachable.
+//
 // Only the payload is stored. No prompt, no lyric text, no credential.
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 const MAX_TITLE_CHARS = 200;
 const MAX_LIST_LIMIT = 500;
 const DEFAULT_LIST_LIMIT = 200;
+const MAX_PLATFORM_CHARS = 64;
+/** 同一个键最多留几份旧版：够把被盖掉的那条捞回来，又不至于无限长。 */
+export const MAX_CACHE_BACKUPS = 10;
 
 const KIND_PATTERN = /^[a-z0-9_-]{1,32}$/;
 const KEY_PATTERN = /^[a-f0-9]{32}$/;
@@ -36,6 +43,8 @@ export interface AiCacheEntry {
   songTitle: string;
   provider: string;
   model: string;
+  /** 这首歌来自哪个音乐平台。老条目没有这一列，读出来是空串。 */
+  platform: string;
   payloadBytes: number;
   hits: number;
   createdAt: string;
@@ -50,9 +59,25 @@ type AiCacheRow = {
   song_title: string | null;
   provider: string | null;
   model: string | null;
+  platform: string | null;
   hits: number;
   created_at: string;
   updated_at: string;
+};
+
+type AiCacheBackupRow = {
+  id: number;
+  kind: string;
+  cache_key: string;
+  payload_json: string;
+  payload_bytes: number;
+  song_title: string | null;
+  provider: string | null;
+  model: string | null;
+  platform: string | null;
+  hits: number;
+  created_at: string;
+  archived_at: string;
 };
 
 const mapRow = (row: AiCacheRow): AiCacheEntry => {
@@ -69,10 +94,35 @@ const mapRow = (row: AiCacheRow): AiCacheEntry => {
     songTitle: row.song_title ?? '',
     provider: row.provider ?? '',
     model: row.model ?? '',
+    platform: row.platform ?? '',
     payloadBytes: Number(row.payload_bytes ?? 0),
     hits: Number(row.hits ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+};
+
+/** 备份表里的一行：够管理员看清是哪一版，也能整版捞回来。 */
+const mapBackupRow = (row: AiCacheBackupRow) => {
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(row.payload_json);
+  } catch {
+    payload = null;
+  }
+  return {
+    id: Number(row.id ?? 0),
+    kind: row.kind,
+    key: row.cache_key,
+    payload,
+    songTitle: row.song_title ?? '',
+    provider: row.provider ?? '',
+    model: row.model ?? '',
+    platform: row.platform ?? '',
+    payloadBytes: Number(row.payload_bytes ?? 0),
+    hits: Number(row.hits ?? 0),
+    createdAt: row.created_at,
+    archivedAt: row.archived_at,
   };
 };
 
@@ -115,7 +165,7 @@ export const pruneHitLog = async (db: D1Database): Promise<void> => {
 /** GET /api/ai-cache/:kind/:key — the pull. Never fails hard; a miss is data. */
 const handleGet = async (db: D1Database, kind: string, key: string) => {
   const row = await db
-    .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, hits, created_at, updated_at FROM ai_cache WHERE kind = ? AND cache_key = ?')
+    .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at FROM ai_cache WHERE kind = ? AND cache_key = ?')
     .bind(kind, key)
     .first<AiCacheRow>();
 
@@ -135,38 +185,139 @@ const handleGet = async (db: D1Database, kind: string, key: string) => {
 };
 
 /*
+ * 覆盖之前把旧的那版存进备份表。
+ *
+ * 上传是公开的，所以「有人拿一份垃圾把别人做好的那条盖掉」迟早会发生。留着旧版
+ * 不只是心里踏实：真被盖了，管理员能把好的那版整条捞回来（/admin/api/ai-cache-backups）。
+ *
+ * 每个键最多留 MAX_CACHE_BACKUPS 份 —— 够覆盖常见的反复重生成，又不让同一个键无限长。
+ */
+const archiveExistingEntry = async (db: D1Database, kind: string, key: string): Promise<void> => {
+  const row = await db
+    .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at FROM ai_cache WHERE kind = ? AND cache_key = ?')
+    .bind(kind, key)
+    .first<AiCacheRow>();
+  if (!row) return;
+
+  const now = new Date().toISOString();
+  await db
+    .prepare(`
+      INSERT INTO ai_cache_backups
+        (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, archived_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .bind(
+      row.kind,
+      row.cache_key,
+      row.payload_json,
+      Number(row.payload_bytes ?? 0),
+      row.song_title ?? '',
+      row.provider ?? '',
+      row.model ?? '',
+      row.platform ?? '',
+      Number(row.hits ?? 0),
+      row.created_at ?? now,
+      now,
+    )
+    .run()
+    .catch(() => undefined);
+
+  await db
+    .prepare(`
+      DELETE FROM ai_cache_backups
+      WHERE kind = ? AND cache_key = ?
+        AND id NOT IN (
+          SELECT id FROM ai_cache_backups
+          WHERE kind = ? AND cache_key = ?
+          ORDER BY archived_at DESC, id DESC
+          LIMIT ?
+        )
+    `)
+    .bind(kind, key, kind, key, MAX_CACHE_BACKUPS)
+    .run()
+    .catch(() => undefined);
+};
+
+/*
  * PUT /api/ai-cache/:kind/:key — the push, after a real generation.
  *
  * 同键**覆盖**，不是「已存在就跳过」。用户点了「重新生成」说明他对云端那条
  * 不满意，就是要拿新的把旧的换掉；累加器 `hits` 照旧留着（它记的是这条被拿过
  * 多少次，换了内容也不该清零），`created_at` 也不动。
+ *
+ * 但覆盖前先过一遍校验：空数据一律拒，形状不合规一律拒，能拿平台上的歌词原文件
+ * 重算哈希的再对一遍。通过了才把旧版存进备份、再写入新的一版。
  */
-const handlePut = async (db: D1Database, kind: string, key: string, body: unknown) => {
-  const source = (body ?? {}) as { payload?: unknown; songTitle?: unknown; provider?: unknown; model?: unknown };
+const handlePut = async (
+  db: D1Database,
+  kind: string,
+  key: string,
+  body: unknown,
+  options: { strict: boolean },
+) => {
+  const source = (body ?? {}) as {
+    payload?: unknown;
+    songTitle?: unknown;
+    provider?: unknown;
+    model?: unknown;
+    /** 这首歌来自哪个平台；老客户端没有，那就是空串，走「按顺序试各平台」。 */
+    platform?: unknown;
+    /** 歌词正文的 MD5。老客户端也没有，那就无从校验、按未验证放行。 */
+    lyricHash?: unknown;
+    isPureMusic?: unknown;
+  };
   const parsed = readPayload(source.payload);
-  if (!parsed.ok) return { ok: false, error: 'invalid_payload', stored: false };
+  if (!parsed.ok) return { ok: false, error: 'invalid_payload', stored: false, note: 'payload 缺失或超过 64KB。' };
+
+  const songTitle = readMetaText(source.songTitle, MAX_TITLE_CHARS);
+  const platform = readMetaText(source.platform, MAX_PLATFORM_CHARS);
+  const lyricHash = readMetaText(source.lyricHash, 64);
+
+  const verification = await verifyStageUpload({
+    payload: parsed.payload,
+    songTitle,
+    platform,
+    lyricHash,
+    isPureMusic: source.isPureMusic === true,
+    strict: options.strict,
+  });
+  if (!verification.ok) {
+    return { ok: false, error: verification.error, stored: false, note: verification.note };
+  }
 
   const now = new Date().toISOString();
-  const songTitle = readMetaText(source.songTitle, MAX_TITLE_CHARS);
   const provider = readMetaText(source.provider, 64);
   const model = readMetaText(source.model, 128);
 
+  /* 先把旧版存好，再覆盖 —— 顺序反了就什么都没留下。 */
+  await archiveExistingEntry(db, kind, key);
+
   await db
     .prepare(`
-      INSERT INTO ai_cache (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, hits, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      INSERT INTO ai_cache (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       ON CONFLICT(kind, cache_key) DO UPDATE SET
         payload_json = excluded.payload_json,
         payload_bytes = excluded.payload_bytes,
         song_title = excluded.song_title,
         provider = excluded.provider,
         model = excluded.model,
+        platform = excluded.platform,
         updated_at = excluded.updated_at
     `)
-    .bind(kind, key, JSON.stringify(parsed.payload), parsed.bytes, songTitle, provider, model, now, now)
+    .bind(kind, key, JSON.stringify(parsed.payload), parsed.bytes, songTitle, provider, model, platform, now, now)
     .run();
 
-  return { ok: true, stored: true };
+  return {
+    ok: true,
+    stored: true,
+    verification: {
+      status: verification.status,
+      platform: verification.platform,
+      source: verification.source,
+      note: verification.note,
+    },
+  };
 };
 
 const buildRoutes = (options: { admin: boolean }) => {
@@ -190,7 +341,12 @@ const buildRoutes = (options: { admin: boolean }) => {
       return c.json({ ok: false, error: 'invalid_key' }, 400);
     }
     const body = await c.req.json<unknown>().catch(() => null);
-    const result = await handlePut(c.env.FOLIA_SYNC_DB, kind, key, body);
+    /*
+     * `AI_CACHE_VERIFY=off` 是上游抖动时的退路：只留空数据与合规那两道，不再拿
+     * 平台上的歌词对哈希。默认开着。
+     */
+    const strict = String(c.env.AI_CACHE_VERIFY ?? '').trim().toLowerCase() !== 'off';
+    const result = await handlePut(c.env.FOLIA_SYNC_DB, kind, key, body, { strict });
     return c.json(result, result.ok ? 200 : 400);
   });
 
@@ -214,11 +370,11 @@ export const adminCacheRoutes = (() => {
 
     const rows = kind && KIND_PATTERN.test(kind)
       ? await c.env.FOLIA_SYNC_DB
-        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, hits, created_at, updated_at FROM ai_cache WHERE kind = ? ORDER BY updated_at DESC LIMIT ?')
+        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at FROM ai_cache WHERE kind = ? ORDER BY updated_at DESC LIMIT ?')
         .bind(kind, limit)
         .all<AiCacheRow>()
       : await c.env.FOLIA_SYNC_DB
-        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, hits, created_at, updated_at FROM ai_cache ORDER BY updated_at DESC LIMIT ?')
+        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at FROM ai_cache ORDER BY updated_at DESC LIMIT ?')
         .bind(limit)
         .all<AiCacheRow>();
 
@@ -255,6 +411,93 @@ export const adminCacheRoutes = (() => {
       await c.env.FOLIA_SYNC_DB.prepare('DELETE FROM ai_cache').run();
     }
     return c.json({ ok: true });
+  });
+
+  return routes;
+})();
+
+/*
+ * Admin: `/admin/api/ai-cache-backups/...` —— 每次被覆盖之前的那一版。
+ *
+ * 校验能挡住空数据，挡不住「一份能看但很糟的主题」。真被盖掉了，管理员在这里挑一版
+ * 旧的捞回来，比让人重新生成一遍划算得多。
+ */
+export const adminCacheBackupRoutes = (() => {
+  const routes = new Hono<{ Bindings: Env }>();
+  routes.use('*', requireAdmin);
+
+  /** GET /admin/api/ai-cache-backups/:kind/:key —— 这个键留下来的旧版，新的在前。 */
+  routes.get('/:kind/:key', async (c) => {
+    const kind = String(c.req.param('kind') || '').toLowerCase();
+    const key = String(c.req.param('key') || '').toLowerCase();
+    if (!KIND_PATTERN.test(kind) || !KEY_PATTERN.test(key)) {
+      return c.json({ ok: false, error: 'invalid_key' }, 400);
+    }
+    const rows = await c.env.FOLIA_SYNC_DB
+      .prepare('SELECT id, kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, archived_at FROM ai_cache_backups WHERE kind = ? AND cache_key = ? ORDER BY archived_at DESC, id DESC')
+      .bind(kind, key)
+      .all<AiCacheBackupRow>();
+    return c.json({
+      ok: true,
+      limit: MAX_CACHE_BACKUPS,
+      backups: (rows.results ?? []).map(mapBackupRow),
+    });
+  });
+
+  /*
+   * POST /admin/api/ai-cache-backups/:id/restore —— 把某一版捞回成当前那条。
+   *
+   * 先把**现在这条**也存进备份再覆盖：万一捞错了还能再捞回来，不会把当前版本弄丢。
+   * 这一版捞回来之后自己就没必要留着了，删掉。
+   */
+  routes.post('/:id/restore', async (c) => {
+    const id = Number.parseInt(String(c.req.param('id') || ''), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ ok: false, error: 'invalid_id' }, 400);
+    }
+    const row = await c.env.FOLIA_SYNC_DB
+      .prepare('SELECT id, kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, archived_at FROM ai_cache_backups WHERE id = ?')
+      .bind(id)
+      .first<AiCacheBackupRow>();
+    if (!row) return c.json({ ok: false, error: 'not_found' }, 404);
+
+    await archiveExistingEntry(c.env.FOLIA_SYNC_DB, row.kind, row.cache_key);
+
+    const now = new Date().toISOString();
+    await c.env.FOLIA_SYNC_DB
+      .prepare(`
+        INSERT INTO ai_cache (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(kind, cache_key) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          payload_bytes = excluded.payload_bytes,
+          song_title = excluded.song_title,
+          provider = excluded.provider,
+          model = excluded.model,
+          platform = excluded.platform,
+          updated_at = excluded.updated_at
+      `)
+      .bind(
+        row.kind,
+        row.cache_key,
+        row.payload_json,
+        Number(row.payload_bytes ?? 0),
+        row.song_title ?? '',
+        row.provider ?? '',
+        row.model ?? '',
+        row.platform ?? '',
+        Number(row.hits ?? 0),
+        row.created_at ?? now,
+        now,
+      )
+      .run();
+
+    await c.env.FOLIA_SYNC_DB
+      .prepare('DELETE FROM ai_cache_backups WHERE id = ?')
+      .bind(id)
+      .run();
+
+    return c.json({ ok: true, restored: id });
   });
 
   return routes;

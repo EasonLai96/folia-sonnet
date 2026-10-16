@@ -8,7 +8,7 @@ import adminAuthRoutes, {
   touchAdminSession,
 } from './admin.js';
 import { renderLoginPage, renderPanelPage } from './panel.js';
-import { aiCacheRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
+import { aiCacheRoutes, adminCacheBackupRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
 import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
 import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
@@ -35,6 +35,11 @@ export type Env = {
   ADMIN_PASSWORD?: string;
   /** Where the font bytes go. Absent means "fall back to D1". See src/fontBlobs.ts. */
   FONT_BLOBS?: FontBlobStore;
+  /**
+   * 上传时拿平台上的歌词原文件重算哈希这道校验的开关。设成 `off` 就只留空数据与
+   * 合规那两道 —— 第三方接口整片不通时的退路。默认开着。
+   */
+  AI_CACHE_VERIFY?: string;
   /** Database file size in bytes; Workers have no filesystem, so this stays unset there. */
   readDatabaseBytes?: () => number | null;
 };
@@ -134,10 +139,35 @@ const ensureSchema = async (db: D1Database) => {
         song_title TEXT,
         provider TEXT,
         model TEXT,
+        platform TEXT,
         hits INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (kind, cache_key)
+      )
+    `),
+    /*
+     * 每次被覆盖之前的那一版。
+     *
+     * 上传是公开的（没填 Key 的人也要能推），所以「有人用空数据把别人做好的那条盖掉」
+     * 是迟早会发生的事。留着旧版不只是能回滚：真被盖了，后台还能把好的那版捞回来。
+     * 每个键最多留 MAX_CACHE_BACKUPS 份，超了删最旧的 —— 缓存条目本身就不大，
+     * 但同一个键被反复覆盖时不该无限长。
+     */
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_cache_backups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        payload_bytes INTEGER NOT NULL DEFAULT 0,
+        song_title TEXT,
+        provider TEXT,
+        model TEXT,
+        platform TEXT,
+        hits INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        archived_at TEXT NOT NULL
       )
     `),
     // 每次命中记一行。`ai_cache.hits` 只是个累加器，看不出「什么时候命中的」，
@@ -163,7 +193,17 @@ const ensureSchema = async (db: D1Database) => {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_font_market_enabled ON font_market(enabled)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_updated_at ON ai_cache(updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_hits_at ON ai_cache_hits(at)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_backups_key ON ai_cache_backups(kind, cache_key, archived_at)'),
   ]);
+
+  /*
+   * 老库建表时还没有 platform 列：`CREATE TABLE IF NOT EXISTS` 对已经存在的表什么都不做，
+   * 那一列就永远加不上。SQLite 没有「加列 IF NOT EXISTS」，所以单独 ALTER 一次、
+   * 已经存在（报 duplicate column）就当没事 —— 与 pruneHitLog 一样，升级不该因为
+   * 这条语句报错而把整个服务挡在门外。
+   */
+  await db.prepare('ALTER TABLE ai_cache ADD COLUMN platform TEXT').run().catch(() => undefined);
+
   schemaEnsured = true;
 };
 
@@ -637,6 +677,7 @@ app.get('/admin', async (c) => {
 });
 app.route('/admin/api/fonts', adminFontRoutes);
 app.route('/admin/api/ai-cache', adminCacheRoutes);
+app.route('/admin/api/ai-cache-backups', adminCacheBackupRoutes);
 // 概况图：`GET /admin/api/stats.svg`，挂在 /admin/api 下，跟面板同一道门。
 app.route('/admin/api', adminStatsImageRoutes);
 app.get('/admin/api/stats', requireAdmin, async (c) => {

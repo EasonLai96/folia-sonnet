@@ -78,6 +78,24 @@ export type AiCloudCachePull =
 export interface AiCloudCachePushMeta {
     songTitle?: string;
     target?: AiCompletionTarget | null;
+    /**
+     * 这首歌来自哪个音乐平台（netease / qq / kugou …）。
+     *
+     * 服务端拿它去对应平台把歌词原文件取回来重算哈希；**本地歌曲没有平台**，那就留空，
+     * 服务端会按顺序逐个平台试。这个字段只跟着上传走 —— 拉取那条链路照样只看 MD5 键，
+     * 于是加了它也不影响早先推上去的那些条目。
+     */
+    platform?: string;
+    /**
+     * 歌词正文的 MD5（不含 policy）。
+     *
+     * 缓存键是「歌词 + policy」的 MD5，policy 里的屏蔽样式与自定义提示词只有本机能算，
+     * 服务端算不出来 —— 所以另外带一份纯歌词的哈希给它对。老版本没有这个字段，
+     * 服务端就按「无从校验」放行。
+     */
+    lyricHash?: string;
+    /** 纯音乐：喂给模型的（也参与指纹的）是歌名而不是歌词正文。 */
+    isPureMusic?: boolean;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => (
@@ -173,6 +191,9 @@ export const pushAiCloudCache = async (
                 songTitle: meta.songTitle ?? '',
                 provider: meta.target?.provider ?? '',
                 model: meta.target?.model ?? '',
+                platform: meta.platform ?? '',
+                lyricHash: meta.lyricHash ?? '',
+                isPureMusic: meta.isPureMusic === true,
             }),
             signal: withTimeout(),
         });
@@ -207,6 +228,11 @@ export const withAiCloudCache = async <T>(options: {
      */
     combine?: (previous: unknown, fresh: T) => T;
     songTitle?: string;
+    /** 见 `AiCloudCachePushMeta`：平台名与歌词哈希只跟着上传走，不参与键。 */
+    platform?: string;
+    /** 歌词正文的 MD5。算得出来就带上，服务端好拿平台上的歌词对一遍。 */
+    lyricHash?: string;
+    isPureMusic?: boolean;
     /**
      * 别去问云端，直接生成 —— 「重新判断」就是要一个跟缓存里不一样的答案。
      *
@@ -215,7 +241,7 @@ export const withAiCloudCache = async <T>(options: {
      */
     skipPull?: boolean;
 }): Promise<{ value: T; source: AiCloudCacheSource }> => {
-    const { kind, fingerprint, generate, validate, combine, songTitle, skipPull } = options;
+    const { kind, fingerprint, generate, validate, combine, songTitle, platform, lyricHash, isPureMusic, skipPull } = options;
 
     let previous: unknown = null;
     if (!skipPull && isFoliaCloudCacheEnabled()) {
@@ -234,7 +260,7 @@ export const withAiCloudCache = async <T>(options: {
         kind,
         fingerprint,
         combine ? combine(previous, value) : value,
-        { songTitle, target: describeAiTarget() },
+        { songTitle, platform, lyricHash, isPureMusic, target: describeAiTarget() },
     );
     return { value, source: 'ai' };
 };

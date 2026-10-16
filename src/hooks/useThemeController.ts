@@ -35,6 +35,7 @@ import {
     resolveBgModeTheme,
 } from './themeControllerState';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
+import { resolveSongPlatform } from '../utils/songPlatform';
 import { recordAiThemeSkip } from '../utils/aiThemeDiagnostics';
 import { setStatusMessage as setStatusMsg } from '../stores/useStatusMessageStore';
 import { useStableCallbacks } from './useStableCallbacks';
@@ -648,6 +649,11 @@ export function useThemeController({
                  */
                 lines: lyrics?.lines ?? [],
                 trigger: source,
+                /*
+                 * 平台名只跟着上传走，服务端拿它去对应平台核对歌词；本地歌曲留空，
+                 * 服务端再按顺序逐个平台试。键仍然是那个 MD5。
+                 */
+                platform: resolveSongPlatform(currentSong),
                 /*
                  * 手动点「生成 AI 主题」就是「我对现在这个不满意，再给一个」——
                  * 所以不看缓存，直接重新问模型，生成完把云端那条**覆盖**掉。

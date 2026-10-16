@@ -28,6 +28,7 @@ import {
 } from './lyricDirector/prompt';
 import { readDirectorSettings, readRecentModes } from './lyricDirector/state';
 import { setStatusMessage } from '../stores/useStatusMessageStore';
+import { md5 } from '../utils/md5';
 
 // src/services/aiStage.ts
 // 一次 AI 调用，两份答案：视觉主题 + 歌词动画决策。
@@ -75,6 +76,11 @@ export type StageRequirement = 'theme' | 'decision' | 'both';
 
 export interface StageRequest {
     song?: DirectorSongInfo | null;
+    /**
+     * 这首歌来自哪个音乐平台（netease / qq / kugou …）。本地歌曲没有，留空即可。
+     * 只跟着上传走：服务端拿它去对应平台核对歌词，键仍然是那个 MD5。
+     */
+    platform?: string;
     lines?: readonly StageLyricLine[];
     /** 纯音乐：喂给模型的应当是标题，不是歌词正文。不传就按「有没有歌词行」自己判。 */
     isPureMusic?: boolean;
@@ -256,6 +262,11 @@ export type StageContext = {
     prompt: string;
     blockedModes: readonly string[];
     songTitle: string;
+    /** 参与指纹的那段歌词正文（纯音乐时是歌名）。 */
+    lyricSource: string;
+    isPureMusic: boolean;
+    /** 平台名，本地歌曲为空串。 */
+    platform: string;
     skipPull: boolean;
     signal?: AbortSignal;
     generate?: (ctx: StageContext) => Promise<StageParts>;
@@ -301,6 +312,9 @@ const buildStageContext = (request: StageRequest): StageContext => {
         }),
         blockedModes,
         songTitle: song?.title ?? '',
+        lyricSource,
+        isPureMusic,
+        platform: String(request.platform ?? '').trim(),
         skipPull: request.force === true,
         signal: request.signal,
         generate: request.generate,
@@ -430,6 +444,16 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
         /* 回传前先把云端已有的那半捞回来，别让只出一半的生成结果把它抹掉。 */
         combine: (previous, fresh) => combineStageParts(previous, fresh, ctx.blockedModes),
         songTitle: ctx.songTitle,
+        /*
+         * 平台名 + 歌词正文的哈希只给服务端校验用。
+         *
+         * 键是「歌词 + policy」的 MD5，policy（屏蔽的样式、自定义提示词）只有本机能算，
+         * 服务端复现不出来 —— 所以另外给它一份纯歌词的哈希，它拿平台上的歌词原文件
+         * 重算一遍就能对上。算不出来（比如没有歌词正文）就不带，服务端按无从校验放行。
+         */
+        platform: ctx.platform,
+        lyricHash: ctx.lyricSource ? md5(ctx.lyricSource) : '',
+        isPureMusic: ctx.isPureMusic,
     });
     return { ...value, source };
 };

@@ -3,8 +3,16 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSongThemeAutoGeneration } from '@/hooks/useSongThemeAutoGeneration';
+import type { GenerateAIThemeOptions, GenerateAIThemeResult } from '@/hooks/useThemeController';
 import { usePlaybackStore } from '@/stores/usePlaybackStore';
 import type { LyricData, SongResult } from '@/types';
+
+/** 与 hook 期望的签名一致；vi.fn 那一侧在赋值时强转一次。 */
+type GenerateAITheme = (
+    lyrics: LyricData | null,
+    currentSong: SongResult | null,
+    options?: GenerateAIThemeOptions,
+) => Promise<GenerateAIThemeResult>;
 
 // test/unit/hooks/useSongThemeAutoGeneration.test.ts
 // 切歌之后的自动生成到底有没有发起 —— 「后台播着，下一首却没去问云缓存」就在这一段。
@@ -33,7 +41,7 @@ type Call = { songId: string | null };
 let container: HTMLDivElement;
 let root: Root;
 let calls: Call[];
-let generateAITheme: ReturnType<typeof vi.fn>;
+let generateAITheme: GenerateAITheme;
 
 const Probe = ({ enabled, isLyricsLoading }: { enabled: boolean; isLyricsLoading: boolean }) => {
     useSongThemeAutoGeneration({
@@ -85,9 +93,10 @@ beforeEach(() => {
     vi.useFakeTimers();
     calls = [];
     generateAITheme = vi.fn(async (lyrics: LyricData | null, song: SongResult | null) => {
-        calls.push({ songId: song?.id ?? null });
+        /* MediaId 可能是数字，统一记成字符串好比对。 */
+        calls.push({ songId: song?.id != null ? String(song.id) : null });
         return { status: 'generated', applied: true } as const;
-    });
+    }) as unknown as GenerateAITheme;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

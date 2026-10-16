@@ -62,6 +62,11 @@ export const generateThemeFromLyrics = async (
     lines?: readonly StageLyricLine[];
     /** 「重新生成」：不看缓存，生成完覆盖云端那条。 */
     force?: boolean;
+    /**
+     * 这首歌来自哪个音乐平台。只跟着上传走（服务端拿它去核对歌词），
+     * 键仍然是那个 MD5 —— 早先推上去的条目照样拉得到。
+     */
+    platform?: string;
   }
 ): Promise<AiThemeGenerationResult> => {
   const provider = getWebAiProvider();
@@ -103,6 +108,7 @@ export const generateThemeFromLyrics = async (
         lines: lyricLines as { fullText?: string }[],
         isPureMusic: resolved.isPureMusic,
         songTitle: options?.songTitle,
+        platform: options?.platform,
         require: 'theme',
         /* 「重新生成」同样要跳过缓存，否则桌面端点下去拿回的还是云端那条旧答案。 */
         force: options?.force === true,
@@ -134,6 +140,7 @@ export const generateThemeFromLyrics = async (
         lines: lyricLines as { fullText?: string }[],
         isPureMusic: resolved.isPureMusic,
         songTitle: options?.songTitle,
+        platform: options?.platform,
         require: 'theme',
         force: options?.force === true,
       });
@@ -170,6 +177,7 @@ export const generateThemeFromLyrics = async (
         lines: lyricLines as { fullText?: string }[],
         isPureMusic: resolved.isPureMusic,
         songTitle: options?.songTitle,
+        platform: options?.platform,
         require: 'theme',
         force: options?.force === true,
         generate: async () => {

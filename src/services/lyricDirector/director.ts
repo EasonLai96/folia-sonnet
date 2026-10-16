@@ -405,6 +405,8 @@ const requestDecision = async (input: {
             /* 没歌词就是纯音乐，和主题那条链路同一个判定 —— 指纹要对得上。 */
             isPureMusic: input.lines.length === 0,
             songTitle: input.song?.title ?? '',
+            /* 平台名只跟着上传走，服务端拿它去核对歌词；没有就留空，由它逐个平台试。 */
+            platform: input.song?.platform ?? '',
             hint: settings.userHint,
             blockedModes: settings.blockedModes,
             currentMode: currentModeOf(useVisualizerSettingsStore.getState()),

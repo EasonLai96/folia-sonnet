@@ -319,7 +319,9 @@ http://127.0.0.1:13000
 | `GET` | `/api/fonts/:id/file` | 无 | 下载字体文件本体（客户端点「使用」才取） |
 | `GET` | `/api/fonts/:id/preview` | 无 | 预览图（不可变缓存） |
 | `GET` | `/api/ai-cache/:kind/:key` | 无 | 拉取 AI 生成缓存，`kind` 为 `theme` / `director`，`key` 为歌词文件 MD5 |
-| `PUT` | `/api/ai-cache/:kind/:key` | 无 | 上传 AI 生成结果（单条 payload 上限 64KB） |
+| `PUT` | `/api/ai-cache/:kind/:key` | 无 | 上传 AI 生成结果（单条 payload 上限 64KB，空数据与不合规的一律拒绝） |
+| `GET` | `/admin/api/ai-cache-backups/:kind/:key` | 登录 | 这个键被覆盖前留下来的旧版（最多 10 份，新的在前） |
+| `POST` | `/admin/api/ai-cache-backups/:id/restore` | 登录 | 把某一版旧版捞回成当前那条（当前那条会先存进备份，捞错还能再捞） |
 | `GET` | `/stage` | 无 | 访客检索页：按歌名搜云缓存（支持 `?q=`） |
 | `GET` | `/stage/entry/:key` | 无 | 访客详情页：这一条用了什么动画模式、什么配色、哪些高亮词 |
 | `GET` | `/api/stage-gallery/search?q=&limit=` | 无 | 检索页输入即搜用的接口，回 JSON 与服务端渲染好的结果片段 |
@@ -341,7 +343,10 @@ http://127.0.0.1:13000
 - `src/admin.ts`：可视化面板的登录门（数据库 session + httpOnly cookie）。
 - `src/panel.ts`：可视化面板页面（字体市场上架、云缓存查看与清理）。
 - `src/fonts.ts`：字体市场的公开目录接口与管理员上传 / 启停 / 删除接口。
-- `src/aiCache.ts`：AI 生成缓存的公开读写接口与管理员管理接口。
+- `src/aiCache.ts`：AI 生成缓存的公开读写接口与管理员管理接口（含覆盖前的备份与回滚）。
+- `src/stageVerifier.ts`：一条上传收不收 —— 空数据、形状合规、以及拿平台歌词重算哈希。
+- `src/stageLyricSources.ts`：从各音乐平台把歌词原文件取回来（只用于算哈希，不落库）。
+- `src/md5.ts`：MD5 实现（WebCrypto 不提供 MD5，而缓存键就是它）。
 - `src/stageGallery.ts` / `src/stageGalleryView.ts`：对外那一面（访客检索页与详情页）的路由与渲染。
 - `install.sh` / `install.ps1`：Node、Docker、Cloudflare 三种部署菜单。
 
@@ -395,6 +400,36 @@ http://127.0.0.1:13000
 面板的写操作接口都在 `/admin/api/*` 下，受上面那套 session + `requireAdmin` 中间件保护；只读的 `/api/fonts` 与 `/api/ai-cache` 仍然公开。
 
 ---
+
+## 🛡 上传校验与覆盖备份
+
+上传接口是公开的（没填 Key 的人也要能把自己那份推上来），所以「有人拿空数据把别人做好的那条盖掉」迟早会发生。两道防线：
+
+**一、收不收：先过校验**
+
+| 情况 | 处置 |
+| --- | --- |
+| 空数据（既没有主题也没有动画决策） | **一律拒绝**（400 `empty_payload`） |
+| 形状不合规 / 超过 64KB | 拒绝（400 `invalid_payload`） |
+| 纯音乐：哈希与歌名对不上 | 拒绝（400 `lyric_mismatch`） |
+| 有平台歌词可比对，哈希一致 | 收下，记 `verified` |
+| 有平台歌词可比对，哈希不一致 | 拒绝（400 `lyric_mismatch`） |
+| 平台取不到歌词（没这首歌 / 接口不通） | **放行**，记 `unverified` |
+| 旧客户端没带歌词哈希 | 放行，记 `unverified` |
+
+**放行那条是纪律**：第三方平台接口随时会抖，缓存的底线是永不阻塞功能 —— 一次上游抖动不该变成全站上传失败。真要临时关掉这道校验（只留空数据与合规那两道），设 `AI_CACHE_VERIFY=off`。
+
+**二、盖掉了也能捞回来：覆盖前留旧版**
+
+每次覆盖之前，旧的那版整条存进 `ai_cache_backups`，**每个键最多 10 份**（超了删最旧的）。管理员在 `/admin/api/ai-cache-backups/:kind/:key` 能翻旧版，挑一版 `POST /:id/restore` 捞回来 —— 捞的时候当前那条也会先存进备份，捞错还能再捞。
+
+**关于平台名字段**
+
+上传现在多带三个字段：`platform`（netease / qq / kugou，本地歌曲留空）、`lyricHash`（歌词正文的 MD5）、`isPureMusic`。
+
+- **拉取那条链路完全不看它们**，键仍然是那个 MD5 —— 早先推上去、没有这些字段的条目照样拉得到。
+- `lyricHash` 之所以要单独带一份：缓存键是「歌词 + policy」的 MD5，而 policy 里的屏蔽样式与自定义提示词只有本机能算，服务端复现不出来，所以另给一份纯歌词的哈希去比对。
+- 没写平台名（本地歌曲、旧客户端）时，服务端按 **netease → qq → kugou** 顺序逐个平台试，先匹配上谁算谁。
 
 ## 🔍 访客检索页
 

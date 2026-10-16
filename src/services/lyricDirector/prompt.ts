@@ -25,6 +25,8 @@ export interface DirectorSongInfo {
     title: string;
     artist: string;
     album: string | null;
+    /** 这首歌来自哪个音乐平台（netease / qq / kugou …）；本地歌曲没有，留空。 */
+    platform?: string;
 }
 
 export interface DirectorPreviousChoice {
