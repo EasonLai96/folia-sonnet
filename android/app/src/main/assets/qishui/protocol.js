@@ -8168,7 +8168,7 @@
     writeFileSync(COOKIE_FILE, normalized);
     return normalized;
   }
-  var STATUS_ENRICH_BUDGET_MS = 6e3;
+  var STATUS_ENRICH_BUDGET_MS = 15e3;
   async function withBudget(promise, ms) {
     let timer = null;
     const timeout = new Promise((resolve2) => {

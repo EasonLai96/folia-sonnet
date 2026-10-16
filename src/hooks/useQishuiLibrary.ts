@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { omni } from '../services/onlineMusic/omni';
+import { clearQishuiLibraryCache, getQishuiLibraryNote } from '../services/onlineMusic/qishuiLibrary';
 import { noteQishuiRefreshDiagnostic } from '../services/onlineMusic/qishuiProvider';
 import { clearProviderAccountSnapshot, loadProviderAccountSnapshot, saveProviderAccountSnapshot } from '../services/onlineMusic/providerAccountCache';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
@@ -54,10 +55,8 @@ export const useQishuiLibrary = () => {
             let offset = 0;
             let fetchedLikedSongIds: MediaId[] = [];
             if (capabilities.userLibrary) {
-                // 歌单拉不到不该否定「已经登录」这件事。安卓上 /luna 这类接口
-                // 服务端只认 bdms.node 的 X-Helios/X-Medusa，而 bdms.node 是
-                // Windows x64 原生模块 —— 签名宿主只能回退 a_bogus，拿不到
-                // 歌单是**能力缺失**而不是登录失败。保留已拿到的部分，继续收尾。
+                // 歌单拉不到不该否定「已经登录」这件事（原因见上面 availability 那段注释）。
+                // 拉空时把协议层记的 /luna 失败原因带进诊断，否则界面只说「没有数据」。
                 try {
                     while (true) {
                         const page = await omni.getProviderUserPlaylists('qishui', user.id, { offset, limit: 50 });
@@ -68,6 +67,12 @@ export const useQishuiLibrary = () => {
                     }
                 } catch (error) {
                     console.warn('[QishuiLibrary] user playlists unavailable', error);
+                }
+                if (!collections.length) {
+                    noteQishuiRefreshDiagnostic('playlists empty; '
+                        + (getQishuiLibraryNote() ?? 'library never fetched'));
+                } else if (getQishuiLibraryNote()?.startsWith('/luna errors')) {
+                    noteQishuiRefreshDiagnostic('playlists partial; ' + getQishuiLibraryNote());
                 }
             }
             if (capabilities.likes) {

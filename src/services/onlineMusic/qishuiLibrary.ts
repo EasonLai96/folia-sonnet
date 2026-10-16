@@ -8,11 +8,21 @@ import { requestQishui, throwQishuiDataError } from './qishuiTransport';
 const playlistCache = new Map<string, { at: number; items: ProviderCollection[] }>();
 export const clearQishuiLibraryCache = () => playlistCache.clear();
 
+// /luna 那一路的失败原因留在协议层的 libraryErrors 里，但歌单拉空时上层只看到
+// 「没有数据」，看不出是被签名挡了还是接口换了。这里记一句，由 useQishuiLibrary
+// 读走（不能直接 import qishuiProvider —— 它反过来 import 本文件，会成环）。
+let lastQishuiLibraryNote: string | null = null;
+export const getQishuiLibraryNote = (): string | null => lastQishuiLibraryNote;
+
 // `user.playlists` 一次就把整库（含我的喜欢 / 最近播放 / 推荐流的虚拟歌单）带回来，没有分页参数。
 async function allPlaylists(userId: MediaId): Promise<ProviderCollection[]> {
     const data = await requestQishui<any>('user.playlists', {});
     throwQishuiDataError(data);
     const raw = Array.isArray(data.playlists) ? data.playlists : [];
+    const errors = Array.isArray(data.libraryErrors) ? data.libraryErrors.map(String) : [];
+    lastQishuiLibraryNote = errors.length
+        ? `/luna errors: ${errors.join(' | ')}`
+        : '/luna ok (no errors)';
     const items = raw.map((item: unknown) => normalizeQishuiCollection(item));
     playlistCache.set(String(userId), { at: Date.now(), items });
     return items;

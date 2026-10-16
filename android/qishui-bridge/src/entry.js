@@ -115,7 +115,11 @@ function saveQishuiCookie(value) {
 // 插件的 25s 上限，表现成「登录超时」「完成二次验证后报错」。所以富化单独一个预算，
 // 超时就按 cookie 判定返回，绝不让它决定成败。
 
-const STATUS_ENRICH_BUDGET_MS = 6000;
+// 富化的预算。fetchQishuiWebLibrary 先单独打 me（每个 /luna 请求自己 6.5s），
+// 再并行三个，签名那一路失败还会退回普通请求重打一遍 —— 6s 会被它自己吃满，
+// 于是 status 永远只回「光秃秃的 cookie 判定」，歌单与资料全空。
+// 给到 15s：插件侧 25s 才是硬上限，且库结果有 90s 缓存，后续 status 会很快。
+const STATUS_ENRICH_BUDGET_MS = 15000;
 
 async function withBudget(promise, ms) {
     let timer = null;
