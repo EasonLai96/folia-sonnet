@@ -320,6 +320,9 @@ http://127.0.0.1:13000
 | `GET` | `/api/fonts/:id/preview` | 无 | 预览图（不可变缓存） |
 | `GET` | `/api/ai-cache/:kind/:key` | 无 | 拉取 AI 生成缓存，`kind` 为 `theme` / `director`，`key` 为歌词文件 MD5 |
 | `PUT` | `/api/ai-cache/:kind/:key` | 无 | 上传 AI 生成结果（单条 payload 上限 64KB） |
+| `GET` | `/stage` | 无 | 访客检索页：按歌名搜云缓存（支持 `?q=`） |
+| `GET` | `/stage/entry/:key` | 无 | 访客详情页：这一条用了什么动画模式、什么配色、哪些高亮词 |
+| `GET` | `/api/stage-gallery/search?q=&limit=` | 无 | 检索页输入即搜用的接口，回 JSON 与服务端渲染好的结果片段 |
 
 字体市场与云缓存的接口刻意放在 Bearer 门之外：没有填 key 的用户也要能先拉到别人已经生成好的结果。同步数据（设置 / 主题）依旧受 `SYNC_TOKEN` 保护。
 
@@ -339,6 +342,7 @@ http://127.0.0.1:13000
 - `src/panel.ts`：可视化面板页面（字体市场上架、云缓存查看与清理）。
 - `src/fonts.ts`：字体市场的公开目录接口与管理员上传 / 启停 / 删除接口。
 - `src/aiCache.ts`：AI 生成缓存的公开读写接口与管理员管理接口。
+- `src/stageGallery.ts` / `src/stageGalleryView.ts`：对外那一面（访客检索页与详情页）的路由与渲染。
 - `install.sh` / `install.ps1`：Node、Docker、Cloudflare 三种部署菜单。
 
 当前协议约束：schema version 为 `2`（v2 新增 `font_market` / `font_files` / `font_previews` / `ai_cache` / `admin_sessions` 五张表），主题 manifest 固定为 `256` 个 bucket；主题批量写入上限为 `500`，bucket 请求最多 `32` 个，完整主题 list 最多 `1000` 条；字体文件单份上限 `40MB`、预览图 `2MB`；AI 缓存单条 payload 上限 `64KB`，`kind` 需匹配 `^[a-z0-9_-]{1,32}$`、`key` 需匹配 `^[a-f0-9]{32}$`。修改这些限制或路由时必须同步客户端 `src/services/sync/*`、`src/services/fontMarket.ts`、`src/services/aiCloudCache.ts` 和本 README。
@@ -389,3 +393,24 @@ http://127.0.0.1:13000
 - **云缓存**：按 `theme` / `director` 筛选，支持按 MD5 或歌名搜索，可以查看某条缓存的完整 payload、删除单条或按类型清空。
 
 面板的写操作接口都在 `/admin/api/*` 下，受上面那套 session + `requireAdmin` 中间件保护；只读的 `/api/fonts` 与 `/api/ai-cache` 仍然公开。
+
+---
+
+## 🔍 访客检索页
+
+云缓存里躺着别人已经生成好的那一份，这一面把它开放给**所有人看，不用登录**：
+
+**访问地址**：`http://你的服务域名/stage`
+
+按歌名搜索，点进 `http://你的服务域名/stage/entry/<md5>` 看这一条的细节：
+
+- **动画模式**：AI 给这首歌定的是哪个歌词动画（中文名 + 模式 ID + 一句话性格），以及它给出的理由与参数；
+- **主题颜色**：浅色 / 深色两套配色，色块直接用取到的颜色铺底，并标出主色、强调色、次色的 hex；
+- **高亮词**：AI 标出的那几个词，用**它自己给的那个颜色**显示。
+
+几点说明：
+
+- 缓存的键是**歌词文件的 MD5**，歌名是推送时顺手记在 `song_title` 列上的 —— 所以检索只走这一列，没记歌名的条目搜不到（详情页按 MD5 仍可直达）。空查询时展示最近更新、且记得住歌名的那些。
+- 这一面**只读**，且刻意挂在 `app.route('/', api)` 那张 Bearer 兜底网之前 —— 挂到后面访客就都进不来了。
+- 页面上每一个字都来自任何人都能 PUT 的 payload：文本一律转义，颜色只认 `#rgb` / `#rrggbb`，认不出的换成兜底色。颜色尤其要卡死 —— 它们会被拼进 `style="..."`，放过一个 `;` 就是一处注入。
+- 结果片段由服务端渲染好后经 `/api/stage-gallery/search` 回传，转义只在服务端做一遍，前端不重复实现渲染。

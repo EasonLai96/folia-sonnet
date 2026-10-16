@@ -11,6 +11,7 @@ import { renderLoginPage, renderPanelPage } from './panel.js';
 import { aiCacheRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
 import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
+import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
 import type { FontBlobStore } from './fontBlobs.js';
 
 export type D1PreparedStatement = {
@@ -615,6 +616,15 @@ api.post('/themes/list', async (c) => {
  */
 app.route('/api/fonts', fontRoutes);
 app.route('/api/ai-cache', aiCacheRoutes);
+
+/*
+ * 访客检索：`/stage` 是搜索页，`/stage/entry/<md5>` 是详情页。
+ *
+ * 这两条**必须**挂在文件末尾那张 `app.route('/', api)` 兜底网之前 —— 那张网会给
+ * 所有没被认领的路径套上 Bearer 校验，访客手上没有 token，挂到后面就谁也进不来。
+ */
+app.route('/stage', galleryPageRoutes);
+app.route('/api/stage-gallery', galleryApiRoutes);
 
 // Visual panel: /admin is the page, /admin/api/* is what it talks to.
 app.route('/admin', adminAuthRoutes);
