@@ -699,6 +699,33 @@ describe('QQ Music Web transport', () => {
         expect(JSON.parse(String(init.body))).toEqual({ tid: '70001', op: 'add', songs: [{ id: 101, type: 0 }] });
     });
 
+    // 3.3.1 的红心与收藏专辑同样只收 POST + JSON。
+    it('posts the like and album subscription writes to their documented routes', async () => {
+        storage.set('online_provider:qq:cookie', CONFIRMED_COOKIE);
+        const fetchMock = vi.fn().mockImplementation(async () => Response.json({ code: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const { requestQq } = await import('@/services/onlineMusic/qqTransport');
+
+        await requestQq('user_song_like', {}, { song: { id: 101, mid: 'song-mid', type: 0 }, liked: true });
+        await requestQq('user_album_subscribe', {}, { id: '000FixAlbum001', subscribed: false });
+
+        const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+        expect(calls.map(([target]) => new URL(target).pathname)).toEqual(['/user/song/like', '/user/album/subscribe']);
+        expect(calls.map(([, init]) => init.method)).toEqual(['POST', 'POST']);
+        expect(JSON.parse(String(calls[0][1].body))).toEqual({ song: { id: 101, mid: 'song-mid', type: 0 }, liked: true });
+        expect(JSON.parse(String(calls[1][1].body))).toEqual({ id: '000FixAlbum001', subscribed: false });
+    });
+
+    it('refuses to send the like and album subscription writes without a body', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        const { requestQq } = await import('@/services/onlineMusic/qqTransport');
+
+        await expect(requestQq('user_song_like')).rejects.toMatchObject({ code: 'invalid-response' });
+        await expect(requestQq('user_album_subscribe')).rejects.toMatchObject({ code: 'invalid-response' });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('sends a same-origin write with the session header and no session in the URL', async () => {
         vi.stubEnv('VITE_QQ_API_BASE', '/api/qq');
         storage.set('online_provider:qq:cookie', CONFIRMED_COOKIE);

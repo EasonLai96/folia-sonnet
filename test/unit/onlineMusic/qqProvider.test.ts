@@ -166,8 +166,8 @@ describe('qqProvider', () => {
         resetQqProviderRuntimeCache();
     });
 
-    // 3.3.0 开放了推荐、歌单增删与收藏歌单；红心、收藏专辑、不喜欢与历史日推后端还没有，不能冒出来。
-    it('declares the 3.3.0 recommendations and mutations without the ones the backend lacks', () => {
+    // 3.3.0 开放了推荐、歌单增删与收藏歌单，3.3.1 补上红心与收藏专辑；不喜欢与历史日推后端还没有，不能冒出来。
+    it('declares the 3.3.1 recommendations and mutations without the ones the backend lacks', () => {
         expect(qqProvider.capabilities).toMatchObject({
             userLibrary: true,
             playlists: true,
@@ -181,7 +181,9 @@ describe('qqProvider', () => {
         expect(qqProvider.capabilities.personalFmModes).toBeFalsy();
         expect(qqProvider.capabilities.historyRecommendations).toBeFalsy();
         expect(Object.keys(qqProvider.recommendations ?? {}).sort()).toEqual(['getDailySongs', 'getPersonalFm', 'getRecommendedCollections']);
-        expect(Object.keys(qqProvider.mutations ?? {}).sort()).toEqual(['canAddToPlaylist', 'canEditPlaylistTracks', 'subscribePlaylist', 'updatePlaylistTracks']);
+        expect(Object.keys(qqProvider.mutations ?? {}).sort()).toEqual([
+            'canAddToPlaylist', 'canEditPlaylistTracks', 'likeSong', 'subscribeAlbum', 'subscribePlaylist', 'updatePlaylistTracks',
+        ]);
         expect(qqProvider.catalog?.getSubscriptionStatus).toBeTypeOf('function');
     });
 
@@ -763,6 +765,12 @@ describe('qqProvider', () => {
         await qqProvider.auth!.logout();
         expect(requestMock).not.toHaveBeenCalled();
         expect(clearSessionMock).toHaveBeenCalledTimes(2);
+    });
+
+    // 网页上的单曲页按 songmid 定位，与网易云的 `getSongPageUrl` 同一份契约：拿不到 songmid 就不给链接。
+    it('links a song to its QQ Music web page by songmid', () => {
+        expect(qqProvider.getSongPageUrl?.(normalizeQqSong(SEARCH_ITEM))).toBe('https://y.qq.com/n/ryqq/songDetail/003rJSwm3TechU');
+        expect(qqProvider.getSongPageUrl?.(normalizeQqSong({ ...SEARCH_ITEM, mid: '' }))).toBeNull();
     });
 
     it('routes search and lyrics through the existing QQ modules', async () => {

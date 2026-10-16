@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { ModExportProgress, ModFfmpegStatus, ModLogEntry, ModRuntimeInfo, ModRuntimeSnapshot } from './mods/types';
+import type { ModClearCacheResult, ModExportProgress, ModFfmpegStatus, ModLogEntry, ModRuntimeInfo, ModRuntimeSnapshot, ModStorageUsageResult } from './mods/types';
 
 declare global {
   // 当前文件：Folia 构建常量、Vite 环境变量与宿主桥接类型声明。
@@ -1016,6 +1016,8 @@ declare global {
         getFfmpegStatus: () => Promise<{ ffmpeg: ModFfmpegStatus }>;
         openModsDirectory: () => Promise<{ ok: boolean; directory?: string; error?: string }>;
         installModFromZip: (zipPath: string) => Promise<{ ok: boolean; id?: string; error?: string }>;
+        getModStorageUsage: (modId: string) => Promise<ModStorageUsageResult>;
+        clearModCache: (modId: string) => Promise<ModClearCacheResult>;
         onModsStateChanged: (callback: (mods: ModRuntimeInfo[]) => void) => () => void;
         onExportProgress: (callback: (progress: ModExportProgress) => void) => () => void;
         onModLog: (callback: (entry: ModLogEntry) => void) => () => void;

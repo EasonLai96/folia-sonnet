@@ -980,7 +980,7 @@ export const qqProvider: OnlineMusicProvider = {
         playlists: true,
         albums: true,
         artists: true,
-        // 推荐、歌单增删与收藏是 qq-music-api 3.3.0 的路由；红心与收藏专辑后端尚未开放，likeSong / subscribeAlbum 不实现。
+        // 推荐、歌单增删与收藏歌单是 qq-music-api 3.3.0 的路由，红心与收藏专辑是 3.3.1 的。
         recommendations: true,
         mutations: true,
         playlistTrackMutations: true,
@@ -996,6 +996,12 @@ export const qqProvider: OnlineMusicProvider = {
         getSongMetadata(song) {
             return createProviderSongMetadata(song);
         },
+    },
+    // 网页版的单曲页按 songmid 定位。只认真的 songmid：没有 mid 的条目 mediaId 会退成数字 id，拿它拼出来的是错的页面。
+    getSongPageUrl(song) {
+        const sourceRef = song.sourceRef?.kind === 'online' && song.sourceRef.providerId === 'qq' ? song.sourceRef : undefined;
+        const songmid = String(song.qqMid || sourceRef?.providerData?.songMid || '').trim();
+        return songmid ? `https://y.qq.com/n/ryqq/songDetail/${encodeURIComponent(songmid)}` : null;
     },
     search: { searchSongs },
     playback: { getSongDetail: getQqSongDetail, getAudioSource },

@@ -1773,6 +1773,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 onToggleAutoHidePlayerChrome={onToggleAutoHidePlayerChrome}
                                                 onToggleAutoHideCursorWithPlayerChrome={onToggleAutoHideCursorWithPlayerChrome}
                                                 onSaveCustomTheme={onSaveCustomTheme}
+                                                rangeInputClass={rangeInputClass}
                                                 settingsCardClass={settingsCardClass}
                                                 songThemeAutoSwitchEnabled={songThemeAutoSwitchEnabled}
                                                 songThemeAutoGenerateEnabled={songThemeAutoGenerateEnabled}

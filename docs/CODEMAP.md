@@ -20,8 +20,8 @@
 | utils | 128+ |
 | backend/electron | 64+ |
 | hooks | 64+ |
-| src (其他) | 64+ |
 | 其他 | 64+ |
+| src (其他) | 32+ |
 | stores | 32+ |
 | types | 16+ |
 | i18n | 4+ |
@@ -59,9 +59,7 @@
 | 32+ | `src/services/onlineMusic/songMetadata.ts` |
 | 32+ | `src/stores/useAppViewStore.ts` |
 | 32+ | `src/stores/useAudioSettingsStore.ts` |
-| 32+ | `src/stores/useOnlineProviderAccountStore.ts` |
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
-| 32+ | `src/stores/useVisualizerSettingsStore.ts` |
 | 32+ | `src/types/localLibrary.ts` |
 | 32+ | `src/utils/coverUrl.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
@@ -88,6 +86,7 @@
 - `dev/probes/collectionMorph.probe.tsx`
 - `dev/probes/coverSizeAudit.probe.tsx`
 - `dev/probes/fmTab.probe.tsx`
+- `dev/probes/foliumSelectField.probe.tsx`
 - `dev/probes/globalLyricOffsetRuler.probe.tsx`
 - `dev/probes/gridEntrancePerf.probe.tsx`
 - `dev/probes/gridPanelToggle.probe.tsx`
@@ -237,9 +236,6 @@
 下面这些边的依赖方向本身就是错的：
 
 - `src/stores/useVisualizerSettingsStore.ts` → `src/components/visualizer/registry.tsx`  —— store 不应依赖组件
-- `src/utils/frameTimingDiagnostics.ts` → `src/stores/usePerfDiagnosticsStore.ts`  —— 纯变换不应依赖 UI 或状态
-- `src/utils/mediaDiagnostics.ts` → `src/stores/motionSignals.ts`  —— 纯变换不应依赖 UI 或状态
-- `src/utils/mediaDiagnostics.ts` → `src/stores/usePerfDiagnosticsStore.ts`  —— 纯变换不应依赖 UI 或状态
 
 ### 目录归属存疑
 

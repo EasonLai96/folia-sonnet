@@ -71,7 +71,7 @@ const createContext = (overrides: CommandPaletteContextOverrides = {}): CommandP
         navigateToLattice: vi.fn(),
             focusLatticeCurrentSong: vi.fn(() => true),
             canFocusLatticeCurrentSong: true,
-            setHomeViewTab: vi.fn(),
+            selectHomeViewTab: vi.fn(),
             toggleBrowserFullscreen: vi.fn(async () => true),
             toggleRemoteControlWindow: vi.fn(async () => true),
             toggleMainWindowAlwaysOnTop: vi.fn(async () => true),
@@ -624,7 +624,7 @@ describe('command palette registry', () => {
         const [matchLocalTab] = getCommandPaletteMatches('local music');
         expect(matchLocalTab.command.id).toBe('home-local');
         matchLocalTab.command.execute('', context);
-        expect(context.navigation.setHomeViewTab).toHaveBeenCalledWith('local');
+        expect(context.navigation.selectHomeViewTab).toHaveBeenCalledWith('local');
         expect(context.navigation.navigateToHome).toHaveBeenCalled();
     });
 

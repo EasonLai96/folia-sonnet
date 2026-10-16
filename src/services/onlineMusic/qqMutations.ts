@@ -5,10 +5,10 @@ import { requestQqSongDetail } from './qqSongDetail';
 import { hasQqSession, requestQq } from './qqTransport';
 
 // src/services/onlineMusic/qqMutations.ts
-// QQ 音乐的写入：往自建歌单加歌删歌、收藏歌单，以及查询收藏状态（qq-music-api 3.3.0）。
+// QQ 音乐的写入：往自建歌单加歌删歌、收藏歌单，以及查询收藏状态（qq-music-api 3.3.0）；红心与收藏专辑（3.3.1）。
 // 写入只送一次、不自动重试；后端回错误时结果可能已经生效，交给调用方重新读歌单确认，这里不重发。
 
-// 后端只接受目录号 1–199、没有系统类型标记的自建歌单；「我喜欢」是 201，另有红心接口（尚未开放）。
+// 后端只接受目录号 1–199、没有系统类型标记的自建歌单；「我喜欢」是 201，走红心接口。
 const QQ_MAX_NORMAL_DIR_ID = 199;
 // 一次写入最多 100 首。
 const QQ_TRACKS_PER_WRITE = 100;
@@ -64,6 +64,12 @@ const resolveQqSongId = async (song: MediaId | SongResult): Promise<number> => {
     throw new OnlineProviderError('invalid-response', 'QQ song has no numeric song id for a playlist write', 'qq');
 };
 
+/** 没有改动时，读回的结果是不是已经是用户要的样子（加歌：都在；删歌：都不在）。 */
+const alreadyApplied = (operation: 'add' | 'del', response: any): boolean => {
+    const status = response?.verification?.status;
+    return operation === 'add' ? status === 'present' : status === 'absent';
+};
+
 const updatePlaylistTracks: NonNullable<OnlineMutationProvider['updatePlaylistTracks']> = async (operation, playlist, tracks) => {
     if (typeof playlist === 'object' && !canEditQqPlaylistTracks(playlist)) {
         throw new OnlineProviderError('unsupported', 'QQ playlist does not accept track mutations', 'qq');
@@ -77,9 +83,10 @@ const updatePlaylistTracks: NonNullable<OnlineMutationProvider['updatePlaylistTr
     for (let start = 0; start < songIds.length; start += QQ_TRACKS_PER_WRITE) {
         const songs = songIds.slice(start, start + QQ_TRACKS_PER_WRITE).map(id => ({ id, type: 0 }));
         const response = await requestQq<any>('user_playlist_tracks', {}, { tid: String(tid), op: operation, songs });
-        // changed:false 是上游明说这次没有改动，原因后端也分不出来（可能歌已经在 / 不在歌单里）。不当成功，
+        // changed:false 是上游明说这次没有改动。3.3.1 起后端会读回歌单说明这批歌现在在不在：加歌时都在、删歌时都不在，
+        // 就是用户要的结果，算成功；其余（方向不对、读不出来、旧后端没有这个字段）不当成功，
         // 免得界面说「已更新」或把没删掉的歌从列表里拿掉。
-        if (response?.changed !== true) {
+        if (response?.changed !== true && !alreadyApplied(operation, response)) {
             throw new OnlineProviderError(
                 'invalid-response',
                 `QQMusicApi user_playlist_tracks reported no change (${operation})`,
@@ -96,6 +103,34 @@ const subscribePlaylist: NonNullable<OnlineMutationProvider['subscribePlaylist']
     const response = await requestQq<any>('user_playlist_subscribe', {}, { tid: String(tid), subscribed });
     if (response?.subscribed !== subscribed) {
         throw new OnlineProviderError('invalid-response', 'QQMusicApi user_playlist_subscribe returned no confirmation', 'qq', response);
+    }
+};
+
+/**
+ * 红心与取消红心。后端要数字 id 与 songmid 一起核对，type 0 是调用方确认的普通曲库歌曲；
+ * 回包的 liked 对上才算成功。结果不明时后端回 502，写入可能已经生效，这里不重送。
+ */
+const likeSong: NonNullable<OnlineMutationProvider['likeSong']> = async (song, liked) => {
+    // 只认真的 songmid：没有 mid 的条目 mediaId 会退成数字 id，送去只会被后端核对失败。
+    const sourceRef = typeof song === 'object' && song.sourceRef?.kind === 'online' && song.sourceRef.providerId === 'qq'
+        ? song.sourceRef
+        : undefined;
+    const mid = typeof song === 'object' ? String(song.qqMid || sourceRef?.providerData?.songMid || '').trim() : '';
+    if (!mid) throw new OnlineProviderError('invalid-response', 'QQ song has no songmid for a like write', 'qq');
+    const id = await resolveQqSongId(song);
+    const response = await requestQq<any>('user_song_like', {}, { song: { id, mid, type: 0 }, liked });
+    if (response?.liked !== liked) {
+        throw new OnlineProviderError('invalid-response', 'QQMusicApi user_song_like returned no confirmation', 'qq', response);
+    }
+};
+
+/** 收藏与取消收藏专辑，按专辑 mid 送；回包的 subscribed 对上才算成功，同样不重送。 */
+const subscribeAlbum: NonNullable<OnlineMutationProvider['subscribeAlbum']> = async (id, subscribed) => {
+    const albumMid = String(id ?? '').trim();
+    if (!albumMid) throw new OnlineProviderError('invalid-response', 'QQ album has no mid for a subscription write', 'qq');
+    const response = await requestQq<any>('user_album_subscribe', {}, { id: albumMid, subscribed });
+    if (response?.subscribed !== subscribed) {
+        throw new OnlineProviderError('invalid-response', 'QQMusicApi user_album_subscribe returned no confirmation', 'qq', response);
     }
 };
 
@@ -120,4 +155,6 @@ export const qqMutations: OnlineMutationProvider = {
     canEditPlaylistTracks: canEditQqPlaylistTracks,
     updatePlaylistTracks,
     subscribePlaylist,
+    likeSong,
+    subscribeAlbum,
 };

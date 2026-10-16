@@ -1979,7 +1979,14 @@ export async function handleQQPlaylistTracksWrite(input, cookieHeader) {
   // 全零是「删空了」那种成功。前端遇到 changed:false 会报错，不会假装更新成功。
   const changed = (Number(data.dirId) === dirId && Number(data.tid) === tid)
     || (Number(data.dirId) === 0 && (data.tid === 0 || String(data.tid) === '0'));
-  return { code: 0, changed };
+  // 3.3.1 起「没有改动」要带一条读回结果：加歌时歌都在、删歌时歌都不在，就是用户要的结果
+  // （前端按成功处理）；读不出来回 unknown，前端照旧报错，不猜。
+  if (changed) return { code: 0, changed };
+  return {
+    code: 0,
+    changed,
+    verification: { status: await qqVerifyTrackPresence(dirId, vSongInfo.map((song) => song.songId), cookieHeader) },
+  };
 }
 
 /** 收藏 / 取消收藏歌单（不是「我喜欢」，那是目录 201）。 */
@@ -2042,4 +2049,115 @@ export async function handleQQSubscriptionStatus(type, ids, cookieHeader) {
       status: fan[id] === true ? 'subscribed' : fan[id] === false ? 'not-subscribed' : 'unknown',
     })),
   };
+}
+
+/**
+ * 「我喜欢」的读回：按 songmid 问这首歌现在是不是已收藏。
+ *
+ * 与自建服务（qq-music-api 3.3.1 的 `/user/song/like`）同一条协议，写完之后要读回确认 ——
+ * 只看写入回包不够：dirId 201 的写入回「成功」而收藏状态没变的情况实测存在。
+ * 读不出来回 undefined（不是 false）：差别在于「没收藏」与「不知道」，前端只认前者。
+ */
+async function qqSongFanByMid(mid, cookieHeader) {
+  const result = await qqMusicuCall(
+    'music.musicasset.SongFavRead', 'IsSongFanByMid',
+    { v_songMid: [mid] },
+    cookieHeader,
+  );
+  if (!result.ok) return undefined;
+  const fan = result.data && result.data.m_fan && typeof result.data.m_fan === 'object'
+    ? result.data.m_fan
+    : {};
+  return fan[mid] === true ? true : fan[mid] === false ? false : undefined;
+}
+
+/** 专辑收藏的读回，与上面的歌同理。 */
+async function qqAlbumFanByMid(mid, cookieHeader, uin) {
+  const result = await qqMusicuCall(
+    'music.musicasset.AlbumFavRead', 'IsAlbumFan',
+    { uin, v_albumMid: [mid] },
+    cookieHeader,
+  );
+  if (!result.ok) return undefined;
+  const fan = result.data && result.data.m_fan && typeof result.data.m_fan === 'object'
+    ? result.data.m_fan
+    : {};
+  return fan[mid] === true ? true : fan[mid] === false ? false : undefined;
+}
+
+/**
+ * 红心 / 取消红心（`/user/song/like`，qq-music-api 3.3.1）。
+ *
+ * 与自建服务同一个契约：写一次、读回确认后才回成功，结果不明时报失败而不重送。
+ * 已经是用户要的样子就不写（读回等于目标值直接回成功）。
+ */
+export async function handleQQSongLikeWrite(input, cookieHeader) {
+  const song = input && typeof input.song === 'object' && input.song !== null ? input.song : {};
+  const liked = (input && input.liked) === true || String(input && input.liked) === 'true';
+  const mid = typeof song.mid === 'string' ? song.mid.trim() : '';
+  const id = Number(song.id);
+  if (!mid || !Number.isSafeInteger(id) || id <= 0) {
+    return { __foliaBridgeError: 'UNSUPPORTED', message: 'QQ song like: bad input' };
+  }
+  const uin = qqCookieUin(cookieHeader);
+  if (!uin) return qqAuthRequired('song-like');
+
+  const before = await qqSongFanByMid(mid, cookieHeader);
+  if (before === liked) return { code: 0, liked: before };
+
+  const result = await handleQQSongLike(String(id), mid, liked, cookieHeader);
+  if (!result || result.error) {
+    return result && result.loggedIn === false
+      ? qqAuthRequired('song-like')
+      : qqBridgeFailure('song-like', (result && result.code) || 'failed');
+  }
+  const after = await qqSongFanByMid(mid, cookieHeader);
+  if (after !== liked) return qqBridgeFailure('song-like', after === undefined ? 'unconfirmed' : 'mismatch');
+  return { code: 0, liked: after };
+}
+
+/** 收藏 / 取消收藏专辑（`/user/album/subscribe`，qq-music-api 3.3.1）。同样写一次、读回确认。 */
+export async function handleQQAlbumSubscribe(input, cookieHeader) {
+  const mid = typeof (input && input.id) === 'string' ? input.id.trim() : '';
+  const subscribed = (input && input.subscribed) === true || String(input && input.subscribed) === 'true';
+  if (!mid) return { __foliaBridgeError: 'UNSUPPORTED', message: 'QQ album subscribe: bad input' };
+  const uin = qqCookieUin(cookieHeader);
+  if (!uin) return qqAuthRequired('album-subscribe');
+  const numericUin = Number(uin) || uin;
+
+  const before = await qqAlbumFanByMid(mid, cookieHeader, numericUin);
+  if (before === subscribed) return { code: 0, subscribed: before };
+
+  const write = await qqMusicuCall(
+    'music.musicasset.AlbumFavWrite',
+    subscribed ? 'FavAlbum' : 'CancelFavAlbum',
+    { uin: numericUin, v_albumMid: [mid] },
+    cookieHeader,
+  );
+  if (!write.ok) {
+    return write.loginRequired ? qqAuthRequired('album-subscribe') : qqBridgeFailure('album-subscribe', write.code);
+  }
+  const after = await qqAlbumFanByMid(mid, cookieHeader, numericUin);
+  if (after !== subscribed) {
+    return qqBridgeFailure('album-subscribe', after === undefined ? 'unconfirmed' : 'mismatch');
+  }
+  return { code: 0, subscribed: after };
+}
+
+/**
+ * 加歌删歌回了「没有改动」时读一遍歌单，说明这批歌现在到底在不在。
+ *
+ * 与自建服务同一个字段：`verification.status` 是 present（加歌时都在）/ absent（删歌时都不在）/
+ * unknown（读不出来）。只有前两种能让前端按成功处理 —— 读不出来时照旧报错，不猜。
+ */
+async function qqVerifyTrackPresence(dirId, ids, cookieHeader) {
+  const playlist = await fetchQQDirPlaylistTracks(String(dirId), cookieHeader);
+  if (!playlist || !Array.isArray(playlist.songs)) return 'unknown';
+  const present = new Set(playlist.songs.map((song) => String(song && song.qqId || '').trim()).filter(Boolean));
+  const wanted = ids.filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (wanted.length === 0) return 'unknown';
+  const found = wanted.filter((id) => present.has(String(id))).length;
+  if (found === wanted.length) return 'present';
+  if (found === 0) return 'absent';
+  return 'unknown';
 }

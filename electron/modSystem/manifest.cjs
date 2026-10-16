@@ -405,6 +405,7 @@ module.exports = {
     FOLIUM_VERSION,
     KNOWN_PERMISSIONS,
     KNOWN_EXPERIMENTAL,
+    MOD_ID_PATTERN,
     parseDependency,
     satisfiesRange,
     satisfiesHostRange,

@@ -12,6 +12,7 @@ export const QQ_OPERATIONS = [
     'user_detail', 'user_playlist', 'user_albums', 'user_liked_songs', 'user_playlist_detail',
     'user_guess_you_like', 'user_daily_songs', 'recommend_playlists',
     'user_playlist_tracks', 'user_playlist_subscribe', 'user_subscription_status',
+    'user_song_like', 'user_album_subscribe',
     'music_play', 'song_list_detail', 'song_info',
     'album_info', 'artist_albums', 'artist_songs',
 ] as const;
@@ -19,8 +20,10 @@ export const QQ_OPERATIONS = [
 export type QqOperation = typeof QQ_OPERATIONS[number];
 export type QqParams = Record<string, string | number | boolean | undefined>;
 
-// 3.3.0 的写入路由只收 POST + JSON 正文；GET 会回 405。
-const POST_OPERATIONS: ReadonlySet<QqOperation> = new Set<QqOperation>(['user_playlist_tracks', 'user_playlist_subscribe']);
+// 写入路由只收 POST + JSON 正文；GET 会回 405。
+const POST_OPERATIONS: ReadonlySet<QqOperation> = new Set<QqOperation>([
+    'user_playlist_tracks', 'user_playlist_subscribe', 'user_song_like', 'user_album_subscribe',
+]);
 
 const ENDPOINTS: Record<QqOperation, string> = {
     login_qr_key: '/login/qr/key',
@@ -46,6 +49,9 @@ const ENDPOINTS: Record<QqOperation, string> = {
     user_playlist_tracks: '/user/playlist/tracks',
     user_playlist_subscribe: '/user/playlist/subscribe',
     user_subscription_status: '/user/subscription-status',
+    // 3.3.1 的红心与收藏专辑：写一次、读回确认后才回成功，结果不明回 502。
+    user_song_like: '/user/song/like',
+    user_album_subscribe: '/user/album/subscribe',
     music_play: '/getMusicPlay',
     song_list_detail: '/getSongListDetail',
     song_info: '/getSongInfo',

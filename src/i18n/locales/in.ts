@@ -411,6 +411,7 @@ export default {
     "playbackErrorPrompt": "Pemutaran gagal. Akan dilewati otomatis dalam {{seconds}} detik",
     "autoSkippedNext": "Melewati ke lagu berikutnya",
     "playbackErrorAutoSkipped": "Pemutaran gagal. Melewati ke lagu berikutnya",
+    "songUnplayableSkipPrompt": "Lagu ini tidak dapat diputar. Dilewati dalam {{seconds}} detik",
     "skipUnavailableAction": "Lewati",
     "cancel": "Batal",
     "confirm": "Konfirmasi",
@@ -871,6 +872,7 @@ export default {
   },
   "ui": {
     "noTrack": "Tidak Ada Trek",
+    "selectPlaceholder": "Pilih...",
     "previousTrack": "Lagu sebelumnya",
     "nextTrack": "Lagu berikutnya",
     "stageTrackPillNext": "Selanjutnya diputar",
@@ -1135,6 +1137,8 @@ export default {
     }
   },
   "mods": {
+    "homeBackToLibrary": "Kembali ke pustaka",
+    "homePageNavigation": "Halaman beranda",
     "title": "Manajer Mod",
     "experimental": "Eksperimental",
     "warning": "Mod kompatibel dengan Folium v{{version}}. Mod bertanda Terverifikasi telah ditinjau dan ditandatangani Folium; selebihnya mod pihak ketiga yang belum ditinjau. Terverifikasi atau tidak, setelah diaktifkan mod berjalan dengan hak penuh aplikasi (termasuk runtime Node.js dan pengaturan apa pun seperti URL dan kunci layanan AI). Aktifkan hanya mod dari sumber tepercaya.",
@@ -1143,10 +1147,12 @@ export default {
     "devSourceHint": "Mod di direktori pengembangan: setelah dikonfirmasi, mengubah berkasnya tidak membatalkan persetujuan (hanya build pengembangan).",
     "signatureVerified": "Terverifikasi",
     "signatureVerifiedDetail": "Memiliki tanda tangan resmi Folium yang valid ({{key}}): sumber dan isinya telah ditinjau Folium dan tidak berubah sejak ditandatangani. Setelah diaktifkan, mod tetap berjalan dengan hak penuh aplikasi.",
+    "signatureBeta": "Pratinjau",
+    "signatureBetaDetail": "Ditandatangani dengan kunci pratinjau Folium ({{key}}): hanya lolos tinjauan keamanan. Implementasinya mungkin belum rapi dan fiturnya bisa saja sama sekali tidak berfungsi. Ditujukan bagi pengembang komunitas untuk bereksperimen; sebagian besar pengguna sebaiknya tidak mengaktifkannya. Setelah diaktifkan, mod tetap berjalan dengan hak penuh aplikasi.",
     "signatureUnsigned": "Belum terverifikasi",
     "signatureUnsignedDetail": "Tanpa tanda tangan resmi: ini mod pihak ketiga yang belum ditinjau Folium. Aktifkan hanya mod dari sumber yang Anda percayai.",
     "signatureInvalid": "Tanda tangan tidak cocok",
-    "signatureInvalidDetail": "Mod ini ditandatangani, tetapi tanda tangannya gagal diperiksa ({{reason}}), jadi bukan lagi mod terverifikasi resmi. Biasanya berkasnya diubah setelah ditandatangani; jika bukan Anda yang mengubahnya, jangan aktifkan.",
+    "signatureInvalidDetail": "Mod ini ditandatangani, tetapi tanda tangannya gagal diperiksa ({{reason}}), jadi tanda tangan ini tidak lagi bisa menjaminnya. Biasanya berkasnya diubah setelah ditandatangani; jika bukan Anda yang mengubahnya, jangan aktifkan.",
     "signatureReasons": {
       "malformed": "berkas tanda tangan rusak",
       "unknown-key": "kunci penanda tangan tidak dipercaya",
@@ -1190,6 +1196,13 @@ export default {
     "dropZipHint": "Seret berkas .zip mod ke sini untuk memasangnya",
     "installing": "Memasang mod…",
     "installSuccess": "Mod terpasang: {{id}} (bisa dinonaktifkan atau diperbarui dari daftar)",
+    "storageData": "Data {{size}}",
+    "storageCache": "Cache {{size}}",
+    "storageCacheBroken": "Folder cache rusak (berupa berkas atau tautan mati); bersihkan untuk memulihkan",
+    "clearCache": "Bersihkan cache",
+    "clearingCache": "Membersihkan…",
+    "cacheCleared": "Cache \"{{name}}\" dibersihkan, {{size}} dibebaskan",
+    "cacheClearedUncounted": "Cache \"{{name}}\" dibersihkan",
     "errors": {
       "no-electron-bridge": "Sistem mod tidak tersedia di lingkungan ini",
       "open-directory-failed": "Gagal membuka folder mod: {{value}}",
@@ -1217,7 +1230,10 @@ export default {
       "export-duration-too-long": "Rentang ekspor terlalu panjang (maks 15 menit)",
       "export-unsupported-platform": "Ekspor tidak didukung di platform ini",
       "export-capture-empty": "Pengambilan frame gagal; jendela render mengembalikan frame kosong",
-      "export-cancelled": "Ekspor dibatalkan"
+      "export-cancelled": "Ekspor dibatalkan",
+      "storage-usage-failed": "Tidak dapat menghitung ruang yang dipakai mod ini",
+      "cache-clear-failed": "Gagal membersihkan cache",
+      "cache-clear-partial": "Sebagian cache tidak dapat dibersihkan karena mod sedang memakai berkas tersebut. Nonaktifkan mod lalu coba lagi."
     },
     "warnings": {
       "export-alpha-unavailable": "Platform ini tidak mempertahankan saluran alpha; video memiliki latar pekat. Gunakan mode latar tema dengan animasi teks, atau ekspor di Windows.",
@@ -3237,6 +3253,33 @@ export default {
       "qqPrivatePlaylists": {
         "title": "Playlist Pribadi QQ Music",
         "description": "Setelah masuk, playlist pribadi buatan Anda kini dapat memuat lagu dengan paging sungguhan. Backend yang di-host sendiri harus memakai qq-music-api 3.1.2 atau lebih baru; backend lama beralih otomatis, dan playlist yang tidak dapat dibaca kini menjelaskan bahwa playlist itu tidak publik, alih-alih tampil kosong tanpa keterangan."
+      }
+    },
+    "v0_7_20": {
+      "intro": "0.7.20 melengkapi QQ Music dengan rekomendasi, suka, simpan, dan pengeditan playlist; menambahkan \"Lewati lagu yang tidak dapat diputar\"; membuat ekspor video desktop andal untuk file besar dan di Linux; menghadirkan pemisahan stem di Mac Intel; dan memungkinkan mod menambahkan halaman sendiri di beranda.",
+      "qqMusic": {
+        "title": "QQ Music Kian Lengkap",
+        "description": "Setelah masuk ke QQ Music, kini tersedia rekomendasi harian, FM Pribadi, dan playlist rekomendasi (playlist rekomendasi juga bisa dilihat tanpa masuk). Anda bisa menyukai lagu, menyimpan playlist dan album, serta menambah atau menghapus lagu di playlist buatan sendiri; menghapus lagu dari \"Disukai\" berarti batal menyukainya. Jika lagu yang gagal diputar mungkin terhalang keanggotaan atau wilayah, Folia menyebutkannya sebagai kemungkinan penyebab. QQ belum mendukung \"tidak suka\", jadi tombol tempat sampah di FM Pribadi dinonaktifkan."
+      },
+      "autoSkip": {
+        "title": "Lewati Lagu yang Tidak Dapat Diputar",
+        "description": "Sakelar baru \"Lewati lagu yang tidak dapat diputar\" (nonaktif secara bawaan) ada di kartu antrean pada pengaturan pemutaran. Jika aktif, lagu yang memerlukan keanggotaan atau pembelian, hanya pratinjau, diblokir di wilayah Anda, atau gagal karena alasan yang tidak diketahui akan menghitung mundur lalu melompat ke lagu berikutnya, sama seperti lagu yang dihapus. Lagu yang memerlukan login dan masalah jaringan tetap berhenti menunggu Anda. Sakelar ini juga bisa diubah dari palet perintah."
+      },
+      "videoExport": {
+        "title": "Ekspor Video Lebih Andal",
+        "description": "Ekspor video di desktop kini menulis ke disk selama merekam, sehingga file besar seperti 4K tidak lagi gagal di langkah terakhir. Folia juga merekam halamannya sendiri secara langsung: di Linux (termasuk Wayland) sumber rekaman tidak lagi gagal ditemukan, jendela yang tertutup tetap terekam dengan benar, dan perekaman 4K berjalan dengan frame rate jauh lebih tinggi. File MP4 hasil ekspor kini menampilkan durasi yang benar."
+      },
+      "automixIntelMac": {
+        "title": "Pemisahan Stem di Mac Intel",
+        "description": "Model pemisahan stem yang dipakai automix kini berjalan di Mac Intel (macOS 13 atau lebih baru), dan pemisahan sedikit lebih cepat di platform lain."
+      },
+      "modHomePages": {
+        "title": "Mod Bisa Menambah Halaman Beranda",
+        "description": "Folium 1.5: mod bisa menambahkan halaman sendiri di beranda, berdampingan dengan tab bawaan. Mod dapat membaca dan mengubah volume, bisu, dan mode ulang, melihat dan memutar dari antrean, serta menanggapi kegagalan pemutaran. Panel mod menampilkan ruang yang dipakai tiap mod dan bisa mengosongkan cache-nya; dropdown di pengaturan mod kini seragam dengan bagian lain Folia. Mod dari kanal Beta komunitas ditandai ungu dan memberi peringatan sebelum diaktifkan."
+      },
+      "stabilityFixes": {
+        "title": "Penyempurnaan dan Perbaikan",
+        "description": "Ubin pengaturan di beranda Bravais kini memberi tahu saat ada versi baru. Pencarian dari beranda Bravais tidak lagi menampilkan halaman hasil kosong dan tidak lagi mencari di platform yang salah saat memakai KuGou atau QQ. Label Tionghoa vertikal tidak lagi bertumpuk di beberapa distribusi Linux, dan poster artis atau album tidak lagi berkedip ke warna bawaan saat dibalik. Aplikasi desktop memperketat pemeriksaan keamanan untuk tautan eksternal dan komunikasi internal, dan kunci AI hanya dikirim ke alamat tempat kunci itu disimpan."
       }
     },
     "v0_7_19": {

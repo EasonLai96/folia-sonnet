@@ -413,6 +413,7 @@ export default {
     "playbackErrorPrompt": "Playback failed. Auto-skipping in {{seconds}}s",
     "autoSkippedNext": "Skipped to the next track",
     "playbackErrorAutoSkipped": "Playback failed. Skipped to the next track",
+    "songUnplayableSkipPrompt": "Can't play this song. Skipping in {{seconds}}s",
     "skipUnavailableAction": "Skip",
     "cancel": "Cancel",
     "confirm": "Confirm",
@@ -873,6 +874,7 @@ export default {
   },
   "ui": {
     "noTrack": "No Track",
+    "selectPlaceholder": "Select...",
     "previousTrack": "Previous track",
     "nextTrack": "Next track",
     "stageTrackPillNext": "Next playing",
@@ -1140,6 +1142,8 @@ export default {
     }
   },
   "mods": {
+    "homeBackToLibrary": "Back to library",
+    "homePageNavigation": "Home pages",
     "title": "Mod Manager",
     "experimental": "Experimental",
     "warning": "Mods are compatible with Folium v{{version}}. Mods marked Verified were reviewed and signed by Folium; all others are third-party and unreviewed. Verified or not, once enabled a mod runs with the full privileges of the app (including the Node.js runtime and any setting, such as the AI service URL and key). Only enable mods from trusted sources.",
@@ -1148,10 +1152,12 @@ export default {
     "devSourceHint": "Development source mod: once confirmed, editing its files keeps the approval (development builds only).",
     "signatureVerified": "Verified",
     "signatureVerifiedDetail": "Carries a valid official Folium signature ({{key}}): its source and content were reviewed by Folium and have not changed since signing. Once enabled it still runs with the app's full privileges.",
+    "signatureBeta": "Preview",
+    "signatureBetaDetail": "Signed with the Folium preview key ({{key}}): it passed the security review only. Its implementation may be rough and its features may not work at all. It is meant for community developers to experiment with; most users should not enable it. Once enabled it still runs with the app's full privileges.",
     "signatureUnsigned": "Unverified",
     "signatureUnsignedDetail": "No official signature: this is a third-party mod not reviewed by Folium. Only enable mods from sources you trust.",
     "signatureInvalid": "Signature mismatch",
-    "signatureInvalidDetail": "This mod is signed, but the signature does not check out ({{reason}}), so it is no longer officially verified. Usually its files were changed after signing; if you did not change them yourself, do not enable it.",
+    "signatureInvalidDetail": "This mod is signed, but the signature does not check out ({{reason}}), so the signature can no longer vouch for it. Usually its files were changed after signing; if you did not change them yourself, do not enable it.",
     "signatureReasons": {
       "malformed": "malformed signature file",
       "unknown-key": "untrusted signing key",
@@ -1195,6 +1201,13 @@ export default {
     "dropZipHint": "Drop a mod .zip here to install it",
     "installing": "Installing mod…",
     "installSuccess": "Installed mod: {{id}} (you can disable or update it from the list)",
+    "storageData": "Data {{size}}",
+    "storageCache": "Cache {{size}}",
+    "storageCacheBroken": "Cache folder is broken (a file or a dead link); clear it to recover",
+    "clearCache": "Clear cache",
+    "clearingCache": "Clearing…",
+    "cacheCleared": "Cleared the cache of \"{{name}}\", freeing {{size}}",
+    "cacheClearedUncounted": "Cleared the cache of \"{{name}}\"",
     "errors": {
       "no-electron-bridge": "Mod system is unavailable in this environment",
       "open-directory-failed": "Could not open the mods folder: {{value}}",
@@ -1222,7 +1235,10 @@ export default {
       "export-duration-too-long": "Export range is too long (max 15 minutes)",
       "export-unsupported-platform": "Export is not supported on this platform",
       "export-capture-empty": "Frame capture failed; the render window returned an empty frame",
-      "export-cancelled": "Export was cancelled"
+      "export-cancelled": "Export was cancelled",
+      "storage-usage-failed": "Could not measure how much space this mod uses",
+      "cache-clear-failed": "Could not clear the cache",
+      "cache-clear-partial": "Part of the cache could not be cleared because the mod is using those files. Disable the mod and try again."
     },
     "warnings": {
       "export-alpha-unavailable": "This platform did not preserve the alpha channel; the video has an opaque background. Use a text-only mode with Theme background, or run the export on Windows.",
@@ -3350,6 +3366,33 @@ export default {
       "qqPrivatePlaylists": {
         "title": "Private QQ Music Playlists",
         "description": "When signed in, your own private playlists now load their songs, with real paging. Self-hosted backends must run qq-music-api 3.1.2 or later; older backends fall back automatically, and a playlist that cannot be read now says it is not public instead of silently showing as empty."
+      }
+    },
+    "v0_7_20": {
+      "intro": "0.7.20 fills in QQ Music with recommendations, likes, favorites and playlist editing; adds \"Skip songs that can't be played\"; makes desktop video export reliable for large files and on Linux; brings stem separation to Intel Macs; and lets mods add their own pages to the home screen.",
+      "qqMusic": {
+        "title": "QQ Music Catches Up",
+        "description": "Signed in to QQ Music, you now get daily recommendations, Personal FM and recommended playlists (recommended playlists work without signing in too). You can like songs, save playlists and albums, and add or remove songs in playlists you created; removing a song from \"Liked\" unlikes it. When a failed song may be blocked by membership or region, Folia says so as a likely cause. QQ doesn't support \"dislike\" yet, so the Personal FM trash button is greyed out."
+      },
+      "autoSkip": {
+        "title": "Skip Songs That Can't Be Played",
+        "description": "A new \"Skip songs that can't be played\" switch (off by default) sits in the queue card of the playback settings. When on, songs that need membership or purchase, are preview-only, are blocked in your region, or fail for an unknown reason count down and skip to the next track, just like removed songs. Songs that need you to sign in and network problems still stop and wait for you. It can also be toggled from the command palette."
+      },
+      "videoExport": {
+        "title": "More Reliable Video Export",
+        "description": "Desktop video export now writes to disk while recording, so large files such as 4K no longer fail at the last step. It also records Folia's own page directly: Linux (including Wayland) no longer fails to find a capture source, covered windows still record correctly, and 4K recording runs at a much higher frame rate. Exported MP4 files now show the right duration."
+      },
+      "automixIntelMac": {
+        "title": "Stem Separation on Intel Macs",
+        "description": "The stem separation model used by automix now runs on Intel Macs (macOS 13 or later), and separation is slightly faster on other platforms."
+      },
+      "modHomePages": {
+        "title": "Mods Can Add Home Pages",
+        "description": "Folium 1.5: mods can add their own pages to the home screen, next to the built-in tabs. They can read and change volume, mute and loop mode, view and play from the queue, and react to playback failures. The mod panel shows how much space each mod uses and can clear its cache; dropdowns in mod settings now match the rest of Folia. Mods from the community Beta channel are marked in purple and warn you before you enable them."
+      },
+      "stabilityFixes": {
+        "title": "Polish and Fixes",
+        "description": "The Bravais home settings tile now tells you when a new version is available. Searching from the Bravais home no longer shows an empty result page, and no longer searches the wrong platform on KuGou or QQ. Vertical Chinese labels no longer pile up on some Linux distributions, and artist or album posters no longer flash the default colors as they flip away. The desktop app tightens security checks on external links and internal messaging, and AI keys are only sent to the address they were saved for."
       }
     },
     "v0_7_19": {

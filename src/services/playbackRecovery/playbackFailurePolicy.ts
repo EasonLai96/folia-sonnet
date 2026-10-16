@@ -22,6 +22,10 @@ import type {
 //
 // 代价靠 maxAutoSkips 收敛：整条链路的原因跳一两首就够（再跳多半还是同一个平台），
 // 单曲的原因才给足预算。
+//
+// 上游后来加了一个「无法播放时自动跳过」开关，只覆盖受限类与原因不明的失败。fork 的表格
+// 比它更彻底（所有原因本来就跳），所以那个开关不接进设置；下面的 options 仍按上游的形状
+// 留着，传进来也不会改变结果。
 
 const NO_RETRY: readonly number[] = [];
 
@@ -34,6 +38,27 @@ const AUTO_SKIP_COUNTDOWN_KEY = 'status.playbackErrorPrompt';
  */
 const PLATFORM_WIDE_SKIP_BUDGET = 1;
 
+/** 解析策略时的用户设置；由调用方在解析那一刻读出传入，本模块不读 store。 */
+export interface PlaybackFailurePolicyOptions {
+    /** 「无法播放时自动跳过」：受限类与原因不明的失败也倒计时跳歌。fork 一律跳过，这一项不会改变结果。 */
+    autoSkipUnplayable?: boolean;
+}
+
+/** 「无法播放时自动跳过」打开时倒计时用的文案；不说原因，只说放不了、几秒后跳过。 */
+export const UNPLAYABLE_SKIP_PROMPT_KEY = 'status.songUnplayableSkipPrompt' as const;
+
+// 「无法播放时自动跳过」覆盖的原因：受限类（会员、购买、权限、试听、地区）与原因不明的失败。
+// 登录类和网络类不在其中：登录或网络恢复后这首歌就能放，自动跳走反而让用户错过它。
+const UNPLAYABLE_AUTO_SKIP_REASONS: ReadonlySet<PlaybackFailureReason> = new Set<PlaybackFailureReason>([
+    'membership-required', 'purchase-required', 'entitlement-required', 'preview-only', 'region-restricted',
+    'invalid-response', 'unknown',
+]);
+
+// 原因不明但后端说登录可能有用（文案会提示登录）时，按登录类处理：不跳。
+const isUnplayableAutoSkipCandidate = (failure: PlaybackFailure): boolean => (
+    UNPLAYABLE_AUTO_SKIP_REASONS.has(failure.reason)
+    && !(failure.reason === 'unknown' && failure.hint === 'sign-in-may-help')
+);
 // 停播、只给“跳过”：账号、权限、试听、地区这类重试也不会变好的原因。
 // 一律倒计时跳歌；`maxAutoSkips` 收紧那些换了哪首都一样的原因。
 const stopWithSkip = (
@@ -147,10 +172,13 @@ export const getPlaybackFailureMessage = (
 /**
  * 解析一次失败在给定上下文下的最终策略：先套变体（文案、未配置时去掉重试），再套上下文覆盖。
  * 'restore' 只显示一条消息，不倒计时也不给按钮；'mid-playback' 与 'play' 相同（停播时由 presenter 置 PAUSED）。
+ * 用户设置 autoSkipUnplayable 在上下文覆盖之前套用（所以 restore 仍不跳），只加上倒计时：stopPlayback 与 actions
+ * 保持该原因原本的值，连跳次数用尽或用户取消倒计时时 presenter 退回它们。
  */
 export const resolvePlaybackFailurePolicy = (
     failure: PlaybackFailure,
     context: PlaybackFailureContext,
+    options: PlaybackFailurePolicyOptions = {},
 ): PlaybackFailurePolicy => {
     const base = PLAYBACK_FAILURE_POLICY[failure.reason];
     const message = getPlaybackFailureMessage(failure);
@@ -166,6 +194,10 @@ export const resolvePlaybackFailurePolicy = (
         policy = { ...policy, actions: ['skip'] };
     }
 
+    if (options.autoSkipUnplayable && policy.autoSkip === 'none' && isUnplayableAutoSkipCandidate(failure)) {
+        policy = { ...policy, autoSkip: 'countdown', countdownKey: UNPLAYABLE_SKIP_PROMPT_KEY };
+    }
+
     if (context === 'restore') {
         policy = { ...policy, autoSkip: 'none', actions: [] };
         delete policy.countdownKey;
@@ -173,6 +205,16 @@ export const resolvePlaybackFailurePolicy = (
 
     return policy;
 };
+
+/**
+ * 这次失败按策略是否倒计时跳歌（不看连跳次数和有没有下一首）。presenter 用同一个判断决定倒计时，
+ * 队列控制器用它决定「跳过」是否累计连跳次数：只有走倒计时的原因才累计，否则受限类在设置打开时会无限连跳。
+ */
+export const isAutoSkipFailure = (
+    failure: PlaybackFailure,
+    context: PlaybackFailureContext,
+    options: PlaybackFailurePolicyOptions = {},
+): boolean => resolvePlaybackFailurePolicy(failure, context, options).autoSkip === 'countdown';
 
 export const PLAYBACK_RETRYING_MESSAGE_KEY = 'status.songRetrying';
 
@@ -224,6 +266,7 @@ export const withProviderLabel = (
 export const PLAYBACK_FAILURE_MESSAGE_KEYS: readonly string[] = Array.from(new Set<string>([
     ...Object.keys(MESSAGE_KEY_REGISTRY),
     ...Object.values(PLAYBACK_FAILURE_POLICY).flatMap(policy => (policy.countdownKey ? [policy.countdownKey] : [])),
+    UNPLAYABLE_SKIP_PROMPT_KEY,
     PLAYBACK_RETRYING_MESSAGE_KEY,
 ]));
 

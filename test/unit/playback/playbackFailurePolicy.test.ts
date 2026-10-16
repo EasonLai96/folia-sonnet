@@ -4,8 +4,10 @@ import {
     PLAYBACK_FAILURE_MESSAGE_KEYS,
     PLAYBACK_FAILURE_POLICY,
     PLAYBACK_RETRYING_MESSAGE_KEY,
+    UNPLAYABLE_SKIP_PROMPT_KEY,
     buildPlaybackFailureStatus,
     getPlaybackFailureMessage,
+    isAutoSkipFailure,
     isPlaybackFailureStatus,
     resolvePlaybackFailurePolicy,
     sleepForPlaybackRetry,
@@ -176,6 +178,86 @@ describe('policy variants', () => {
         resolvePlaybackFailurePolicy(failure('service-unavailable', { transient: false }), 'play');
         expect(PLAYBACK_FAILURE_POLICY['taken-down'].countdownKey).toBe('status.songUnavailablePrompt');
         expect(PLAYBACK_FAILURE_POLICY['service-unavailable'].actions).toEqual(['retry', 'skip']);
+    });
+});
+
+// fork 的策略表比上游那个「无法播放时自动跳过」开关更彻底：任何原因本来就倒计时跳歌，
+// 所以那个开关（options.autoSkipUnplayable）传 true、传 false、不传，解析出来的策略都一样。
+// 这几条用例钉住的就是「它改不动 fork 的行为」，以及倒计时文案仍是播放出错那条。
+describe('auto-skip setting cannot change the fork policy', () => {
+    const ON = { autoSkipUnplayable: true } as const;
+
+    it('resolves the same policy whatever the setting says', () => {
+        for (const reason of ALL_REASONS) {
+            const plain = resolvePlaybackFailurePolicy(failure(reason), 'play');
+            expect(resolvePlaybackFailurePolicy(failure(reason), 'play', ON), reason).toEqual(plain);
+            expect(resolvePlaybackFailurePolicy(failure(reason), 'play', { autoSkipUnplayable: false }), reason).toEqual(plain);
+            expect(resolvePlaybackFailurePolicy(failure(reason), 'play', {}), reason).toEqual(plain);
+        }
+    });
+
+    it.each(ALL_REASONS)('%s counts down with the playback-error prompt', reason => {
+        const policy = resolvePlaybackFailurePolicy(failure(reason), 'play', ON);
+        expect(policy.autoSkip, reason).toBe('countdown');
+        // 下架那条自带自己的倒计时文案（还带替代版本），其余都是「播放出错，N 秒后自动跳过」。
+        expect(policy.countdownKey, reason).toBe(reason === 'taken-down' ? 'status.songUnavailablePrompt' : 'status.playbackErrorPrompt');
+    });
+
+    it('keeps the sign-in hint wording for an unknown failure, but still counts down', () => {
+        const policy = resolvePlaybackFailurePolicy(failure('unknown', { hint: 'sign-in-may-help' }), 'play', ON);
+        expect(policy.messageKey).toBe('status.songTemporarilyUnavailableSignInHint');
+        expect(policy.autoSkip).toBe('countdown');
+        expect(policy.countdownKey).toBe('status.playbackErrorPrompt');
+    });
+
+    it.each(['maybe-membership', 'maybe-region-restricted'] as const)('still skips unknown with the %s hint', hint => {
+        expect(resolvePlaybackFailurePolicy(failure('unknown', { hint }), 'play', ON)).toMatchObject({
+            autoSkip: 'countdown', countdownKey: 'status.playbackErrorPrompt',
+        });
+    });
+
+    it('never skips in the restore context', () => {
+        for (const reason of ALL_REASONS) {
+            const policy = resolvePlaybackFailurePolicy(failure(reason), 'restore', ON);
+            expect(policy.autoSkip, reason).toBe('none');
+            expect(policy.actions, reason).toEqual([]);
+            expect(policy.countdownKey, reason).toBeUndefined();
+        }
+    });
+
+    it('mid-playback matches play', () => {
+        for (const reason of ALL_REASONS) {
+            expect(resolvePlaybackFailurePolicy(failure(reason), 'mid-playback', ON))
+                .toEqual(resolvePlaybackFailurePolicy(failure(reason), 'play', ON));
+        }
+    });
+
+    it('does not mutate the shared table', () => {
+        resolvePlaybackFailurePolicy(failure('membership-required'), 'play', ON);
+        resolvePlaybackFailurePolicy(failure('unknown'), 'play', ON);
+        expect(PLAYBACK_FAILURE_POLICY['membership-required'].autoSkip).toBe('countdown');
+        expect(PLAYBACK_FAILURE_POLICY.unknown.autoSkip).toBe('countdown');
+    });
+
+    it('isAutoSkipFailure answers exactly whether the resolved policy counts down', () => {
+        for (const options of [{}, ON]) {
+            for (const context of ['play', 'restore', 'mid-playback'] as const) {
+                for (const reason of ALL_REASONS) {
+                    const expected = resolvePlaybackFailurePolicy(failure(reason), context, options).autoSkip === 'countdown';
+                    expect(isAutoSkipFailure(failure(reason), context, options), `${reason} ${context} ${JSON.stringify(options)}`).toBe(expected);
+                }
+            }
+        }
+        expect(isAutoSkipFailure(failure('taken-down'), 'play')).toBe(true);
+        expect(isAutoSkipFailure(failure('membership-required'), 'play')).toBe(true);
+        expect(isAutoSkipFailure(failure('network'), 'play')).toBe(true);
+        // restore 不跳。
+        expect(isAutoSkipFailure(failure('membership-required'), 'restore', ON)).toBe(false);
+    });
+
+    it('registers the countdown key for the locale coverage check', () => {
+        expect(UNPLAYABLE_SKIP_PROMPT_KEY).toBe('status.songUnplayableSkipPrompt');
+        expect(PLAYBACK_FAILURE_MESSAGE_KEYS).toContain(UNPLAYABLE_SKIP_PROMPT_KEY);
     });
 });
 

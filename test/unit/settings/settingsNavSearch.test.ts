@@ -48,7 +48,7 @@ describe('searchSettingsNav', () => {
         const graphics = flattenSettingsNavItems(result.groups).find(item => item.id === 'graphics');
 
         expect(graphics?.anchors.map(anchor => anchor.id)).toEqual([
-            'graphicsPerformance', 'graphicsMotion', 'graphicsLyricsWallpaper',
+            'graphicsPerformance', 'graphicsMotion',
         ]);
     });
 

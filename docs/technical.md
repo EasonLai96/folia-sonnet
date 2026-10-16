@@ -7,7 +7,7 @@
 
 ## 桌面端说明
 
-桌面版内置前后端运行环境，适合希望即装即用的用户。最新版本请前往 [Releases 页面](https://github.com/maimai993/folia-sonnet/releases)。
+桌面版内置前后端运行环境，适合希望即装即用的用户。最新版本请前往 [Releases 页面](https://github.com/chthollyphile/folia-major/releases)。
 
 ### 发布与更新通道
 
@@ -79,7 +79,7 @@ windowrule {
 
 如果使用前端版本的话，需要先自行部署该 API 服务。
 
-QQ 音乐是可选音源，由 npm 包 `@yakult-green-tea/qq-music-api` 提供，有两种部署形态。一是常驻 Node 进程（Docker 容器、裸 Node，或 Electron 主进程内嵌），功能最完整，支持微信扫码和 QQ 扫码两种登录方式。二是 serverless：从 3.0.0 起该包提供 `./serverless` 导出，本仓库已内置 Cloudflare Workers 与 Vercel 两个平台的入口，把 `VITE_QQ_API_BASE` 填成 `/api/qq` 并配好 `QQ_SESSION_SECRET` 即可，不需要单独部署 API 实例。serverless 形态默认只支持微信扫码登录，且 `/getMusicPlay` 必须先登录；Cloudflare 使用 3.1.0 或更高版本时，可选地绑定 Durable Object（`QQ_QR_CHANNEL` → `QqQrChannel`），增加 QQ 扫码登录方式。完整部署步骤与排错方法见 [QQ 音乐部署指南](qq-music-deployment.md)；Docker 镜像、卷和常驻服务细节见 [`deploy/docker/qq-api/README.md`](../deploy/docker/qq-api/README.md)。Electron 版在主进程内直接启动该包，不需要单独部署。Folia 锁定 3.3.0：电台页的每日推荐、私人 FM（猜你喜欢）与推荐歌单，往自建歌单加歌删歌和收藏歌单，都用这一版新增的接口；红心、收藏专辑、不喜欢与历史日推后端还没有，QQ 不提供这几项。
+QQ 音乐是可选音源，由 npm 包 `@yakult-green-tea/qq-music-api` 提供，有两种部署形态。一是常驻 Node 进程（Docker 容器、裸 Node，或 Electron 主进程内嵌），功能最完整，支持微信扫码和 QQ 扫码两种登录方式。二是 serverless：从 3.0.0 起该包提供 `./serverless` 导出，本仓库已内置 Cloudflare Workers 与 Vercel 两个平台的入口，把 `VITE_QQ_API_BASE` 填成 `/api/qq` 并配好 `QQ_SESSION_SECRET` 即可，不需要单独部署 API 实例。serverless 形态默认只支持微信扫码登录，且 `/getMusicPlay` 必须先登录；Cloudflare 使用 3.1.0 或更高版本时，可选地绑定 Durable Object（`QQ_QR_CHANNEL` → `QqQrChannel`），增加 QQ 扫码登录方式。完整部署步骤与排错方法见 [QQ 音乐部署指南](qq-music-deployment.md)；Docker 镜像、卷和常驻服务细节见 [`deploy/docker/qq-api/README.md`](../deploy/docker/qq-api/README.md)。Electron 版在主进程内直接启动该包，不需要单独部署。Folia 锁定 3.3.1：电台页的每日推荐、私人 FM（猜你喜欢）与推荐歌单，往自建歌单加歌删歌和收藏歌单，是 3.3.0 新增的接口；红心与收藏专辑是 3.3.1 新增的。不喜欢与历史日推后端还没有，QQ 不提供这两项。
 
 ### AI 能力
 
@@ -110,7 +110,7 @@ GET http://127.0.0.1:32109/v1/lyric
 
 如果你希望快速上线 Web 版本，可以直接通过下方入口创建 Vercel 项目：
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/maimai993/folia-sonnet)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/chthollyphile/folia-major)
 
 部署完成后，请在 Vercel 项目设置中补齐环境变量。
 
@@ -146,7 +146,6 @@ vercel env pull .env.local
 | --- | --- | --- |
 | `VITE_NETEASE_API_BASE` | 网易云音乐 API 实例地址 | 是 |
 | `VITE_KUGOU_API_BASE` | Web 版的 KuGouMusicApi 实例地址；Electron 不使用此项 | 否，默认留空 |
-| `VITE_FOLIA_API_BASE` | 自行托管的 Folia AI/歌词代理 API 根地址；Android 使用相关功能时必须为 HTTPS | 否，默认留空 |
 | `VITE_QQ_API_BASE` | QQ 音乐 API 实例地址；Cloudflare / Vercel 上可填 `/api/qq` 用本仓库内置的 serverless 入口；留空时 QQ 入口可见但不可用 | 否，默认留空 |
 | `QQ_SESSION_SECRET` | serverless 形态下加密登录态用的服务端密钥，**不加 `VITE_` 前缀**；未设置时 QQ 登录路由回 501，曲库路由仍可用 | 用 `/api/qq` 时需要 |
 | `QQ_SESSION_SECRET_PREVIOUS` | 轮换 `QQ_SESSION_SECRET` 时用来验证旧令牌，避免把所有人一次性登出 | 否 |
@@ -164,7 +163,6 @@ Gemini 示例：
 ```env
 VITE_NETEASE_API_BASE=http://localhost:3000
 VITE_KUGOU_API_BASE=
-VITE_FOLIA_API_BASE=
 VITE_AI_PROVIDER=google
 GEMINI_API_KEY=your_google_gemini_api_key
 ```
@@ -224,61 +222,12 @@ OPENAI_API_TEMPERATURE=0.7
 vercel dev
 ```
 
-## Android（Capacitor 8）
-
-Android 应用位于仓库的 `android/`，内置 `dist/` 中的 Vite 产物；application ID 固定为 `top.izuna.foliamajor`，最低支持 Android 7 / API 24。Android 构建不会注册 PWA Service Worker，本地音乐入口因为不支持因此也会隐藏。
-
-### 本地工具链
-
-- 最新稳定版 Android Studio，并使用它自带的 JDK。
-- Android SDK Platform 36.1、最新 Build Tools 36.x、Platform Tools。
-- 模拟器建议使用 API 36.1 系统镜像。
-- 工程固定使用 Capacitor 8 模板的 AGP 8.13.x 与 Gradle Wrapper 8.14.3。
-
-首次准备：
-
-```bash
-npm ci --allow-remote=root
-npm run cap:assets:android
-npm run cap:sync:android
-```
-
-`cap:assets:android` 以 `android/img/icon.png`、`android/img/splash-light.png` 和 `android/img/splash-dark.png` 为唯一源图，重新生成 adaptive/round/legacy 图标及浅色、深色纵横屏启动图；源图不会被修改。
-
-`build:capacitor` 不再内置任何 API 地址。若要在 Android 中使用 AI 主题或歌词代理，请在 `.env.local` 中提供自行托管的 HTTPS `VITE_FOLIA_API_BASE`；不配置时这些功能会在运行时提示不可用。Web 未配置时仍使用同源 `/api/*`。AI Key 只能配置在你的服务端，禁止放入 `VITE_*`、APK 或 Android 日志。
-
-### 构建与运行
-
-```bash
-npm run cap:open:android
-npm run cap:run:android
-npm run build:android:debug
-npm run build:android:bundle
-```
-
-- 调试 APK：`android/app/build/outputs/apk/debug/app-debug.apk`
-- 发布 AAB：`android/app/build/outputs/bundle/release/app-release.aab`
-- 每次 Web 代码变化后先执行 `npm run cap:sync:android`，确保 APK 内资源已更新。
-
-### 发布签名
-
-Android `versionName` 自动读取 `package.json`；`versionCode` 从 1 开始，每次发布到应用商店前必须严格递增。复制 `android/keystore.properties.example` 为 `android/keystore.properties`，填写本机 keystore 的相对路径、密码和 alias。真实 `keystore.properties`、`*.jks`、`*.keystore`、APK/AAB 与 Gradle 缓存均被 Git 忽略；缺少本地签名配置时仍可检查 unsigned release bundle。
-
-首版只承诺前台播放，不包含本地音乐扫描、Android 前台媒体服务、可靠后台/锁屏连续播放或 Play 商店正式上架。Navidrome 服务必须使用 HTTPS。
-
 ## 常用脚本
 
 | 命令 | 说明 |
 | --- | --- |
 | `npm run dev` | 启动 Vite 开发服务器 |
 | `npm run build` | 构建 Web 版本 |
-| `npm run build:capacitor` | 构建不含 PWA Service Worker 的 Android Web 产物 |
-| `npm run cap:assets:android` | 从 `android/img` 的三张源图重新生成 Android 图标和启动图 |
-| `npm run cap:sync:android` | 构建 Web 产物并同步到 Android 工程 |
-| `npm run cap:open:android` | 使用 Android Studio 打开 Android 工程 |
-| `npm run cap:run:android` | 构建并运行到已连接设备或模拟器 |
-| `npm run build:android:debug` | 同步资源并生成调试 APK |
-| `npm run build:android:bundle` | 同步资源并生成发布 AAB |
 | `npm run preview` | 预览构建结果 |
 | `npm run dev:electron` | 启动 Electron 开发模式 |
 | `npm run dev:electron:update-preview` | 启动 Electron 开发模式，并模拟显示版本更新提示 |

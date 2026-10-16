@@ -20,6 +20,7 @@ import { backgroundsRegistry } from './registries/backgrounds';
 import { stageLayersRegistry } from './registries/stageLayers';
 import { settingsSectionsRegistry } from './registries/settingsSections';
 import { playerPanelTabsRegistry } from './registries/playerPanelTabs';
+import { homeTabsRegistry } from './registries/homeTabs';
 import { controlButtonsRegistry, progressLayersRegistry } from './registries/progress';
 import { stylesRegistry } from './registries/styles';
 import { addFoliumEventHandler } from './events';
@@ -44,6 +45,7 @@ const UI_ONLY_REGISTRIES = new Set<keyof FoliumRegistries>([
     'commands',
     'stageLayers',
     'playerPanelTabs',
+    'homeTabs',
     'controlButtons',
     'progressLayers',
     'styles',
@@ -59,6 +61,7 @@ const HOST_REGISTRIES: Record<keyof FoliumRegistries, AnyHostRegistry> = {
     stageLayers: stageLayersRegistry,
     settingsSections: settingsSectionsRegistry,
     playerPanelTabs: playerPanelTabsRegistry,
+    homeTabs: homeTabsRegistry,
     controlButtons: controlButtonsRegistry,
     progressLayers: progressLayersRegistry,
     styles: stylesRegistry,
@@ -176,6 +179,7 @@ export const createFoliumClientApi = (mod: ModRuntimeInfo, options: FoliumClient
             },
         }),
         playerPanelTabs: bindRegistry(playerPanelTabsRegistry, modId, inert('playerPanelTabs')),
+        homeTabs: bindRegistry(homeTabsRegistry, modId, inert('homeTabs')),
         controlButtons: bindRegistry(controlButtonsRegistry, modId, inert('controlButtons')),
         progressLayers: bindRegistry(progressLayersRegistry, modId, inert('progressLayers')),
         styles: bindRegistry(stylesRegistry, modId, inert('styles')),

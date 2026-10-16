@@ -10,6 +10,9 @@ import type { SettingsSubviewId } from '../../../../stores/useSettingsModalStore
 export const SETTINGS_ANCHOR_DEFINITIONS = {
     // AppearanceSettingsSubview
     lyricsRenderer: { section: 'appearance', labelKey: 'options.lyricsRenderer' },
+    // 渲染在 lyricsRenderer 那一节里面（LyricsWallpaperSettingsSection）。Android 专有，
+    // 非安卓组件返回 null，于是这一条自己也就不会出现。
+    lyricsWallpaper: { section: 'appearance', labelKey: 'options.lyricsWallpaperSection' },
     themePresets: { section: 'appearance', labelKey: 'options.themePresets' },
     stageTrackPill: { section: 'appearance', labelKey: 'options.stageTrackPill' },
     grid3dCardStyle: { section: 'appearance', labelKey: 'options.grid3dCardStyle' },
@@ -48,6 +51,8 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     // panels being mutually exclusive; it is still one destination.
     discordRichPresence: { section: 'integration', labelKey: 'options.discordRichPresence', electronOnly: true },
     obsBrowserSource: { section: 'integration', labelKey: 'options.obsBrowserSource', electronOnly: true },
+    // ColorOS 那节只在 ColorOS 16+ 上渲染，跟上面的 Electron 专用项一样靠渲染侧收起来。
+    colorOsLyrics: { section: 'integration', labelKey: 'options.colorOsLyrics' },
     lyricApi: { section: 'integration', labelKey: 'options.lyricApi', electronOnly: true },
     stageMode: { section: 'integration', labelKey: 'options.stageMode' },
     navidrome: { section: 'integration', labelKey: 'navidrome.settings' },
@@ -70,7 +75,6 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     // GraphicsSettingsSubview
     graphicsPerformance: { section: 'graphics', labelKey: 'options.labPerformanceSection' },
     graphicsMotion: { section: 'graphics', labelKey: 'options.reduceMotionSection' },
-    graphicsLyricsWallpaper: { section: 'graphics', labelKey: 'options.lyricsWallpaperSection' },
 
     // ModsSettingsSubview
     modSystem: { section: 'mods', labelKey: 'options.enableModSystem', electronOnly: true },

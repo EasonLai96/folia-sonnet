@@ -9,6 +9,7 @@ import { getLocalLibraryCatalogSnapshot } from '../../../services/localLibraryEn
 import { getNavidromeConfig, navidromeApi } from '../../../services/navidromeService';
 import { applyOnlineAudioSourceMetadata, loadOnlineSongAudioSource } from '../../../services/onlinePlayback';
 import { getPlaybackFailureMessage, withProviderLabel } from '../../../services/playbackRecovery/playbackFailurePolicy';
+import { notifyPlaybackFailed } from '../../../services/hostExtensionHooks';
 import type { ThemeCacheSongKey } from '../../../services/themeCache';
 import type { LyricData, LocalSong, SongResult, StatusMessage } from '../../../types';
 import type { NavidromeSong } from '../../../types/navidrome';
@@ -32,7 +33,7 @@ import { omni } from '../../../services/onlineMusic/omni';
 import { getCachedSongCoverUrl, getSongCacheWithLegacyMigration } from '../../../services/onlineMusic/resourceCache';
 import { getSongCoverUrl } from '../../../services/onlineMusic/songMetadata';
 import { useOnlineProviderAccountStore } from '../../../stores/useOnlineProviderAccountStore';
-import { setStatusMessage as setStatusMsg } from '../../../stores/useStatusMessageStore';
+import { setStatusMessage as setStatusMsg, useStatusMessageStore } from '../../../stores/useStatusMessageStore';
 import { setActiveLocalLyricsSource, setAudioSrc, setCachedCoverUrl, setCurrentSong, usePlaybackStore } from '../../../stores/usePlaybackStore';
 import { useLyricSettingsStore } from '../../../stores/useLyricSettingsStore';
 
@@ -73,17 +74,23 @@ const replaceBlobUrl = (
     blobUrlRef.current = nextBlobUrl;
 };
 
-// Restore context: one plain error line naming the reason, no countdown and no buttons.
+// A failed restore shows one plain line, no countdown and no buttons.
 // It never replaces a persistent toast: that belongs to a newer play request (its retry / skip, or a
 // countdown), which the store cannot yet tell apart from this song while that request is loading.
-const showRestoreFailure = (failure: PlaybackFailure) => {
+// Returns whether the line is now showing: a failure kept off screen this way is not reported either.
+const showRestoreMessage = (message: StatusMessage): boolean => {
+    if (useStatusMessageStore.getState().message?.persistent) return false;
+    setStatusMsg(message);
+    return true;
+};
+
+// Online restore failures name the reason.
+// 登录过期 / 未登录那条文案带 {{provider}}，平台名在这层补（策略层拿不到 provider 注册表）。
+const showRestoreFailure = (failure: PlaybackFailure): boolean => {
     const message = getPlaybackFailureMessage(failure);
-    // 登录过期 / 未登录那条文案带 {{provider}}，平台名在这层补（策略层拿不到 provider 注册表）。
     const providerLabel = failure.providerId ? omni.getProviderLabel(failure.providerId) : undefined;
     const params = withProviderLabel(message, providerLabel);
-    const text = params ? i18n.t(message.key, params) : i18n.t(message.key);
-    const status: StatusMessage = { type: 'error', text };
-    setStatusMsg(prev => (prev?.persistent ? prev : status));
+    return showRestoreMessage({ type: 'error', text: params ? i18n.t(message.key, params) : i18n.t(message.key) });
 };
 
 // Restores the remembered song's source and lyrics. 'stale' means the listener moved on to another
@@ -109,6 +116,10 @@ export const restorePlaybackSourceForSong = async (
     });
 
     setCachedCoverUrl(await getCachedSongCoverUrl(song));
+
+    // Every await below can outlive the restore: the listener may pick another song meanwhile, and
+    // a late write would put this song's status, source or lyrics over theirs.
+    const isCurrent = () => isSamePlaybackSong(usePlaybackStore.getState().currentSong, song);
 
     if (isNavidromePlaybackSong(song)) {
         const navidromeSongToRestore = (song as unknown as SongResult & { navidromeData?: NavidromeSong }).navidromeData;
@@ -159,7 +170,15 @@ export const restorePlaybackSourceForSong = async (
     if (isLocalPlaybackSong(song) || legacyLocalData?.id) {
         const localSongId = isLocalPlaybackSong(song) ? song.localRef.songId : legacyLocalData?.id;
         let songToRestore: LocalSong | undefined;
+        // A local failure has no reason code; like the online one it is reported only when the listener
+        // still sees it: not for a song they already left, nor when a newer persistent toast keeps it off screen.
+        const reportLocalFailure = (textKey: 'status.localSongNotInLibrary' | 'status.localFileReauthorize') => {
+            if (showRestoreMessage({ type: 'info', text: i18n.t(textKey) })) {
+                notifyPlaybackFailed({ song, reason: null, phase: 'restore', willAutoSkip: false });
+            }
+        };
         const songs = await getLocalSongs();
+        if (!isCurrent()) return 'stale';
 
         if (localSongId) {
             songToRestore = songs.find(candidate => candidate.id === localSongId);
@@ -174,26 +193,28 @@ export const restorePlaybackSourceForSong = async (
 
         if (!songToRestore) {
             console.warn('[restorePlaybackSourceForSong] Could not find local song in library');
-            setStatusMsg({
-                type: 'info',
-                text: i18n.t('status.localSongNotInLibrary'),
-            });
+            reportLocalFailure('status.localSongNotInLibrary');
             return 'failed';
         }
 
         const blobUrl = await getAudioFromLocalSong(songToRestore);
+        if (!isCurrent()) {
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            return 'stale';
+        }
         if (!blobUrl) {
             console.warn('[restorePlaybackSourceForSong] Local song file not accessible - needs resync');
-            setStatusMsg({
-                type: 'info',
-                text: i18n.t('status.localFileReauthorize'),
-            });
+            reportLocalFailure('status.localFileReauthorize');
             return 'failed';
         }
 
         songToRestore = await ensureLocalSongCoverAsset(songToRestore);
         const localCoverUrl = getLocalCoverAssetUrl(songToRestore.localCoverAssetId, 1024);
         const catalog = await getLocalLibraryCatalogSnapshot();
+        if (!isCurrent()) {
+            URL.revokeObjectURL(blobUrl);
+            return 'stale';
+        }
         const restoredSong = applyLocalLibraryEntityDisplay(buildUnifiedLocalSong({
             localSong: songToRestore,
             matchedSong: null,
@@ -230,13 +251,16 @@ export const restorePlaybackSourceForSong = async (
         return 'restored';
     }
 
-    // Every await below can outlive the restore: the listener may pick another song meanwhile, and
-    // a late write would put this song's status, source or lyrics over theirs.
-    const isCurrent = () => isSamePlaybackSong(usePlaybackStore.getState().currentSong, song);
     const providerId = getOnlineProviderIdForSong(song) ?? undefined;
+    // Reported to extensions (Folium `playback.failed`) only when the listener sees it: a fallback source
+    // taking over silently is not a failure they can see, and its own media error is reported if it fails too.
+    // Nor is one kept off screen by a newer request's persistent toast: a listener acting on it (skip, play)
+    // would act on a song the user already left, over that request's retry or countdown.
     const reportFailure = (failure: PlaybackFailure) => {
         if (hasFallbackSource) console.warn('[restorePlaybackSourceForSong] Source not refreshed; the caller falls back to its own', failure);
-        else showRestoreFailure(failure);
+        else if (showRestoreFailure(failure)) {
+            notifyPlaybackFailed({ song, reason: failure.reason, phase: 'restore', willAutoSkip: false });
+        }
     };
 
     const onlineLyricsState = await loadOnlineLyricsState(song);

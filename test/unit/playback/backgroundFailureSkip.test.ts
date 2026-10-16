@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlayerState } from '@/types';
+import { PlayerState, type SongResult } from '@/types';
 import type { PlaybackFailure } from '@/types/playbackFailure';
 
 // test/unit/playback/backgroundFailureSkip.test.ts
@@ -28,11 +28,14 @@ const { presentPlaybackFailure } = await import('@/components/app/playback/prese
 const { resetBackgroundPlaybackNoticeDedupe } = await import('@/services/playbackRecovery/backgroundFailureNotice');
 
 const failure = (reason: PlaybackFailure['reason']): PlaybackFailure => ({ reason, stage: 'resolve-url' });
+// 报告里的那首歌（Folium 的 playback.failed）：后台没人看提示条，模组与统计只认这一份报告。
+const song: SongResult = { id: '1', name: 'Song 1', artists: [], album: { id: '', name: '' }, durationMs: 1000 };
 
 const createHarness = () => {
     const setStatusMsg = vi.fn();
     const setPlayerState = vi.fn();
     const showTimedSkipPrompt = vi.fn();
+    const notifyFailure = vi.fn();
     const audio = { pause: vi.fn() };
     const deps = {
         t: (key: string, options?: Record<string, unknown>) => (options ? `${key}:${JSON.stringify(options)}` : key),
@@ -43,8 +46,9 @@ const createHarness = () => {
         setIsLyricsLoading: vi.fn(),
         showTimedSkipPrompt,
         maxAutoSkipCount: 4,
+        notifyFailure,
     };
-    return { deps, setStatusMsg, setPlayerState, showTimedSkipPrompt, audio };
+    return { deps, setStatusMsg, setPlayerState, showTimedSkipPrompt, audio, notifyFailure };
 };
 
 describe('presentPlaybackFailure while the interface is in the background', () => {
@@ -55,10 +59,11 @@ describe('presentPlaybackFailure while the interface is in the background', () =
     });
 
     it('skips at once instead of starting a countdown, and says why in a toast', () => {
-        const { deps, showTimedSkipPrompt } = createHarness();
+        const { deps, showTimedSkipPrompt, notifyFailure } = createHarness();
         const skip = vi.fn();
         presentPlaybackFailure({
             failure: failure('preview-only'),
+            song,
             context: 'play',
             isCurrent: () => true,
             skipCount: 0,
@@ -67,6 +72,8 @@ describe('presentPlaybackFailure while the interface is in the background', () =
 
         expect(skip).toHaveBeenCalledTimes(1);
         expect(showTimedSkipPrompt).not.toHaveBeenCalled();
+        // 当场跳走也算「会自动跳」：模组那边只关心这首歌放没放成、接下来会不会换歌。
+        expect(notifyFailure).toHaveBeenCalledWith({ song, reason: 'preview-only', phase: 'play', willAutoSkip: true });
         expect(showNativeToast).toHaveBeenCalledTimes(1);
         expect(showNativeToast.mock.calls[0][0]).toContain('status.songPreviewOnly');
         expect(showNativeToast.mock.calls[0][0]).toContain('status.autoSkippedNext');
@@ -79,6 +86,7 @@ describe('presentPlaybackFailure while the interface is in the background', () =
             const skip = vi.fn();
             presentPlaybackFailure({
                 failure: failure(reason),
+                song,
                 context: 'play',
                 isCurrent: () => true,
                 skipCount: 0,
@@ -90,10 +98,11 @@ describe('presentPlaybackFailure while the interface is in the background', () =
     });
 
     it('stops after the one-song budget of a whole-platform failure', () => {
-        const { deps, setPlayerState } = createHarness();
+        const { deps, setPlayerState, notifyFailure } = createHarness();
         const skip = vi.fn();
         presentPlaybackFailure({
             failure: failure('session-expired'),
+            song,
             context: 'play',
             isCurrent: () => true,
             skipCount: 1,
@@ -105,6 +114,8 @@ describe('presentPlaybackFailure while the interface is in the background', () =
         expect(setPlayerState).toHaveBeenCalledWith(PlayerState.IDLE);
         // 停下来了也要说一声，否则用户连「为什么没声了」都不知道。
         expect(showNativeToast).toHaveBeenCalledTimes(1);
+        // 报告同样发一次，但这次不跳 —— 停播与「跳走」对模组是两回事。
+        expect(notifyFailure).toHaveBeenCalledWith({ song, reason: 'session-expired', phase: 'play', willAutoSkip: false });
     });
 
     it('keeps going through several broken songs when each one is its own problem', () => {
@@ -112,6 +123,7 @@ describe('presentPlaybackFailure while the interface is in the background', () =
         const skip = vi.fn();
         presentPlaybackFailure({
             failure: failure('preview-only'),
+            song,
             context: 'play',
             isCurrent: () => true,
             skipCount: 3,
@@ -121,21 +133,24 @@ describe('presentPlaybackFailure while the interface is in the background', () =
     });
 
     it('does not skip a request that has already been superseded', () => {
-        const { deps } = createHarness();
+        const { deps, notifyFailure } = createHarness();
         const skip = vi.fn();
         presentPlaybackFailure({
             failure: failure('preview-only'),
+            song,
             context: 'play',
             isCurrent: () => false,
             skipCount: 0,
             skip,
         }, deps);
         expect(skip).not.toHaveBeenCalled();
+        // 陈旧请求同样不报告：用户没看到这次失败。
+        expect(notifyFailure).not.toHaveBeenCalled();
     });
 
     it('does not repeat the same message within the dedupe window', () => {
         const skip = vi.fn();
-        const input = { failure: failure('preview-only'), context: 'play' as const, isCurrent: () => true, skipCount: 0, skip };
+        const input = { failure: failure('preview-only'), song, context: 'play' as const, isCurrent: () => true, skipCount: 0, skip };
         presentPlaybackFailure(input, createHarness().deps);
         presentPlaybackFailure(input, createHarness().deps);
         expect(showNativeToast).toHaveBeenCalledTimes(1);
@@ -154,6 +169,7 @@ describe('presentPlaybackFailure while the interface is visible', () => {
         const skip = vi.fn();
         presentPlaybackFailure({
             failure: failure('preview-only'),
+            song,
             context: 'play',
             isCurrent: () => true,
             skipCount: 0,

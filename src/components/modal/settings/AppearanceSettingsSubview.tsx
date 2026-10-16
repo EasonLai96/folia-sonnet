@@ -22,6 +22,7 @@ import { ObsCopyUrlButton } from '../../shared/ObsCopyUrlButton';
 import { resolveWebObsTarget, selectWebObsSource } from '../../../services/obs/webObsTarget';
 import { buildVisualSettingsConfig, resolveObsCopyHintKey } from '../../../services/obs/visualSettingsConfig';
 import LatticeSettingsSection from './LatticeSettingsSection';
+import LyricsWallpaperSettingsSection from './LyricsWallpaperSettingsSection';
 import AiProviderSettings from './AiProviderSettings';
 import GridViewSettingsSection from './GridViewSettingsSection';
 import VideoLayerSettingsSection from './VideoLayerSettingsSection';
@@ -66,6 +67,7 @@ type AppearanceSettingsSubviewProps = {
     onToggleAutoHidePlayerChrome: (enabled: boolean) => void;
     onToggleAutoHideCursorWithPlayerChrome: (enabled: boolean) => void;
     onSaveCustomTheme: (dualTheme: DualTheme) => void;
+    rangeInputClass: string;
     settingsCardClass: string;
     songThemeAutoSwitchEnabled: boolean;
     songThemeAutoGenerateEnabled: boolean;
@@ -115,6 +117,7 @@ const AppearanceSettingsSubview: React.FC<AppearanceSettingsSubviewProps> = ({
     onToggleAutoHidePlayerChrome,
     onToggleAutoHideCursorWithPlayerChrome,
     onSaveCustomTheme,
+    rangeInputClass,
     settingsCardClass,
     songThemeAutoSwitchEnabled,
     songThemeAutoGenerateEnabled,
@@ -670,6 +673,15 @@ const AppearanceSettingsSubview: React.FC<AppearanceSettingsSubviewProps> = ({
                         </span>
                         <ChevronRight size={18} className="shrink-0 opacity-45 transition-transform group-hover:translate-x-0.5 group-hover:opacity-80" />
                     </button>
+                    {/* 歌词动态壁纸：Android 专有，组件内部非安卓直接返回 null，所以这里不用再判端。 */}
+                    <LyricsWallpaperSettingsSection
+                        isDaylight={isDaylight}
+                        settingsCardClass={settingsCardClass}
+                        toggleOffBackgroundClass={toggleOffBackgroundClass}
+                        utilityGhostButtonClass={utilityGhostButtonClass}
+                        rangeInputClass={rangeInputClass}
+                        theme={theme}
+                    />
                     <div className={`p-4 rounded-xl border space-y-4 ${settingsCardClass}`}>
                         <div className="flex items-center justify-between gap-4">
                             <div className="space-y-1">

@@ -189,7 +189,11 @@ export type AudioSettingsState = {
     openAudioEqualizer: () => void;
     closeAudioEqualizer: () => void;
     handleSetVolume: (val: number) => void;
+    /** Sets the mute switch; the same value is a no-op. */
+    handleSetMuted: (muted: boolean) => void;
     handleToggleMute: () => void;
+    /** Sets the repeat mode and toasts it like the repeat button; the mode already in effect is a no-op. */
+    handleSetLoopMode: (mode: 'off' | 'all' | 'one' | 'shuffle') => void;
     handleToggleLoopMode: () => void;
 };
 
@@ -322,10 +326,38 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
         }
         set({ volume: val });
     },
+    // The toggles below delegate to these setters, so persistence and the toast live in one place
+    // (Folium's playback.setMuted / setLoopMode call the setters directly).
+    handleSetMuted: (muted) => {
+        if (muted === get().isMuted) {
+            return;
+        }
+        setStoredBoolean('player_is_muted', muted);
+        set({ isMuted: muted });
+    },
     handleToggleMute: () => {
-        const next = !get().isMuted;
-        setStoredBoolean('player_is_muted', next);
-        set({ isMuted: next });
+        get().handleSetMuted(!get().isMuted);
+    },
+    handleSetLoopMode: (mode) => {
+        if (mode === get().loopMode) {
+            return;
+        }
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('player_loop_mode', mode);
+        }
+        set({ loopMode: mode });
+        const loopModeKey = mode === 'off'
+            ? 'loopOff'
+            : mode === 'one'
+                ? 'loopOne'
+                : mode === 'shuffle'
+                    ? 'loopShuffle'
+                    : 'loopAll';
+        setStatusMessage({
+            type: 'success',
+            text: i18n.t(`player.${loopModeKey}`),
+            nonce: Date.now(),
+        });
     },
     handleToggleLoopMode: () => {
         // 顺序（off）→ 列表循环（all）→ 单曲循环（one）→ 随机播放（shuffle）→ 回到顺序。
@@ -338,22 +370,7 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
                 : prev === 'one'
                     ? 'shuffle'
                     : 'off';
-        if (typeof window !== 'undefined') {
-            localStorage.setItem('player_loop_mode', next);
-        }
-        set({ loopMode: next });
-        const loopModeKey = next === 'off'
-            ? 'loopOff'
-            : next === 'one'
-                ? 'loopOne'
-                : next === 'shuffle'
-                    ? 'loopShuffle'
-                    : 'loopAll';
-        setStatusMessage({
-            type: 'success',
-            text: i18n.t(`player.${loopModeKey}`),
-            nonce: Date.now(),
-        });
+        get().handleSetLoopMode(next);
     },
 }));
 
