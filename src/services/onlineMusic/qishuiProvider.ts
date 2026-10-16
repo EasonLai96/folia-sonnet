@@ -31,6 +31,8 @@ export const noteQishuiRefreshDiagnostic = (text: string): void => {
 };
 /** 最近一次 login.check 的结论：确认了但没拿到会话 Cookie 时，靠它看清 cookie 罐里有什么。 */
 let lastQishuiCheckNote: string | null = null;
+/** 二维码阶段服务端下发的扫码文案（谁家 App 能扫，由上游说了算）。 */
+let lastQishuiQrNote: string | null = null;
 
 function qishuiNotOurs(): OnlineProviderError {
     return new OnlineProviderError('unsupported', 'Song does not belong to Qishui Music', 'qishui');
@@ -144,6 +146,10 @@ export const qishuiProvider: OnlineMusicProvider = {
                 qrTtlMs = resolved > 0 ? resolved : QISHUI_QR_TTL_MS;
             }
             qrSessions.set(token, imageUrl);
+            // 服务端下发的扫码文案原样留档：上游实测是「抖音」，诊断里一眼可见，
+            // 免得靠猜「到底该用哪个 App 扫」。
+            lastQishuiQrNote = `qr copywriting: ${qishuiText(data?.copywriting) || '(none)'}`
+                + ` / webName: ${qishuiText(data?.webName) || '(none)'}`;
             return token;
         },
         async createQr(key) {
@@ -197,6 +203,7 @@ export const qishuiProvider: OnlineMusicProvider = {
         async getQrLoginDiagnostics() {
             return [
                 `last status: ${lastQishuiLoginStatus ?? 'none'}`,
+                `last qr: ${lastQishuiQrNote ?? 'none'}`,
                 `last check: ${lastQishuiCheckNote ?? 'none'}`,
                 `last refresh: ${lastQishuiRefreshNote ?? 'none'}`,
                 // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能

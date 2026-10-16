@@ -8223,7 +8223,11 @@
         qrcode: String(data.qrcode || ""),
         qrcodeIndexUrl: String(data.qrcode_index_url || ""),
         expireTime: Number(data.expire_time || 0),
-        message: "请使用汽水音乐 App 扫码并确认登录"
+        message: "请使用汽水音乐 App 扫码并确认登录",
+        // 服务端自己下发的扫码文案（data.copywriting）。上游实测写的是「抖音」，
+        // 这里原样带出来，诊断里能直接看到该让用什么 App 扫。
+        copywriting: String(data.copywriting || ""),
+        webName: String(data.web_name || "")
       };
     },
     "login.check": async (params) => {

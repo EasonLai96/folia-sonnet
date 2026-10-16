@@ -407,6 +407,18 @@ final class QishuiSignHost {
                     public void onResponse(Call call, Response response) throws IOException {
                         try (Response closable = response) {
                             int code = closable.code();
+                            // 登录态是 passport 用 Set-Cookie 下发的：/passport/web/get_qrcode/
+                            // 就已经开始给，check_qrconnect 拿到确认后再给一次 sessionid。
+                            // 这条异步路径是假 XHR 的唯一出口（folia-xhr.js → http 桥），
+                            // 少了这里的记录，宿主 cookie 罐永远是空的。
+                            final String responseUrl = closable.request().url().toString();
+                            for (String value : closable.headers("Set-Cookie")) {
+                                try {
+                                    CookieManager.getInstance().setCookie(responseUrl, value);
+                                } catch (Throwable ignored) {
+                                }
+                                rememberCookie(value);
+                            }
                             String text = closable.body() != null ? closable.body().string() : "";
                             JSONObject resultHeaders = new JSONObject();
                             for (String name : closable.headers().names()) {
@@ -569,9 +581,11 @@ final class QishuiSignHost {
                 }
             }
             // 登录态：优先用宿主自己记的会话 cookie，其次才是 WebView cookie 罐里的。
+            // 走 getCookie 的并集（自攒的 jar + CookieManager），别只读后者 ——
+            // 假 XHR 不走真实网络，CookieManager 里未必有 OkHttp 收到的那批。
             String cookie = sessionCookie != null && !sessionCookie.isEmpty()
                     ? sessionCookie
-                    : CookieManager.getInstance().getCookie(url);
+                    : getCookie(url);
             if (cookie != null && !cookie.isEmpty()) builder.header("Cookie", cookie);
 
             String method = request.getMethod() == null ? "GET" : request.getMethod();
