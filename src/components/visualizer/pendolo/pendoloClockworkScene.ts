@@ -1,4 +1,4 @@
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 
 // src/components/visualizer/pendolo/pendoloClockworkScene.ts
 // Frame inputs and color palette for Pendolo clockwork decor.

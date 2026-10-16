@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { motion, useSpring, useTransform } from 'framer-motion';
 import { Star, type LucideIcon } from 'lucide-react';
 import { DEFAULT_PENDOLO_TUNING } from '../../../types';
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import { useLucideIcons } from '../../../hooks/useLucideIcons';
 import { resolveLucideIcon } from '../../../services/lucideIconResolver';
 import { type VisualizerSharedProps } from '../definition';

@@ -12,7 +12,7 @@ import type { LibraryDirectorySurfaceHandle } from '../../library/core/contracts
 import type { LibraryArtistSurfaceHandle } from '../../library/core/contracts/artist';
 import type { LibrarySuiteChromeHandle } from '../../library/core/contracts/suiteChrome';
 import { type SettingsModalInitialTab, type SettingsSubviewId, type VisualizerSettingsSection } from '../../stores/useSettingsModalStore';
-import type { SettingsAnchorId } from '../modal/settings/navigation/settingsAnchorModel';
+import type { SettingsAnchorId } from '../../utils/settingsAnchorModel';
 import type { LyricStaffAbsorbMode, LyricStaffPolicy } from '../../utils/lyrics/staffCreditsPolicy';
 import type { AudioEqualizerModeId } from '../../utils/audioEqualizer';
 import type { ThemeGenerationSource } from '../../services/themePreferences';

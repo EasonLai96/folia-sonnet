@@ -1,4 +1,4 @@
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import {
     buildPendoloClockworkPalette,
     resolvePendoloClockworkAnchors,

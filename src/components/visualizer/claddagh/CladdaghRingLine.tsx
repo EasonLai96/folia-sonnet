@@ -3,7 +3,7 @@ import { MotionValue } from 'framer-motion';
 import { type Line, type Theme } from '../../../types';
 import { buildLineGraphemeTimeline } from '../../../utils/lyrics/graphemeTiming';
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
-import { colorWithAlpha, mixColors } from '../colorMix';
+import { colorWithAlpha, mixColors } from '../../../utils/visualizer/colorMix';
 import { isGlowBlurQuantized, quantizeShadowBlur } from '../../../utils/glowBlurQuantize';
 import { buildWordColorRanges } from '../wordColoring';
 import {

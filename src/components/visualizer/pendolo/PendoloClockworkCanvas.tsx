@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import type { MotionValue } from 'framer-motion';
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import { drawPendoloClockwork2d } from './pendoloClockworkDraw2d';
 import {
     createPendoloClockworkMotionState,

@@ -1,17 +1,13 @@
 import {
-    DIORAMA_MOTE_CIRCUMFERENCE_MAX,
-    DIORAMA_MOTE_CIRCUMFERENCE_MIN,
-    DIORAMA_MOTE_RADIAL_MAX,
-    DIORAMA_MOTE_RADIAL_MIN,
-    DEFAULT_DIORAMA_TUNING,
-} from '../../../types';
-import {
-    composeLocal,
     DIORAMA_STEP_DISTANCE,
+    composeLocal,
     hashSeed,
     seededUnit,
     type DioramaFrame,
 } from './cameraPath';
+// 窗口与密度上限住在 utils：设置层（store / 滑条）也要夹同样的范围，而它们不能依赖
+// components/visualizer。这里只用 slot 的下标算法。
+import { dioramaMoteSlot } from '../../../utils/visualizer/dioramaMoteTuning';
 
 // src/components/visualizer/diorama/dioramaMoteField.ts
 // The background mote field: fine dust drifting through the corridor, giving the flight something to
@@ -32,41 +28,8 @@ import {
 // past the fog's 30-unit reach, so it fades up out of the haze) and retired at -3 (24 units behind the
 // camera, out of frustum). Fog is load-bearing for that - see DioramaScene's scene.fog.
 
-/** Lines of motes kept resident behind / ahead of the read head. */
-export const DIORAMA_MOTE_LINES_BEHIND = 2;
-export const DIORAMA_MOTE_LINES_AHEAD = 5;
-export const DIORAMA_MOTE_WINDOW_LINES = DIORAMA_MOTE_LINES_BEHIND + DIORAMA_MOTE_LINES_AHEAD + 1;
-
-/** Worst-case points the layer can ever draw - the density cap's whole reason for existing. */
-export const DIORAMA_MOTE_MAX_POINTS = DIORAMA_MOTE_WINDOW_LINES
-    * DIORAMA_MOTE_CIRCUMFERENCE_MAX * DIORAMA_MOTE_RADIAL_MAX;
-
-/** Clamp a requested 圆周 count (motes around each ring) into its safe range. */
-export const resolveDioramaMoteCircumference = (requested: number): number => Math.round(Math.min(
-    DIORAMA_MOTE_CIRCUMFERENCE_MAX,
-    Math.max(
-        DIORAMA_MOTE_CIRCUMFERENCE_MIN,
-        Number.isFinite(requested) ? requested : DEFAULT_DIORAMA_TUNING.backgroundParticleCircumference,
-    ),
-));
-
-/** Clamp a requested 径向 count (layers across the shell thickness) into its safe range. */
-export const resolveDioramaMoteRadial = (requested: number): number => Math.round(Math.min(
-    DIORAMA_MOTE_RADIAL_MAX,
-    Math.max(
-        DIORAMA_MOTE_RADIAL_MIN,
-        Number.isFinite(requested) ? requested : DEFAULT_DIORAMA_TUNING.backgroundParticleRadial,
-    ),
-));
-
-/** Motes drawn per line = 圆周 x 径向, both already clamped. */
-export const resolveDioramaMoteCount = (circumference: number, radial: number): number =>
-    resolveDioramaMoteCircumference(circumference) * resolveDioramaMoteRadial(radial);
-
-/** Which ring-buffer slot a line owns. Consecutive lines always land in distinct slots. */
-export const dioramaMoteSlot = (line: number): number => (
-    ((line % DIORAMA_MOTE_WINDOW_LINES) + DIORAMA_MOTE_WINDOW_LINES) % DIORAMA_MOTE_WINDOW_LINES
-);
+// 窗口的边界（DIORAMA_MOTE_LINES_*）、密度上限与三个夹取函数见
+// utils/visualizer/dioramaMoteTuning.ts —— 那一半是设置层的取值规则，没有几何，也不需要相机路径。
 
 // Motes sit in an elliptical shell around the path axis. The inner clearance is what keeps them off the
 // lyrics and out of the camera's own rail - the camera flies down the axis and the text hangs near it, so

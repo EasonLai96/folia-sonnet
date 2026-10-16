@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { DIORAMA_HERO_DISTANCE } from './cameraPath';
 import { resolveGlobal, type SequencerState } from './dioramaSequencer';
 import { type DioramaLineRaster } from './dioramaTextRaster';
-import { DIORAMA_MOTE_LINES_AHEAD, DIORAMA_MOTE_LINES_BEHIND, dioramaMoteSlot, extendDioramaFrame, writeDioramaMoteLine } from './dioramaMoteField';
+import { DIORAMA_MOTE_LINES_AHEAD, DIORAMA_MOTE_LINES_BEHIND, dioramaMoteSlot } from '../../../utils/visualizer/dioramaMoteTuning';
+import { extendDioramaFrame, writeDioramaMoteLine } from './dioramaMoteField';
 import {
     ACTIVE_LINE_OPACITY,
     LINE_FONT_SIZE,

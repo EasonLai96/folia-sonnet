@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import type { Theme } from '../../../types';
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import { useLucideIcons } from '../../../hooks/useLucideIcons';
 import { getLucideIconStatus, resolveLucideIcon } from '../../../services/lucideIconResolver';
 

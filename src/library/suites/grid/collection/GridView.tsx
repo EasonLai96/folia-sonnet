@@ -8,7 +8,7 @@ import { isSongUnavailable } from '../../../../services/onlineMusic/songAvailabi
 import { formatSongName } from '../../../../utils/songNameFormatter';
 import { getSizedCoverUrl } from '../../../../utils/coverUrl';
 import { getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
-import { colorWithAlpha } from '../../../../components/visualizer/colorMix';
+import { colorWithAlpha } from '../../../../utils/visualizer/colorMix';
 import { useFoliaHexViewport } from '../shared/useFoliaHexViewport';
 import { PolaroidCard, type GridItem } from '../shared/PolaroidCard';
 import type { GridPlaybackMark } from '../shared/useGridStayPlayback';

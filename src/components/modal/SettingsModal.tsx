@@ -41,7 +41,7 @@ import { type SettingsModalState, type SettingsSubviewId, type VisualizerSetting
 import { SettingsAnchorProvider, useSettingsAnchorList, useSettingsAnchorStore } from './settings/navigation/SettingsAnchorContext';
 import SettingsSidebarChips from './settings/navigation/SettingsSidebarChips';
 import SettingsSidebarWide from './settings/navigation/SettingsSidebarWide';
-import { settingsAnchorSubview } from './settings/navigation/settingsAnchorModel';
+import { settingsAnchorSubview } from '../../utils/settingsAnchorModel';
 import SettingsSectionHeader from './settings/SettingsSectionHeader';
 import { buildSettingsNavGroups, findSettingsNavItem, type SettingsSectionId } from './settings/navigation/settingsNavModel';
 import { isSettingsSectionSubview, resolveInitialSettingsSection, sectionForSettingsSubview, writeLastSettingsSection } from './settings/navigation/settingsLastSection';

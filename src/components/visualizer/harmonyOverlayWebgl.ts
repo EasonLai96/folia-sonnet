@@ -1,4 +1,4 @@
-import { colorWithAlpha, parseColorChannels } from './colorMix';
+import { colorWithAlpha, parseColorChannels } from '../../utils/visualizer/colorMix';
 import type { HarmonyTextLayout } from './harmonyOverlaySweep';
 
 // src/components/visualizer/harmonyOverlayWebgl.ts

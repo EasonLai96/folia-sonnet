@@ -7,7 +7,7 @@ import { buildLineGraphemeTimeline } from '../../../utils/lyrics/graphemeTiming'
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
 import { type VisualizerSharedProps } from '../definition';
 import { useVisualizerRuntime } from '../runtime';
-import { colorWithAlpha, mixColors } from '../colorMix';
+import { colorWithAlpha, mixColors } from '../../../utils/visualizer/colorMix';
 import VisualizerShell from '../VisualizerShell';
 import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
 import { adjustCladdaghTimeline } from './claddaghTimeline';

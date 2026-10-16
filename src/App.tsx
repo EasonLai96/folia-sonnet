@@ -47,7 +47,7 @@ import { useWallHandoffDirector } from './components/app/presentation/wallHandof
 import WallToolsDockHost from './components/wall/WallToolsDock';
 import { buildPlayerViewFlags } from './components/app/presentation/buildPlayerViewFlags';
 import { buildVisualizerTheme } from './components/app/presentation/buildVisualizerTheme';
-import { createCoverUrlResolver } from './components/app/playback/createCoverUrlResolver';
+import { createCoverUrlResolver } from './utils/coverUrlResolver';
 import { createLyricsSetter } from './components/app/playback/createLyricsSetter';
 import { createLyricSegmentationActions } from './components/app/playback/createLyricSegmentationActions';
 import { useLyricWordSegmentation } from './hooks/useLyricWordSegmentation';

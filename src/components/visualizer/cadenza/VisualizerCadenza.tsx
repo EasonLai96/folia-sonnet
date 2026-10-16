@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CADENZA_TUNING, Line } from '../../../types';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
-import { colorWithAlpha, mixColors } from '../colorMix';
+import { colorWithAlpha, mixColors } from '../../../utils/visualizer/colorMix';
 import { isGlowBlurQuantized } from '../../../utils/glowBlurQuantize';
 import { prepareActiveAndUpcoming, useVisualizerRuntime } from '../runtime';
 import { type VisualizerSharedProps } from '../definition';

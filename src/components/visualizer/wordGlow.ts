@@ -1,5 +1,5 @@
 import type { Variants } from 'framer-motion';
-import { colorWithAlpha } from './colorMix';
+import { colorWithAlpha } from '../../utils/visualizer/colorMix';
 import { isGlowBlurQuantized } from '../../utils/glowBlurQuantize';
 import { isLyricFlat } from '../../utils/lyricFlat';
 

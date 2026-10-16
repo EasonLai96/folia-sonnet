@@ -1,6 +1,9 @@
-import type { SettingsSubviewId } from '../../../../stores/useSettingsModalStore';
+import type { SettingsSubviewId } from '../stores/useSettingsModalStore';
 
-// src/components/modal/settings/navigation/settingsAnchorModel.ts
+// src/utils/settingsAnchorModel.ts
+//
+// 住在 utils 而不是 components/modal/settings/navigation：它只是一张表加两个取值函数，
+// 不碰 React，却被 services/ponder/pagePonderTarget 用（service 不能依赖组件目录）。
 // Which options-tab section each <SettingsAnchor> lives in and which translated label its expanded
 // sidebar entry uses. Commands and inactive sidebar sections both need this information before the
 // destination panel exists, so it is declared once here. settingsAnchorCoverage.test.ts holds the

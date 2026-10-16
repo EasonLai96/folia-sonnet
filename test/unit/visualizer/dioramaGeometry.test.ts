@@ -34,11 +34,10 @@ import {
     DIORAMA_MOTE_MAX_POINTS,
     DIORAMA_MOTE_WINDOW_LINES,
     dioramaMoteSlot,
-    extendDioramaFrame,
     resolveDioramaMoteCircumference,
     resolveDioramaMoteRadial,
-    writeDioramaMoteLine,
-} from '@/components/visualizer/diorama/dioramaMoteField';
+} from '@/utils/visualizer/dioramaMoteTuning';
+import { extendDioramaFrame, writeDioramaMoteLine } from '@/components/visualizer/diorama/dioramaMoteField';
 import {
     DIORAMA_CLUSTER_COLLISION_LINE_SPAN,
     selectVisibleDioramaClusters,

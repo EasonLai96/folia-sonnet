@@ -13,7 +13,7 @@ import { resolveTrackAlbumLink, resolveTrackArtistLinks, type TrackArtistLink } 
 import { canResolveSongCatalogRef } from '../../../services/onlineMusic/catalogRefs';
 import { useGridCommandFilter } from '../../../hooks/useGridCommandFilter';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
-import { colorWithAlpha } from '../../../components/visualizer/colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import LibraryTuiArtistHeader from './LibraryTuiArtistHeader';
 import {
     LIBRARY_TUI_ARTIST_ALBUM_COLUMNS,

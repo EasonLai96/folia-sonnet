@@ -1,6 +1,6 @@
 import { Theme } from '../../../types';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import type { CameraTarget, FumeBlock, ViewportSize } from './fumeTypes';
 import { clamp, isCJK } from './fumeMath';
 import { resolveLinePassCutoffTime } from './fumeReveal';

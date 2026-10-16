@@ -6,7 +6,7 @@ import { useLibraryAccountProviders, useLibraryAccountSelector } from '../../cor
 import { canLogoutProvider, resolveProviderSelectLabel } from '../../core/model/accountRules';
 import { canSwitchToProviderDirectly } from '../../core/model/onlineProviderAccountView';
 import { translateHomeMessage } from '../../core/model/homeSources';
-import { colorWithAlpha } from '../../../components/visualizer/colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import { useLibraryTuiAccountListKeys } from './useLibraryTuiHomeKeyboard';
 
 // src/library/suites/tui/LibraryTuiAccountList.tsx

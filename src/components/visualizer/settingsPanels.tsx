@@ -1,12 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { DEFAULT_CAPPELLA_TUNING, DEFAULT_CLASSIC_TUNING, DEFAULT_CLADDAGH_TUNING, DEFAULT_DIORAMA_TUNING, DEFAULT_FUME_TUNING, DEFAULT_PARTITA_TUNING, DEFAULT_TILT_TUNING, DIORAMA_PARTICLE_DENSITY_MAX, DIORAMA_PARTICLE_DENSITY_MIN, DIORAMA_PARTICLE_GLOW_INTENSITY_MAX, DIORAMA_PARTICLE_GLOW_INTENSITY_MIN, DIORAMA_PARTICLE_SIZE_MAX, DIORAMA_PARTICLE_SIZE_MIN, type CappellaTuning, type ClassicTuning, type CladdaghTuning, type DioramaTuning, type FumeTuning, type PartitaTuning, type TiltColorScheme, type TiltTuning } from '../../types';
-import { colorWithAlpha } from './colorMix';
+import { colorWithAlpha } from '../../utils/visualizer/colorMix';
 import { type VisualizerSettingsPanelProps } from './definition';
 import { DioramaGeometrySettings } from './diorama/DioramaGeometrySettings';
 import { DioramaBackgroundParticleSettings } from './diorama/DioramaBackgroundParticleSettings';
 import { DioramaEffectSettings } from './diorama/DioramaEffectSettings';
 import { DioramaSettingsToggle } from './diorama/DioramaSettingsToggle';
-import { resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from './diorama/dioramaMoteField';
+import { resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from '../../utils/visualizer/dioramaMoteTuning';
 import VisualizerPresetGroup, { type VisualizerPresetOption } from './VisualizerPresetGroup';
 
 // src/components/visualizer/settingsPanels.tsx

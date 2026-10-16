@@ -1,7 +1,11 @@
-import type { CommandPaletteCommand } from './types';
+import type { CommandPaletteCommand } from '../components/command-palette/types';
 
-// src/components/command-palette/pinnedCommandPreferences.ts
+// src/utils/pinnedCommandPreferences.ts
 // Normalizes and persists the three positional command palette shortcuts.
+//
+// 住在 utils 而不是 components/command-palette：它是 localStorage 的读写与规整，
+// 不碰 React，却被 stores/useSettingsModalStore 用（store 不能依赖组件目录）。
+// 上面那个 `import type` 是类型边 —— 运行时不存在，也不构成对 UI 的依赖。
 
 export type PinnedCommandIds = [
     string | null,

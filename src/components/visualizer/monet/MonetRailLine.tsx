@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, MotionValue } from 'framer-motion';
 import { type Theme, type Line } from '../../../types';
 import { SECONDARY_TRACK_OPACITY } from '../../../utils/lyrics/subtitleTrackStyle';
-import { colorWithAlpha } from '../colorMix';
+import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import { type WordColorMatcher } from '../wordColoring';
 import { MONET_SCROLL_TRANSITION, MONET_SUBTITLE_TRACK_STAGGER_S, type PositionedMonetLineEntry } from './monetRailLayout';
 import { composeLineMasks, getClippedTextMask, getEdgeFadeMask, getLineMask } from './monetRailMasks';

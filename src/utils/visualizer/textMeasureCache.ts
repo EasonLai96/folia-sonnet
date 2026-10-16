@@ -1,7 +1,10 @@
 // Copyright (c) 2026 chthollyphile
-// src/components/visualizer/textMeasureCache.ts
+// src/utils/visualizer/textMeasureCache.ts
 // 各模式文字测量共用的两件小事：按插入顺序淘汰的有界缓存，以及按整段前缀累计字素偏移的循环骨架。
 // 测量本身（pretext 首行宽、pretext 自然宽加字距、canvas measureText）仍由各模式传入，结果与原实现逐位一致。
+//
+// 住在 utils 而不是 components/visualizer：它零依赖、不碰 React，却被同一个目录下的
+// colorMix 用（后者现在是 utils 的纯色彩数学）。
 
 /**
  * Stores `value` under `key` in an insertion-ordered Map, first evicting the oldest entry when a new

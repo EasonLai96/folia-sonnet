@@ -9,7 +9,7 @@ import {
     isBuiltinVisualizerBackgroundMode,
     isBuiltinVisualizerMode,
 } from '../types/visualizerModes';
-import { resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from '../components/visualizer/diorama/dioramaMoteField';
+import { resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from '../utils/visualizer/dioramaMoteTuning';
 import { parseVisualizerFrameRate, VISUALIZER_FRAME_RATE_STORAGE_KEY } from '../utils/frameRateLimiter';
 import { sanitizeUrlBackgroundList } from '../utils/urlBackground';
 import { normalizeLumiereTuning } from '../utils/lumiereTuning';

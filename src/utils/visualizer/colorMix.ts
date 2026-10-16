@@ -1,7 +1,10 @@
 import { rememberBounded } from './textMeasureCache';
 
-// src/components/visualizer/colorMix.ts
+// src/utils/visualizer/colorMix.ts
 // Shared color helpers for visualizer renderers.
+//
+// 住在 utils 而不是 components/visualizer：零依赖的色彩数学，谁都能用 ——
+// utils/themeColorMath（纯变换）也要它，而 utils 不能反向依赖组件目录。
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const mix = (from: number, to: number, amount: number) => from + (to - from) * amount;
 const FALLBACK_RGB = { r: 255, g: 255, b: 255 };

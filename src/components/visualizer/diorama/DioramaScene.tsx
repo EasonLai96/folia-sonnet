@@ -10,7 +10,7 @@ import { DIORAMA_HERO_DISTANCE, type DioramaMotionParams } from './cameraPath';
 import { resolveGlobal, type SequencerState, totalGlobalLines } from './dioramaSequencer';
 import { buildDioramaFontSpec } from './dioramaTextRaster';
 import { DioramaParticleField } from './DioramaParticleField';
-import { DIORAMA_MOTE_WINDOW_LINES, resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from './dioramaMoteField';
+import { DIORAMA_MOTE_WINDOW_LINES, resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from '../../../utils/visualizer/dioramaMoteTuning';
 import {
     COLOR_DAMP_RATE,
     FOG_FAR,

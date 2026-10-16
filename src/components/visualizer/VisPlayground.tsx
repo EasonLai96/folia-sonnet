@@ -47,7 +47,7 @@ import {
     type VisualizerMode,
 } from '../../types';
 import { resolveThemeFontStack } from '../../utils/fontStacks';
-import { colorWithAlpha } from './colorMix';
+import { colorWithAlpha } from '../../utils/visualizer/colorMix';
 import FontFallbackStackControl from './FontFallbackStackControl';
 import {
     findPreviewPlaceholderLineIndex,
