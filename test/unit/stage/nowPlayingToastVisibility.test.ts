@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildAppOverlaysModel } from '../../../src/components/app/overlays/buildAppOverlaysModel';
-import { shouldShowNowPlayingToast } from '../../../src/components/app/overlays/now-playing-toast/nowPlayingToastVisibility';
+import {
+    isNowPlayingToastHiddenWithChrome,
+    shouldShowNowPlayingToast,
+} from '../../../src/components/app/overlays/now-playing-toast/nowPlayingToastVisibility';
 import { useLatticeControlsStore } from '../../../src/stores/useLatticeControlsStore';
 import { PlayerState, type SongResult } from '../../../src/types';
 
@@ -20,6 +23,32 @@ describe('now playing toast visibility', () => {
         expect(shouldShowNowPlayingToast({ mode: 'auto', view: 'home', showOnHome: false })).toBe(false);
         expect(shouldShowNowPlayingToast({ mode: 'always', view: 'home', showOnHome: true })).toBe(true);
         expect(shouldShowNowPlayingToast({ mode: 'never', view: 'lattice', showOnHome: true })).toBe(false);
+    });
+
+    // 判据必须是显式传进来的 view，不能读 PlayerBottomBarLayoutContext：那个 Provider 只包住
+    // VisualizerRenderer，而卡片挂在 AppOverlays 里，读它恒为 false —— 卡片就永远不跟随隐藏。
+    it('hides with the player chrome on the lyrics page, and only there', () => {
+        const hidden = { isPlayerChromeHidden: true, autoHidePlayerChrome: false };
+        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'player' })).toBe(true);
+        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'lattice' })).toBe(false);
+        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'home' })).toBe(false);
+    });
+
+    it('leaves the card alone while the auto-hide clock owns the chrome', () => {
+        // 那一档里「藏着」是常态，跟着收等于卡片再也不出现。
+        expect(isNowPlayingToastHiddenWithChrome({
+            view: 'player',
+            isPlayerChromeHidden: true,
+            autoHidePlayerChrome: true,
+        })).toBe(false);
+    });
+
+    it('shows the card again once the chrome is back', () => {
+        expect(isNowPlayingToastHiddenWithChrome({
+            view: 'player',
+            isPlayerChromeHidden: false,
+            autoHidePlayerChrome: false,
+        })).toBe(false);
     });
 
     it('routes a Lattice card click to the registered current-song focus action', () => {

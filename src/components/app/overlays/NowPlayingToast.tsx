@@ -8,7 +8,7 @@ import { usePlayerBottomBarBottomPx } from '../../../hooks/usePlayerBottomBarBot
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
-import { useIsPlayerBottomBarHost } from '../../floating-player/PlayerBottomBarLayoutContext';
+import { isNowPlayingToastHiddenWithChrome } from './now-playing-toast/nowPlayingToastVisibility';
 import {
     PLAYER_BOTTOM_BAR_SUBTITLE_BLOCK_PX,
     PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX,
@@ -126,15 +126,17 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
     // 那一下的意思是「把控件还给我」，不是「把刚才那条弹窗再放一遍」。换歌时复位，
     // 因为「新歌来了」正是这张卡片存在的理由。
     //
-    // 两个排除和 VisualizerSubtitleOverlay 同一套理由：
-    // - 只在 App 播放页那棵树里算数。这不是 App 的私有件：探针页
-    //   （test/component/nowPlayingToastTransitionBorder.spec.ts）会单独挂它，而那种树里没有
-    //   PlayerBottomBarLayoutContext 的 Provider（默认 false），播放页的显隐不该管到它。
-    // - 「自动隐藏控制栏」那一档不算：那一档里「藏着」是常态，跟着收等于卡片再也不出现。
-    const isPlayerPageTree = useIsPlayerBottomBarHost();
+    // 只在播放页算数，且「自动隐藏控制栏」那一档不算（那一档里「藏着」是常态，跟着收等于
+    // 卡片再也不出现）。判据用显式传 view 的纯函数，不能读 PlayerBottomBarLayoutContext ——
+    // 这张卡片挂在 AppOverlays 里，是那个 Provider 的**兄弟节点**，读它恒为 false。
+    // 详见 nowPlayingToastVisibility.ts。
     const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
     const autoHidePlayerChrome = usePlayerChromeSettingsStore(state => state.autoHidePlayerChrome);
-    const isChromeHiddenHere = isPlayerPageTree && isPlayerChromeHidden && !autoHidePlayerChrome;
+    const isChromeHiddenHere = isNowPlayingToastHiddenWithChrome({
+        view,
+        isPlayerChromeHidden,
+        autoHidePlayerChrome,
+    });
     const [dismissedWithChrome, setDismissedWithChrome] = useState(false);
     useEffect(() => {
         if (isChromeHiddenHere) setDismissedWithChrome(true);

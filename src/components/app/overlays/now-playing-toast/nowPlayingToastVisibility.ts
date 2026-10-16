@@ -22,3 +22,23 @@ export const shouldShowNowPlayingToast = ({
     || view === 'lattice'
     || (view === 'home' && (showOnHome || homeIsWall))
 );
+
+/**
+ * 播放页把界面收起来时这张卡片跟着收（点空白那一族手势，见 App 的 handleVisualSurfaceClick）。
+ *
+ * 判据是显式传进来的 `view`，**不是** `useIsPlayerBottomBarHost()`：那个 Provider 只包住
+ * `VisualizerRenderer`，而这张卡片挂在 AppOverlays 里 —— 是可视化层的**兄弟节点**，在这里读
+ * context 永远拿到默认的 false，卡片就永远不隐藏（这个 bug 出过一次）。
+ * 字幕层（VisualizerSubtitleOverlay）确实长在那棵 Provider 里面，所以那边用它是对的。
+ *
+ * 「自动隐藏控制栏」那一档不算：那一档里「藏着」是常态，跟着收等于卡片再也不出现。
+ */
+export const isNowPlayingToastHiddenWithChrome = ({
+    view,
+    isPlayerChromeHidden,
+    autoHidePlayerChrome,
+}: {
+    view: AppView;
+    isPlayerChromeHidden: boolean;
+    autoHidePlayerChrome: boolean;
+}) => view === 'player' && isPlayerChromeHidden && !autoHidePlayerChrome;
