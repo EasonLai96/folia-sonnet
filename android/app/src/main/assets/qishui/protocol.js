@@ -8239,9 +8239,27 @@
       return import_qishui_api.default.handleQishuiAlbumDetail(id, readQishuiCookie(), limit, trackId);
     },
     lyric: (params) => import_qishui_api.default.handleQishuiLyric(String(params && params.id || ""), readQishuiCookie()),
-    "song.url": (params) => {
+    "song.url": async (params) => {
       const p = params || {};
-      return import_qishui_api.default.handleQishuiSongUrl({ id: String(p.id || ""), quality: String(p.quality || "") }, readQishuiCookie());
+      const result = await import_qishui_api.default.handleQishuiSongUrl({ id: String(p.id || ""), quality: String(p.quality || "") }, readQishuiCookie());
+      if (!result || result.playable === false || !result.url) return result;
+      const text = String(result.url);
+      const hashIndex = text.indexOf("#auth=");
+      if (hashIndex < 0) return result;
+      let auth = text.slice(hashIndex + 6);
+      try {
+        auth = decodeURIComponent(auth);
+      } catch (_) {
+      }
+      const cleanUrl = text.slice(0, hashIndex);
+      const host = window.FoliaQishuiHost;
+      const proxyUrl = host && typeof host.audioProxyUrl === "function" ? String(host.audioProxyUrl(cleanUrl, auth) || "") : "";
+      if (!proxyUrl) return result;
+      return Object.assign({}, result, {
+        url: proxyUrl,
+        upstreamUrl: cleanUrl,
+        localProxy: true
+      });
     },
     feed: (params) => import_qishui_api.default.handleQishuiFeed(qishuiClampInt((params || {}).limit, 8, 4, 12), readQishuiCookie()),
     "user.playlists": () => import_qishui_api.default.handleQishuiUserPlaylists(readQishuiCookie()),

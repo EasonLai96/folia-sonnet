@@ -219,10 +219,28 @@ const handlers = {
 
     lyric: params => qishuiApi.handleQishuiLyric(String((params && params.id) || ''), readQishuiCookie()),
 
-    'song.url': params => {
+    'song.url': async params => {
         const p = params || {};
-        // 加密直链（#auth=）的解密代理由原生侧承接；这里原样透传。
-        return qishuiApi.handleQishuiSongUrl({ id: String(p.id || ''), quality: String(p.quality || '') }, readQishuiCookie());
+        const result = await qishuiApi.handleQishuiSongUrl({ id: String(p.id || ''), quality: String(p.quality || '') }, readQishuiCookie());
+        if (!result || result.playable === false || !result.url) return result;
+        // 与桌面桥唯一的「改写返回值」operation：上游直链带 #auth= 的交给原生
+        // loopback 解密代理（AES-128-CTR），<audio> 只吃解密后的明文流。
+        const text = String(result.url);
+        const hashIndex = text.indexOf('#auth=');
+        if (hashIndex < 0) return result;
+        let auth = text.slice(hashIndex + 6);
+        try { auth = decodeURIComponent(auth); } catch (_) { /* 保持原样 */ }
+        const cleanUrl = text.slice(0, hashIndex);
+        const host = window.FoliaQishuiHost;
+        const proxyUrl = host && typeof host.audioProxyUrl === 'function'
+            ? String(host.audioProxyUrl(cleanUrl, auth) || '')
+            : '';
+        if (!proxyUrl) return result;
+        return Object.assign({}, result, {
+            url: proxyUrl,
+            upstreamUrl: cleanUrl,
+            localProxy: true,
+        });
     },
 
     feed: params => qishuiApi.handleQishuiFeed(qishuiClampInt((params || {}).limit, 8, 4, 12), readQishuiCookie()),

@@ -108,6 +108,10 @@ final class QishuiSignHost {
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
     /** 宿主自己要用的 cookie：协议层的「当前会话」就是它。 */
     private volatile String sessionCookie = "";
+    /** 加密音频的本地回环代理：主 WebView 的 <audio> 吃这个地址（独立于签名 WebView）。 */
+    private final QishuiAudioServer audioServer = new QishuiAudioServer();
+    private final java.util.concurrent.ExecutorService executor =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     interface Pending {
         void resolve(String json);
@@ -164,6 +168,8 @@ final class QishuiSignHost {
         created.addJavascriptInterface(new HostBridge(), "FoliaQishuiHost");
         created.setWebViewClient(new HostClient());
         created.loadUrl(BOOTSTRAP_URL);
+        // 音频代理提前起（失败只降级为「无本地代理」，song.url 原样直链）。
+        executor.execute(audioServer::start);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -228,6 +234,7 @@ final class QishuiSignHost {
             }
             webView = null;
             ready = false;
+            audioServer.stop();
             for (Map.Entry<String, Pending> entry : pending.entrySet()) {
                 entry.getValue().resolve(envelopeJson(false, null, "unavailable", "Signing host was disposed"));
             }
@@ -359,6 +366,16 @@ final class QishuiSignHost {
         @JavascriptInterface
         public void setMfaVisible(String visible) {
             mainHandler.post(() -> setWebViewExpanded("1".equals(visible)));
+        }
+
+        /**
+         * 协议层 song.url 用：把带 #auth= 的加密直链改写成 loopback 解密代理地址。
+         * JavascriptInterface 的返回值是同步的，协议层可以直接拿到；服务器未就绪时
+         * 返回空串，页面侧回退为原样直链（与桌面「无本地代理」的降级一致）。
+         */
+        @JavascriptInterface
+        public String audioProxyUrl(String cleanUrl, String auth) {
+            return audioServer.buildProxyUrl(cleanUrl, auth);
         }
     }
 
