@@ -356,3 +356,60 @@ export const removeNativeCookie = async (options: { url: string; name: string })
         console.warn('[FoliaNative] removeNativeCookie failed', error);
     }
 };
+
+// ─── 汽水音乐（FoliaQishui）────────────────────────────────────────────
+// 汽水的协议层要跑在「一个真的浏览器页面里」：它的签名组件（官方 bdms.js）会改写
+// 页面里的 XHR/fetch 给请求补签名，桌面端靠 Electron 的隐藏 BrowserWindow 提供这个页面，
+// 安卓端由原生起的隐藏 WebView（QishuiSignHost）提供。所以这里不是一个普通的网络插件：
+// 它把 operation 递给那个页面里的协议层，再把结果原样带回来。
+
+export type QishuiBridgeEnvelope =
+    | { ok: true; data: unknown }
+    | { ok: false; error: { code: string; message: string } };
+
+interface FoliaQishuiPlugin {
+    request(options: { operation: string; params?: Record<string, unknown> }): Promise<QishuiBridgeEnvelope>;
+    status(): Promise<{ ready: boolean; reason?: string }>;
+    dispose(): Promise<void>;
+}
+
+const FoliaQishui = registerPlugin<FoliaQishuiPlugin>('FoliaQishui');
+
+/**
+ * 安卓上汽水音源有没有可用：插件在（说明原生把隐藏 WebView 建起来了）才算数。
+ *
+ * 桌面端走 window.electron.qishuiRequest，两边信封完全一致，所以渲染层只有这一处判断。
+ */
+export const isQishuiNativeAvailable = (): boolean => (
+    isCapacitorAndroid() && typeof FoliaQishui?.request === 'function'
+);
+
+/** 把一个汽水 operation 交给原生的签名宿主；返回与桌面端同一套信封。 */
+export const requestQishuiNative = async (
+    operation: string,
+    params: Record<string, unknown> = {},
+): Promise<QishuiBridgeEnvelope> => {
+    if (!isQishuiNativeAvailable()) {
+        return { ok: false, error: { code: 'unavailable', message: 'Qishui bridge is not available' } };
+    }
+    try {
+        const envelope = await FoliaQishui.request({ operation, params });
+        if (envelope && typeof envelope === 'object' && 'ok' in envelope) return envelope;
+        return { ok: false, error: { code: 'invalid-response', message: 'Qishui bridge returned a malformed envelope' } };
+    } catch (error) {
+        return {
+            ok: false,
+            error: { code: 'unavailable', message: error instanceof Error ? error.message : String(error) },
+        };
+    }
+};
+
+/** 让原生把隐藏 WebView 与它占的资源收掉（登出 / 退出时调用，可重复调用）。 */
+export const disposeQishuiNative = async (): Promise<void> => {
+    if (!isCapacitorAndroid()) return;
+    try {
+        await FoliaQishui.dispose();
+    } catch (error) {
+        console.warn('[FoliaQishui] dispose failed', error);
+    }
+};

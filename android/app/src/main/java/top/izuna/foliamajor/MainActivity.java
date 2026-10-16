@@ -196,6 +196,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(StatusBarPlugin.class);
         registerPlugin(SplashScreenPlugin.class);
         registerPlugin(BrowserPlugin.class);
+        // 汽水音乐：签名宿主（隐藏 WebView + bdms.js）的原生桥。
+        registerPlugin(FoliaQishuiPlugin.class);
 
         super.onCreate(savedInstanceState);
 

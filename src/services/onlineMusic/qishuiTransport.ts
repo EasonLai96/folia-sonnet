@@ -1,5 +1,6 @@
 import type { ProviderErrorCode } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
+import { isQishuiNativeAvailable, requestQishuiNative } from '../../platform/foliaNative';
 
 // src/services/onlineMusic/qishuiTransport.ts
 
@@ -33,8 +34,14 @@ export type QishuiBridgeResult =
     | { ok: true; data: unknown }
     | { ok: false; error: { code: string; message: string } };
 
-export const getQishuiTransportAvailability = () => (
+// 桌面端（Electron preload）与安卓端（原生隐藏 WebView）给的是同一套信封，
+// 所以「哪一边的桥在」只在这里判断一次，其余代码两边都不用分叉。
+const hasDesktopBridge = () => (
     typeof window !== 'undefined' && typeof window.electron?.qishuiRequest === 'function'
+);
+
+export const getQishuiTransportAvailability = () => (
+    hasDesktopBridge() || isQishuiNativeAvailable()
         ? { configured: true } as const
         : { configured: false, reason: 'runtime-unavailable' } as const
 );
@@ -66,8 +73,14 @@ export const toQishuiErrorCode = (code: unknown): ProviderErrorCode => {
 };
 
 export async function requestQishui<T = unknown>(operation: QishuiOperation, params: QishuiParams = {}): Promise<T> {
-    if (!getQishuiTransportAvailability().configured) {
-        throw new OnlineProviderError('unavailable', 'Qishui Music requires the desktop app', 'qishui');
+    // 安卓：协议层在原生那个隐藏 WebView 里，信封与桌面端一致，只是走插件。
+    if (isQishuiNativeAvailable()) {
+        const result = await requestQishuiNative(operation, params);
+        if (!result.ok) throw new OnlineProviderError(toQishuiErrorCode(result.error.code), result.error.message, 'qishui', result.error.code);
+        return result.data as T;
+    }
+    if (!hasDesktopBridge()) {
+        throw new OnlineProviderError('unavailable', 'Qishui Music is not available on this runtime', 'qishui');
     }
     let result: QishuiBridgeResult;
     try { result = await window.electron!.qishuiRequest(operation, params); }
