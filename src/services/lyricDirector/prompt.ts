@@ -1,4 +1,4 @@
-import { buildParamSpec } from './catalog';
+import { buildParamSpec, SONNET_CAMERA_INTENSITY_MAX } from './catalog';
 import type { DirectorModeInfo } from './catalog';
 
 // src/services/lyricDirector/prompt.ts
@@ -75,6 +75,7 @@ const SYSTEM_PROMPT = [
     '7. 重要：模式之间没有“更好”或“最强”，只有“更合适”。不要因为某个模式功能多、特效强就总是选它。请先认真比较各模式的气质，选那个与这首歌最贴合的；如果两三个模式都说得通，就选比较少见、更有个性的那一个，让不同歌曲尽量呈现不同模式。',
     '8. “这首歌上次的选择”指同一首歌：除非这次明显不合适，否则沿用它，让同一首歌保持稳定的观感。',
     '9. “最近用过的模式”指别的歌用过什么：列出它是为了提醒你别让所有歌都长一个样。除非这首歌确实更适合其中某个，否则优先挑一个不在这个列表里的模式。',
+    `10. 商奈（sonnet）的 \`cameraIntensity\`（镜头运动强度）不能大于 ${SONNET_CAMERA_INTENSITY_MAX}：这一档的相机运动是叠在分镜与转场上的，再高就容易把镜头甩出屏幕外（画幅边缘露黑、歌词被推出画面）。参数清单里这个键的上限也写着 ${SONNET_CAMERA_INTENSITY_MAX}，别越过它；安静的歌还要更低。`,
 ].join('\n');
 
 const clipLine = (text: unknown): string => {

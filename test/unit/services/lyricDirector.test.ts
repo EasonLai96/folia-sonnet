@@ -14,6 +14,7 @@ import {
 import {
     buildLyricSnippet,
     buildSourcePrompt,
+    buildSystemPrompt,
     extractJsonText,
     MAX_LINES_IN_PROMPT,
 } from '../../../src/services/lyricDirector/prompt';
@@ -54,12 +55,14 @@ describe('lyric director catalogue', () => {
 
     it('drops keys the mode cannot express and clamps the rest', () => {
         const cleaned = sanitizeParams('sonnet', {
-            cameraIntensity: 9, // clamped to the 0..2 range
+            // 商奈的相机强度上限定在 0.7（不是 setter 的 2）：这一档的相机运动叠上分镜与转场
+            // 之后，再高容易把画面甩出屏幕外。数就写死在这里，谁动了那条线都要在这里显形。
+            cameraIntensity: 9,
             typographyMotion: 1.5,
             notAThing: true,
             postProcessEnabled: 'true', // strings are accepted for booleans
         });
-        expect(cleaned).toEqual({ cameraIntensity: 2, typographyMotion: 1.5, postProcessEnabled: true });
+        expect(cleaned).toEqual({ cameraIntensity: 0.7, typographyMotion: 1.5, postProcessEnabled: true });
     });
 
     it('refuses values outside a select and non-numeric numbers', () => {
@@ -104,6 +107,16 @@ describe('lyric director catalogue', () => {
 describe('lyric director prompt', () => {
     it('says so when a track has no lyrics', () => {
         expect(buildLyricSnippet([])).toBe('(这首歌没有歌词)');
+    });
+
+    it('keeps sonnet\u2019s camera motion inside its safe range, in the rule and in the list', () => {
+        // 真机现象：商奈档把镜头运动调高之后画面会甩出屏幕外。规则要写在系统提示词里，而参数
+        // 清单里那个范围也得跟着收紧 —— 清单写着 0~2 而规则说 0.7，模型会按清单走。
+        const prompt = buildSystemPrompt();
+        expect(prompt).toContain('商奈');
+        expect(prompt).toContain('cameraIntensity');
+        expect(prompt).toContain('0.7');
+        expect(buildParamSpec().sonnet).toContain('cameraIntensity(0~0.7)');
     });
 
     it('samples long lyrics instead of sending all of them', () => {
