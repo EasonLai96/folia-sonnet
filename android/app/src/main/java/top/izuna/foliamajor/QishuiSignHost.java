@@ -335,6 +335,27 @@ final class QishuiSignHost {
         }
 
         /**
+         * 登出时把宿主侧的 cookie 全部清掉。
+         *
+         * 协议层只清它自己那份（config.cookie 与 COOKIE_FILE），但登录态还留在
+         * 这里的两处：自攒的 jarCookies 与 WebView 的 CookieManager —— 请求发
+         * 出去时仍然带着旧会话，于是「点了退出却还登着」，下一次扫码也会撞上
+         * 上一个会话。
+         */
+        @JavascriptInterface
+        public void clearCookies() {
+            synchronized (jarCookies) {
+                jarCookies.clear();
+            }
+            sessionCookie = "";
+            try {
+                CookieManager.getInstance().removeAllCookies(null);
+            } catch (Throwable error) {
+                Log.w(TAG, "clearCookies failed", error);
+            }
+        }
+
+        /**
          * 把 WebView cookie 罐里某个源下的 cookie 回给页面。
          *
          * 登录确认时 passport 的登录态是走 Set-Cookie 下发的（响应体里的

@@ -8229,6 +8229,16 @@
     });
     return QISHUI_LOGIN_COOKIE_KEYS.map((name) => name + (obj[name] ? "=y" : "=n")).join(" ");
   }
+  function clearHostCookies() {
+    const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.clearCookies !== "function") return false;
+    try {
+      host.clearCookies();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
   function hostCookieKeys() {
     const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
     if (!host || typeof host.getCookie !== "function") return "(no-host)";
@@ -8341,6 +8351,7 @@
       const api = import_qishui_api.default;
       await import_qishui_qr_login.default.clear();
       saveQishuiCookie("");
+      clearHostCookies();
       const cleared = api.clearQishuiAccessToken();
       const empty = api.getQishuiStatus("");
       return Object.assign({}, cleared, {

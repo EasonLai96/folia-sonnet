@@ -167,6 +167,17 @@ function loginCookieKeys(text) {
         .join(' ');
 }
 
+function clearHostCookies() {
+    const host = typeof window !== 'undefined' ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.clearCookies !== 'function') return false;
+    try {
+        host.clearCookies();
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
 function hostCookieKeys() {
     const host = typeof window !== 'undefined' ? window.FoliaQishuiHost : null;
     if (!host || typeof host.getCookie !== 'function') return '(no-host)';
@@ -301,6 +312,9 @@ const handlers = {
         const api = qishuiApi;
         await qishuiQrLogin.clear();
         saveQishuiCookie('');
+        // 协议层只清它自己那两份（config.cookie 与 COOKIE_FILE）；登录态还留在
+        // 宿主的自攒罐与 WebView CookieManager 里，不清的话请求照样带旧会话。
+        clearHostCookies();
         const cleared = api.clearQishuiAccessToken();
         const empty = api.getQishuiStatus('');
         return Object.assign({}, cleared, {
