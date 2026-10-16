@@ -116,6 +116,7 @@ export const qishuiProvider: OnlineMusicProvider = {
                 + ` cookieReady=${data.cookieReady ? 'yes' : 'no'} profileReady=${data.profileReady ? 'yes' : 'no'}`
                 + ` libraryReady=${data.libraryReady ? 'yes' : 'no'} userId=${String(data.userId || '-')}`
                 + ` cookieKeys=${String(data.cookieKeys ?? '-')}`
+                + ` loginKeys=${String(data.loginKeys ?? '-')}`
                 + (data.profileError ? ` profileError=${String(data.profileError)}` : '')
                 + (Array.isArray(data.libraryErrors) && data.libraryErrors.length
                     ? ` libraryErrors=${data.libraryErrors.map((item: unknown) => String(item)).join(' | ')}` : '')
@@ -178,6 +179,7 @@ export const qishuiProvider: OnlineMusicProvider = {
                 + ` errorCode=${String(data?.errorCode ?? data?.error_code ?? '0')}`
                 + ` loggedIn=${data?.loggedIn ? 'yes' : 'no'}`
                 + ` cookieKeys=${String(data?.cookieKeys ?? '-')}`
+                + ` loginKeys=${String(data?.loginKeys ?? '-')}`
                 + ` hostCookieKeys=${String(data?.hostCookieKeys ?? '-')}`
                 + ` msg=${message ?? ''}`;
             const retryAfter = Number(data?.retryAfterMs);

@@ -8190,6 +8190,16 @@
     });
     return names.join(",") || "(empty)";
   }
+  var QISHUI_LOGIN_COOKIE_KEYS = ["sessionid", "sessionid_ss", "sid_guard", "sid_tt", "uid_tt", "uid_tt_ss"];
+  function loginCookieKeys(text) {
+    const obj = {};
+    String(text || "").split(";").forEach((pair) => {
+      const eq = pair.indexOf("=");
+      if (eq <= 0) return;
+      obj[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    });
+    return QISHUI_LOGIN_COOKIE_KEYS.map((name) => name + (obj[name] ? "=y" : "=n")).join(" ");
+  }
   function hostCookieKeys() {
     const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
     if (!host || typeof host.getCookie !== "function") return "(no-host)";
@@ -8202,9 +8212,10 @@
   async function readQishuiStatus(cookie) {
     const base = import_qishui_api.default.getQishuiStatus(cookie);
     const cookieKeys = cookieKeyNames(cookie);
-    if (!base.webSession) return Object.assign({}, base, { cookieKeys });
+    const loginKeys = loginCookieKeys(cookie);
+    if (!base.webSession) return Object.assign({}, base, { cookieKeys, loginKeys });
     const enriched = await withBudget(import_qishui_api.default.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
-    if (enriched) return Object.assign({}, enriched, { cookieKeys });
+    if (enriched) return Object.assign({}, enriched, { cookieKeys, loginKeys });
     return Object.assign({}, base, {
       profileReady: false,
       libraryReady: false,
@@ -8268,6 +8279,7 @@
           error_code: 0,
           message: "登录成功",
           cookieKeys: cookieKeyNames(cookie),
+          loginKeys: loginCookieKeys(cookie),
           hostCookieKeys: hostCookieKeys()
         });
       }
@@ -8288,6 +8300,7 @@
         retryAfterMs: errorCode === 7 ? 6e4 : 0,
         message: confirmedWithoutCookie || result && result.message || data.description || "",
         cookieKeys: sessionKeys,
+        loginKeys: loginCookieKeys(bridge.getCookie()),
         hostCookieKeys: hostCookieKeys()
       };
     },

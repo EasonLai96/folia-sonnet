@@ -145,6 +145,28 @@ function cookieKeyNames(text) {
     return names.join(',') || '(empty)';
 }
 
+/**
+ * 「哪些登录 cookie 真的在手里」。
+ *
+ * 登录判定（hasLoginCookie）只要 sessionid / sessionid_ss / sid_guard / sid_tt
+ * 里**任意一个**命中就通过了，而 sid_tt 这类跟踪 cookie 登录前就可能存在 ——
+ * 于是会出现「界面说登录成功，但 /luna 回 1000016 登录状态已失效」。
+ * /luna 认的是完整会话，所以这里逐个键列出来，诊断一眼可见到底缺哪个。
+ */
+const QISHUI_LOGIN_COOKIE_KEYS = ['sessionid', 'sessionid_ss', 'sid_guard', 'sid_tt', 'uid_tt', 'uid_tt_ss'];
+
+function loginCookieKeys(text) {
+    const obj = {};
+    String(text || '').split(';').forEach(pair => {
+        const eq = pair.indexOf('=');
+        if (eq <= 0) return;
+        obj[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    });
+    return QISHUI_LOGIN_COOKIE_KEYS
+        .map(name => name + (obj[name] ? '=y' : '=n'))
+        .join(' ');
+}
+
 function hostCookieKeys() {
     const host = typeof window !== 'undefined' ? window.FoliaQishuiHost : null;
     if (!host || typeof host.getCookie !== 'function') return '(no-host)';
@@ -160,9 +182,10 @@ async function readQishuiStatus(cookie) {
     // 诊断用：登录判定的输入到底是什么。cookieKeys 为空说明压根没拿到 cookie，
     // 有键但 loggedIn=no 说明拿到的是不含 sessionid 的那一批。
     const cookieKeys = cookieKeyNames(cookie);
-    if (!base.webSession) return Object.assign({}, base, { cookieKeys });
+    const loginKeys = loginCookieKeys(cookie);
+    if (!base.webSession) return Object.assign({}, base, { cookieKeys, loginKeys });
     const enriched = await withBudget(qishuiApi.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
-    if (enriched) return Object.assign({}, enriched, { cookieKeys });
+    if (enriched) return Object.assign({}, enriched, { cookieKeys, loginKeys });
     return Object.assign({}, base, {
         profileReady: false,
         libraryReady: false,
@@ -235,6 +258,7 @@ const handlers = {
                 error_code: 0,
                 message: '登录成功',
                 cookieKeys: cookieKeyNames(cookie),
+                loginKeys: loginCookieKeys(cookie),
                 hostCookieKeys: hostCookieKeys(),
             });
         }
@@ -260,6 +284,7 @@ const handlers = {
             retryAfterMs: errorCode === 7 ? 60000 : 0,
             message: confirmedWithoutCookie || (result && result.message) || data.description || '',
             cookieKeys: sessionKeys,
+            loginKeys: loginCookieKeys(bridge.getCookie()),
             hostCookieKeys: hostCookieKeys(),
         };
     },
