@@ -104,10 +104,45 @@ function saveQishuiCookie(value) {
     return normalized;
 }
 
+// ---- 状态富化的时间预算 --------------------------------------------------
+//
+// 「是否登录」只由 cookie 决定；handleQishuiStatus 多出来的资料与歌单是**锦上添花**，
+// 而它们全走 /luna —— 安卓没有 bdms.node（Windows x64 原生模块），只能拿 a_bogus
+// 去碰，碰不到就是碰不到。早先把整段 await 住：一次 /luna 卡住就能把 status 拖过
+// 插件的 25s 上限，表现成「登录超时」「完成二次验证后报错」。所以富化单独一个预算，
+// 超时就按 cookie 判定返回，绝不让它决定成败。
+
+const STATUS_ENRICH_BUDGET_MS = 6000;
+
+async function withBudget(promise, ms) {
+    let timer = null;
+    const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(null), ms); });
+    try {
+        // 超时后 promise 仍会跑完；挂一个 catch 既防它事后变成未处理的拒绝，
+        // 也让「抛错」和「太慢」得到同一个结果：退回 cookie 判定。
+        return await Promise.race([Promise.resolve(promise).catch(() => null), timeout]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+async function readQishuiStatus(cookie) {
+    const base = qishuiApi.getQishuiStatus(cookie);
+    if (!base.webSession) return base;
+    const enriched = await withBudget(qishuiApi.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
+    if (enriched) return enriched;
+    return Object.assign({}, base, {
+        profileReady: false,
+        libraryReady: false,
+        statusBudgetExceeded: true,
+        profileError: 'QISHUI_STATUS_BUDGET_EXCEEDED',
+    });
+}
+
 // ---- operation 派发（照抄 qishuiApiBridge.cjs；song.url 见文件头说明）----
 
 const handlers = {
-    status: () => qishuiApi.handleQishuiStatus(readQishuiCookie()),
+    status: () => readQishuiStatus(readQishuiCookie()),
 
     'login.qr': async () => {
         const result = await qishuiQrLogin.createQrCode();
@@ -149,7 +184,7 @@ const handlers = {
                 throw qishuiBridgeFailure('qishui-qr-session-cookie-missing', '二维码登录未返回有效的会话 Cookie');
             }
             saveQishuiCookie(cookie);
-            const status = await api.handleQishuiStatus(readQishuiCookie());
+            const status = await readQishuiStatus(readQishuiCookie());
             return Object.assign({}, status, {
                 provider: 'qishui',
                 ok: true,

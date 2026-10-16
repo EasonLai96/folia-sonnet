@@ -4194,7 +4194,7 @@
             playlistTracks: configured,
             webSession
           },
-          message: webSession ? "汽水音乐官方扫码登录已连接，可同步歌单与我的喜欢，并按账号权益播放。" : tokenConfigured ? "已有旧版开放平台目录授权；账号功能仍需完成官方扫码登录。" : QISHUI_PUBLIC_ENABLED ? "请使用抖音 App 扫描 Folia 中的汽水官方二维码；未登录时仅保留公开搜索匹配。" : "请使用抖音 App 扫描 Folia 中的汽水官方二维码完成登录。"
+          message: webSession ? "汽水音乐官方扫码登录已连接，可同步歌单与我的喜欢，并按账号权益播放。" : tokenConfigured ? "已有旧版开放平台目录授权；账号功能仍需完成官方扫码登录。" : QISHUI_PUBLIC_ENABLED ? "请使用汽水音乐 App 扫描 Folia 中的汽水官方二维码；未登录时仅保留公开搜索匹配。" : "请使用汽水音乐 App 扫描 Folia 中的汽水官方二维码完成登录。"
         };
       }
       function qishuiUrl(apiPath) {
@@ -8136,8 +8136,32 @@
     writeFileSync(COOKIE_FILE, normalized);
     return normalized;
   }
+  var STATUS_ENRICH_BUDGET_MS = 6e3;
+  async function withBudget(promise, ms) {
+    let timer = null;
+    const timeout = new Promise((resolve2) => {
+      timer = setTimeout(() => resolve2(null), ms);
+    });
+    try {
+      return await Promise.race([Promise.resolve(promise).catch(() => null), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  async function readQishuiStatus(cookie) {
+    const base = import_qishui_api.default.getQishuiStatus(cookie);
+    if (!base.webSession) return base;
+    const enriched = await withBudget(import_qishui_api.default.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
+    if (enriched) return enriched;
+    return Object.assign({}, base, {
+      profileReady: false,
+      libraryReady: false,
+      statusBudgetExceeded: true,
+      profileError: "QISHUI_STATUS_BUDGET_EXCEEDED"
+    });
+  }
   var handlers = {
-    status: () => import_qishui_api.default.handleQishuiStatus(readQishuiCookie()),
+    status: () => readQishuiStatus(readQishuiCookie()),
     "login.qr": async () => {
       const result = await import_qishui_qr_login.default.createQrCode();
       const data = result && result.data || {};
@@ -8175,7 +8199,7 @@
           throw qishuiBridgeFailure("qishui-qr-session-cookie-missing", "二维码登录未返回有效的会话 Cookie");
         }
         saveQishuiCookie(cookie);
-        const status2 = await api.handleQishuiStatus(readQishuiCookie());
+        const status2 = await readQishuiStatus(readQishuiCookie());
         return Object.assign({}, status2, {
           provider: "qishui",
           ok: true,
