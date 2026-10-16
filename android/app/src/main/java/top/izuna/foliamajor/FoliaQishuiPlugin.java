@@ -42,16 +42,16 @@ public class FoliaQishuiPlugin extends Plugin {
 
     @PluginMethod
     public void request(PluginCall call) {
-        String operation = call.getString("operation");
+        final String operation = call.getString("operation");
         if (operation == null || operation.isEmpty()) {
             call.reject("operation is required");
             return;
         }
-        String paramsJson = "{}";
-        JSObject params = call.getObject("params", null);
-        if (params != null) paramsJson = params.toString();
+        // 只赋值一次：下面要在 lambda 里捕获，二次赋值就不是 effectively final 了。
+        final JSObject params = call.getObject("params", null);
+        final String paramsJson = params != null ? params.toString() : "{}";
 
-        QishuiSignHost signHost = host();
+        final QishuiSignHost signHost = host();
         if (signHost == null) {
             call.resolve(failure("unavailable", "Qishui signing host is unavailable"));
             return;
