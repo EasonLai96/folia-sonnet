@@ -9,8 +9,11 @@
 //
 // 采样是否启动由开发者选项里的「性能采样」开关决定（installPerfDiagnosticsSwitch），
 // 默认不启动。
-
-import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
+//
+// 开关本身住在 stores/usePerfDiagnosticsStore，而这个模块是叶子 —— utils 不能反向
+// import store。所以开关以**端口**的形式传进来（启动处 src/index.tsx 调
+// installPerfDiagnosticsSwitch 时给），与 utils/frameRateLimiter 拿 store 传进来的
+// 帧率上限同一形状：低层只声明它需要什么，装配在边上做。
 
 export type FrameRenderHealth = 'smooth' | 'mild' | 'heavy' | 'unknown';
 
@@ -427,13 +430,24 @@ export const resetFrameTimingDiagnostics = (): void => {
 };
 
 /**
+ * 「性能采样」开关的端口。
+ *
+ * 读值与订阅分开，因为开关可以随时翻：只在启动时读一次现值的话，用户打开开关得重启
+ * 才生效。订阅由装配方接（它能 import store），这里只管在收到通知时启停。
+ */
+export type PerfDiagnosticsSwitchPort = {
+    isEnabled: () => boolean;
+    /** 开关翻转时调用 listener。返回值忽略：退订只在进程结束或测试复位时需要。 */
+    subscribe: (listener: (enabled: boolean) => void) => void;
+};
+
+/**
  * 把采样接到「性能采样」开关上。
  *
  * 采样本身是常驻开销（一条 rAF 循环 + longtask 观察者），默认关，
  * 由开发者选项里的开关启停（见 usePerfDiagnosticsStore）。
- * 开关可以随时翻，所以这里订阅它，而不是在启动时读一次就完事。
  */
-export const installPerfDiagnosticsSwitch = (): void => {
+export const installPerfDiagnosticsSwitch = (port: PerfDiagnosticsSwitchPort): void => {
     if (typeof window === 'undefined') return;
     const apply = (enabled: boolean): void => {
         if (enabled) installFrameTimingDiagnostics();
@@ -441,10 +455,8 @@ export const installPerfDiagnosticsSwitch = (): void => {
         // 顺带把已经采到的数据清掉（关着的时候留一堆旧数字只会误导）。
         else resetFrameTimingDiagnostics();
     };
-    apply(usePerfDiagnosticsStore.getState().perfDiagnosticsEnabled);
-    usePerfDiagnosticsStore.subscribe((state) => {
-        apply(state.perfDiagnosticsEnabled);
-    });
+    apply(port.isEnabled());
+    port.subscribe(apply);
 };
 
 export const readFrameTimingSnapshot = (): FrameTimingSnapshot => {

@@ -1,5 +1,6 @@
 import { type VisualizerMode } from '../../types';
 import { BUILTIN_VISUALIZER_MODES, DEFAULT_VISUALIZER_MODE, assertBuiltinModeList } from '../../types/visualizerModes';
+import { registerVisualizerModeLabelResolver } from '../../utils/visualizerModeLabel';
 import {
     type VisualizerEntryModule,
     type VisualizerRegistryEntry,
@@ -110,3 +111,15 @@ export const removeVisualizerEntry = (mode: VisualizerMode): boolean => {
     }
     return true;
 };
+
+/*
+ * 把显示名解析交给低层（utils/visualizerModeLabel）：store 要发「已切换到 X」那条 toast，
+ * 而它不能 import 这个文件。注册必须在全部 const 定义之后（上面的 getVisualizerModeLabel
+ * 是箭头函数常量，提前引用会撞 TDZ）。
+ *
+ * 认不出的模式返回 null —— 由低层退回模式 id：这里原本会静默给出默认模式（classic）的名字，
+ * 把「切到了某个还没注册的模式」显示成「已切换到 Luminous」，比显示一串 id 更容易误判。
+ */
+registerVisualizerModeLabelResolver((mode, t) => (
+    hasVisualizerMode(mode) ? getVisualizerModeLabel(mode as VisualizerMode, t) : null
+));

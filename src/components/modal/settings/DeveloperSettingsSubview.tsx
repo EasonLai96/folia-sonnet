@@ -8,6 +8,7 @@ import {
     type MediaDiagnosticsSnapshot,
     type SpectrumDiagnosticsSnapshot,
 } from '../../../utils/mediaDiagnostics';
+import { audioBands, audioPower } from '../../../stores/motionSignals';
 import {
     getPhoneInsets,
     getPhoneInsetsSource,
@@ -231,7 +232,8 @@ const AudioBufferReadout: React.FC<{ isDaylight: boolean; cardClass: string }> =
 const SpectrumReadout: React.FC<{ isDaylight: boolean; cardClass: string }> = ({ isDaylight, cardClass }) => {
     const { t } = useTranslation();
     const [snapshot, setSnapshot] = useState<SpectrumDiagnosticsSnapshot | null>(null);
-    const refresh = useCallback(() => setSnapshot(readSpectrumDiagnostics()), []);
+    // 信号从这里传进去：utils 那份读表不能自己去 stores 取（反向依赖）。
+    const refresh = useCallback(() => setSnapshot(readSpectrumDiagnostics({ ...audioBands, power: audioPower })), []);
     useEffect(() => {
         refresh();
     }, [refresh]);

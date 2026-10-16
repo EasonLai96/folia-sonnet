@@ -46,8 +46,28 @@ export type MediaDiagnosticsSnapshot = {
     audioContextState: string | null;
 };
 
-import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
-import { audioBands, audioPower } from '../stores/motionSignals';
+import type { MotionValue } from 'framer-motion';
+import type { AudioBandSignals } from '../stores/motionSignals';
+
+// 这个模块是叶子：**不 import store**（utils → stores 是反的依赖方向）。它需要两样
+// 外部东西，都以参数 / 端口的形式从边上给进来：
+//
+//  · 「性能采样」开关的现值 —— 每个音频事件都要问一次，所以做成可注册的读值函数，
+//    由启动处（src/index.tsx）把 store 的读值接上（见 setMediaDiagnosticsEnabledReader）；
+//  · 频谱那一帧的读数 —— 由调用方（开发者选项的面板）把 motionSignals 传进来
+//    （见 readSpectrumDiagnostics）。类型上用 `import type` 引用 stores 的签名：类型在
+//    运行时不存在，跑不到那条边界上去。
+//
+// 顺带一提：audioBands / audioPower 住在 stores/ 只是历史 —— 那份文件里没有一个
+// React state，全是进程级稳定的 MotionValue 实例。
+
+/** 采样开关的读值函数。默认关：没接上的时候这些计数只服务于排查，不该自己跑起来。 */
+let readDiagnosticsEnabled: () => boolean = () => false;
+
+/** 由启动处接上「性能采样」开关的读值。重复注册以最后一次为准。 */
+export const setMediaDiagnosticsEnabledReader = (read: () => boolean): void => {
+    readDiagnosticsEnabled = read;
+};
 
 let waitingCount = 0;
 let waitingTotalMs = 0;
@@ -128,7 +148,7 @@ export const noteAudioEvent = (
 ): void => {
     // 跟「性能采样」同一个开关（开发者选项）。默认关：这些计数只服务于排查，
     // 不应该在每个用户的每次播放事件上跑。
-    if (!usePerfDiagnosticsStore.getState().perfDiagnosticsEnabled) return;
+    if (!readDiagnosticsEnabled()) return;
     if (element) trackedElement = element;
     lastEvent = kind;
     lastEventAt = new Date().toISOString();
@@ -242,13 +262,19 @@ export const noteAnalyser = (analyser: AnalyserNode | null | undefined): void =>
     }
 };
 
+/** 频谱那一路的信号，就是 motionSignals 的 audioBands 再加整体能量 audioPower。 */
+export type SpectrumSignals = AudioBandSignals & { power: MotionValue<number> };
+
 /**
  * 读这一帧的频谱。
  *
  * bin 是隔 4 个抽一个：这里只回答「有没有 / 有多大」，全扫一遍不过是白花时间。
+ *
+ * 信号由调用方传进来（motionSignals 的 audioBands + audioPower）—— 这个模块不自己
+ * 去取，否则就成了 utils 反向依赖 stores。
  */
-export const readSpectrumDiagnostics = (): SpectrumDiagnosticsSnapshot => {
-    const spectrum = audioBands.spectrum?.get();
+export const readSpectrumDiagnostics = (signals: SpectrumSignals): SpectrumDiagnosticsSnapshot => {
+    const spectrum = signals.spectrum.get();
     let peak = 0;
     if (spectrum) {
         for (let index = 0; index < spectrum.length; index += 4) {
@@ -262,12 +288,12 @@ export const readSpectrumDiagnostics = (): SpectrumDiagnosticsSnapshot => {
         analyserBuilt,
         spectrumBins: spectrum ? spectrum.length : 0,
         spectrumPeak: peak,
-        power: Math.round(audioPower.get()),
-        bass: Math.round(audioBands.bass.get()),
-        lowMid: Math.round(audioBands.lowMid.get()),
-        mid: Math.round(audioBands.mid.get()),
-        vocal: Math.round(audioBands.vocal.get()),
-        treble: Math.round(audioBands.treble.get()),
+        power: Math.round(signals.power.get()),
+        bass: Math.round(signals.bass.get()),
+        lowMid: Math.round(signals.lowMid.get()),
+        mid: Math.round(signals.mid.get()),
+        vocal: Math.round(signals.vocal.get()),
+        treble: Math.round(signals.treble.get()),
     };
 };
 

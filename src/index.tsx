@@ -6,6 +6,8 @@ import { installDebugModule } from './services/debug/debugModule';
 import { installMemorySampleFeed } from './services/debug/memorySamples';
 import { installNativeAndroidBridge } from './services/nativeAndroidBridge';
 import { installPerfDiagnosticsSwitch } from './utils/frameTimingDiagnostics';
+import { setMediaDiagnosticsEnabledReader } from './utils/mediaDiagnostics';
+import { usePerfDiagnosticsStore } from './stores/usePerfDiagnosticsStore';
 import { installAndroidPhoneFitPreference, installDeviceProfilePreference } from './services/androidPhoneLayout';
 // import { installCoverSizeAudit } from './services/debug/coverSizeSamples';
 // @ts-ignore
@@ -42,8 +44,19 @@ installGlobalVisualizerFrameRateLimiter();
  * **默认不采样**，由开发者选项里的「性能采样」开关控制（见 usePerfDiagnosticsStore）：
  * 这条 rAF 循环是常驻开销，只有真在查问题的时候才该付。开关可以随时翻，
  * 这里订阅它做启停。
+ *
+ * 采样模块自己不 import store（utils → stores 是反的依赖方向），所以读值与订阅在这里
+ * 接给它；媒体诊断那份计数用的是同一个开关，只要读值（每个音频事件问一次现值，
+ * 不需要订阅）。
  */
-installPerfDiagnosticsSwitch();
+const perfDiagnosticsPort = {
+    isEnabled: () => usePerfDiagnosticsStore.getState().perfDiagnosticsEnabled,
+    subscribe: (listener: (enabled: boolean) => void) => {
+        usePerfDiagnosticsStore.subscribe((state) => listener(state.perfDiagnosticsEnabled));
+    },
+};
+installPerfDiagnosticsSwitch(perfDiagnosticsPort);
+setMediaDiagnosticsEnabledReader(perfDiagnosticsPort.isEnabled);
 // 本地登录的地基：把内置的接口代码挂到页面与原生之间。它是异步的（要 import 那份 JS），
 // 但装好之前页面发来的请求会被排队，装好后统一补发，所以不用 await。
 void installNativeAndroidBridge();
