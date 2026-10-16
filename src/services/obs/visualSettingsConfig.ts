@@ -1,4 +1,4 @@
-import { collectVisualizerTunings } from '../../components/visualizer/tuningRegistry';
+import { collectVisualizerTunings } from '../../utils/visualizer/tunings';
 import { readStoredThemeAutoGenerateEnabled, readStoredThemeAutoSwitchEnabled, readStoredThemeGenerationSource } from '../themePreferences';
 import type { CappellaAvatarImage, CappellaEmojiImage, CappellaTuning, MonetBackgroundImage, MonetBackgroundTuning, MonetPortraitImage, MonetTuning, NomandBackgroundTuning } from '../../types';
 import { useVisualizerSettingsStore } from '../../stores/useVisualizerSettingsStore';

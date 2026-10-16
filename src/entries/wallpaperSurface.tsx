@@ -14,7 +14,7 @@ import { useMotionValue, type MotionValue } from 'framer-motion';
 import '../index.css';
 
 import VisualizerRenderer from '../components/visualizer/VisualizerRenderer';
-import { collectVisualizerTunings } from '../components/visualizer/tuningRegistry';
+import { collectVisualizerTunings } from '../utils/visualizer/tunings';
 import { NO_LYRIC_LINES } from '../utils/lyrics/noLyricLines';
 import { installGlobalVisualizerFrameRateLimiter } from '../utils/frameRateLimiter';
 

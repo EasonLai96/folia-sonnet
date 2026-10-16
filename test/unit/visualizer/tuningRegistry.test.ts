@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_DIORAMA_TUNING, DEFAULT_SONNET_TUNING } from '../../../src/types';
 import {
-    applyVisualizerTuningsToSettings,
-    collectVisualizerTunings,
     getVisualizerTuningModes,
 } from '../../../src/components/visualizer/tuningRegistry';
+import {
+    applyVisualizerTuningsToSettings,
+    collectVisualizerTunings,
+} from '../../../src/utils/visualizer/tunings';
 
 // Verifies that mode-local tuning adapters are auto-discovered for transport and settings bridges.
 describe('visualizer tuning registry', () => {

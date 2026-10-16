@@ -8,7 +8,7 @@ import {
     type ThemeMode,
     type UrlBackgroundItem,
 } from '../../../types';
-import { applyVisualizerTuningsToSettings } from '../../visualizer/tuningRegistry';
+import { applyVisualizerTuningsToSettings } from '../../../utils/visualizer/tunings';
 import { ObsCopyCssButton } from '../../shared/ObsCopyCssButton';
 import { mergeUrlBackgroundList } from '../../../utils/urlBackground';
 import { compressConfig, decompressConfig, readSavedCustomTheme } from '../../../utils/appearanceCodec';

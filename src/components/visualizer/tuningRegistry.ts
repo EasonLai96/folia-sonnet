@@ -1,42 +1,14 @@
-import type {
-    CappellaTuning,
-    CadenzaTuning,
-    ClassicTuning,
-    CladdaghTuning,
-    DioramaTuning,
-    FumeTuning,
-    LumiereTuning,
-    MonetTuning,
-    PartitaTuning,
-    PendoloTuning,
-    SonnetTuning,
-    TemperaTuning,
-    TiltTuning,
-    VisualizerMode,
-} from '../../types';
+import type { VisualizerMode } from '../../types';
+// 键表与 bundle 类型在低层（同步 / OBS 配置按字段名读写设置，它们不能依赖组件目录）。
+// 这里再导出一次类型，是为了不打断已经从 registry 取它们的 9 个模块。
+import { assertVisualizerTuningKeys } from '../../utils/visualizer/tunings';
+import type { VisualizerTuningBundle, VisualizerTuningMap, VisualizerTuningMode } from '../../utils/visualizer/tunings';
 import type { VisualizerSharedProps } from './definition';
+
+export type { VisualizerTuningBundle, VisualizerTuningMap, VisualizerTuningMode } from '../../utils/visualizer/tunings';
 
 // src/components/visualizer/tuningRegistry.ts
 // Pure-data registry for transporting heterogeneous visualizer tuning without importing renderers.
-export interface VisualizerTuningMap {
-    classic: ClassicTuning;
-    cadenza: CadenzaTuning;
-    partita: PartitaTuning;
-    fume: FumeTuning;
-    claddagh: CladdaghTuning;
-    cappella: CappellaTuning;
-    tilt: TiltTuning;
-    diorama: DioramaTuning;
-    monet: MonetTuning;
-    pendolo: PendoloTuning;
-    sonnet: SonnetTuning;
-    tempera: TemperaTuning;
-    lumiere: LumiereTuning;
-}
-
-export type VisualizerTuningMode = keyof VisualizerTuningMap;
-export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
-
 export interface VisualizerTuningAdapter<M extends VisualizerTuningMode = VisualizerTuningMode> {
     mode: M;
     settingsKey: string;
@@ -63,6 +35,10 @@ adapters.forEach(adapter => {
     adaptersByMode.set(adapter.mode, adapter);
 });
 
+// 上面这些 settingsKey / settingsSetterKey 与 utils/visualizer/tunings.ts 的键表必须逐字相同：
+// 那份表是同步与 OBS 配置读写设置的依据，从这里飘走的话，读和写会指向不同的字段。
+assertVisualizerTuningKeys('VisualizerTuningRegistry', adapters);
+
 export const applyVisualizerTuning = (
     mode: VisualizerMode,
     props: VisualizerSharedProps,
@@ -74,27 +50,3 @@ export const applyVisualizerTuning = (
 };
 
 export const getVisualizerTuningModes = (): VisualizerTuningMode[] => [...adaptersByMode.keys()];
-
-export const collectVisualizerTunings = (settings: Record<string, unknown>): VisualizerTuningBundle => {
-    const bundle: VisualizerTuningBundle = {};
-    adapters.forEach(adapter => {
-        const value = settings[adapter.settingsKey];
-        if (value !== undefined) {
-            (bundle as Record<string, unknown>)[adapter.mode] = value;
-        }
-    });
-    return bundle;
-};
-
-export const applyVisualizerTuningsToSettings = (
-    settings: Record<string, unknown>,
-    bundle: VisualizerTuningBundle,
-) => {
-    adapters.forEach(adapter => {
-        const value = bundle[adapter.mode];
-        const setter = settings[adapter.settingsSetterKey];
-        if (value !== undefined && typeof setter === 'function') {
-            setter(value);
-        }
-    });
-};

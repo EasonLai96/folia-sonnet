@@ -6,7 +6,7 @@ import { usePlayerChromeSettingsStore, type PlayerChromeSettingsState } from '..
 import { useThemeSettingsStore, type ThemeSettingsState } from '../../stores/useThemeSettingsStore';
 import type { SyncedSettingsRecord, SyncedVisualSettings } from './syncTypes';
 import { SYNC_SCHEMA_VERSION } from './syncTypes';
-import { applyVisualizerTuningsToSettings, collectVisualizerTunings } from '../../components/visualizer/tuningRegistry';
+import { applyVisualizerTuningsToSettings, collectVisualizerTunings } from '../../utils/visualizer/tunings';
 
 // src/services/sync/settingsSnapshot.ts
 // Maps the settings stores to the syncable visual settings JSON document.
