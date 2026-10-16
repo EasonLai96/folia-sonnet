@@ -14,7 +14,7 @@
 
 ## 项目简介
 
-Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器，支持网易云、QQ 音乐、酷狗、Navidrome  
+Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器，支持网易云、QQ 音乐、酷狗、汽水音乐、Navidrome  
 与本地音乐库，通过智能歌词匹配、AI 生成配色主题以及多种全屏歌词动画提供独特的听歌体验。
 
 这个仓库做的是同一套 Web 代码的 Android 容器（Capacitor），并补齐移动 / 壁纸场景才需要的那部分：
@@ -51,10 +51,22 @@ Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器�
 
 | 项目                                                                                                | 关系                                                                              |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [chthollyphile/folia-major](https://github.com/chthollyphile/folia-major)                         | Folia 主线仓库。本仓库的 Web 代码跟随它演进，当前对应 **0.7.18**。                                    |
+| [chthollyphile/folia-major](https://github.com/chthollyphile/folia-major)                         | Folia 主线仓库。本仓库的 Web 代码跟随它演进，当前对应 **0.7.20**。                                    |
 | [chthollyphile/folia-sonnet](https://github.com/chthollyphile/folia-sonnet)                       | Folia 的 Web / 桌面版本，本仓库 fork 自它，Android 容器是在它的代码外面加的一层壳。                         |
+| [2706521883-lgtm/folia-qishui](https://github.com/2706521883-lgtm/folia-qishui)                   | 在 Folia 主线基础上新增「汽水音乐」在线音源。本仓库的汽水音乐协议层、Electron 签名宿主与音频解密均来自该项目。 |
 | [Andrea-lyz/ColorOS-Live-Lyrics-Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge) | ColorOS 原生锁屏歌词（「媒体与播放」歌词页）的桥接协议参考。原生锁屏歌词那部分按它的协议写 `MediaMetadata["lyricInfo"]`。 |
 | [RemnantCloudGodofWar/folia-android](https://github.com/RemnantCloudGodofWar/folia-android)       | 同为 Folia 的 Android 化尝试，手机适配（紧凑布局、竖屏 / 横屏）与 AI 主题等做法参考了它。                        |
+
+## 汽水音乐音源
+
+本项目额外接入了[2706521883-lgtm/folia-qishui](https://github.com/2706521883-lgtm/folia-qishui)实现的「汽水音乐」在线音源，能力与网易云、QQ 音乐、酷狗、波点并列：
+
+- 搜索、歌单、专辑、歌手、播放、歌词、扫码登录、我的喜欢、歌单收藏。
+- 封面右下角会显示汽水音乐 App 图标；「全部平台」合并视图也会把它算进去。
+- 桌面端通过 Electron 主进程内的隐藏窗口调用汽水官方签名组件（`bdms.node` / `metasecml.dll`）生成请求签名；加密音频由本机 `127.0.0.1` 随机端口代理解密后交给播放器。
+- **Android 端暂不可用**：汽水音乐的签名依赖 Windows 原生模块，Android 容器没有等效环境；在手机上选择「汽水音乐」会显示「需要桌面应用」。
+
+> 注意：`electron/qishui/qishui-auth-v6/` 下的 `bdms.node` 与 `metasecml.dll` 来自汽水音乐官方客户端的 Web 安全组件，仅用于生成请求签名；它们随 folia-qishui 仓库以 AGPL-3.0 分发，版权归字节跳动与汽水音乐所有。
 
 ## 范围与限制
 

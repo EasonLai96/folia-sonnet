@@ -1394,6 +1394,8 @@ export default {
     "loginNoteQq": "请选择与账号一致的登录方式：QQ 扫码或微信扫码",
     "loginTitleFeiniu": "登录飞牛音乐",
     "loginNoteFeiniu": "填写飞牛（FNOS）的地址与账号。地址可以带端口，例如 http://192.168.1.5:5666",
+    "loginTitleQishui": "扫码登录汽水音乐",
+    "loginNoteQishui": "打开抖音 App 扫描二维码并确认登录",
     "loginServerUrl": "服务器地址",
     "loginServerUrlPlaceholder": "http://192.168.1.5:5666",
     "loginUsername": "用户名",

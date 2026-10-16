@@ -906,6 +906,10 @@ declare global {
         operation: import('./services/onlineMusic/bodianTransport').BodianOperation,
         params?: import('./services/onlineMusic/bodianTransport').BodianParams,
       ) => Promise<import('./services/onlineMusic/bodianTransport').BodianBridgeResult>;
+      qishuiRequest: (
+        operation: import('./services/onlineMusic/qishuiTransport').QishuiOperation,
+        params?: import('./services/onlineMusic/qishuiTransport').QishuiParams,
+      ) => Promise<import('./services/onlineMusic/qishuiTransport').QishuiBridgeResult>;
       kugouRequest: (
         operation: ElectronKugouOperation,
         params?: Record<string, string | number | boolean | undefined>,

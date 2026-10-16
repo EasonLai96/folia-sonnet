@@ -1395,6 +1395,8 @@ export default {
     "loginNoteQq": "Choose the sign-in method matching your account: QQ scan or WeChat scan",
     "loginTitleFeiniu": "Sign in to FeiNiu Music",
     "loginNoteFeiniu": "Enter your FeiNiu (FNOS) address and account. The address may include a port, e.g. http://192.168.1.5:5666",
+    "loginTitleQishui": "Scan to sign in to Qishui Music",
+    "loginNoteQishui": "Scan this code with the Douyin app and confirm sign-in",
     "loginServerUrl": "Server address",
     "loginServerUrlPlaceholder": "http://192.168.1.5:5666",
     "loginUsername": "Username",

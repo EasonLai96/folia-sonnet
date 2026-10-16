@@ -1390,6 +1390,8 @@ export default {
     "loginNoteQq": "Pilih metode masuk yang sesuai: pindai QQ atau pindai WeChat",
     "loginTitleFeiniu": "Masuk ke FeiNiu Music",
     "loginNoteFeiniu": "Masukkan alamat FeiNiu (FNOS) dan akun Anda. Alamat boleh menyertakan port, mis. http://192.168.1.5:5666",
+    "loginTitleQishui": "Pindai untuk masuk ke Qishui Music",
+    "loginNoteQishui": "Pindai kode ini dengan aplikasi Douyin dan konfirmasi masuk",
     "loginServerUrl": "Alamat server",
     "loginServerUrlPlaceholder": "http://192.168.1.5:5666",
     "loginUsername": "Nama pengguna",

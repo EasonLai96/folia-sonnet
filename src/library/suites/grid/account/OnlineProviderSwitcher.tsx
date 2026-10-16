@@ -31,6 +31,7 @@ const AVATAR_BADGE_BY_PROVIDER: Record<string, { label: string; iconUrl?: string
     qq: { label: 'Q', iconUrl: getProviderAppIcon('qq'), className: 'bg-emerald-600' },
     bodian: { label: '波', iconUrl: getProviderAppIcon('bodian'), className: 'bg-teal-600' },
     feiniu: { label: '飞', iconUrl: getProviderAppIcon('feiniu'), className: 'bg-zinc-600' },
+    qishui: { label: '汽', iconUrl: getProviderAppIcon('qishui'), className: 'bg-cyan-600' },
 };
 
 // Providers without a builtin badge (Folium mod sources) get their name's first letter, like the

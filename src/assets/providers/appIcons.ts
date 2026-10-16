@@ -3,6 +3,7 @@ import qqMusicIcon from './qqmusic.webp';
 import kugouIcon from './kugou.webp';
 import bodianIcon from './bodian.webp';
 import feiniuIcon from './feiniu.png';
+import qishuiIcon from './qishui.png';
 import foliaIcon from './folia.svg';
 
 // src/assets/providers/appIcons.ts
@@ -22,6 +23,7 @@ export const PROVIDER_APP_ICONS: Record<string, string> = {
     kugou: kugouIcon,
     bodian: bodianIcon,
     feiniu: feiniuIcon,
+    qishui: qishuiIcon,
 };
 
 /** 本地曲库等"自家人"来源统一用的图标 key。 */

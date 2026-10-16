@@ -26,6 +26,7 @@ const { createKugouApiBridge } = require('./kugouApiBridge.cjs');
 const { createExternalUrlOpener } = require('./externalUrlPolicy.cjs');
 const { createSenderGuardedHandler } = require('./ipcAccessGuard.cjs');
 const { createBodianApiBridge } = require('./bodianApiBridge.cjs');
+const { createQishuiApiBridge } = require('./qishuiApiBridge.cjs');
 const { createBodianMediaPolicy } = require('./bodian/mediaCors.cjs');
 const { createQqAuthSessionRepository } = require('./qqAuthSessionRepository.cjs');
 const { DEFAULT_DISCORD_APPLICATION_ID, createDiscordPresenceController } = require('./discordPresence.cjs');
@@ -208,6 +209,7 @@ const bodianApiBridge = createBodianApiBridge({ store, safeStorage,
     return request;
   },
 });
+let qishuiApiBridge = null;
 const qqAuthSessionRepository = createQqAuthSessionRepository({ store, safeStorage });
 // AI API keys are sealed with safeStorage instead of sitting in config.json as plaintext, and never
 // leave the main process: the renderer only sees AI_API_KEYS_CONFIGURED (#586).
@@ -4914,6 +4916,15 @@ function createWindow(options = {}) {
       displaySleepBlocker.stop();
       mainWindowClickThroughUnlockHover = false;
       stopMainWindowClickThroughUnlockHoverMonitor();
+      // 汽水音乐桥的隐藏签名窗口是一个真实 BrowserWindow，只要还开着，Electron 就不会触发
+      // 'window-all-closed'，主窗口关掉后 app 退不出去。主窗口真正关闭时先回收桥。
+      if (qishuiApiBridge) {
+        try {
+          qishuiApiBridge.dispose();
+        } catch (error) {
+          console.warn('[Qishui] dispose on main window close failed:', error && error.message);
+        }
+      }
       if (remoteControlWindow && !remoteControlWindow.isDestroyed()) {
         remoteControlWindow.close();
       }
@@ -5049,6 +5060,12 @@ app.whenReady().then(async () => {
   if (startupResult === 'spawned') {
     return;
   }
+
+  // 汽水音乐：构造本身很轻（协议层与签名运行时都是惰性 require），第一次真正用到才加载。
+  qishuiApiBridge = createQishuiApiBridge({
+    userDataDir: app.getPath('userData'),
+    warn: console.warn,
+  });
 
   if (process.platform === 'win32') {
     app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
@@ -5301,6 +5318,13 @@ app.on('before-quit', () => {
   videoExportFileWriter.disposeSync();
   isAppQuitting = true;
   clearPendingWindowPlaybackHandoffRequests();
+  if (qishuiApiBridge) {
+    try {
+      qishuiApiBridge.dispose();
+    } catch (error) {
+      console.error('[Qishui] Failed to dispose the API bridge', error);
+    }
+  }
   if (modSystem) {
     try {
       modSystem.dispose();
@@ -5881,6 +5905,17 @@ ipcMain.handle('bodian-api-request', (event, operation, params) => {
     return { ok: false, error: { code: 'unavailable', message: 'Untrusted Bodian request' } };
   }
   return bodianApiBridge.request(operation, params);
+});
+
+// 汽水音乐：与 bodian 一样限制为受信主窗口发送方；桥未构造完成时明确回 unavailable 而不是抛错。
+ipcMain.handle('qishui-api-request', (event, operation, params) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
+    return { ok: false, error: { code: 'unavailable', message: 'Untrusted Qishui request' } };
+  }
+  if (!qishuiApiBridge) {
+    return { ok: false, error: { code: 'unavailable', message: 'Qishui bridge is not ready' } };
+  }
+  return qishuiApiBridge.request(operation, params);
 });
 
 ipcMain.handle('window-minimize', () => {
