@@ -24,6 +24,11 @@ let qrTtlMs = QISHUI_QR_TTL_MS;
 // 时，诊断报告靠它说明卡在哪：是 status 就没认下这个会话，还是会话认了但
 // /luna 那一路签名拿不到东西（安卓没有 bdms.node，见 useQishuiLibrary 的注释）。
 let lastQishuiLoginStatus: string | null = null;
+/** refresh 的失败出口单独记一行：与 status 详情互不覆盖，诊断才看得全。 */
+let lastQishuiRefreshNote: string | null = null;
+export const noteQishuiRefreshDiagnostic = (text: string): void => {
+    lastQishuiRefreshNote = text;
+};
 
 function qishuiNotOurs(): OnlineProviderError {
     return new OnlineProviderError('unsupported', 'Song does not belong to Qishui Music', 'qishui');
@@ -92,7 +97,16 @@ export const qishuiProvider: OnlineMusicProvider = {
     },
     auth: {
         async getLoginStatus() {
-            const data = await requestQishui<any>('status', {});
+            // 请求本身失败时也要留下痕迹：否则诊断只会写「last status: none」，
+            // 看不出是没走到这一步，还是这一步抛了错。
+            let data: any = null;
+            try {
+                data = await requestQishui<any>('status', {});
+            } catch (error) {
+                lastQishuiLoginStatus = 'status request failed: '
+                    + (error instanceof Error ? `${error.message}` : String(error));
+                throw error;
+            }
             lastQishuiLoginStatus = data
                 ? `loggedIn=${data.loggedIn ? 'yes' : 'no'} webSession=${data.webSession ? 'yes' : 'no'}`
                 + ` cookieReady=${data.cookieReady ? 'yes' : 'no'} profileReady=${data.profileReady ? 'yes' : 'no'}`
@@ -174,6 +188,7 @@ export const qishuiProvider: OnlineMusicProvider = {
         async getQrLoginDiagnostics() {
             return [
                 `last status: ${lastQishuiLoginStatus ?? 'none'}`,
+                `last refresh: ${lastQishuiRefreshNote ?? 'none'}`,
                 // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能
                 // 回退 a_bogus —— 这条说明让「歌单/播放拿不到」有据可查。
                 'signed requests: passport=a_bogus (verified), luna=a_bogus fallback (bdms.node is Windows-only)',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { omni } from '../services/onlineMusic/omni';
+import { noteQishuiRefreshDiagnostic } from '../services/onlineMusic/qishuiProvider';
 import { clearProviderAccountSnapshot, loadProviderAccountSnapshot, saveProviderAccountSnapshot } from '../services/onlineMusic/providerAccountCache';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
 import { OnlineProviderError } from '../types/onlineMusic';
@@ -15,6 +16,10 @@ export const useQishuiLibrary = () => {
         const store = useOnlineProviderAccountStore.getState();
         try {
             if (!omni.getProviderAvailability('qishui').configured || !omni.getProviderCapabilities('qishui').auth) {
+                // refresh 有好几个 false 出口，光看「account-refresh-failed」分不清是哪个。
+                noteQishuiRefreshDiagnostic('refresh aborted: availability='
+                    + (omni.getProviderAvailability('qishui').configured ? 'configured' : 'unavailable')
+                    + ' auth=' + (omni.getProviderCapabilities('qishui').auth ? 'yes' : 'no'));
                 store.clearAccount('qishui');
                 await pendingSave.current.catch(() => {});
                 await clearProviderAccountSnapshot('qishui');
@@ -24,6 +29,9 @@ export const useQishuiLibrary = () => {
             const user = await omni.getLoginStatus('qishui');
             if (generation.current !== current) return false;
             if (!user) {
+                // status 回了却没认下登录态：那一行详情由 getLoginStatus 自己记着，
+                // 这里只补一句「因此放弃账号」，避免覆盖掉它。
+                noteQishuiRefreshDiagnostic('refresh: no user (see status line above)');
                 store.clearAccount('qishui');
                 await pendingSave.current.catch(() => {});
                 await clearProviderAccountSnapshot('qishui');
@@ -88,6 +96,8 @@ export const useQishuiLibrary = () => {
             return true;
         } catch (error) {
             if (generation.current !== current) return false;
+            noteQishuiRefreshDiagnostic('refresh threw: '
+                + (error instanceof Error ? `${error.message}` : String(error)));
             if (error instanceof OnlineProviderError && error.code === 'auth-required') {
                 store.clearAccount('qishui', 'auth-required');
                 await pendingSave.current.catch(() => {});
