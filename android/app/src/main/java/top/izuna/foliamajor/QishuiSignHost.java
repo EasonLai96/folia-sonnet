@@ -120,6 +120,48 @@ final class QishuiSignHost {
     private final java.util.concurrent.ExecutorService executor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
 
+    /**
+     * 请求要带的 Cookie 头：自攒的 jar 优先，CookieManager 补缺的名字。
+     *
+     * 都放在外层是因为两条出口都要用——http() 桥（异步，内部类 HostBridge 里）和
+     * shouldInterceptRequest（同步，外层方法）。只在一处实现必然编译不过或漏一半。
+     */
+    private String cookieHeaderFor(String url) {
+        StringBuilder out = new StringBuilder();
+        synchronized (jarCookies) {
+            for (Map.Entry<String, String> entry : jarCookies.entrySet()) {
+                if (out.length() > 0) out.append("; ");
+                out.append(entry.getKey()).append('=').append(entry.getValue());
+            }
+        }
+        // CookieManager 可能还存着页面自己那一份，缺的名字补上（已有的不覆盖，
+        // 罐里的值可能更旧）。
+        String[] pairs = readWebViewCookies(url).split(";");
+        for (String pair : pairs) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) continue;
+            String name = pair.substring(0, eq).trim();
+            if (name.isEmpty()) continue;
+            synchronized (jarCookies) {
+                if (jarCookies.containsKey(name)) continue;
+            }
+            if (out.length() > 0) out.append("; ");
+            out.append(name).append('=').append(pair.substring(eq + 1).trim());
+        }
+        return out.toString();
+    }
+
+    private String readWebViewCookies(String url) {
+        if (url == null || url.isEmpty()) return "";
+        try {
+            String value = CookieManager.getInstance().getCookie(url);
+            return value == null ? "" : value;
+        } catch (Throwable error) {
+            Log.w(TAG, "getCookie failed", error);
+            return "";
+        }
+    }
+
     /** 只保留 `name=value`，丢掉 expires / path / domain 等属性。 */
     private void rememberCookie(String setCookie) {
         if (setCookie == null) return;
@@ -304,41 +346,11 @@ final class QishuiSignHost {
          */
         @JavascriptInterface
         public String getCookie(String url) {
-            StringBuilder out = new StringBuilder();
-            synchronized (jarCookies) {
-                for (Map.Entry<String, String> entry : jarCookies.entrySet()) {
-                    if (out.length() > 0) out.append("; ");
-                    out.append(entry.getKey()).append('=').append(entry.getValue());
-                }
-            }
-            // CookieManager 可能还存着页面自己那一份，缺的名字补上（已有的不覆盖，
-            // 罐里的值可能更旧）。
-            String fromWebView = readWebViewCookies(url);
-            String[] pairs = fromWebView.split(";");
-            for (String pair : pairs) {
-                int eq = pair.indexOf('=');
-                if (eq <= 0) continue;
-                String name = pair.substring(0, eq).trim();
-                if (name.isEmpty()) continue;
-                synchronized (jarCookies) {
-                    if (jarCookies.containsKey(name)) continue;
-                }
-                if (out.length() > 0) out.append("; ");
-                out.append(name).append('=').append(pair.substring(eq + 1).trim());
-            }
-            return out.toString();
+            // 拼装逻辑放在外层（QishuiSignHost.cookieHeaderFor）：shouldInterceptRequest
+            // 那条同步出口也要用同一份并集，不能只在这里实现。
+            return cookieHeaderFor(url);
         }
 
-        private String readWebViewCookies(String url) {
-            if (url == null || url.isEmpty()) return "";
-            try {
-                String value = CookieManager.getInstance().getCookie(url);
-                return value == null ? "" : value;
-            } catch (Throwable error) {
-                Log.w(TAG, "getCookie failed", error);
-                return "";
-            }
-        }
 
         /**
          * 页面内所有协议请求的真传输（folia-xhr.js 的假 XHR 走这里）。
@@ -581,11 +593,11 @@ final class QishuiSignHost {
                 }
             }
             // 登录态：优先用宿主自己记的会话 cookie，其次才是 WebView cookie 罐里的。
-            // 走 getCookie 的并集（自攒的 jar + CookieManager），别只读后者 ——
+            // 走 cookieHeaderFor 的并集（自攒的 jar + CookieManager），别只读后者 ——
             // 假 XHR 不走真实网络，CookieManager 里未必有 OkHttp 收到的那批。
             String cookie = sessionCookie != null && !sessionCookie.isEmpty()
                     ? sessionCookie
-                    : getCookie(url);
+                    : cookieHeaderFor(url);
             if (cookie != null && !cookie.isEmpty()) builder.header("Cookie", cookie);
 
             String method = request.getMethod() == null ? "GET" : request.getMethod();
