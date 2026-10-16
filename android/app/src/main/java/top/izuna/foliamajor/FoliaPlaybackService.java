@@ -800,6 +800,8 @@ public class FoliaPlaybackService extends android.app.Service {
             // 通知栏的 smallIcon 从 Android 5.0 起只认 alpha，彩色图会被整体染成一个
             // 没有细节的色块。剪影由那张官方图标去掉红底得来（alpha 取三通道最小值）。
             case "feiniu": return R.drawable.ic_provider_feiniu;
+            // 汽水音乐：Electron-only，但通知栏角标资源仍保留一份白色剪影，保持全量接入。
+            case "qishui": return R.drawable.ic_provider_qishui;
             default: return R.mipmap.ic_launcher;
         }
     }
