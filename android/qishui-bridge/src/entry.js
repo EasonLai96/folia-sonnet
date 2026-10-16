@@ -124,7 +124,12 @@ const handlers = {
 
     'login.check': async params => {
         const token = String((params && params.token) || '').trim();
-        if (!token) throw qishuiBridgeFailure('missing-token', '二维码登录 token 缺失');
+        if (!token) {
+            // 把收到的键名带回诊断：能立刻分清是「params 整个没过桥」还是
+            // 「token 字段丢了」—— 安卓上第一次轮询就报这个时尤其有用。
+            const keys = Object.keys(params && typeof params === 'object' ? params : {}).join(',') || '(empty)';
+            throw qishuiBridgeFailure('missing-token', '二维码登录 token 缺失（params keys: ' + keys + '）');
+        }
         const api = qishuiApi;
         const bridge = qishuiQrLogin;
         let result;

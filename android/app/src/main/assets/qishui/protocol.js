@@ -8152,7 +8152,10 @@
     },
     "login.check": async (params) => {
       const token = String(params && params.token || "").trim();
-      if (!token) throw qishuiBridgeFailure("missing-token", "二维码登录 token 缺失");
+      if (!token) {
+        const keys = Object.keys(params && typeof params === "object" ? params : {}).join(",") || "(empty)";
+        throw qishuiBridgeFailure("missing-token", "二维码登录 token 缺失（params keys: " + keys + "）");
+      }
       const api = import_qishui_api.default;
       const bridge = import_qishui_qr_login.default;
       let result;

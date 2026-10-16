@@ -393,7 +393,9 @@ export const requestQishuiNative = async (
         return { ok: false, error: { code: 'unavailable', message: 'Qishui bridge is not available' } };
     }
     try {
-        const envelope = await FoliaQishui.request({ operation, params });
+        // params 以字符串过桥：Capacitor 的嵌套对象转换在个别版本上会把内层
+        // 对象丢成 null（安卓上表现为「二维码登录 token 缺失」），字符串零歧义。
+        const envelope = await FoliaQishui.request({ operation, params: JSON.stringify(params ?? {}) });
         if (envelope && typeof envelope === 'object' && 'ok' in envelope) return envelope;
         return { ok: false, error: { code: 'invalid-response', message: 'Qishui bridge returned a malformed envelope' } };
     } catch (error) {

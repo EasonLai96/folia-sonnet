@@ -47,20 +47,32 @@ public class FoliaQishuiPlugin extends Plugin {
             call.reject("operation is required");
             return;
         }
-        // 只赋值一次：下面要在 lambda 里捕获，二次赋值就不是 effectively final 了。
-        final JSObject params = call.getObject("params", null);
-        final String paramsJson = params != null ? params.toString() : "{}";
+        // 前端传的是字符串（见 foliaNative.ts 的说明）；保留 getObject 分支是为了
+        // 兼容任何还在传对象的调用方（Capacitor 的嵌套对象转换个别版本会丢内层）。
+        String paramsJson = call.getString("params", "");
+        if (paramsJson == null || paramsJson.isEmpty()) {
+            JSObject params = call.getObject("params", null);
+            paramsJson = params != null ? params.toString() : "{}";
+        }
+        final String resolvedParamsJson = paramsJson;
 
         final QishuiSignHost signHost = host();
         if (signHost == null) {
             call.resolve(failure("unavailable", "Qishui signing host is unavailable"));
             return;
         }
+        // 需要参数的 operation 收到空 params 时立刻失败：往页面走只会得到一句
+        // 「token 缺失」，看不出是过桥丢了还是本来就没传。
+        if (("{}".equals(resolvedParamsJson) || resolvedParamsJson.isEmpty())
+                && ("login.check".equals(operation) || "search".equals(operation))) {
+            call.resolve(failure("params-missing", "Qishui operation " + operation + " requires params"));
+            return;
+        }
         signHost.ensureStarted();
         // 保留这次调用：结果要等页面算完才回来，方法必须立刻返回。
         call.setKeepAlive(true);
         final PluginCall pendingCall = call;
-        waitForReady(signHost, 0, () -> signHost.request(operation, paramsJson, json -> {
+        waitForReady(signHost, 0, () -> signHost.request(operation, resolvedParamsJson, json -> {
             try {
                 pendingCall.resolve(new JSObject(json));
             } catch (Exception error) {
