@@ -95,7 +95,7 @@
   });
 
   // src/shims/globals.js
-  var __foliaProcessEnv;
+  var __foliaProcessEnv, __foliaDirname;
   var init_globals = __esm({
     "src/shims/globals.js"() {
       "use strict";
@@ -106,6 +106,7 @@
         QISHUI_QR_CONFIG_FILE: "/folia/qishui-qr-login.json",
         QISHUI_OAUTH_CONFIG_FILE: "/folia/qishui-oauth.json"
       };
+      __foliaDirname = "/folia";
     }
   });
 
@@ -2817,7 +2818,7 @@
       var AUTH_PARTITION = "persist:folia-qishui-auth-v6";
       var OFFICIAL_BDMS_URL = "https://lf-headquarters-speed.yhgfb-cn-static.com/obj/rc-client-security/web/stable/1.0.0.41/bdms.js";
       var UA2 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.2.1 Chrome/136.0.7103.59 Electron/36.4.0-rs.22.release.main.1 TTElectron/36.4.0-rs.22.release.main.1 Safari/537.36";
-      var ASSET_DIR = path.join(__dirname, "qishui-auth-v6");
+      var ASSET_DIR = path.join(__foliaDirname, "qishui-auth-v6");
       var ASSETS = /* @__PURE__ */ new Map([
         ["security_seed.html", "text/html; charset=utf-8"],
         ["security_host.html", "text/html; charset=utf-8"],
@@ -3561,7 +3562,7 @@
       var os = (init_os(), __toCommonJS(os_exports));
       var path = (init_path(), __toCommonJS(path_exports));
       var qishuiAuthV6 = require_qishui_auth_v6();
-      var DEFAULT_CONFIG_FILE = __foliaProcessEnv.QISHUI_QR_CONFIG_FILE || path.join(__dirname, ".qishui-qr-login.json");
+      var DEFAULT_CONFIG_FILE = __foliaProcessEnv.QISHUI_QR_CONFIG_FILE || path.join(__foliaDirname, ".qishui-qr-login.json");
       function defaultConfig() {
         return {
           deviceId: "",
@@ -3689,7 +3690,7 @@
       var QISHUI_RELATED_MEDIA_PATH = "/api/luna/v1/platform/feed/related-media/";
       var QISHUI_FEED_SONG_TAB_PATH = "/api/luna/v1/platform/feed/song-tab/";
       var QISHUI_SCOPE = "luna.openapi.platform.play_core";
-      var DEFAULT_QISHUI_TOKEN_FILE = __foliaProcessEnv.QISHUI_TOKEN_FILE || path.join(__dirname, ".qishui-token");
+      var DEFAULT_QISHUI_TOKEN_FILE = __foliaProcessEnv.QISHUI_TOKEN_FILE || path.join(__foliaDirname, ".qishui-token");
       var QISHUI_UA = "Folia/0.7.13 (Qishui official OpenAPI bridge)";
       var QISHUI_OAUTH_AUTH_URL = (__foliaProcessEnv.QISHUI_OAUTH_AUTH_URL || "https://open.douyin.com/platform/oauth/connect").replace(/\/+$/, "");
       var QISHUI_OAUTH_TOKEN_URL = __foliaProcessEnv.QISHUI_OAUTH_TOKEN_URL || "https://open.douyin.com/oauth/access_token/";
@@ -3747,8 +3748,8 @@
           add(path.join(path.dirname(qishuiTokenFile()), ".qishui-oauth.json"));
         } catch (_) {
         }
-        add(path.join(__dirname, ".qishui-oauth.json"));
-        add(path.join(__dirname, "qishui-oauth.json"));
+        add(path.join(__foliaDirname, ".qishui-oauth.json"));
+        add(path.join(__foliaDirname, "qishui-oauth.json"));
         return candidates;
       }
       function readQishuiOAuthFileConfig() {
@@ -7585,6 +7586,19 @@
   function buildCookieString(values) {
     return Object.entries(values).filter(([name]) => name).map(([name, value]) => name + "=" + value).join("; ");
   }
+  function nativeCookieJar() {
+    const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.getCookie !== "function") return "";
+    const chunks = [];
+    for (const url of COOKIE_JAR_URLS) {
+      try {
+        const value = String(host.getCookie(url) || "");
+        if (value) chunks.push(value);
+      } catch (_) {
+      }
+    }
+    return chunks.join("; ");
+  }
   function lastXhrEntry(needle) {
     const log = window.__foliaXhrLog || [];
     for (let i = log.length - 1; i >= 0; i--) {
@@ -7632,7 +7646,7 @@
   async function clear() {
     if (runtime) await runtime.clear();
   }
-  var import_browser, API_BASE, AID, APP_VERSION, SDK_VERSION, VERIFY_SDK_VERSION, SECURE_SDK_VERSION, BDMS_VERSION, UA, getConfig, updateConfig, runtime, QishuiAuthRuntime, constants;
+  var import_browser, API_BASE, AID, APP_VERSION, SDK_VERSION, VERIFY_SDK_VERSION, SECURE_SDK_VERSION, BDMS_VERSION, UA, getConfig, updateConfig, runtime, COOKIE_JAR_URLS, QishuiAuthRuntime, constants;
   var init_qishui_auth_android = __esm({
     "src/qishui-auth-android.js"() {
       "use strict";
@@ -7650,6 +7664,11 @@
       getConfig = null;
       updateConfig = null;
       runtime = null;
+      COOKIE_JAR_URLS = [
+        "https://www.qishui.com/",
+        "https://qishui.com/",
+        "https://passport.qishui.com/"
+      ];
       QishuiAuthRuntime = class {
         constructor() {
           this.browserInfo = null;
@@ -7931,6 +7950,7 @@
         async persistSessionCookies(sessionCookie) {
           const current = parseCookieString(getConfig().cookie || "");
           Object.assign(current, parseCookieString(sessionCookie));
+          Object.assign(current, parseCookieString(nativeCookieJar()));
           updateConfig({ cookie: buildCookieString(current), msToken: readMsToken() });
         }
         async clear() {
@@ -7952,7 +7972,7 @@
       var os = (init_os(), __toCommonJS(os_exports));
       var path = (init_path(), __toCommonJS(path_exports));
       var qishuiAuthV6 = (init_qishui_auth_android(), __toCommonJS(qishui_auth_android_exports));
-      var DEFAULT_CONFIG_FILE = __foliaProcessEnv.QISHUI_QR_CONFIG_FILE || path.join(__dirname, ".qishui-qr-login.json");
+      var DEFAULT_CONFIG_FILE = __foliaProcessEnv.QISHUI_QR_CONFIG_FILE || path.join(__foliaDirname, ".qishui-qr-login.json");
       function defaultConfig() {
         return {
           deviceId: "",

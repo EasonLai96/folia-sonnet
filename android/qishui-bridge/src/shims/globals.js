@@ -16,4 +16,15 @@ const __foliaProcessEnv = {
     QISHUI_OAUTH_CONFIG_FILE: '/folia/qishui-oauth.json',
 };
 
-export { Buffer, __foliaProcessEnv };
+//   __foliaDirname   → esbuild 的 --define:__dirname=__foliaDirname 用它替换
+//                       Node 的 __dirname。协议层几个 CommonJS 模块在**函数体里**
+//                       用 __dirname 拼配置文件路径（qishui-api.js 的 oauth 候选、
+//                       qishui-auth-v6.js 的 ASSET_DIR），模块顶层那几处因为被
+//                       process.env 短路了反而不会执行 —— 所以这个坑只在真正
+//                       查登录态时才炸，表现为 status / refresh 抛
+//                       "__dirname is not defined"。安卓侧「文件」其实是
+//                       localStorage 键，给一个稳定的前缀就够。
+const __foliaDirname = '/folia';
+const __foliaFilename = '/folia/qishui-api.js';
+
+export { Buffer, __foliaProcessEnv, __foliaDirname, __foliaFilename };

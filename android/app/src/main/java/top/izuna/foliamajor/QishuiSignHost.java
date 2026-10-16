@@ -108,10 +108,31 @@ final class QishuiSignHost {
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
     /** 宿主自己要用的 cookie：协议层的「当前会话」就是它。 */
     private volatile String sessionCookie = "";
+    /**
+     * OkHttp 收到的 set-cookie 自己攒一份。登录态（sessionid 等）正是这么下发的，
+     * 而 CookieManager 的读回依赖 WebView 状态、还可能因为不在主线程而失败 ——
+     * 不能当唯一来源，所以这里同步记一份，`getCookie` 先给这份再补 CookieManager。
+     */
+    private final java.util.Map<String, String> jarCookies =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, String>());
     /** 加密音频的本地回环代理：主 WebView 的 <audio> 吃这个地址（独立于签名 WebView）。 */
     private final QishuiAudioServer audioServer = new QishuiAudioServer();
     private final java.util.concurrent.ExecutorService executor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /** 只保留 `name=value`，丢掉 expires / path / domain 等属性。 */
+    private void rememberCookie(String setCookie) {
+        if (setCookie == null) return;
+        String pair = setCookie.split(";", 2)[0].trim();
+        int eq = pair.indexOf('=');
+        if (eq <= 0) return;
+        String name = pair.substring(0, eq).trim();
+        String value = pair.substring(eq + 1).trim();
+        if (name.isEmpty()) return;
+        // 空值是服务端在清这个 cookie。
+        if (value.isEmpty()) jarCookies.remove(name);
+        else jarCookies.put(name, value);
+    }
 
     interface Pending {
         void resolve(String json);
@@ -269,6 +290,54 @@ final class QishuiSignHost {
         @JavascriptInterface
         public void setCookie(String cookie) {
             sessionCookie = cookie == null ? "" : cookie;
+        }
+
+        /**
+         * 把 WebView cookie 罐里某个源下的 cookie 回给页面。
+         *
+         * 登录确认时 passport 的登录态是走 Set-Cookie 下发的（响应体里的
+         * session_cookie 字段经常是空的）；这些 cookie 由 OkHttp 收到后转发进
+         * CookieManager（见 http() 里的 set-cookie 处理）。上游在 Electron 里靠
+         * `session.cookies.get({})` 把它们并回 config，安卓只能从这里读 —— 少了
+         * 这一步，`getStatus().loggedIn` 永远是 false，表现成「扫码确认了但账号
+         * 出不来」。
+         */
+        @JavascriptInterface
+        public String getCookie(String url) {
+            StringBuilder out = new StringBuilder();
+            synchronized (jarCookies) {
+                for (Map.Entry<String, String> entry : jarCookies.entrySet()) {
+                    if (out.length() > 0) out.append("; ");
+                    out.append(entry.getKey()).append('=').append(entry.getValue());
+                }
+            }
+            // CookieManager 可能还存着页面自己那一份，缺的名字补上（已有的不覆盖，
+            // 罐里的值可能更旧）。
+            String fromWebView = readWebViewCookies(url);
+            String[] pairs = fromWebView.split(";");
+            for (String pair : pairs) {
+                int eq = pair.indexOf('=');
+                if (eq <= 0) continue;
+                String name = pair.substring(0, eq).trim();
+                if (name.isEmpty()) continue;
+                synchronized (jarCookies) {
+                    if (jarCookies.containsKey(name)) continue;
+                }
+                if (out.length() > 0) out.append("; ");
+                out.append(name).append('=').append(pair.substring(eq + 1).trim());
+            }
+            return out.toString();
+        }
+
+        private String readWebViewCookies(String url) {
+            if (url == null || url.isEmpty()) return "";
+            try {
+                String value = CookieManager.getInstance().getCookie(url);
+                return value == null ? "" : value;
+            } catch (Throwable error) {
+                Log.w(TAG, "getCookie failed", error);
+                return "";
+            }
         }
 
         /**
@@ -528,6 +597,7 @@ final class QishuiSignHost {
                     CookieManager.getInstance().setCookie(url, value);
                 } catch (Throwable ignored) {
                 }
+                rememberCookie(value);
                 if (headers.containsKey("Set-Cookie")) {
                     headers.put("Set-Cookie", headers.get("Set-Cookie") + "," + value);
                 } else {

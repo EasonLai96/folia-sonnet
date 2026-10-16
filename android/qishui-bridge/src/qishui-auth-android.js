@@ -124,6 +124,28 @@ function buildCookieString(values) {
         .join('; ');
 }
 
+// 签名宿主 WebView 的 cookie 罐（由原生把 OkHttp 收到的 set-cookie 转存进去）。
+// 只问 qishui 自己的几个源：CookieManager.getCookie 按 URL 匹配，登录 cookie 的
+// domain 可能是 `.qishui.com`，也可能是 passport 子域。
+const COOKIE_JAR_URLS = [
+    'https://www.qishui.com/',
+    'https://qishui.com/',
+    'https://passport.qishui.com/',
+];
+
+function nativeCookieJar() {
+    const host = typeof window !== 'undefined' ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.getCookie !== 'function') return '';
+    const chunks = [];
+    for (const url of COOKIE_JAR_URLS) {
+        try {
+            const value = String(host.getCookie(url) || '');
+            if (value) chunks.push(value);
+        } catch (_) { /* 宿主不可用就当作没有 */ }
+    }
+    return chunks.join('; ');
+}
+
 // 最近一次命中 needle 的 XHR 记录（folia-xhr.js 在 open/send 时记录）。
 function lastXhrEntry(needle) {
     const log = window.__foliaXhrLog || [];
@@ -439,6 +461,14 @@ class QishuiAuthRuntime {
     async persistSessionCookies(sessionCookie) {
         const current = parseCookieString(getConfig().cookie || '');
         Object.assign(current, parseCookieString(sessionCookie));
+        // 上游在 Electron 里还会 `session.cookies.get({})`，把 qishui 域下的 cookie
+        // 一并并回 config —— 登录态其实是 passport 用 Set-Cookie 下发的，响应体里的
+        // session_cookie 字段经常是空的。裁剪版早先漏了这一步，于是
+        // config.cookie 一直是空、getStatus().loggedIn 永远是 false，表现成
+        // 「扫码确认了但账号出不来」。安卓侧这些 cookie 被 OkHttp 转存进
+        // WebView 的 CookieManager（见 QishuiSignHost.http 的 set-cookie 处理），
+        // 只能从原生回读。
+        Object.assign(current, parseCookieString(nativeCookieJar()));
         updateConfig({ cookie: buildCookieString(current), msToken: readMsToken() });
     }
 

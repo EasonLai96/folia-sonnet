@@ -115,6 +115,10 @@ esbuild([
     '--outfile=' + join(assetsDir, 'protocol.js'),
     '--inject:' + join(here, 'src', 'shims', 'globals.js'),
     '--define:process.env=__foliaProcessEnv',
+    // Node 内建变量在浏览器里没有：协议层用它们拼配置文件路径（见 globals.js 注释）。
+    // 走注入的标识符而不是字符串字面量，避开 Windows cmd 对引号的处理。
+    '--define:__dirname=__foliaDirname',
+    '--define:__filename=__foliaFilename',
     '--alias:fs=./src/shims/fs.js',
     '--alias:os=./src/shims/os.js',
     '--alias:path=./src/shims/path.js',
