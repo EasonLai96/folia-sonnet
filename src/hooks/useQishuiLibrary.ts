@@ -44,16 +44,31 @@ export const useQishuiLibrary = () => {
             const collections: ProviderCollection[] = [];
             const capabilities = omni.getProviderCapabilities('qishui');
             let offset = 0;
+            let fetchedLikedSongIds: MediaId[] = [];
             if (capabilities.userLibrary) {
-                while (true) {
-                    const page = await omni.getProviderUserPlaylists('qishui', user.id, { offset, limit: 50 });
-                    if (generation.current !== current) return false;
-                    collections.push(...page.items);
-                    if (!page.hasMore || page.nextOffset <= offset) break;
-                    offset = page.nextOffset;
+                // 歌单拉不到不该否定「已经登录」这件事。安卓上 /luna 这类接口
+                // 服务端只认 bdms.node 的 X-Helios/X-Medusa，而 bdms.node 是
+                // Windows x64 原生模块 —— 签名宿主只能回退 a_bogus，拿不到
+                // 歌单是**能力缺失**而不是登录失败。保留已拿到的部分，继续收尾。
+                try {
+                    while (true) {
+                        const page = await omni.getProviderUserPlaylists('qishui', user.id, { offset, limit: 50 });
+                        if (generation.current !== current) return false;
+                        collections.push(...page.items);
+                        if (!page.hasMore || page.nextOffset <= offset) break;
+                        offset = page.nextOffset;
+                    }
+                } catch (error) {
+                    console.warn('[QishuiLibrary] user playlists unavailable', error);
                 }
             }
-            const fetchedLikedSongIds: MediaId[] = capabilities.likes ? await omni.getProviderLikedSongIds('qishui', user.id) : [];
+            if (capabilities.likes) {
+                try {
+                    fetchedLikedSongIds = await omni.getProviderLikedSongIds('qishui', user.id);
+                } catch (error) {
+                    console.warn('[QishuiLibrary] liked songs unavailable', error);
+                }
+            }
             if (generation.current !== current) return false;
             const save = pendingSave.current.catch(() => {}).then(() => {
                 if (generation.current !== current) return null;

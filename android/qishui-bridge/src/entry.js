@@ -118,7 +118,7 @@ const handlers = {
             qrcode: String(data.qrcode || ''),
             qrcodeIndexUrl: String(data.qrcode_index_url || ''),
             expireTime: Number(data.expire_time || 0),
-            message: '请使用抖音 App 扫码并确认登录',
+            message: '请使用汽水音乐 App 扫码并确认登录',
         };
     },
 

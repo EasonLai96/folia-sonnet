@@ -20,6 +20,11 @@ const QISHUI_QR_TTL_MS = 5 * 60 * 1000;
 const qrSessions = new Map<string, string>();
 let qrTtlMs = QISHUI_QR_TTL_MS;
 
+// 最近一次登录态检查的结论。扫码确认后账户没加载出来（account-refresh-failed）
+// 时，诊断报告靠它说明卡在哪：是 status 就没认下这个会话，还是会话认了但
+// /luna 那一路签名拿不到东西（安卓没有 bdms.node，见 useQishuiLibrary 的注释）。
+let lastQishuiLoginStatus: string | null = null;
+
 function qishuiNotOurs(): OnlineProviderError {
     return new OnlineProviderError('unsupported', 'Song does not belong to Qishui Music', 'qishui');
 }
@@ -88,6 +93,14 @@ export const qishuiProvider: OnlineMusicProvider = {
     auth: {
         async getLoginStatus() {
             const data = await requestQishui<any>('status', {});
+            lastQishuiLoginStatus = data
+                ? `loggedIn=${data.loggedIn ? 'yes' : 'no'} webSession=${data.webSession ? 'yes' : 'no'}`
+                + ` cookieReady=${data.cookieReady ? 'yes' : 'no'} profileReady=${data.profileReady ? 'yes' : 'no'}`
+                + ` libraryReady=${data.libraryReady ? 'yes' : 'no'} userId=${String(data.userId || '-')}`
+                + (data.profileError ? ` profileError=${String(data.profileError)}` : '')
+                + (Array.isArray(data.libraryErrors) && data.libraryErrors.length
+                    ? ` libraryErrors=${data.libraryErrors.map((item: unknown) => String(item)).join(' | ')}` : '')
+                : 'null';
             if (!data?.loggedIn) return null;
             const user = normalizeQishuiUser(data);
             // 登录态只有 status 这一处能读，缺 id 也不能当作未登录，否则整库会被清空。
@@ -158,6 +171,14 @@ export const qishuiProvider: OnlineMusicProvider = {
         },
         async cancelQr(key) { qrSessions.delete(key); },
         getQrTtlMs: () => qrTtlMs,
+        async getQrLoginDiagnostics() {
+            return [
+                `last status: ${lastQishuiLoginStatus ?? 'none'}`,
+                // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能
+                // 回退 a_bogus —— 这条说明让「歌单/播放拿不到」有据可查。
+                'signed requests: passport=a_bogus (verified), luna=a_bogus fallback (bdms.node is Windows-only)',
+            ];
+        },
     },
     catalog: qishuiCatalog,
     library: qishuiLibrary,
