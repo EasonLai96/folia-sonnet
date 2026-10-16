@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Boxes, Check, ChevronLeft, ChevronsLeftRight, GamepadDirectional, Mic, Monitor, Moon, Play, Settings2 } from 'lucide-react';
+import { Boxes, Check, ChevronLeft, ChevronsLeftRight, GamepadDirectional, Mic, Monitor, Moon, Play, Settings2, Waves } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import type { Theme } from '../../../types';
@@ -93,6 +93,8 @@ const LabSettingsModal: React.FC<LabSettingsModalProps> = ({
     })));
     const autoPlayOnLaunch = useAudioSettingsStore(state => state.autoPlayOnLaunch);
     const onToggleAutoPlayOnLaunch = useAudioSettingsStore(state => state.handleToggleAutoPlayOnLaunch);
+    const autoJumpToVisualizerOnLaunch = useAudioSettingsStore(state => state.autoJumpToVisualizerOnLaunch);
+    const onToggleAutoJumpToVisualizerOnLaunch = useAudioSettingsStore(state => state.handleToggleAutoJumpToVisualizerOnLaunch);
     const borderColor = isDaylight ? 'border-zinc-300/70' : 'border-white/10';
     const overlayBackground = isDaylight ? 'rgba(0,0,0,0.32)' : 'rgba(0,0,0,0.5)';
     const subviewPanelBg = isDaylight ? 'bg-zinc-200' : 'bg-zinc-900';
@@ -242,6 +244,19 @@ const LabSettingsModal: React.FC<LabSettingsModalProps> = ({
                                         </div>
                                     </div>
                                     {renderToggle(autoPlayOnLaunch, () => onToggleAutoPlayOnLaunch(!autoPlayOnLaunch))}
+                                </div>
+
+                                <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${settingsCardClass}`}>
+                                    <div className="space-y-1">
+                                        <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                                            <Waves size={14} />
+                                            {t('options.autoJumpToVisualizerOnLaunch')}
+                                        </div>
+                                        <div className="text-xs opacity-50 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
+                                            {t('options.autoJumpToVisualizerOnLaunchDesc')}
+                                        </div>
+                                    </div>
+                                    {renderToggle(autoJumpToVisualizerOnLaunch, () => onToggleAutoJumpToVisualizerOnLaunch(!autoJumpToVisualizerOnLaunch))}
                                 </div>
 
                                 <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${settingsCardClass}`}>

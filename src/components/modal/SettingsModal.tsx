@@ -262,12 +262,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         transparentPlayerBackground,
         autoHidePlayerChrome,
         autoHideCursorWithPlayerChrome,
+        hidePlayerChromeOnTap,
+        hideSubtitleWhenChromeHidden,
         showOpenPanelCloseButton,
         handleToggleHidePlayerProgressBar: onToggleHidePlayerProgressBar,
         handleToggleHidePlayerRightPanelButton: onToggleHidePlayerRightPanelButton,
         handleToggleTransparentPlayerBackground: onToggleTransparentPlayerBackgroundFromStore,
         handleToggleAutoHidePlayerChrome: onToggleAutoHidePlayerChrome,
         handleToggleAutoHideCursorWithPlayerChrome: onToggleAutoHideCursorWithPlayerChrome,
+        handleToggleHidePlayerChromeOnTap: onToggleHidePlayerChromeOnTap,
+        handleToggleHideSubtitleWhenChromeHidden: onToggleHideSubtitleWhenChromeHidden,
         handleToggleOpenPanelCloseButton: onToggleOpenPanelCloseButton,
     } = usePlayerChromeSettingsStore(useShallow(selectPlayerChromeSettingsSnapshot));
     const {
@@ -1786,6 +1790,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 transparentPlayerBackground={transparentPlayerBackground}
                                                 autoHidePlayerChrome={autoHidePlayerChrome}
                                                 autoHideCursorWithPlayerChrome={autoHideCursorWithPlayerChrome}
+                                                hidePlayerChromeOnTap={hidePlayerChromeOnTap}
+                                                hideSubtitleWhenChromeHidden={hideSubtitleWhenChromeHidden}
+                                                onToggleHidePlayerChromeOnTap={onToggleHidePlayerChromeOnTap}
+                                                onToggleHideSubtitleWhenChromeHidden={onToggleHideSubtitleWhenChromeHidden}
                                                 stageTrackPillMode={stageTrackPillMode}
                                                 stageTrackPillTimeoutSec={stageTrackPillTimeoutSec}
                                                 stageTrackPillOnHome={stageTrackPillOnHome}

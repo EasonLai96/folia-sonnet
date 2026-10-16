@@ -28,6 +28,14 @@ export const MEDIA_CACHE_LIMIT_GB_KEY = 'folia_media_cache_limit_gb';
 /** Lab switch: start the restored last session playing instead of waiting for a press. */
 export const AUTO_PLAY_ON_LAUNCH_KEY = 'folia_auto_play_on_launch';
 
+/**
+ * Lab switch, the one under the above: also walk straight to the lyrics page on launch.
+ * Only meaningful together with AUTO_PLAY_ON_LAUNCH_KEY — with nothing playing there is no
+ * page to watch. Off unless asked for: an app that reopens onto somebody else's screen is a
+ * worse default than one that reopens onto the home wall.
+ */
+export const AUTO_JUMP_TO_VISUALIZER_ON_LAUNCH_KEY = 'folia_auto_jump_to_visualizer_on_launch';
+
 export const ENABLE_TRANSCODE_FALLBACK_KEY = 'folia_enable_transcode_fallback';
 
 /** Whether finished plays of online NetEase tracks are reported to the signed-in account. */
@@ -157,6 +165,8 @@ export type AudioSettingsState = {
     queueAddBehavior: QueueAddBehavior;
     /** Whether entering the app starts the restored session by itself. Off unless asked for. */
     autoPlayOnLaunch: boolean;
+    /** Whether that same launch also walks straight to the lyrics page. Off unless asked for. */
+    autoJumpToVisualizerOnLaunch: boolean;
     /** Electron-only recovery for local and Navidrome formats Chromium cannot decode. */
     enableTranscodeFallback: boolean;
     /** Report finished plays of online NetEase tracks to the signed-in account. Off by default. */
@@ -178,6 +188,7 @@ export type AudioSettingsState = {
     handleSetMediaCacheLimitGb: (gigabytes: number) => void;
     handleSetQueueAddBehavior: (behavior: QueueAddBehavior) => void;
     handleToggleAutoPlayOnLaunch: (enable: boolean) => void;
+    handleToggleAutoJumpToVisualizerOnLaunch: (enable: boolean) => void;
     handleToggleTranscodeFallback: (enable: boolean) => void;
     handleToggleNeteaseScrobble: (enable: boolean) => void;
     handleTogglePlaybackFade: (enable: boolean) => void;
@@ -203,6 +214,7 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     mediaCacheLimitGb: readStoredMediaCacheLimitGb(),
     queueAddBehavior: readStoredQueueAddBehavior(),
     autoPlayOnLaunch: getStoredBoolean(AUTO_PLAY_ON_LAUNCH_KEY, false),
+    autoJumpToVisualizerOnLaunch: getStoredBoolean(AUTO_JUMP_TO_VISUALIZER_ON_LAUNCH_KEY, false),
     enableTranscodeFallback: getStoredBoolean(
         ENABLE_TRANSCODE_FALLBACK_KEY,
         typeof window !== 'undefined' && Boolean(window.electron?.requestTranscodeFallback),
@@ -252,6 +264,14 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
         setStatusMessage({
             type: 'info',
             text: i18n.t('notifications.' + (enable ? 'autoPlayOnLaunchOn' : 'autoPlayOnLaunchOff')),
+        });
+    },
+    handleToggleAutoJumpToVisualizerOnLaunch: (enable) => {
+        setStoredBoolean(AUTO_JUMP_TO_VISUALIZER_ON_LAUNCH_KEY, enable);
+        set({ autoJumpToVisualizerOnLaunch: enable });
+        setStatusMessage({
+            type: 'info',
+            text: i18n.t('notifications.' + (enable ? 'autoJumpToVisualizerOn' : 'autoJumpToVisualizerOff')),
         });
     },
     handleToggleTranscodeFallback: (enable) => {
@@ -384,6 +404,7 @@ export const selectAudioSettingsSnapshot = (state: AudioSettingsState) => ({
     mediaCacheLimitGb: state.mediaCacheLimitGb,
     queueAddBehavior: state.queueAddBehavior,
     autoPlayOnLaunch: state.autoPlayOnLaunch,
+    autoJumpToVisualizerOnLaunch: state.autoJumpToVisualizerOnLaunch,
     enableTranscodeFallback: state.enableTranscodeFallback,
     neteaseScrobbleEnabled: state.neteaseScrobbleEnabled,
     playbackFadeEnabled: state.playbackFadeEnabled,
@@ -398,6 +419,7 @@ export const selectAudioSettingsSnapshot = (state: AudioSettingsState) => ({
     handleSetMediaCacheLimitGb: state.handleSetMediaCacheLimitGb,
     handleSetQueueAddBehavior: state.handleSetQueueAddBehavior,
     handleToggleAutoPlayOnLaunch: state.handleToggleAutoPlayOnLaunch,
+    handleToggleAutoJumpToVisualizerOnLaunch: state.handleToggleAutoJumpToVisualizerOnLaunch,
     handleToggleTranscodeFallback: state.handleToggleTranscodeFallback,
     handleToggleNeteaseScrobble: state.handleToggleNeteaseScrobble,
     handleTogglePlaybackFade: state.handleTogglePlaybackFade,

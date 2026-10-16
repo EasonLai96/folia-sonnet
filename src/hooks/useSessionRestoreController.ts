@@ -42,6 +42,11 @@ type UseSessionRestoreControllerParams = {
     currentSongRef: MutableRefObject<string | number | null>;
     /** Bumped with each commit of the current song (see usePlaybackRuntimeRefs). */
     playbackGenerationRef: MutableRefObject<number>;
+    /**
+     * 「进入应用后自动播放」下面那一项：起播的同时把页面切到歌词页。
+     * 只在这一处按开关调；不跳的时候首页照旧。
+     */
+    jumpToPlayerOnLaunch?: () => void;
 };
 
 // Restores the main playback session without pushing more boot logic into App.tsx.
@@ -59,8 +64,13 @@ export function useSessionRestoreController({
     shouldAutoPlayRef,
     currentSongRef,
     playbackGenerationRef,
+    jumpToPlayerOnLaunch,
 }: UseSessionRestoreControllerParams) {
     const audioQuality = useAudioSettingsStore(state => state.audioQuality);
+    // 恢复只跑一次，回调却每次渲染都是新的（navigateToPlayer 是 useCallback）。
+    // 用 ref 接过它，免得把 effect 的依赖数组搅乱、或者拿第一次渲染那份过期的。
+    const jumpToPlayerOnLaunchRef = useRef(jumpToPlayerOnLaunch);
+    jumpToPlayerOnLaunchRef.current = jumpToPlayerOnLaunch;
 
     const hasInitializedRef = useRef(false);
     const hasLoadedLocalLibraryRef = useRef(false);
@@ -157,6 +167,11 @@ export function useSessionRestoreController({
                     // that gives the deck its src, and it spends this flag there; setting it after
                     // would miss that run and leave the deck buffered in silence.
                     shouldAutoPlayRef.current = true;
+                    // 「同时跳转至可视化页面」：等音源落地再切会先白一下首页，而这里要的就是
+                    // 打开应用直接是那一页。两个开关一起读：下面的开关只在上面那个开着时才有页面可看。
+                    if (useAudioSettingsStore.getState().autoJumpToVisualizerOnLaunch) {
+                        jumpToPlayerOnLaunchRef.current?.();
+                    }
                 }
 
                 try {

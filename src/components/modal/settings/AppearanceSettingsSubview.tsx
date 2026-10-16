@@ -66,6 +66,8 @@ type AppearanceSettingsSubviewProps = {
     onToggleTransparentPlayerBackground: (enabled: boolean) => void;
     onToggleAutoHidePlayerChrome: (enabled: boolean) => void;
     onToggleAutoHideCursorWithPlayerChrome: (enabled: boolean) => void;
+    onToggleHidePlayerChromeOnTap: (enabled: boolean) => void;
+    onToggleHideSubtitleWhenChromeHidden: (enabled: boolean) => void;
     onSaveCustomTheme: (dualTheme: DualTheme) => void;
     rangeInputClass: string;
     settingsCardClass: string;
@@ -77,6 +79,8 @@ type AppearanceSettingsSubviewProps = {
     transparentPlayerBackground: boolean;
     autoHidePlayerChrome: boolean;
     autoHideCursorWithPlayerChrome: boolean;
+    hidePlayerChromeOnTap: boolean;
+    hideSubtitleWhenChromeHidden: boolean;
     stageTrackPillMode: 'auto' | 'always' | 'never';
     stageTrackPillTimeoutSec: number;
     stageTrackPillOnHome: boolean;
@@ -116,6 +120,8 @@ const AppearanceSettingsSubview: React.FC<AppearanceSettingsSubviewProps> = ({
     onToggleTransparentPlayerBackground,
     onToggleAutoHidePlayerChrome,
     onToggleAutoHideCursorWithPlayerChrome,
+    onToggleHidePlayerChromeOnTap,
+    onToggleHideSubtitleWhenChromeHidden,
     onSaveCustomTheme,
     rangeInputClass,
     settingsCardClass,
@@ -127,6 +133,8 @@ const AppearanceSettingsSubview: React.FC<AppearanceSettingsSubviewProps> = ({
     transparentPlayerBackground,
     autoHidePlayerChrome,
     autoHideCursorWithPlayerChrome,
+    hidePlayerChromeOnTap,
+    hideSubtitleWhenChromeHidden,
     stageTrackPillMode,
     stageTrackPillTimeoutSec,
     onChangeStageTrackPillMode,
@@ -734,6 +742,49 @@ const AppearanceSettingsSubview: React.FC<AppearanceSettingsSubviewProps> = ({
                                 style={{ backgroundColor: autoHideCursorWithPlayerChrome ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
                             >
                                 <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${autoHideCursorWithPlayerChrome ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+                        {/* 歌词页上「点一下空白」就是藏 / 显这一下。与上面那个自动隐藏是两回事：
+                            一个听指针空闲，一个听点击，所以各占一行、互不锁定。默认开。
+
+                            开着「自动隐藏控制栏」时淡出：那一档里每次点击都会先把控件唤出来
+                            （见 usePlayerChromeAutoHide 的 pointerdown / pointerup），这一次点击
+                            因此永远落在「收起」那一面，「再点一下恢复」就废了 —— 所以那一档下
+                            这个手势整体让位，这一行连同它下面那条从属项一起变淡。 */}
+                        <div className={`pt-2 border-t border-white/5 flex items-center justify-between gap-4 transition-opacity ${autoHidePlayerChrome ? 'opacity-40' : ''}`}>
+                            <div className="space-y-1">
+                                <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                                    {t('options.hidePlayerChromeOnTap')}
+                                </div>
+                                <div className="text-xs opacity-50 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
+                                    {t('options.hidePlayerChromeOnTapDesc')}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => onToggleHidePlayerChromeOnTap(!hidePlayerChromeOnTap)}
+                                className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${!hidePlayerChromeOnTap ? toggleOffBackgroundClass : ''}`}
+                                style={{ backgroundColor: hidePlayerChromeOnTap ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                            >
+                                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${hidePlayerChromeOnTap ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+                        {/* 从属项：上面那条不生效时（关着，或撞上自动隐藏那一档）界面根本不会
+                            因点击而藏，它也就轮不到出场，整行淡出但仍可点。 */}
+                        <div className={`pl-4 border-l-2 border-white/10 flex items-center justify-between gap-4 transition-opacity ${hidePlayerChromeOnTap && !autoHidePlayerChrome ? '' : 'opacity-40'}`}>
+                            <div className="space-y-1">
+                                <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                                    {t('options.hideSubtitleWhenChromeHidden')}
+                                </div>
+                                <div className="text-xs opacity-50 max-w-[360px]" style={{ color: 'var(--text-secondary)' }}>
+                                    {t('options.hideSubtitleWhenChromeHiddenDesc')}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => onToggleHideSubtitleWhenChromeHidden(!hideSubtitleWhenChromeHidden)}
+                                className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${!hideSubtitleWhenChromeHidden ? toggleOffBackgroundClass : ''}`}
+                                style={{ backgroundColor: hideSubtitleWhenChromeHidden ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
+                            >
+                                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${hideSubtitleWhenChromeHidden ? 'translate-x-6' : 'translate-x-0'}`} />
                             </button>
                         </div>
                     </div>

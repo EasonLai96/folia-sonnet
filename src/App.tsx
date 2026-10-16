@@ -449,6 +449,7 @@ export default function App() {
         autoHidePlayerChrome,
         handleToggleAutoHidePlayerChrome,
         autoHideCursorWithPlayerChrome,
+        hidePlayerChromeOnTap,
         alwaysShowMainWindowTitlebar,
         hideFullscreenButton,
         handleToggleTransparentPlayerBackground,
@@ -1014,6 +1015,8 @@ export default function App() {
         shouldAutoPlayRef: shouldAutoPlay,
         currentSongRef,
         playbackGenerationRef,
+        // 「进入应用后自动播放」下面那一项：同一个开关组，起播的同时切到歌词页。
+        jumpToPlayerOnLaunch: navigateToPlayer,
     });
 
     const localLibraryCatalog = useLocalLibraryCatalog(localSongs);
@@ -1689,6 +1692,32 @@ export default function App() {
         resumePlayback,
         syncStageLyricsClock,
     });
+
+    /*
+     * 点击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
+     *
+     * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，
+     * 所以先只收面板。（面板由 handleContainerClick 管，它在别处也挂着这个语义。）
+     *
+     * 这一层只铺着可视化渲染：播放条、按钮、标题栏都是它的兄弟节点，点控件不会冒泡到这里，
+     * 所以「空白」不用再自己判断点到了哪儿。
+     *
+     * 只有歌词页算数：这一层在首页和 Lattice 底下也铺着（当背景），在那里翻出来的是
+     * 「下次进歌词页控件是藏着的」，而点的人当时什么也没看见。
+     *
+     * auto-hide 模式下不动手：那边 pointerdown / pointerup 会在每次点击时先把控件显出来
+     * （见 usePlayerChromeAutoHide），因此这里的 toggle 永远读到「显」、只会一路藏下去，
+     * 「再点一下恢复」当场失效。那一档的显隐本来归空闲时钟管，点一下让它显出来正是它的语义。
+     */
+    const handleVisualSurfaceClick = useCallback(() => {
+        if (isPanelOpen) {
+            handleContainerClick();
+            return;
+        }
+        if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
+            setIsPlayerChromeHidden(prev => !prev);
+        }
+    }, [currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
 
     const { personalFmSelection, personalFmSelectionLabel, isPersonalFmModeSupported, setPersonalFmSelection } = usePersonalFmModeController({
         isFmMode,
@@ -2963,7 +2992,7 @@ export default function App() {
                 data-folia-lyric-surface="1"
                 data-library-backdrop-blur={blursVisualizerBackdrop || undefined}
                 style={visualizerBackdropStyle(blursVisualizerBackdrop)}
-                onClick={handleContainerClick}
+                onClick={handleVisualSurfaceClick}
             >
                 <PlayerBottomBarLayoutContext.Provider value={currentView === 'player'}>
                     {shouldMountVisualizer && <VisualizerRenderer {...visualizerRendererModel} />}
