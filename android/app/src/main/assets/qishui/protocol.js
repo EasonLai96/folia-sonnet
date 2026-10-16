@@ -8312,6 +8312,18 @@
       return import_qishui_api.default.handleQishuiCreateComment(String(p.id || ""), String(p.content || ""), readQishuiCookie());
     }
   };
+  function normalizeParams(value) {
+    if (!value) return {};
+    if (typeof value === "object") return value;
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return {};
+      }
+    }
+    return {};
+  }
   async function request2(operation, params) {
     const name = String(operation || "");
     if (!Object.prototype.hasOwnProperty.call(handlers, name)) {
@@ -8330,16 +8342,8 @@
     }
   }
   window.__foliaQishui = {
-    async start(operation, paramsJson, ticket) {
-      let params = {};
-      if (paramsJson) {
-        try {
-          params = JSON.parse(paramsJson);
-        } catch (_) {
-          params = {};
-        }
-      }
-      const envelope = await request2(operation, params);
+    async start(operation, params, ticket) {
+      const envelope = await request2(operation, normalizeParams(params));
       const host = window.FoliaQishuiHost;
       if (host && typeof host.resolve === "function") {
         try {

@@ -307,6 +307,21 @@ const handlers = {
     },
 };
 
+/**
+ * 入参归一：原生把 params 直接当 JS 字面量拼进 evaluateJavascript 的脚本里，
+ * 所以这里拿到的是**对象**而不是 JSON 字符串 —— 早先一律 JSON.parse 会把它
+ * String() 成 "[object Object]" 再解析，必然抛错并悄悄落回空对象，
+ * 表现就是「二维码登录 token 缺失」。两种形态都认。
+ */
+function normalizeParams(value) {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    if (typeof value === 'string') {
+        try { return JSON.parse(value); } catch (_) { return {}; }
+    }
+    return {};
+}
+
 async function request(operation, params) {
     const name = String(operation || '');
     if (!Object.prototype.hasOwnProperty.call(handlers, name)) {
@@ -328,12 +343,8 @@ async function request(operation, params) {
 // ---- 对外入口 ------------------------------------------------------------
 
 window.__foliaQishui = {
-    async start(operation, paramsJson, ticket) {
-        let params = {};
-        if (paramsJson) {
-            try { params = JSON.parse(paramsJson); } catch (_) { params = {}; }
-        }
-        const envelope = await request(operation, params);
+    async start(operation, params, ticket) {
+        const envelope = await request(operation, normalizeParams(params));
         const host = window.FoliaQishuiHost;
         if (host && typeof host.resolve === 'function') {
             try {
