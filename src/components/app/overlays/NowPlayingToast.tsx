@@ -6,6 +6,9 @@ import type { Theme } from '../../../types';
 import { useTransitionBorderCue } from './now-playing-toast/useTransitionBorderCue';
 import { usePlayerBottomBarBottomPx } from '../../../hooks/usePlayerBottomBarBottomPx';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
+import { useAppChromeStore } from '../../../stores/useAppChromeStore';
+import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
+import { useIsPlayerBottomBarHost } from '../../floating-player/PlayerBottomBarLayoutContext';
 import {
     PLAYER_BOTTOM_BAR_SUBTITLE_BLOCK_PX,
     PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX,
@@ -15,6 +18,8 @@ import {
 // 播放器与 Lattice 左下角的 now playing 卡片（playing-toast 样式：圆角 2xl、44px 封面、底部滑入）。
 // 歌名上方带 "正在播放 / 接下来播放" 标签。
 // 显示模式：auto=显示 timeoutSec 秒后淡出（换歌重新计时），always=常驻，never=不渲染。
+// 播放页把界面收起来时它一起收（点空白那一族手势），并且恢复控件那一下不会把它带回来 ——
+// 见下面 visible 之后那一组状态。
 // isNextUp=自动切歌预览（automix 混合或普通曲目结束倒计时）：强制显示下一首并挂
 // "接下来播放" 标签，切完后翻回 "正在播放"。
 // automix 混音期间边框上会长出一圈进度描边（见 now-playing-toast/NowPlayingToastTransitionBorder
@@ -114,6 +119,33 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
         return () => window.clearTimeout(timer);
     }, [mode, hideDelayMs, trackKey, holdOpen]);
 
+    // 界面收起来时这张卡片跟着收（点击空白那一族手势的收尾，见 App 的
+    // handleVisualSurfaceClick）。它不是控件而是「换歌了」的一次告知，所以：
+    //
+    // 收起来一次就记一笔，直到换歌或换页都不再回来 —— 恢复控件那一下不该把它带回来，
+    // 那一下的意思是「把控件还给我」，不是「把刚才那条弹窗再放一遍」。换歌时复位，
+    // 因为「新歌来了」正是这张卡片存在的理由。
+    //
+    // 两个排除和 VisualizerSubtitleOverlay 同一套理由：
+    // - 只在 App 播放页那棵树里算数。这不是 App 的私有件：探针页
+    //   （test/component/nowPlayingToastTransitionBorder.spec.ts）会单独挂它，而那种树里没有
+    //   PlayerBottomBarLayoutContext 的 Provider（默认 false），播放页的显隐不该管到它。
+    // - 「自动隐藏控制栏」那一档不算：那一档里「藏着」是常态，跟着收等于卡片再也不出现。
+    const isPlayerPageTree = useIsPlayerBottomBarHost();
+    const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
+    const autoHidePlayerChrome = usePlayerChromeSettingsStore(state => state.autoHidePlayerChrome);
+    const isChromeHiddenHere = isPlayerPageTree && isPlayerChromeHidden && !autoHidePlayerChrome;
+    const [dismissedWithChrome, setDismissedWithChrome] = useState(false);
+    useEffect(() => {
+        if (isChromeHiddenHere) setDismissedWithChrome(true);
+    }, [isChromeHiddenHere]);
+    // view 也要复位：在播放页收起过之后走到首页，那个「记的一笔」不该跨页面管着（2026-10-10 起
+    // 首页 / Lattice 也挂这张卡片）。
+    useEffect(() => {
+        setDismissedWithChrome(false);
+    }, [trackKey, view]);
+    const isHiddenWithChrome = isChromeHiddenHere || dismissedWithChrome;
+
     // 描边要的是卡片的实际尺寸（内容撑出来的，没有固定宽高），所以量一下外层容器：
     // 它是 fixed 且没给宽度，会收缩到卡片大小，而且不会随 trackKey 重挂。
     // 描边本身是绝对定位、外扩一圈的兄弟节点，不参与这个尺寸。
@@ -142,7 +174,7 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
 
     return (
         <AnimatePresence>
-            {visible && (
+            {visible && !isHiddenWithChrome && (
                 <motion.div
                     ref={frameRef}
                     data-folia-now-playing-toast="true"
