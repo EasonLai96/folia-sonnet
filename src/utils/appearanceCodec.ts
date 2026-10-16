@@ -9,6 +9,7 @@ import {
     DEFAULT_PENDOLO_TUNING,
     DEFAULT_SONNET_TUNING,
     DEFAULT_TEMPERA_TUNING,
+    SONNET_CAMERA_INTENSITY_MAX,
     type DualTheme,
     type Theme,
 } from '../types';
@@ -388,8 +389,31 @@ const compressSonnet = (t: any): any => ({
     ppld: t.postProcessLensDistortion,
     pplx: t.postProcessLensDispersion,
 });
+/**
+ * `vt` 是整包透传的渲染器 tuning，不像 `snt` 那样有逐模式的解码函数 —— 所以旧配置码里那些
+ * 已经超出上限的值只能在这里夹一次。
+ *
+ * 必须夹在这里而不是「等它写进 store」：OBS 浏览器源与主题公园预览是直接拿这个 bundle 渲染的，
+ * 根本不经过 store 的 setter（那一层才有 clamp）。设置导入那条路会走 setter，夹了也无妨。
+ * 没超标就原样返回同一个对象，别无谓地换掉引用。
+ */
+const normalizeImportedVisualizerTunings = (bundle: any): any => {
+    const sonnet = bundle?.sonnet;
+    if (!sonnet || typeof sonnet !== 'object') return bundle;
+    const cameraIntensity = Number(sonnet.cameraIntensity);
+    if (!Number.isFinite(cameraIntensity)) return bundle;
+    const capped = Math.min(SONNET_CAMERA_INTENSITY_MAX, Math.max(0, cameraIntensity));
+    return capped === cameraIntensity
+        ? bundle
+        : { ...bundle, sonnet: { ...sonnet, cameraIntensity: capped } };
+};
+
 const decompressSonnet = (o: any): any => ({
-    cameraIntensity: o.ci !== undefined ? o.ci : DEFAULT_SONNET_TUNING.cameraIntensity,
+    // 旧外观码里的 ci 可能写到 2，而镜头运动超过 0.7 会把画面甩出屏幕外 —— 导入时夹到新上限
+    // （见 SONNET_CAMERA_INTENSITY_MAX）。非数字、以及旧码里没带这一位的，落回默认值。
+    cameraIntensity: Number.isFinite(Number(o.ci))
+        ? Math.min(SONNET_CAMERA_INTENSITY_MAX, Math.max(0, Number(o.ci)))
+        : DEFAULT_SONNET_TUNING.cameraIntensity,
     typographyMotion: o.tm !== undefined ? o.tm : DEFAULT_SONNET_TUNING.typographyMotion,
     mgDensity: o.md !== undefined ? o.md : DEFAULT_SONNET_TUNING.mgDensity,
     showOnlyText: o.sot !== undefined ? o.sot : DEFAULT_SONNET_TUNING.showOnlyText,
@@ -669,7 +693,7 @@ export const decompressConfig = (str: string): any => {
         if (parsed.sfff) decompressed.subtitleFontFallbackFamilies = parsed.sfff;
 
         if (parsed.ct) decompressed.classicTuning = decompressClassic(parsed.ct);
-        if (parsed.vt) decompressed.visualizerTunings = parsed.vt;
+        if (parsed.vt) decompressed.visualizerTunings = normalizeImportedVisualizerTunings(parsed.vt);
         if (parsed.cat) decompressed.cadenzaTuning = decompressCadenza(parsed.cat);
         if (parsed.pt) decompressed.partitaTuning = decompressPartita(parsed.pt);
         if (parsed.ft) decompressed.fumeTuning = decompressFume(parsed.ft);

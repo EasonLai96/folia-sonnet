@@ -1,5 +1,10 @@
 import React, { useMemo } from 'react';
-import { DEFAULT_SONNET_TUNING, type SonnetOuterFrameMode, type SonnetTuning } from '../../../types';
+import {
+    DEFAULT_SONNET_TUNING,
+    SONNET_CAMERA_INTENSITY_MAX,
+    type SonnetOuterFrameMode,
+    type SonnetTuning,
+} from '../../../types';
 import { colorWithAlpha } from '../../../utils/visualizer/colorMix';
 import type { VisualizerSettingsPanelProps } from '../definition';
 import VisualizerPresetGroup, { type VisualizerPresetOption } from '../VisualizerPresetGroup';
@@ -45,8 +50,12 @@ const SonnetSettingsPanel: React.FC<VisualizerSettingsPanelProps> = ({
     const motionControls: Array<{
         key: Extract<keyof SonnetTuning, 'cameraIntensity' | 'typographyMotion' | 'mgDensity'>;
         label: string;
+        /** 不给就用 SonnetRangeControl 自己的 0~2。 */
+        max?: number;
     }> = [
-        { key: 'cameraIntensity', label: t('options.sonnetCameraIntensity') },
+        // 相机强度的上限就是默认值本身：再高镜头会把画面甩出屏幕外（见 SONNET_CAMERA_INTENSITY_MAX）。
+        // 滑块量程必须跟着收 —— 让它能拖到 2 而写入时被夹回 0.7，等于拖了没用。
+        { key: 'cameraIntensity', label: t('options.sonnetCameraIntensity'), max: SONNET_CAMERA_INTENSITY_MAX },
         { key: 'typographyMotion', label: t('options.sonnetTypographyMotion') },
         { key: 'mgDensity', label: t('options.sonnetMgDensity') },
     ];
@@ -96,6 +105,7 @@ const SonnetSettingsPanel: React.FC<VisualizerSettingsPanelProps> = ({
                         key={control.key}
                         label={control.label}
                         value={sonnetTuning[control.key]}
+                        max={control.max}
                         rangeInputClass={rangeInputClass}
                         onChange={value => onSonnetTuningChange?.({ [control.key]: value })}
                         onPointerDown={onSliderPointerDown}

@@ -1,5 +1,5 @@
 import { BUILTIN_VISUALIZER_MODES } from '../../types/visualizerModes';
-import type { VisualizerMode } from '../../types';
+import { SONNET_CAMERA_INTENSITY_MAX, type VisualizerMode } from '../../types';
 
 // src/services/lyricDirector/catalog.ts
 // The parameter space the director may hand to the AI, and the shape it has to
@@ -87,16 +87,6 @@ export type DirectorParamSpec =
     | { kind: 'number'; min: number; max: number; zh: string }
     | { kind: 'select'; options: (string | number)[]; zh: string };
 
-/**
- * 商奈（sonnet）镜头运动强度的 AI 上限。
- *
- * 控件本身到 2（`DEFAULT_SONNET_TUNING.cameraIntensity` 默认 1），但这一档的相机运动是叠在
- * 分镜与转场上的：数值再高，镜头推拉很容易把画面甩出屏幕外（边缘露黑、歌词被推出画幅）。
- * 所以「能调多少」和「让 AI 调多少」在这里分开 —— 手动滑块照旧到 2，只有 AI 写的值被夹在
- * 这条线以内。参数清单（buildParamSpec）与提示词里那条规则都从这一个数来，改它一处即可。
- */
-export const SONNET_CAMERA_INTENSITY_MAX = 0.7;
-
 export interface DirectorModeSpec {
     /** The visualizer store action that writes this mode's tuning; null when it has none. */
     setter: string | null;
@@ -109,7 +99,7 @@ export interface DirectorModeSpec {
  * express. Two exceptions, both deliberately *narrower* than the setter:
  * cadenza has no settings panel and its setter only merges, so those four ranges
  * are our own sane bounds; and sonnet's cameraIntensity stops at
- * SONNET_CAMERA_INTENSITY_MAX (see it for why).
+ * SONNET_CAMERA_INTENSITY_MAX (types.ts, which explains why).
  */
 export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
     classic: {
@@ -225,7 +215,6 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
     sonnet: {
         setter: 'handleSetSonnetTuning',
         params: {
-            // 上限不是 setter 的 2：见 SONNET_CAMERA_INTENSITY_MAX。
             cameraIntensity: { kind: 'number', min: 0, max: SONNET_CAMERA_INTENSITY_MAX, zh: '相机强度' },
             typographyMotion: { kind: 'number', min: 0, max: 2, zh: '字体运动' },
             mgDensity: { kind: 'number', min: 0, max: 2, zh: '动图密度' },

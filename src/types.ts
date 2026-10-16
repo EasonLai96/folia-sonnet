@@ -567,8 +567,21 @@ export interface SonnetTuning {
   postProcessLensDispersion: number;
 }
 
+/**
+ * 商奈（sonnet）镜头运动强度的上限 —— 也就是它的默认值。
+ *
+ * 这一档的相机运动是叠在分镜与转场上的：数值再高，镜头推拉很容易把画面甩出屏幕外（画幅
+ * 边缘露黑、歌词被推出画面）。所以「能调多少」就定在 0.7，默认也直接落在 0.7 —— 默认即
+ * 安全上限，滑块只能往下收。
+ *
+ * 改这里一处即可：AI 导演的可调范围（services/lyricDirector/catalog）、store 的写入夹取、
+ * 读取 localStorage 时的旧数据兼容、外观码导入，全都引这个常量。
+ * 凝彩（tempera）的 cameraIntensity 是另一回事，不受它约束。
+ */
+export const SONNET_CAMERA_INTENSITY_MAX = 0.7;
+
 export const DEFAULT_SONNET_TUNING: SonnetTuning = {
-  cameraIntensity: 1,
+  cameraIntensity: SONNET_CAMERA_INTENSITY_MAX,
   typographyMotion: 1,
   mgDensity: 1,
   showOnlyText: false,

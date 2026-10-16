@@ -1,4 +1,5 @@
-import { buildParamSpec, SONNET_CAMERA_INTENSITY_MAX } from './catalog';
+import { SONNET_CAMERA_INTENSITY_MAX } from '../../types';
+import { buildParamSpec } from './catalog';
 import type { DirectorModeInfo } from './catalog';
 
 // src/services/lyricDirector/prompt.ts
