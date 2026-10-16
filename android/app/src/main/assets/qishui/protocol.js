@@ -7508,7 +7508,8 @@
     constants: () => constants,
     getQrCode: () => getQrCode,
     initSignEngine: () => initSignEngine,
-    requestOfficial: () => requestOfficial
+    requestOfficial: () => requestOfficial,
+    syncNativeCookiesIntoConfig: () => syncNativeCookiesIntoConfig
   });
   function configure(hooks) {
     getConfig = hooks && hooks.getConfig;
@@ -7598,6 +7599,15 @@
       }
     }
     return chunks.join("; ");
+  }
+  function syncNativeCookiesIntoConfig() {
+    if (typeof getConfig !== "function" || typeof updateConfig !== "function") return false;
+    const jar = nativeCookieJar();
+    if (!jar) return false;
+    const current = parseCookieString(getConfig().cookie || "");
+    Object.assign(current, parseCookieString(jar));
+    updateConfig({ cookie: buildCookieString(current) });
+    return true;
   }
   function lastXhrEntry(needle) {
     const log = window.__foliaXhrLog || [];
@@ -7942,7 +7952,8 @@
               throw new Error("二次验证已通过，但服务端仍返回 2046；请重新刷新二维码");
             }
           }
-          if (Number(data.error_code) === 0 && (String(data.status) === "3" || String(data.status) === "confirmed" || data.session_cookie)) {
+          const rawStatus = String(data.status || "").trim().toLowerCase();
+          if (rawStatus === "3" || rawStatus === "confirmed" || data.session_cookie) {
             await this.persistSessionCookies(data.session_cookie || "");
           }
           return envelope;
@@ -8091,6 +8102,7 @@
   init_fs();
   var import_qishui_api = __toESM(require_qishui_api(), 1);
   var import_qishui_qr_login = __toESM(require_qishui_qr_login2(), 1);
+  init_qishui_auth_android();
   var COOKIE_FILE = __foliaProcessEnv.QISHUI_COOKIE_FILE;
   function qishuiErrorCode(value) {
     return String(value == null ? "" : value).trim().toLowerCase().replace(/[_\s]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
@@ -8168,11 +8180,31 @@
       if (timer) clearTimeout(timer);
     }
   }
+  function cookieKeyNames(text) {
+    const names = [];
+    String(text || "").split(";").forEach((pair) => {
+      const eq = pair.indexOf("=");
+      if (eq <= 0) return;
+      const name = pair.slice(0, eq).trim();
+      if (name && !names.includes(name)) names.push(name);
+    });
+    return names.join(",") || "(empty)";
+  }
+  function hostCookieKeys() {
+    const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.getCookie !== "function") return "(no-host)";
+    try {
+      return cookieKeyNames(host.getCookie("https://www.qishui.com/"));
+    } catch (_) {
+      return "(host-threw)";
+    }
+  }
   async function readQishuiStatus(cookie) {
     const base = import_qishui_api.default.getQishuiStatus(cookie);
-    if (!base.webSession) return base;
+    const cookieKeys = cookieKeyNames(cookie);
+    if (!base.webSession) return Object.assign({}, base, { cookieKeys });
     const enriched = await withBudget(import_qishui_api.default.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
-    if (enriched) return enriched;
+    if (enriched) return Object.assign({}, enriched, { cookieKeys });
     return Object.assign({}, base, {
       profileReady: false,
       libraryReady: false,
@@ -8213,6 +8245,7 @@
       }
       const data = result && result.data || {};
       const errorCode = Number(data.error_code || 0);
+      syncNativeCookiesIntoConfig();
       if (bridge.getStatus().loggedIn) {
         const cookie = bridge.getCookie();
         if (!api.qishuiCookieHasLogin(cookie)) {
@@ -8229,7 +8262,9 @@
           status: "confirmed",
           errorCode: 0,
           error_code: 0,
-          message: "登录成功"
+          message: "登录成功",
+          cookieKeys: cookieKeyNames(cookie),
+          hostCookieKeys: hostCookieKeys()
         });
       }
       const rawStatus = String(data.status || "").trim().toLowerCase();
@@ -8238,6 +8273,8 @@
       else if (errorCode === 7) status = "rate_limited";
       else if (/^(2|scanned|scan)$/.test(rawStatus)) status = "scanned";
       else if (/^(3|confirmed|confirm)$/.test(rawStatus)) status = "confirmed";
+      const sessionKeys = cookieKeyNames(bridge.getCookie());
+      const confirmedWithoutCookie = status === "confirmed" ? "已确认但未拿到会话 Cookie（config: " + sessionKeys + " / host: " + hostCookieKeys() + "）" : "";
       return {
         provider: "qishui",
         loggedIn: false,
@@ -8245,7 +8282,9 @@
         errorCode,
         error_code: errorCode,
         retryAfterMs: errorCode === 7 ? 6e4 : 0,
-        message: result && result.message || data.description || ""
+        message: confirmedWithoutCookie || result && result.message || data.description || "",
+        cookieKeys: sessionKeys,
+        hostCookieKeys: hostCookieKeys()
       };
     },
     "login.logout": async () => {

@@ -146,6 +146,28 @@ function nativeCookieJar() {
     return chunks.join('; ');
 }
 
+/**
+ * 把宿主 cookie 罐并进传入的 cookie 表，返回并进来的那一段原文。
+ *
+ * 上游在 Electron 里靠 `session.cookies.get({})` 补齐 qishui 域下的 cookie ——
+ * 登录态其实是 passport 用 **Set-Cookie** 下发的，响应体里的 session_cookie 字段
+ * 经常是空的。裁剪版早先漏了这一步，config.cookie 一直是空、
+ * getStatus().loggedIn 永远是 false，表现成「扫码确认了但账号出不来」。
+ * 安卓侧这些 cookie 被 OkHttp 收到后转存进 CookieManager（见 QishuiSignHost.http
+ * 的 set-cookie 处理），只能从原生回读。
+ *
+ * 对外导出：登录确认那一刻不一定已经拿到全部 cookie，判定登录态之前还要再并一次。
+ */
+export function syncNativeCookiesIntoConfig() {
+    if (typeof getConfig !== 'function' || typeof updateConfig !== 'function') return false;
+    const jar = nativeCookieJar();
+    if (!jar) return false;
+    const current = parseCookieString(getConfig().cookie || '');
+    Object.assign(current, parseCookieString(jar));
+    updateConfig({ cookie: buildCookieString(current) });
+    return true;
+}
+
 // 最近一次命中 needle 的 XHR 记录（folia-xhr.js 在 open/send 时记录）。
 function lastXhrEntry(needle) {
     const log = window.__foliaXhrLog || [];
@@ -452,7 +474,11 @@ class QishuiAuthRuntime {
                 throw new Error('二次验证已通过，但服务端仍返回 2046；请重新刷新二维码');
             }
         }
-        if (Number(data.error_code) === 0 && (String(data.status) === '3' || String(data.status) === 'confirmed' || data.session_cookie)) {
+        // 判定与 entry.js 的 login.check 保持一致：那边只要 status 是 3/confirmed
+        // 就报「已确认」，这里若还额外要求 error_code===0，就会出现「界面说确认了、
+        // cookie 却没存」—— 上游的 error_code 在某些分支里非 0 但状态已经是 3。
+        const rawStatus = String(data.status || '').trim().toLowerCase();
+        if (rawStatus === '3' || rawStatus === 'confirmed' || data.session_cookie) {
             await this.persistSessionCookies(data.session_cookie || '');
         }
         return envelope;
@@ -461,13 +487,7 @@ class QishuiAuthRuntime {
     async persistSessionCookies(sessionCookie) {
         const current = parseCookieString(getConfig().cookie || '');
         Object.assign(current, parseCookieString(sessionCookie));
-        // 上游在 Electron 里还会 `session.cookies.get({})`，把 qishui 域下的 cookie
-        // 一并并回 config —— 登录态其实是 passport 用 Set-Cookie 下发的，响应体里的
-        // session_cookie 字段经常是空的。裁剪版早先漏了这一步，于是
-        // config.cookie 一直是空、getStatus().loggedIn 永远是 false，表现成
-        // 「扫码确认了但账号出不来」。安卓侧这些 cookie 被 OkHttp 转存进
-        // WebView 的 CookieManager（见 QishuiSignHost.http 的 set-cookie 处理），
-        // 只能从原生回读。
+        // 并一次宿主 cookie 罐（见 syncNativeCookiesIntoConfig 的注释）。
         Object.assign(current, parseCookieString(nativeCookieJar()));
         updateConfig({ cookie: buildCookieString(current), msToken: readMsToken() });
     }

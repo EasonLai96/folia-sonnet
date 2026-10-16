@@ -17,6 +17,9 @@ import qishuiApi from '../../../electron/qishui/qishui-api.js';
 // generated/qishui-qr-login.cjs 由 build.mjs 从 electron/qishui/qishui-qr-login.js
 // 生成：唯一差异是 require('./qishui-auth-v6') 改指裁剪版签名层。
 import qishuiQrLogin from './generated/qishui-qr-login.cjs';
+// 与上面那个模块 require 的同一份裁剪版签名层：登录 cookie 由宿主（OkHttp 收到的
+// set-cookie）持有，判定登录态之前要把它并回 config。
+import { syncNativeCookiesIntoConfig } from './qishui-auth-android.js';
 
 const COOKIE_FILE = process.env.QISHUI_COOKIE_FILE;
 
@@ -126,11 +129,36 @@ async function withBudget(promise, ms) {
     }
 }
 
+/** cookie 里到底有哪些键（诊断用，不回传值）。 */
+function cookieKeyNames(text) {
+    const names = [];
+    String(text || '').split(';').forEach(pair => {
+        const eq = pair.indexOf('=');
+        if (eq <= 0) return;
+        const name = pair.slice(0, eq).trim();
+        if (name && !names.includes(name)) names.push(name);
+    });
+    return names.join(',') || '(empty)';
+}
+
+function hostCookieKeys() {
+    const host = typeof window !== 'undefined' ? window.FoliaQishuiHost : null;
+    if (!host || typeof host.getCookie !== 'function') return '(no-host)';
+    try {
+        return cookieKeyNames(host.getCookie('https://www.qishui.com/'));
+    } catch (_) {
+        return '(host-threw)';
+    }
+}
+
 async function readQishuiStatus(cookie) {
     const base = qishuiApi.getQishuiStatus(cookie);
-    if (!base.webSession) return base;
+    // 诊断用：登录判定的输入到底是什么。cookieKeys 为空说明压根没拿到 cookie，
+    // 有键但 loggedIn=no 说明拿到的是不含 sessionid 的那一批。
+    const cookieKeys = cookieKeyNames(cookie);
+    if (!base.webSession) return Object.assign({}, base, { cookieKeys });
     const enriched = await withBudget(qishuiApi.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
-    if (enriched) return enriched;
+    if (enriched) return Object.assign({}, enriched, { cookieKeys });
     return Object.assign({}, base, {
         profileReady: false,
         libraryReady: false,
@@ -178,6 +206,9 @@ const handlers = {
         }
         const data = (result && result.data) || {};
         const errorCode = Number(data.error_code || 0);
+        // 登录 cookie 未必都随「确认」那一个响应下发（passport 有时分几拍给），
+        // 所以判定登录态之前先把宿主 cookie 罐再并一次。
+        syncNativeCookiesIntoConfig();
         if (bridge.getStatus().loggedIn) {
             const cookie = bridge.getCookie();
             if (!api.qishuiCookieHasLogin(cookie)) {
@@ -195,6 +226,8 @@ const handlers = {
                 errorCode: 0,
                 error_code: 0,
                 message: '登录成功',
+                cookieKeys: cookieKeyNames(cookie),
+                hostCookieKeys: hostCookieKeys(),
             });
         }
         // 状态词表与桌面端一致：未知状态宁可继续等，也不要凭空报错。
@@ -204,6 +237,12 @@ const handlers = {
         else if (errorCode === 7) status = 'rate_limited';
         else if (/^(2|scanned|scan)$/.test(rawStatus)) status = 'scanned';
         else if (/^(3|confirmed|confirm)$/.test(rawStatus)) status = 'confirmed';
+        // 确认了却没拿到会话 Cookie：把两侧 cookie 的键名都带进 message，
+        // 这样下一次诊断一眼能分清「宿主压根没 cookie」还是「有 cookie 但不含 sessionid」。
+        const sessionKeys = cookieKeyNames(bridge.getCookie());
+        const confirmedWithoutCookie = status === 'confirmed'
+            ? '已确认但未拿到会话 Cookie（config: ' + sessionKeys + ' / host: ' + hostCookieKeys() + '）'
+            : '';
         return {
             provider: 'qishui',
             loggedIn: false,
@@ -211,7 +250,9 @@ const handlers = {
             errorCode,
             error_code: errorCode,
             retryAfterMs: errorCode === 7 ? 60000 : 0,
-            message: (result && result.message) || data.description || '',
+            message: confirmedWithoutCookie || (result && result.message) || data.description || '',
+            cookieKeys: sessionKeys,
+            hostCookieKeys: hostCookieKeys(),
         };
     },
 

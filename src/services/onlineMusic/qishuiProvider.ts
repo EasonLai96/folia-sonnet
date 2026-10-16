@@ -29,6 +29,8 @@ let lastQishuiRefreshNote: string | null = null;
 export const noteQishuiRefreshDiagnostic = (text: string): void => {
     lastQishuiRefreshNote = text;
 };
+/** 最近一次 login.check 的结论：确认了但没拿到会话 Cookie 时，靠它看清 cookie 罐里有什么。 */
+let lastQishuiCheckNote: string | null = null;
 
 function qishuiNotOurs(): OnlineProviderError {
     return new OnlineProviderError('unsupported', 'Song does not belong to Qishui Music', 'qishui');
@@ -111,6 +113,7 @@ export const qishuiProvider: OnlineMusicProvider = {
                 ? `loggedIn=${data.loggedIn ? 'yes' : 'no'} webSession=${data.webSession ? 'yes' : 'no'}`
                 + ` cookieReady=${data.cookieReady ? 'yes' : 'no'} profileReady=${data.profileReady ? 'yes' : 'no'}`
                 + ` libraryReady=${data.libraryReady ? 'yes' : 'no'} userId=${String(data.userId || '-')}`
+                + ` cookieKeys=${String(data.cookieKeys ?? '-')}`
                 + (data.profileError ? ` profileError=${String(data.profileError)}` : '')
                 + (Array.isArray(data.libraryErrors) && data.libraryErrors.length
                     ? ` libraryErrors=${data.libraryErrors.map((item: unknown) => String(item)).join(' | ')}` : '')
@@ -165,6 +168,12 @@ export const qishuiProvider: OnlineMusicProvider = {
                 return { state: 'error', message };
             }
             const message = qishuiText(data?.message) || undefined;
+            lastQishuiCheckNote = `status=${qishuiText(data?.status) || '-'}`
+                + ` errorCode=${String(data?.errorCode ?? data?.error_code ?? '0')}`
+                + ` loggedIn=${data?.loggedIn ? 'yes' : 'no'}`
+                + ` cookieKeys=${String(data?.cookieKeys ?? '-')}`
+                + ` hostCookieKeys=${String(data?.hostCookieKeys ?? '-')}`
+                + ` msg=${message ?? ''}`;
             const retryAfter = Number(data?.retryAfterMs);
             const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
             const errorCode = Number(data?.errorCode ?? 0);
@@ -188,6 +197,7 @@ export const qishuiProvider: OnlineMusicProvider = {
         async getQrLoginDiagnostics() {
             return [
                 `last status: ${lastQishuiLoginStatus ?? 'none'}`,
+                `last check: ${lastQishuiCheckNote ?? 'none'}`,
                 `last refresh: ${lastQishuiRefreshNote ?? 'none'}`,
                 // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能
                 // 回退 a_bogus —— 这条说明让「歌单/播放拿不到」有据可查。
