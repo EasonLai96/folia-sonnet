@@ -441,7 +441,8 @@ final class QishuiSignHost {
             String path = request.getUrl().getPath() == null ? "" : request.getUrl().getPath();
 
             // 1) 打包在 assets 里的页面与脚本：直接按文件路径喂回去。
-            if (PAGE_ORIGIN.equals(request.getUrl().getProtocol() + "://" + host) && path.startsWith(PAGE_PATH_PREFIX)) {
+            //    直接用 URL 前缀判断：Uri 没有 getProtocol()，只有 getScheme()。
+            if (url.startsWith(PAGE_ORIGIN + PAGE_PATH_PREFIX)) {
                 return serveAsset(path.substring(PAGE_PATH_PREFIX.length()));
             }
             // 2) sdk-glue 会动态加载官方 CDN 的 bdms.js；上游（Electron）用 session hook

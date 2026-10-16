@@ -66,7 +66,8 @@ public class FoliaQishuiPlugin extends Plugin {
             } catch (Exception error) {
                 pendingCall.resolve(failure("invalid-response", "Qishui host returned a malformed envelope"));
             }
-            pendingCall.releaseKeepAlive();
+            // 不需要手动释放 keepAlive：resolve() 自己会清掉 saved 标记
+            // （这个 Capacitor 版本的 PluginCall 没有 releaseKeepAlive()）。
         }));
     }
 
