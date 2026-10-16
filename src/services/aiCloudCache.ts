@@ -1,4 +1,4 @@
-import { createAiFetch } from './aiNativeFetch';
+import { createAiFetch, fetchAiCacheViaNative } from './aiNativeFetch';
 import { describeAiTarget, type AiCompletionTarget } from './aiCompletion';
 import { isFoliaCloudCacheEnabled, resolveCloudApiUrl } from './foliaCloud';
 import { md5 } from '../utils/md5';
@@ -101,23 +101,57 @@ export const pullAiCloudCache = async (
     if (!/^[a-f0-9]{32}$/.test(key)) return { status: 'unavailable' };
     if (wasRecentMiss(kind, key)) return { status: 'miss' };
 
+    const url = resolveAiCloudCacheUrl(kind, key);
+    let data: { hit?: unknown; entry?: unknown } | null = null;
+
+    /*
+     * 安卓先问原生。
+     *
+     * 那一次请求由 OkHttp 发出、答案留在原生侧，于是「网页发起 → 后台被冻住」这一整段
+     * 都不再参与：原生把活干完，网页哪一步回来问都能拿到。没有这个方法（老版本 App）
+     * 就照旧走下面那条。
+     */
+    /*
+     * 整段包住，不只是 reject：取那个导出本身也可能抛（模块没加载出来时是同步的），
+     * 而缓存的纪律是**永不阻塞功能** —— 这里出任何岔子都只是「这次没命中」。
+     */
+    let native: { ok: boolean; body: string } | null = null;
     try {
-        const response = await createAiFetch()(resolveAiCloudCacheUrl(kind, key), {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal: withTimeout(),
-        });
-        if (!response.ok) return { status: 'miss' };
-        const data = await response.json().catch(() => null) as { hit?: unknown; entry?: unknown } | null;
-        const entry = data?.entry;
-        if (data?.hit !== true || !isPlainObject(entry) || !('payload' in entry)) {
-            rememberMiss(kind, key);
+        native = await fetchAiCacheViaNative(key, url);
+    } catch {
+        native = null;
+    }
+    if (native) {
+        /* 原生真发了请求、服务端说没有：那就是没命中，不必再用网页那条再问一遍。 */
+        if (!native.ok) return { status: 'miss' };
+        /* 原生回的是响应体原文：解析不出来就跟没命中一样，别让一条脏响应炸了整条链路。 */
+        try {
+            data = JSON.parse(native.body) as { hit?: unknown; entry?: unknown };
+        } catch {
+            data = null;
+        }
+    }
+
+    if (!data) {
+        try {
+            const response = await createAiFetch()(url, {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+                signal: withTimeout(),
+            });
+            if (!response.ok) return { status: 'miss' };
+            data = await response.json().catch(() => null) as { hit?: unknown; entry?: unknown } | null;
+        } catch {
             return { status: 'miss' };
         }
-        return { status: 'hit', payload: entry.payload };
-    } catch {
+    }
+
+    const entry = data?.entry;
+    if (data?.hit !== true || !isPlainObject(entry) || !('payload' in entry)) {
+        rememberMiss(kind, key);
         return { status: 'miss' };
     }
+    return { status: 'hit', payload: entry.payload };
 };
 
 /** 推一次。失败就当没发生过，绝不打断已经生成好的结果。 */

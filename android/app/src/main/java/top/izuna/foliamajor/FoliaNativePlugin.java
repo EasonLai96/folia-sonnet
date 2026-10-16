@@ -47,6 +47,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
@@ -133,6 +134,118 @@ public class FoliaNativePlugin extends Plugin {
         .readTimeout(45, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)
         .build();
+
+    /*
+     * AI 云缓存的原生侧副本。
+     *
+     * 请求本来就是走 httpRequest 出原生 OkHttp 的，但那一次是**网页发起**的：界面退到后台
+     * 之后 WebView 的 JS 会被节流甚至冻住，发起的那一步就卡在那儿，或者发起之后回调回来
+     * 时 JS 已经不在跑 —— 表现就是「切了歌，云缓存一次都没问」。
+     *
+     * 这里让原生自己把请求做完并留一份答案 OkHttp 跑在自己的线程池上，不受 WebView 冻结
+     * 影响；网页什么时候回来问都能拿到，不必再发一次。
+     *
+     * 只留命中的：没命中也冻上几分钟，只会把「云端刚刚有了」这件事挡在外面。
+     */
+    private static final int AI_CACHE_MAX_ENTRIES = 64;
+    private static final long AI_CACHE_TTL_MS = 6 * 60 * 1000L;
+    private static final Map<String, AiCacheCell> aiCache = new LinkedHashMap<String, AiCacheCell>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, AiCacheCell> eldest) {
+            return size() > AI_CACHE_MAX_ENTRIES;
+        }
+    };
+
+    private static final class AiCacheCell {
+        final String body;
+        final long at;
+
+        AiCacheCell(String body, long at) {
+            this.body = body;
+            this.at = at;
+        }
+    }
+
+    private static String readAiCacheBody(String key, long now) {
+        synchronized (aiCache) {
+            AiCacheCell cell = aiCache.get(key);
+            if (cell == null) return null;
+            if (now - cell.at > AI_CACHE_TTL_MS) {
+                aiCache.remove(key);
+                return null;
+            }
+            return cell.body;
+        }
+    }
+
+    private static void writeAiCacheBody(String key, String body, long now) {
+        synchronized (aiCache) {
+            aiCache.put(key, new AiCacheCell(body, now));
+        }
+    }
+
+    /**
+     * 读一条 AI 云缓存：命中原生副本就直接回，否则发一次请求并把命中的答案留下来。
+     *
+     * 回的是**服务端响应体原文**（字符串），不由原生去解析 JSON —— Capacitor 的嵌套对象
+     * 转换在个别版本上会把内层对象丢成 null，字符串零歧义。
+     */
+    @PluginMethod
+    public void aiCloudCacheGet(PluginCall call) {
+        String key = call.getString("key", "");
+        String url = call.getString("url", "");
+        if (key == null || key.isEmpty() || url == null || url.isEmpty()) {
+            call.reject("Missing cache key or url");
+            return;
+        }
+
+        String cached = readAiCacheBody(key, System.currentTimeMillis());
+        if (cached != null) {
+            JSObject result = new JSObject();
+            result.put("ok", true);
+            result.put("body", cached);
+            result.put("cached", true);
+            call.resolve(result);
+            return;
+        }
+
+        try {
+            Request request = new Request.Builder()
+                .url(url)
+                .get()
+                .header("Accept", "application/json")
+                .build();
+            // 与 httpRequest 同理：等待交给 OkHttp 的线程池，别占着桥线程。
+            call.setKeepAlive(true);
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call httpCall, IOException error) {
+                    call.reject(error.getMessage(), error);
+                }
+
+                @Override
+                public void onResponse(Call httpCall, Response response) {
+                    try (Response body = response) {
+                        ResponseBody responseBody = body.body();
+                        String text = responseBody == null ? "" : responseBody.string();
+                        boolean ok = body.isSuccessful();
+                        if (ok && !text.isEmpty() && text.contains("\"hit\":true")) {
+                            writeAiCacheBody(key, text, System.currentTimeMillis());
+                        }
+                        JSObject result = new JSObject();
+                        result.put("ok", ok);
+                        result.put("body", text);
+                        result.put("cached", false);
+                        call.resolve(result);
+                    } catch (IOException | IllegalArgumentException error) {
+                        call.reject(error.getMessage(), error);
+                    }
+                }
+            });
+        } catch (IllegalArgumentException error) {
+            call.reject(error.getMessage(), error);
+        }
+    }
 
     @Override
     public void load() {
