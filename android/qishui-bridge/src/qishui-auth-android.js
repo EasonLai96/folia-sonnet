@@ -480,8 +480,44 @@ class QishuiAuthRuntime {
         const rawStatus = String(data.status || '').trim().toLowerCase();
         if (rawStatus === '3' || rawStatus === 'confirmed' || data.session_cookie) {
             await this.persistSessionCookies(data.session_cookie || '');
+            // 会话字段也可能直接躺在 JSON 里（不只是 Set-Cookie）。
+            const current = parseCookieString(getConfig().cookie || '');
+            let touched = false;
+            for (const key of ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard']) {
+                const value = data[key] || envelope[key];
+                if (typeof value === 'string' && value) {
+                    current[key] = value;
+                    touched = true;
+                }
+            }
+            if (touched) updateConfig({ cookie: buildCookieString(current) });
+            // 手机点确认之后，真正的会话 cookie 常常**不在这一个响应里**，而是在它给的
+            // redirect_url 上（ly-music-source 的原话：「Phone confirmed — keep polling
+            // until session cookies arrive」「Some flows put a redirect_url; try harvest
+            // cookies once」）。少了这一步，手里只有 get_qrcode 阶段就存在的 sid_tt，
+            // 登录判定（只要任一登录键命中）会被骗过，而 /luna 回 1000016。
+            await this.harvestRedirectCookies(String(data.redirect_url || data.redirect || ''));
+            syncNativeCookiesIntoConfig();
         }
         return envelope;
+    }
+
+    /** 原样 GET 一次确认后给的跳转地址，只为让宿主把 Set-Cookie 收进罐子。 */
+    async harvestRedirectCookies(redirectUrl) {
+        if (!redirectUrl || !/^https?:\/\//i.test(redirectUrl)) return false;
+        const identity = ensureIdentity();
+        try {
+            await pageRequest({
+                method: 'GET',
+                url: redirectUrl,
+                headers: this.requestHeaders(identity, ''),
+                body: null,
+                timeout: 15000,
+            });
+        } catch (_) {
+            return false;
+        }
+        return true;
     }
 
     async persistSessionCookies(sessionCookie) {

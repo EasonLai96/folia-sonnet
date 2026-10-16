@@ -7955,8 +7955,37 @@
           const rawStatus = String(data.status || "").trim().toLowerCase();
           if (rawStatus === "3" || rawStatus === "confirmed" || data.session_cookie) {
             await this.persistSessionCookies(data.session_cookie || "");
+            const current = parseCookieString(getConfig().cookie || "");
+            let touched = false;
+            for (const key of ["sessionid", "sessionid_ss", "sid_tt", "sid_guard"]) {
+              const value = data[key] || envelope[key];
+              if (typeof value === "string" && value) {
+                current[key] = value;
+                touched = true;
+              }
+            }
+            if (touched) updateConfig({ cookie: buildCookieString(current) });
+            await this.harvestRedirectCookies(String(data.redirect_url || data.redirect || ""));
+            syncNativeCookiesIntoConfig();
           }
           return envelope;
+        }
+        /** 原样 GET 一次确认后给的跳转地址，只为让宿主把 Set-Cookie 收进罐子。 */
+        async harvestRedirectCookies(redirectUrl) {
+          if (!redirectUrl || !/^https?:\/\//i.test(redirectUrl)) return false;
+          const identity = ensureIdentity();
+          try {
+            await pageRequest({
+              method: "GET",
+              url: redirectUrl,
+              headers: this.requestHeaders(identity, ""),
+              body: null,
+              timeout: 15e3
+            });
+          } catch (_) {
+            return false;
+          }
+          return true;
         }
         async persistSessionCookies(sessionCookie) {
           const current = parseCookieString(getConfig().cookie || "");
@@ -8285,12 +8314,16 @@
       }
       const rawStatus = String(data.status || "").trim().toLowerCase();
       let status = "waiting";
+      let waitingForCookie = false;
       if (errorCode === 2 || /^(4|5|expired|timeout)$/.test(rawStatus)) status = "expired";
       else if (errorCode === 7) status = "rate_limited";
       else if (/^(2|scanned|scan)$/.test(rawStatus)) status = "scanned";
-      else if (/^(3|confirmed|confirm)$/.test(rawStatus)) status = "confirmed";
+      else if (/^(3|confirmed|confirm)$/.test(rawStatus)) {
+        status = "scanned";
+        waitingForCookie = true;
+      }
       const sessionKeys = cookieKeyNames(bridge.getCookie());
-      const confirmedWithoutCookie = status === "confirmed" ? "已确认但未拿到会话 Cookie（config: " + sessionKeys + " / host: " + hostCookieKeys() + "）" : "";
+      const confirmedWithoutCookie = status === "scanned" && waitingForCookie ? "手机已确认，正在等待下发会话 Cookie（config: " + sessionKeys + " / host: " + hostCookieKeys() + "）" : "";
       return {
         provider: "qishui",
         loggedIn: false,

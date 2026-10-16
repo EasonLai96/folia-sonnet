@@ -265,15 +265,23 @@ const handlers = {
         // 状态词表与桌面端一致：未知状态宁可继续等，也不要凭空报错。
         const rawStatus = String(data.status || '').trim().toLowerCase();
         let status = 'waiting';
+        // 手机确认了但会话 cookie 还没到手（真正的下发在 redirect_url 上，见裁剪版签名层
+        // 的 harvestRedirectCookies）：继续当 scanned 轮询，别在这里收尾 —— 一收尾轮询就停，
+        // cookie 永远拿不到，表现就是「登录成功但什么数据都没有」。
+        let waitingForCookie = false;
         if (errorCode === 2 || /^(4|5|expired|timeout)$/.test(rawStatus)) status = 'expired';
         else if (errorCode === 7) status = 'rate_limited';
         else if (/^(2|scanned|scan)$/.test(rawStatus)) status = 'scanned';
-        else if (/^(3|confirmed|confirm)$/.test(rawStatus)) status = 'confirmed';
+        else if (/^(3|confirmed|confirm)$/.test(rawStatus)) {
+            status = 'scanned';
+            waitingForCookie = true;
+        }
         // 确认了却没拿到会话 Cookie：把两侧 cookie 的键名都带进 message，
         // 这样下一次诊断一眼能分清「宿主压根没 cookie」还是「有 cookie 但不含 sessionid」。
         const sessionKeys = cookieKeyNames(bridge.getCookie());
-        const confirmedWithoutCookie = status === 'confirmed'
-            ? '已确认但未拿到会话 Cookie（config: ' + sessionKeys + ' / host: ' + hostCookieKeys() + '）'
+        const confirmedWithoutCookie = status === 'scanned' && waitingForCookie
+            ? '手机已确认，正在等待下发会话 Cookie（config: ' + sessionKeys
+                + ' / host: ' + hostCookieKeys() + '）'
             : '';
         return {
             provider: 'qishui',
