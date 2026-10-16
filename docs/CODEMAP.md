@@ -20,8 +20,8 @@
 | utils | 128+ |
 | backend/electron | 64+ |
 | hooks | 64+ |
+| src (其他) | 64+ |
 | 其他 | 64+ |
-| src (其他) | 32+ |
 | stores | 32+ |
 | types | 16+ |
 | i18n | 4+ |
@@ -36,12 +36,12 @@
 | 512+ | `src/types.ts` |
 | 128+ | `src/types/onlineMusic.ts` |
 | 64+ | `src/components/command-palette/types.ts` |
-| 64+ | `src/components/visualizer/colorMix.ts` |
 | 64+ | `src/library/core/contracts/suite.ts` |
 | 64+ | `src/stores/usePlaybackStore.ts` |
 | 64+ | `src/stores/useStatusMessageStore.ts` |
 | 64+ | `src/types/ponder.ts` |
 | 64+ | `src/utils/appPlaybackGuards.ts` |
+| 64+ | `src/utils/visualizer/colorMix.ts` |
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/ponder/surfaces/ponderSurfaceGeometry.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
@@ -57,9 +57,12 @@
 | 32+ | `src/services/db.ts` |
 | 32+ | `src/services/onlineMusic/omni.ts` |
 | 32+ | `src/services/onlineMusic/songMetadata.ts` |
+| 32+ | `src/stores/motionSignals.ts` |
 | 32+ | `src/stores/useAppViewStore.ts` |
 | 32+ | `src/stores/useAudioSettingsStore.ts` |
+| 32+ | `src/stores/useOnlineProviderAccountStore.ts` |
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
+| 32+ | `src/stores/useVisualizerSettingsStore.ts` |
 | 32+ | `src/types/localLibrary.ts` |
 | 32+ | `src/utils/coverUrl.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
@@ -233,20 +236,5 @@
 规则是人定的（见 `codemap.mjs` 的 `BOUNDARY_RULES`），拿真实的值导入图去比对。
 `import type` 不算——它在运行时不存在。
 
-下面这些边的依赖方向本身就是错的：
-
-- `src/stores/useVisualizerSettingsStore.ts` → `src/components/visualizer/registry.tsx`  —— store 不应依赖组件
-
-### 目录归属存疑
-
-这些边命中了规则，但目标模块在运行时根本不含 UI（不传递依赖 react）。
-依赖方向没问题，是文件住在了 UI 目录（`src/components/`、`src/library/` 的 suites / app）下面。修法是移动文件，不是改依赖。
-
-- `src/services/obs/visualSettingsConfig.ts` → `src/components/visualizer/tuningRegistry.ts`
-- `src/services/ponder/pagePonderTarget.ts` → `src/components/modal/settings/navigation/settingsAnchorModel.ts`
-- `src/services/sync/settingsSnapshot.ts` → `src/components/visualizer/tuningRegistry.ts`
-- `src/stores/usePlaybackStore.ts` → `src/components/app/playback/createCoverUrlResolver.ts`
-- `src/stores/useSettingsModalStore.ts` → `src/components/command-palette/pinnedCommandPreferences.ts`
-- `src/stores/visualizerSettingsPersistence.ts` → `src/components/visualizer/diorama/dioramaMoteField.ts`
-- `src/utils/themeColorMath.ts` → `src/components/visualizer/colorMix.ts`
+当前没有违规。
 
