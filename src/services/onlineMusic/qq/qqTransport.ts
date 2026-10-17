@@ -280,10 +280,28 @@ const assertUpstreamAccepted = (operation: QqOperation, body: any): void => {
     }
 };
 
+/**
+ * 安卓内置那份 QQ 接口（src/nativeBridge/api/qq.js）把换票得到的 cookie 放在
+ * `session.cookie` 上，不是顶层 `cookie`。只认顶层就等于「手机上明明确认了，会话却没存下」，
+ * 紧接着的 user_detail 于是报 `no backend session stored`、登录停在 account-not-read。
+ */
+const firstCookieString = (body: any): string => {
+    const candidates = [body?.cookie, body?.data?.cookie, body?.session?.cookie];
+    for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    const list = body?.session?.cookieList;
+    if (Array.isArray(list) && list.length) {
+        const joined = list.filter((item: unknown) => typeof item === 'string' && item.trim()).join('; ');
+        if (joined) return joined;
+    }
+    return '';
+};
+
 const persistConfirmedSession = (operation: QqOperation, body: any): void => {
     if (operation !== 'login_qr_check' || Number(body?.code) !== QR_CONFIRMED_CODE) return;
-    const cookie = body?.cookie;
-    if (typeof cookie === 'string' && cookie) writeProviderSessionValue('qq', 'cookie', cookie);
+    const cookie = firstCookieString(body);
+    if (cookie) writeProviderSessionValue('qq', 'cookie', cookie);
 };
 
 /** 网页版配置的远端 API 地址（自检与诊断报告用）；桌面版走内嵌后端，返回 null。 */

@@ -398,13 +398,16 @@ const clearWebDeviceIdentity = (): void => {
 };
 
 const persistWebSession = (response: any): void => {
-    const cookies = response?.cookie || response?.data?.cookie;
+    // 安卓内置那份酷狗接口（src/nativeBridge/api/kugou.js）登录成功时**不回 cookie 字段**：
+    // 凭据已经写进原生的 cookie 罐了，返回体里只有 userId / token。只认 cookie 就等于
+    // 「扫码确认了、会话却没存」，下一步 user_detail 读不到账号。
+    const cookies = response?.cookie || response?.data?.cookie || response?.session?.cookie;
     if (typeof cookies === 'string' && cookies) writeProviderSessionValue('kugou', 'cookie', cookies);
     if (Array.isArray(cookies) && cookies.length) writeProviderSessionValue('kugou', 'cookie', cookies.join('; '));
 
     const payload = response?.data || response?.body?.data || response?.body || response;
     const token = payload?.token;
-    const userId = payload?.userid ?? payload?.user_id;
+    const userId = payload?.userid ?? payload?.user_id ?? payload?.userId;
     const dfid = payload?.dfid;
     if (token) writeProviderSessionValue('kugou', 'token', String(token));
     if (userId) writeProviderSessionValue('kugou', 'userid', String(userId));
