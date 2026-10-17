@@ -64,6 +64,7 @@ import { showLatticeFmNotice, usePlaybackEntryViewStore } from '../../../../stor
 import { useStableActionSurface } from '../../../../hooks/useStableCallbacks';
 import { hasBeforePlayHook, notifyPlaybackFailed, runBeforePlayHook } from '../../../../services/hostExtensionHooks';
 import { errorMessage } from '../../../../utils/errorText';
+import { isPlaybackInterfaceHidden, notifyBackgroundPlaybackNotice } from '../../../../services/playbackRecovery/backgroundFailureNotice';
 
 // src/components/app/playback/start/usePlaybackQueueController.ts
 
@@ -578,13 +579,14 @@ export function usePlaybackQueueController({
                 setStatusMsg(withSignInAction(shown, said, t));
             };
             if (stopsPlayback(shown, readAutoSkipUnplayable())) {
+                if (isPlaybackInterfaceHidden()) notifyBackgroundPlaybackNotice(said.text);
                 stopHere();
                 tellFailure(shown, false);
                 return;
             }
             const nextSong = getNextPlayableQueueSong(queueContext, song, isFmCall);
             if (nextSong && skipCount < MAX_UNAVAILABLE_AUTO_SKIP_COUNT) {
-                showTimedSkipPrompt(said, () => {
+                const skipNow = () => {
                     if (!isLatestPlaybackRequest()) return;
                     // A queue given here and not yet in the store is the one kept; else the queue of now,
                     // so that edits made meanwhile are not undone.
@@ -593,10 +595,21 @@ export function usePlaybackQueueController({
                         ...deferredPlayOptions,
                         unavailableSkipCount: skipCount + 1,
                     });
-                }, stopsPlayback(shown) ? () => { if (isLatestPlaybackRequest()) stopHere(); } : undefined);
+                };
+                // 后台不排倒计时（timer 会被节流甚至冻结）：当场跳走，原因交给系统气泡。
+                if (isPlaybackInterfaceHidden()) {
+                    notifyBackgroundPlaybackNotice(`${said.text} · ${t('status.autoSkippedNext')}`);
+                    skipNow();
+                    tellFailure(shown, true);
+                    return;
+                }
+                showTimedSkipPrompt(said, skipNow, stopsPlayback(shown) ? () => { if (isLatestPlaybackRequest()) stopHere(); } : undefined);
                 tellFailure(shown, true);
                 return;
             }
+            // 跳不动了（没有下一首，或连跳次数用尽）：后台照样补一句气泡，
+            // 否则用户连「为什么没声了」都无从知道。
+            if (isPlaybackInterfaceHidden()) notifyBackgroundPlaybackNotice(said.text);
             if (stopsPlayback(shown)) {
                 stopHere();
             } else {
@@ -1173,12 +1186,15 @@ export function usePlaybackQueueController({
         };
 
         if (shown && stopsPlayback(shown, readAutoSkipUnplayable())) {
+            if (isPlaybackInterfaceHidden()) notifyBackgroundPlaybackNotice(said.text);
             stopHere(shown);
             tell(false);
             return;
         }
 
         if (!hasNextTrack || skipCount >= MAX_UNAVAILABLE_AUTO_SKIP_COUNT) {
+            // 跳不动了：页面里的提示条在后台根本没渲染，原因只靠系统气泡说一次。
+            if (isPlaybackInterfaceHidden()) notifyBackgroundPlaybackNotice(said.text);
             if (shown && stopsPlayback(shown)) {
                 stopHere(shown);
                 tell(false);
@@ -1206,7 +1222,7 @@ export function usePlaybackQueueController({
         }
 
         const nextSkipCount = skipCount + 1;
-        showTimedSkipPrompt(said, () => {
+        const skipNow = () => {
             playbackAutoSkipCountRef.current = nextSkipCount;
             // The newest handleNextTrack: the queue as it is when the skip comes, edits made meanwhile kept.
             void latestQueueActionsRef.current.handleNextTrack({
@@ -1217,7 +1233,17 @@ export function usePlaybackQueueController({
                 // one on screen. Skipping from the displayed track would step onto the broken one.
                 fromSong: currentSong ?? undefined,
             });
-        }, shown && stopsPlayback(shown) ? () => { if (isFailedPlaybackCurrent()) stopHere(shown); } : undefined);
+        };
+        // 后台不排倒计时：timer 在 WebView 退到后台后会被节流甚至整页冻结，「几秒后自动跳过」
+        // 可以变成再也没跳过，用户只感觉到放着放着就哑了。当场跳走，并把原因交给系统气泡 ——
+        // 那是后台唯一看得见的东西（页面里的提示条此时根本没渲染）。
+        if (isPlaybackInterfaceHidden()) {
+            notifyBackgroundPlaybackNotice(`${said.text} · ${t('status.autoSkippedNext')}`);
+            if (isFailedPlaybackCurrent()) skipNow();
+            tell(true);
+            return;
+        }
+        showTimedSkipPrompt(said, skipNow, shown && stopsPlayback(shown) ? () => { if (isFailedPlaybackCurrent()) stopHere(shown); } : undefined);
         tell(true);
     }, [audioRef, clearPendingUnavailableSkip, currentSong, isFmMode, loopMode, playQueue, playbackAutoSkipCountRef, setPlayerState, shouldAutoPlayRef, showTimedSkipPrompt, t]);
 
