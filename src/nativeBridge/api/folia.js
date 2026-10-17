@@ -677,7 +677,21 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
       ? await qqWechatCheckLoginQr({ qrsig: key.qrsig, ptqrtoken: key.ptqrtoken })
       : await handleQQLoginQrCheck(key.qrsig, key.ptqrtoken);
     if (result?.isOk || result?.loggedIn) {
-      return { code: 803, message: result.message || 'Login successful', cookie: '' };
+      /*
+       * 803 必须**带着会话一起交出去**。
+       *
+       * 页面侧只认这个字段：qqTransport 的 persistConfirmedSession 与 qqProvider 的
+       * checkLogin 都是 `code === 803` 时把 `response.cookie` 写进 localStorage。
+       * 给空串等于「手机上明明确认了、会话却没存下」—— 紧接着的 user_detail 因为
+       * hasQqSession() 为假直接跳过，诊断里就只剩那两行
+       * `session: backend session stored=no` / `no backend session stored`。
+       *
+       * 换票拿到的 cookie 已经写进 jar 了（handleQQLoginQrCheck 里 saveProviderCookie），
+       * 所以这里从 jar 读回一份完整的即可；换票那份能用就先用它。
+       */
+      const cookie = String(result?.session?.cookie || '').trim()
+        || String((await getQQCookie()) || '').trim();
+      return { code: 803, message: result.message || 'Login successful', cookie };
     }
     if (result?.refresh) return { code: 800, message: result.message || 'QR expired' };
     if (result?.status === 'scanned' || Number(result?.code) === 67 || Number(result?.code) === 802) {
