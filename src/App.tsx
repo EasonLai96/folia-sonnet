@@ -106,6 +106,7 @@ import { useColorOsLyricFeed } from './hooks/useColorOsLyricFeed';
 import { useImmersiveLyricsBars } from './hooks/useImmersiveLyricsBars';
 import { useScreenAwake } from './hooks/useScreenAwake';
 import { usePlayerChromeAutoHide } from './hooks/usePlayerChromeAutoHide';
+import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
 import { usePlaybackAudioBridge } from './hooks/usePlaybackAudioBridge';
 import { useTranscodeFallback } from './hooks/useTranscodeFallback';
 import { useAutomixDecks, type AutomixDeckId } from './services/automix/useAutomixDecks';
@@ -1694,6 +1695,38 @@ export default function App() {
     });
 
     /*
+     * 歌词页左右滑动切歌：左滑下一首，右滑上一首。
+     *
+     * 手势挂在最底下那层可视化背景上（z-0 那层）。播放条、按钮、歌词轨都是它的兄弟
+     * 节点或自带手势，所以拖进度条、滚歌词不会误触；反过来在歌词区域上划，事件会
+     * 冒泡上来，一样算数。判定（阈值 / 横纵比）在 utils/playerSwipeGesture。
+     *
+     * 只在播放页生效：同一层在首页和 Lattice 底下也铺着当背景，在那里划一下就切歌
+     * 是既看不见也猜不到的。
+     */
+    const handlePlayerSwipeNext = useCallback(() => {
+        void handleNextTrack();
+    }, [handleNextTrack]);
+
+    const handlePlayerSwipePrev = useCallback(() => {
+        handlePrevTrack();
+    }, [handlePrevTrack]);
+
+    const isPlayerSwipeEnabled = currentView === 'player' && !isPanelOpen;
+
+    const {
+        onPointerDown: handleSwipePointerDown,
+        onPointerMove: handleSwipePointerMove,
+        onPointerUp: handleSwipePointerUp,
+        onPointerCancel: handleSwipePointerCancel,
+        consumeSuppressedClick: consumeSwipeSuppressedClick,
+    } = usePlayerSwipeGesture({
+        enabled: isPlayerSwipeEnabled,
+        onNext: handlePlayerSwipeNext,
+        onPrev: handlePlayerSwipePrev,
+    });
+
+    /*
      * 点击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
      *
      * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，
@@ -1710,6 +1743,8 @@ export default function App() {
      * 「再点一下恢复」当场失效。那一档的显隐本来归空闲时钟管，点一下让它显出来正是它的语义。
      */
     const handleVisualSurfaceClick = useCallback(() => {
+        // 滑动切完歌浏览器照旧补一个 click，那不是「点了一下空白」，别翻控件显隐。
+        if (consumeSwipeSuppressedClick()) return;
         if (isPanelOpen) {
             handleContainerClick();
             return;
@@ -1717,7 +1752,7 @@ export default function App() {
         if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
             setIsPlayerChromeHidden(prev => !prev);
         }
-    }, [currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
+    }, [consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
 
     const { personalFmSelection, personalFmSelectionLabel, isPersonalFmModeSupported, setPersonalFmSelection } = usePersonalFmModeController({
         isFmMode,
@@ -2991,8 +3026,16 @@ export default function App() {
                 // 兄弟节点不受影响（见 index.css 的 [data-lyric-flat] 段）。
                 data-folia-lyric-surface="1"
                 data-library-backdrop-blur={blursVisualizerBackdrop || undefined}
-                style={visualizerBackdropStyle(blursVisualizerBackdrop)}
+                style={{
+                    ...visualizerBackdropStyle(blursVisualizerBackdrop),
+                    // 横向留给切歌手势：不让浏览器拿去平移或划选歌词，纵向照旧。
+                    ...(isPlayerSwipeEnabled ? { touchAction: 'pan-y' } : {}),
+                }}
                 onClick={handleVisualSurfaceClick}
+                onPointerDown={handleSwipePointerDown}
+                onPointerMove={handleSwipePointerMove}
+                onPointerUp={handleSwipePointerUp}
+                onPointerCancel={handleSwipePointerCancel}
             >
                 <PlayerBottomBarLayoutContext.Provider value={currentView === 'player'}>
                     {shouldMountVisualizer && <VisualizerRenderer {...visualizerRendererModel} />}

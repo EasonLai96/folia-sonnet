@@ -1,0 +1,76 @@
+// src/hooks/usePlayerSwipeGesture.ts
+// 歌词页（播放页）视觉层上的左右滑动切歌。
+//
+// 两条容易踩的线：
+//
+//  1. 触发后浏览器照旧会在松手时补一个 click。歌词页空白的 click 是「控件显隐
+//     翻转」（App.tsx 的 handleVisualSurfaceClick），不吃掉的话每切一首歌控件
+//     的显隐就翻一次 —— 所以这里留了 suppressClickRef，由 click 处理器先问一句
+//     consumeSuppressedClick()。
+//
+//  2. 只在横向明显主导时才算数（判定见 utils/playerSwipeGesture），否则会和
+//     Monet 歌词轨那种纵向 touchmove 抢事件。
+//
+// 判定本身是纯函数，不碰 DOM 也不碰 React —— 单测直接测那个。
+
+import { useCallback, useRef } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { resolvePlayerSwipe, type PlayerSwipePoint } from '../utils/playerSwipeGesture';
+
+interface UsePlayerSwipeGestureOptions {
+    enabled: boolean;
+    onNext: () => void;
+    onPrev: () => void;
+}
+
+export interface PlayerSwipeGestureBinding {
+    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
+    /** click 处理器开头先问一句：这次 click 是刚才那次滑动的尾巴吗？问过即作废。 */
+    consumeSuppressedClick: () => boolean;
+}
+
+export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwipeGestureOptions): PlayerSwipeGestureBinding {
+    const startRef = useRef<PlayerSwipePoint | null>(null);
+    const triggeredRef = useRef(false);
+    // 这个标记要活过 pointerup —— click 是在它之后才到的，所以收尾时不能清它。
+    const suppressClickRef = useRef(false);
+
+    const finish = useCallback(() => {
+        startRef.current = null;
+        triggeredRef.current = false;
+    }, []);
+
+    const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        // 上一次手势的 click 已经派发完了（click 总在 pointerup 之后），这里可以安全重置。
+        suppressClickRef.current = false;
+        if (!enabled) return;
+        startRef.current = { x: event.clientX, y: event.clientY };
+        triggeredRef.current = false;
+    }, [enabled]);
+
+    const onPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        const start = startRef.current;
+        if (!enabled || !start || triggeredRef.current) return;
+        const direction = resolvePlayerSwipe(start, { x: event.clientX, y: event.clientY });
+        if (!direction) return;
+        // 一次手势只切一首：手指继续往同一边划不该连切。
+        triggeredRef.current = true;
+        suppressClickRef.current = true;
+        if (direction === 'next') onNext();
+        else onPrev();
+    }, [enabled, onNext, onPrev]);
+
+    const onPointerUp = useCallback(() => finish(), [finish]);
+    const onPointerCancel = useCallback(() => finish(), [finish]);
+
+    const consumeSuppressedClick = useCallback(() => {
+        if (!suppressClickRef.current) return false;
+        suppressClickRef.current = false;
+        return true;
+    }, []);
+
+    return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, consumeSuppressedClick };
+}
