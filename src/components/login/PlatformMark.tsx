@@ -53,7 +53,7 @@ export const PlatformMark: React.FC<PlatformMarkProps> = ({ providerId, label, s
  * 有的平台的头像只在 http 上。
  *
  * 「App 里」不只是桌面端：安卓 WebView 里页面同样不是那个会被 mixed-content 拦下的普通网页，
- * 而 QQ / 酷狗那几家的头像域名在 https 上未必给得出图 —— 一律改写成 https 就是「头像永远是空的」。
+ * 而有些平台的头像域名在 https 上未必给得出图 —— 一律改写成 https 就是「头像永远是空的」。
  */
 export const accountPictureSrc = (avatarUrl: string, inApp: boolean): string => (
     inApp ? avatarUrl : avatarUrl.replace(/^http:/, 'https:')

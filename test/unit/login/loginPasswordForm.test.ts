@@ -40,11 +40,15 @@ describe('the password form of a sign-in', () => {
         }),
     ));
 
-    const fields = (): { url: HTMLInputElement | null; name: HTMLInputElement | null; secret: HTMLInputElement | null } => ({
-        url: place.querySelector<HTMLInputElement>('input[type="text"]'),
-        name: place.querySelectorAll<HTMLInputElement>('input[type="text"]')[1] ?? null,
-        secret: place.querySelector<HTMLInputElement>('input[type="password"]'),
-    });
+    const fields = (): { url: HTMLInputElement | null; name: HTMLInputElement | null; secret: HTMLInputElement | null } => {
+        // 用户名与服务器地址都是 text 框：要填地址时它是第一个，否则用户名就是第一个。
+        const texts = [...place.querySelectorAll<HTMLInputElement>('input[type="text"]')];
+        return {
+            url: texts.length > 1 ? texts[0] : null,
+            name: texts.length > 1 ? texts[1] : texts[0] ?? null,
+            secret: place.querySelector<HTMLInputElement>('input[type="password"]'),
+        };
+    };
 
     beforeEach(() => {
         (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
