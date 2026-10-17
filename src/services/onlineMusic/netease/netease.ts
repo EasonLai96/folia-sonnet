@@ -5,6 +5,11 @@ import type { PersonalFmRequestOptions, ProviderSongAvailability } from '../../.
 import { withLoginRequestLimit } from '../login/loginRequestLimit';
 import { withOnlineRequestLimit } from '../failure/onlineRequestLimit';
 import { errorFields } from '../../../utils/errorText';
+import {
+  isFoliaExtensionBridgeAvailable,
+  isFoliaExtensionBridgeConfigured,
+  requestFoliaExtension,
+} from '../../foliaExtensionBridge';
 
 type UnavailableSongReplacement = {
   replacementSong: SongResult;
@@ -172,6 +177,37 @@ const getApiBase = async () => {
 // the sign-in's limit; an HTTP error answer to it throws NeteaseLoginHttpError instead of being read as
 // an answer. 'online': a song's address or a collection's tracks, with the limit of online requests.
 const fetchWithCreds = async (endpoint: string, options: RequestInit = {}, limit?: 'sign-in' | 'online') => {
+  // 本地登录：API base 写成 extension 时请求不再出网，交给内置在 App 里的那份接口代码
+  // （Android 上是 src/nativeBridge/api/folia.js + 原生 OkHttp，网页版是 Folia Bridge 扩展）。
+  // 没配后端但桥可用时也走这里 —— 桌面/网页装了扩展就是这个组合。
+  // 少了这一段，`extension` 会被当成真地址拼进 `${base}${endpoint}`（https://localhost/extension/...），
+  // WebView 自己的服务器回一个 index.html → 二维码与歌单全部读不出来。
+  const configuredApiBase = getConfiguredApiBase();
+  const extensionConfigured = isFoliaExtensionBridgeConfigured(configuredApiBase);
+  if (!isElectronRuntime() && (extensionConfigured || !configuredApiBase)) {
+    const bridgeAvailable = await isFoliaExtensionBridgeAvailable();
+    if (bridgeAvailable) {
+      const target = new URL(endpoint, 'https://folia.local');
+      const query = Object.fromEntries(target.searchParams.entries());
+      const response = await requestFoliaExtension<Record<string, any>>({
+        provider: 'netease',
+        operation: target.pathname,
+        path: target.pathname,
+        method: options.method || 'GET',
+        query,
+        body: options.body,
+        headers: Object.fromEntries(new Headers(options.headers || {}).entries()),
+      });
+      if (response?.__foliaBridgeError) {
+        throw new Error(response.message || response.__foliaBridgeError);
+      }
+      return response;
+    }
+    if (extensionConfigured) {
+      throw new Error(NETEASE_API_UNAVAILABLE);
+    }
+  }
+
   const base = await getApiBase();
   const url = `${base}${endpoint}`;
   // Ensure we send credentials to persist session (cookies)

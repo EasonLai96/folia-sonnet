@@ -1,6 +1,7 @@
 import md5 from 'blueimp-md5';
 import { OnlineProviderError } from '../../../types/onlineMusic';
 import { readProviderSessionValue, removeProviderSessionValue, writeProviderSessionValue } from '../providerStorage';
+import { isFoliaExtensionBridgeConfigured, requestFoliaExtension } from '../../foliaExtensionBridge';
 import { lyricProxyWebUrl, requestLyricProxyOnDesktop } from '../../lyricProxy';
 import { withLoginRequestLimit } from '../login/loginRequestLimit';
 
@@ -460,6 +461,37 @@ export const requestKugou = async <T = unknown>(operation: KugouOperation, param
     if (!base) {
         throw new OnlineProviderError('unavailable', KUGOU_API_BASE_MISSING, 'kugou');
     }
+
+    // 本地登录：酷狗的接口代码就内置在 App 里（Android 是 src/nativeBridge/api/kugou.js + 原生
+    // OkHttp，网页版是 Folia Bridge 扩展），凭据也留在原生的 cookie 库，请求不出网。
+    // API base 写成 `extension` 就是这个意思 —— 没有这一段，它会被当成真地址拼到
+    // `https://localhost/extension/...` 上，WebView 自己的服务器回一个 index.html，
+    // 于是「二维码加载失败」「歌单拉不到」全是同一个根因。
+    if (isFoliaExtensionBridgeConfigured(base)) {
+        try {
+            const bridged = await requestFoliaExtension<any>({
+                provider: 'kugou',
+                operation,
+                method: 'GET',
+                params,
+            });
+            if (bridged?.__foliaBridgeError) {
+                if (bridged.__foliaBridgeError === 'AUTH_REQUIRED') {
+                    throw new OnlineProviderError('auth-required', bridged.message || 'KuGou login required', 'kugou', bridged);
+                }
+                if (bridged.__foliaBridgeError === 'UNSUPPORTED') {
+                    throw new OnlineProviderError('unsupported', bridged.message || `KuGouMusicApi has no ${operation} route`, 'kugou', bridged);
+                }
+                throw new OnlineProviderError('network', bridged.message || bridged.__foliaBridgeError, 'kugou', bridged);
+            }
+            persistWebSession(bridged);
+            return bridged as T;
+        } catch (error) {
+            if (error instanceof OnlineProviderError) throw error;
+            throw toKugouProviderError(operation, error);
+        }
+    }
+
     const execute = async (targetOperation: KugouOperation, targetParams: KugouParams): Promise<any> => {
         const query = new URLSearchParams();
         Object.entries(targetParams).forEach(([key, value]) => {

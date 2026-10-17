@@ -1,6 +1,6 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
 import type { OnlineFailureDetail, OnlineFailureOperation } from '../../../types/onlineMusic';
-import { BODIAN_BRIDGE_FAILED, BODIAN_NEEDS_DESKTOP } from './bodianTransport';
+import { BODIAN_BRIDGE_FAILED, BODIAN_LOCAL_BRIDGE_FAILED, BODIAN_NEEDS_BRIDGE } from './bodianTransport';
 
 // src/services/onlineMusic/bodian/bodianFailure.ts
 // What a Bodian request for a song's audio or a collection's tracks that failed hands to the shared
@@ -16,10 +16,12 @@ const PREVIEW_UNAVAILABLE = 'Bodian preview is unavailable';
 
 export const describeBodianFailure = (_operation: OnlineFailureOperation, error: unknown): OnlineFailureDetail | null => {
     if (!(error instanceof OnlineProviderError) || error.providerId !== 'bodian') return null;
-    // This page has no desktop bridge (the web build): Bodian cannot be used here at all.
-    if (error.message === BODIAN_NEEDS_DESKTOP) return { case: 'not-configured' };
+    // 这台设备上没有可用桥（网页版，或 App 里没配 `extension`）：波点在这里根本用不了。
+    if (error.message === BODIAN_NEEDS_BRIDGE) return { case: 'not-configured' };
     // The bridge itself failed (the main process threw): the local service, not the network.
-    if (error.message === BODIAN_BRIDGE_FAILED) return { case: 'local-service-stopped' };
+    if (error.message === BODIAN_BRIDGE_FAILED || error.message === BODIAN_LOCAL_BRIDGE_FAILED) {
+        return { case: 'local-service-stopped' };
+    }
     // Without a session the package answers a right it was not given with auth-required: nobody is signed in.
     if (error.code === 'auth-required' && (error.message === ADDITIONAL_RIGHTS || error.message === RIGHTS_UNAVAILABLE)) {
         return { signedOut: true };
