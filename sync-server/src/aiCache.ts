@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { requireAdmin } from './admin.js';
 import type { D1Database, Env } from './app.js';
+import { looseSongTitle, rankSongTitleMatch } from './songTitleMatch.js';
 import { readHighlightWords, verifyStageUpload } from './stageVerifier.js';
 
 // src/aiCache.ts
@@ -331,6 +332,13 @@ const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) =>
 
 /** 一个键一次给多少条候选去判合规 —— 多了只是让客户端多比几遍。 */
 const MAX_RESOLVE_CANDIDATES = 12;
+/**
+ * 模糊匹配先捞多少行回来打分。
+ *
+ * LIKE '%…%' 用不上索引，而「哪条才是同一首歌」只有压成核心名之后才知道 —— 这件事
+ * SQL 做不了，只好先多捞一点、在本机排完再截断。payload 只给最后那几条 parse。
+ */
+const MAX_RESOLVE_SCAN_ROWS = 200;
 
 export interface ResolveCandidate {
   key: string;
@@ -359,15 +367,21 @@ export const findResolveCandidates = async (
 ): Promise<ResolveCandidate[]> => {
   const title = String(songTitle ?? '').trim().slice(0, MAX_TITLE_CHARS);
   if (!title) return [];
+  /*
+   * 两个 LIKE 都收：库里那条更长的（「晴天 现场」）命中第一个，完全相等的命中
+   * `song_title = ?`。请求更长那一种（「晴天 (Live)」）已经被 `loose` 压短成「晴天」，
+   * 于是反过来能配上库里的短名 —— 这正是括号/后缀那批歌以前配不上的方向。
+   */
+  const loose = looseSongTitle(title) || title;
   const rows = await db
     .prepare(
       `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
        FROM ai_cache
-       WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\')
+       WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\')
        ORDER BY (song_title = ?) DESC, updated_at DESC
        LIMIT ?`,
     )
-    .bind(kind, title, `%${escapeLike(title)}%`, title, MAX_RESOLVE_CANDIDATES)
+    .bind(kind, title, `%${escapeLike(loose)}%`, `%${escapeLike(title)}%`, title, MAX_RESOLVE_SCAN_ROWS)
     .all<{
       cache_key: string;
       song_title: string | null;
@@ -378,7 +392,17 @@ export const findResolveCandidates = async (
       payload_json: string | null;
     }>();
 
-  return (rows.results ?? []).map((row) => {
+  const ranked = (rows.results ?? [])
+    .map((row) => ({ row, rank: rankSongTitleMatch(String(row.song_title ?? ''), title) }))
+    /* 归一后对不上的不算候选 —— 光靠原样包含捞回来的，高亮词那关也过不去。 */
+    .filter((entry) => entry.rank < 3)
+    .sort((left, right) => (
+      left.rank - right.rank
+      || String(right.row.updated_at ?? '').localeCompare(String(left.row.updated_at ?? ''))
+    ))
+    .slice(0, MAX_RESOLVE_CANDIDATES);
+
+  return ranked.map(({ row }) => {
     let payload: unknown = null;
     try {
       payload = JSON.parse(String(row.payload_json ?? ''));
