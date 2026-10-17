@@ -70,7 +70,7 @@ describe('main pagination compatibility in Library Core', () => {
             getHomeFeed: async () => ({ personalFm: [], dailySongs: [], recommendedCollections: [] }),
             songCoverUrl: () => '', supportsDailySongs: () => false,
         });
-        feed.setOwner({ providerId: 'bodian', userId: 'u' });
+        feed.setOwners([{ providerId: 'bodian', userId: 'u' }]);
         await feed.ensure();
         const t = ((key: string) => key) as unknown as TFunction;
         expect(buildOnlineRadioCards(feed.getSnapshot().data, { t }).map(card => card.id)).toEqual(['personal_fm']);

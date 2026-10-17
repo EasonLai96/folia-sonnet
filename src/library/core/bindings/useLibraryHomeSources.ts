@@ -14,7 +14,7 @@ import { usePersonalFmModeStore } from '../../../stores/usePersonalFmModeStore';
 import { getLocalLibraryAvailability } from '../../../services/localLibraryAvailability';
 import { getPersonalFmSelectionLabel } from '../../../services/onlineMusic/fmModes';
 import { useLibraryAccountProviders } from './useLibraryAccount';
-import { mergeProviderCollections } from '../model/onlineProviderScope';
+import { mergeProviderCollections, mergeProviderFeedOwners } from '../model/onlineProviderScope';
 import { selectIsAllProvidersScope, useLibraryOnlineProviderScopeStore } from '../state/useLibraryOnlineProviderScopeStore';
 
 // src/library/core/bindings/useLibraryHomeSources.ts
@@ -91,10 +91,22 @@ export const useLibraryHomeSources = ({
          *   而别的平台是登录着的。合并出东西了就按「有内容」显示（登录入口仍在缝里的账户位上）。
          */
         const merged = mergeProviderCollections(providers);
+        /*
+         * 收藏专辑与电台跟歌单一样要合并：以前只有 collections 换了，这两份数据还按
+         * 「当前平台」去读 —— 当前这家居然不支持（或没登录）时，专辑与电台两个页签
+         * 就是空的，明明别的平台是登录着的。所以这里把各家（已登录、且这项真的支持）
+         * 算成归属交给两份资源，由它们一家一家问过去再合起来。
+         */
+        const feedOwners = mergeProviderFeedOwners(providers, providerId => readOnlineProviderCapabilities(providerId));
         return {
             ...base,
             collections: merged,
             canUsePlaylists: merged.length > 0,
+            // 能力按「任一家支持」判：它原本是当前平台的能力，当前平台不支持时两个页签
+            // 会显示「该平台不支持」并把合并结果藏掉。
+            canUseAlbums: (feedOwners.albums?.length ?? 0) > 0,
+            canUseRadio: (feedOwners.radio?.length ?? 0) > 0,
+            feedOwners,
             ...(merged.length > 0 ? { accountView: 'authenticated' as const, providerLabel: t('home.allProviders') } : {}),
         };
     }, [

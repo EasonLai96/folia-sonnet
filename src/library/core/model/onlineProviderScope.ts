@@ -1,4 +1,5 @@
 import type { OnlineProviderId, ProviderAccountSummary, ProviderCollection } from '../../../types/onlineMusic';
+import type { LibraryHomeFeedOwner } from '../contracts/homeModel';
 
 // src/library/core/model/onlineProviderScope.ts
 // 首页在线页签「看谁的数据」的两种范围：跟着当前平台（默认），或「全部」—— 把各家已登录平台的歌单合在一起看。
@@ -35,6 +36,41 @@ export const mergeProviderCollections = (
     .flatMap(provider => provider.collections.map(collection => (
         collection.providerId ? collection : { ...collection, providerId: provider.providerId }
     )));
+
+/**
+ * 收藏专辑与电台的归属：各家**已登录**、并且这一项它真的支持的「平台 + 账户」。
+ *
+ * 与歌单那份同理（未登录 / 读失败 / 还在读的平台不进），区别在能力：歌单看的是
+ * `playlists`，专辑看 `userAlbums`、电台看 `recommendations` —— 一家支持歌单不代表
+ * 它支持收藏专辑，混在一起会让不支持的那家白跑一次请求、还把结果标成 partial。
+ *
+ * 能力按平台现读（`omni.getProviderCapabilities`），所以放在 model 之外：这里只认
+ * 已经算好的能力，由调用方读好传进来。
+ */
+export const mergeProviderFeedOwners = (
+    providers: readonly ProviderAccountSummary[],
+    /** 每家平台的能力（调用方现读：provider 可能刚被 mod 移除，读不到要按不支持处理）。 */
+    capabilitiesOf: (providerId: string) => { userLibrary?: boolean; userAlbums?: boolean; recommendations?: boolean },
+): {
+    albums: LibraryHomeFeedOwner[];
+    radio: LibraryHomeFeedOwner[];
+} => {
+    const usable = providers
+        .filter(provider => (
+            provider.availability.configured
+            && (provider.status === 'authenticated' || provider.requiresAccount === false)
+            && provider.user?.id !== undefined && provider.user?.id !== null
+        ))
+        // 与歌单那份一致：整墙按「有内容才进」，这里按「有账户」。
+        .map(provider => ({ providerId: provider.providerId, userId: provider.user!.id! }));
+    return {
+        albums: usable.filter(({ providerId }) => {
+            const capabilities = capabilitiesOf(providerId);
+            return Boolean(capabilities.userLibrary && capabilities.userAlbums);
+        }),
+        radio: usable.filter(({ providerId }) => capabilitiesOf(providerId).recommendations),
+    };
+};
 
 /** 合并视图里有多少家平台真的贡献了歌单（「全部」那一行上可以显示它）。 */
 export const countMergeableProviders = (providers: readonly ProviderAccountSummary[]): number => (

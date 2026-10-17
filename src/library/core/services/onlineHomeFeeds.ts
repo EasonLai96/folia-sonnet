@@ -12,7 +12,10 @@ import type {
 // 组件状态，加载 effect 排在「切 provider 清空」的 effect 前面，切 provider 后新 provider 的列表一直不加载；
 // 晚到的应答也没有归属检查。这里每份数据是一个资源：归属（provider + 账户）由调用方显式设置，
 // 每次读取领一个 generation，换归属 / 重新读取让旧读取作废，晚到的结果直接丢掉。
-// 上游调用经注入的 deps（默认装配在 onlineHomeFeedDeps，单测不经过它）。
+//
+// 归属是**一组**而不是一个：首页「全部」那一屏要把各家登录着的平台合在一起看，收藏专辑与电台
+// 都得一家一家问过去（单个归属时就是原来那一条路）。上游调用经注入的 deps（默认装配在
+// onlineHomeFeedDeps，单测不经过它），所以每个接口都把 providerId 显式传进来。
 
 /** 收藏专辑每页取多少（与原 Grid3D 相同）。 */
 export const FAVORITE_ALBUMS_PAGE_SIZE = 50;
@@ -20,8 +23,8 @@ export const FAVORITE_ALBUMS_PAGE_SIZE = 50;
 export const HOME_FEED_RECOMMENDATION_LIMIT = 35;
 
 export type OnlineHomeFeedDeps = {
-    getUserAlbums(userId: MediaId, page: { limit: number; offset: number }): Promise<ProviderPage<ProviderCollection>>;
-    getHomeFeed(limit: number): Promise<{
+    getUserAlbums(providerId: string, userId: MediaId, page: { limit: number; offset: number }): Promise<ProviderPage<ProviderCollection>>;
+    getHomeFeed(providerId: string, limit: number): Promise<{
         personalFm: SongResult[];
         dailySongs: SongResult[];
         recommendedCollections: ProviderCollection[];
@@ -31,8 +34,12 @@ export type OnlineHomeFeedDeps = {
     supportsDailySongs?(providerId: string): boolean;
 };
 
-const sameOwner = (a: LibraryHomeFeedOwner | null, b: LibraryHomeFeedOwner | null) => (
-    a === b || (Boolean(a) && Boolean(b) && a!.providerId === b!.providerId && String(a!.userId) === String(b!.userId))
+const NO_OWNERS: readonly LibraryHomeFeedOwner[] = [];
+
+const sameOwners = (a: readonly LibraryHomeFeedOwner[], b: readonly LibraryHomeFeedOwner[]): boolean => (
+    a === b || (a.length === b.length && a.every((entry, index) => (
+        entry.providerId === b[index].providerId && String(entry.userId) === String(b[index].userId)
+    )))
 );
 
 // omni 在 provider 切换后会以 AbortError 拒绝旧 provider 的应答；那是预期的作废，不当错误记。
@@ -41,8 +48,8 @@ const isAbortError = (error: unknown) => (
 );
 
 /**
- * 通用的首页数据资源。`load` 收到归属与 `isCurrent`（这次读取是否仍有效，分页读取可以据此提前停下）。
- * 失败时保留已有数据、状态记为 error；ensure 只在这个归属下还没成功读过时才读。
+ * 通用的首页数据资源。`load` 收到归属（可能多家）与 `isCurrent`（这次读取是否仍有效，分页读取可以据此提前停下）。
+ * 失败时保留已有数据、状态记为 error；ensure 只在这一组归属下还没成功读过时才读。
  * isComplete 判为不完整的结果照常显示，但不算「读过」，下次 ensure 再读一遍。
  */
 export const createHomeFeedResource = <TData>({
@@ -53,10 +60,11 @@ export const createHomeFeedResource = <TData>({
 }: {
     label: string;
     empty: TData;
-    load: (owner: LibraryHomeFeedOwner, isCurrent: () => boolean) => Promise<TData>;
+    load: (owners: readonly LibraryHomeFeedOwner[], isCurrent: () => boolean) => Promise<TData>;
     isComplete?: (data: TData) => boolean;
 }): LibraryHomeFeedResource<TData> => {
-    let snapshot: LibraryHomeFeedSnapshot<TData> = { owner: null, status: 'idle', loaded: false, data: empty };
+    let owners: readonly LibraryHomeFeedOwner[] = NO_OWNERS;
+    let snapshot: LibraryHomeFeedSnapshot<TData> = { owners: NO_OWNERS, status: 'idle', loaded: false, data: empty };
     let generation = 0;
     const listeners = new Set<() => void>();
 
@@ -66,15 +74,15 @@ export const createHomeFeedResource = <TData>({
     };
 
     const run = async () => {
-        const owner = snapshot.owner;
-        if (!owner) return;
+        const reading = owners;
+        if (reading.length === 0) return;
         const ticket = ++generation;
         const isCurrent = () => ticket === generation;
         commit({ ...snapshot, status: 'loading' });
         try {
-            const data = await load(owner, isCurrent);
+            const data = await load(reading, isCurrent);
             if (!isCurrent()) return;
-            commit({ owner, status: 'ready', loaded: isComplete ? isComplete(data) : true, data });
+            commit({ owners: reading, status: 'ready', loaded: isComplete ? isComplete(data) : true, data });
         } catch (error) {
             if (!isCurrent()) return;
             if (!isAbortError(error)) console.error(`[LibraryHome] Failed to load ${label}`, error);
@@ -90,13 +98,15 @@ export const createHomeFeedResource = <TData>({
                 listeners.delete(listener);
             };
         },
-        setOwner: (owner) => {
-            if (sameOwner(owner, snapshot.owner)) return;
+        setOwners: (next) => {
+            const list = next.length === 0 ? NO_OWNERS : next.map(owner => ({ ...owner }));
+            if (sameOwners(list, owners)) return;
             generation += 1;
-            commit({ owner: owner ? { ...owner } : null, status: 'idle', loaded: false, data: empty });
+            owners = list;
+            commit({ owners: list, status: 'idle', loaded: false, data: empty });
         },
         ensure: () => {
-            if (!snapshot.owner || snapshot.loaded || snapshot.status === 'loading') return Promise.resolve();
+            if (owners.length === 0 || snapshot.loaded || snapshot.status === 'loading') return Promise.resolve();
             return run();
         },
         reload: () => run(),
@@ -104,23 +114,42 @@ export const createHomeFeedResource = <TData>({
 };
 
 /**
- * 按页读完一个账户的收藏专辑（上游顺序）。上游说没有更多、或下一页的 offset 不再前进时停；
- * 读取作废（换了归属）时不再请求后面的页。
+ * 按页读完一组账户的收藏专辑（先家后页，同一家内部照上游顺序）。上游说没有更多、
+ * 或下一页的 offset 不再前进时停；读取作废（换了归属）时不再请求后面的页。
+ *
+ * 一家读失败只是这一家没有专辑，不该把别家已经读到的也拖没 —— 所以每家单独兜住，
+ * 只有作废（AbortError）往上抛（那是换了归属，整次读取都要作数）。
  */
 export const loadAllFavoriteAlbums = async (
     deps: Pick<OnlineHomeFeedDeps, 'getUserAlbums'>,
-    userId: MediaId,
+    owners: readonly LibraryHomeFeedOwner[],
     isCurrent: () => boolean = () => true,
     pageSize = FAVORITE_ALBUMS_PAGE_SIZE,
 ): Promise<ProviderCollection[]> => {
     const albums: ProviderCollection[] = [];
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore && isCurrent()) {
-        const page = await deps.getUserAlbums(userId, { limit: pageSize, offset });
-        albums.push(...page.items);
-        hasMore = page.hasMore && page.nextOffset > offset;
-        offset = page.nextOffset;
+    for (const owner of owners) {
+        let offset = 0;
+        let hasMore = true;
+        while (hasMore && isCurrent()) {
+            let page: ProviderPage<ProviderCollection>;
+            try {
+                page = await deps.getUserAlbums(owner.providerId, owner.userId, { limit: pageSize, offset });
+            } catch (error) {
+                if (isAbortError(error) || !isCurrent()) throw error;
+                console.warn('[LibraryHome] Favorite albums failed for a provider', {
+                    providerId: owner.providerId,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+                break;
+            }
+            // 合并视图里「这家来的」是唯一的身份信息（角标、取曲目、卡片 id 去重），缺了就补上。
+            albums.push(...page.items.map(collection => (
+                collection.providerId ? collection : { ...collection, providerId: owner.providerId }
+            )));
+            hasMore = page.hasMore && page.nextOffset > offset;
+            offset = page.nextOffset;
+        }
+        if (!isCurrent()) return albums;
     }
     return albums;
 };
@@ -131,24 +160,65 @@ export const createFavoriteAlbumsFeed = (
 ): LibraryHomeFeedResource<ProviderCollection[]> => createHomeFeedResource<ProviderCollection[]>({
     label: 'favorite albums',
     empty: [],
-    load: (owner, isCurrent) => loadAllFavoriteAlbums(deps, owner.userId, isCurrent),
+    load: (owners, isCurrent) => loadAllFavoriteAlbums(deps, owners, isCurrent),
 });
 
-/** 电台 feed 资源：私人 FM 与每日推荐只取封面与数量（卡片由 core/model/homeCards 组装）。 */
+/**
+ * 电台 feed 资源：私人 FM 与每日推荐只取封面与数量（卡片由 core/model/homeCards 组装）。
+ *
+ * 多家时合起来看：FM 与每日推荐的封面取第一个有内容的（「全部」视图里它们各只有一张卡），
+ * 每日推荐的数量是各家之和，推荐歌单按家拼在一起、各自标上来自哪家。
+ * 一家没读到只让结果标成 partial（照常显示读到的部分、下次再读），全都没读到才算失败。
+ */
 export const createRadioFeed = (
     deps: Pick<OnlineHomeFeedDeps, 'getHomeFeed' | 'songCoverUrl' | 'supportsDailySongs'>,
 ): LibraryHomeFeedResource<LibraryHomeRadioFeed | null> => createHomeFeedResource<LibraryHomeRadioFeed | null>({
     label: 'radio feed',
     empty: null,
-    load: async (owner) => {
-        const { personalFm, dailySongs, recommendedCollections, partial } = await deps.getHomeFeed(HOME_FEED_RECOMMENDATION_LIMIT);
+    load: async (owners, isCurrent) => {
+        const settled = await Promise.allSettled(
+            owners.map(owner => deps.getHomeFeed(owner.providerId, HOME_FEED_RECOMMENDATION_LIMIT)),
+        );
+        let partial = false;
+        const feeds: { owner: LibraryHomeFeedOwner; feed: Awaited<ReturnType<OnlineHomeFeedDeps['getHomeFeed']>> }[] = [];
+        settled.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                feeds.push({ owner: owners[index], feed: result.value });
+                if (result.value.partial) partial = true;
+                return;
+            }
+            if (isAbortError(result.reason)) throw result.reason;
+            partial = true;
+            console.warn('[LibraryHome] Radio feed failed for a provider', {
+                providerId: owners[index].providerId,
+                message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+            });
+        });
+        if (feeds.length === 0) {
+            throw (settled[0] as PromiseRejectedResult | undefined)?.reason ?? new Error('radio feed unavailable');
+        }
+
+        let personalFmCoverUrl: string | undefined;
+        let dailyCoverUrl = '';
+        let dailyCount = 0;
+        const recommended: ProviderCollection[] = [];
+        feeds.forEach(({ owner, feed }) => {
+            if (!personalFmCoverUrl) personalFmCoverUrl = deps.songCoverUrl(feed.personalFm[0], owner.providerId);
+            if (!dailyCoverUrl) dailyCoverUrl = deps.songCoverUrl(feed.dailySongs[0], owner.providerId) || '';
+            dailyCount += feed.dailySongs.length;
+            recommended.push(...feed.recommendedCollections.map(collection => (
+                collection.providerId ? collection : { ...collection, providerId: owner.providerId }
+            )));
+        });
+
         return {
-            ...(partial ? { partial } : {}),
-            personalFmCoverUrl: deps.songCoverUrl(personalFm[0], owner.providerId),
-            dailyCoverUrl: deps.songCoverUrl(dailySongs[0], owner.providerId) || '',
-            dailyCount: dailySongs.length,
-            supportsDailySongs: deps.supportsDailySongs?.(owner.providerId) ?? true,
-            recommended: recommendedCollections,
+            ...(partial ? { partial: true as const } : {}),
+            personalFmCoverUrl,
+            dailyCoverUrl,
+            dailyCount,
+            // 只要有一家还支持每日推荐，那张卡就留着（各家的内容已经合进同一张）。
+            supportsDailySongs: feeds.some(({ owner }) => deps.supportsDailySongs?.(owner.providerId) ?? true),
+            recommended,
         };
     },
     // 有一块没读到时照常显示读到的部分，但下次进电台页再读一遍（以前整份失败，下次进来也会重读）。

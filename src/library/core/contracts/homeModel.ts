@@ -54,6 +54,14 @@ export type LibraryHomeOnlineSource = {
     canUseRadio: boolean;
     /** provider 支持私人 FM 模式（FM 卡的描述显示当前模式）。 */
     hasPersonalFmModes: boolean;
+    /**
+     * 「全部」视图：收藏专辑与电台从这几家读（各家已登录、并且这一项它真的支持）。
+     * 没有时（普通单平台视图）两份数据都只以当前 provider 为归属。
+     */
+    feedOwners?: {
+        albums?: readonly LibraryHomeFeedOwner[];
+        radio?: readonly LibraryHomeFeedOwner[];
+    };
 };
 
 /** 本地曲库能不能用（浏览器要安全上下文与文件系统 API）。 */
@@ -71,9 +79,10 @@ export type LibraryHomeFeedOwner = {
 export type LibraryHomeFeedStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export type LibraryHomeFeedSnapshot<TData> = {
-    owner: LibraryHomeFeedOwner | null;
+    /** 这组数据从哪些「平台 + 账户」读来的（单平台视图是一个，「全部」是各家已登录的）。 */
+    owners: readonly LibraryHomeFeedOwner[];
     status: LibraryHomeFeedStatus;
-    /** 这个归属下至少成功读到过一次（ensure 据此决定要不要读）。 */
+    /** 这组归属下至少成功读到过一次（ensure 据此决定要不要读）。 */
     loaded: boolean;
     data: TData;
 };
@@ -85,8 +94,11 @@ export type LibraryHomeFeedSnapshot<TData> = {
 export interface LibraryHomeFeedResource<TData> {
     getSnapshot(): LibraryHomeFeedSnapshot<TData>;
     subscribe(listener: () => void): () => void;
-    /** 换归属（null：没有账户或 provider 不支持）：清空数据、作废进行中的读取。同一归属重复设置不起作用。 */
-    setOwner(owner: LibraryHomeFeedOwner | null): void;
+    /**
+     * 换归属（空数组：没有账户或 provider 不支持）：清空数据、作废进行中的读取。同一组归属重复设置不起作用。
+     * 「全部」视图传多家，那时收藏专辑与电台是各家读到的合并结果（见 onlineHomeFeeds）。
+     */
+    setOwners(owners: readonly LibraryHomeFeedOwner[]): void;
     /** 这个归属下还没读到过就读一次；正在读或已读到时什么都不做。 */
     ensure(): Promise<void>;
     /** 不管读没读过都重新读（旧数据保留到新数据到达）；没有归属时什么都不做。 */

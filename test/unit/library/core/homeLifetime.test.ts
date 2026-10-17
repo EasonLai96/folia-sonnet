@@ -80,7 +80,7 @@ describe('home resources across suites', () => {
         const navidromeCalls = navidromeAlbums.mock.calls.length;
 
         releaseLibraryHomeResources(resources);
-        expect(resources.favoriteAlbums.getSnapshot()).toMatchObject({ owner: null, loaded: false, data: [] });
+        expect(resources.favoriteAlbums.getSnapshot()).toMatchObject({ owners: [], loaded: false, data: [] });
         mountSurface(resources, 'albums');
         await flush();
         expect(getUserAlbums).toHaveBeenCalledTimes(2);

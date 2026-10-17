@@ -47,8 +47,17 @@ export const buildOnlinePlaylistCards = (
     }))
 );
 
-/** 收藏专辑页签。 */
-export const buildOnlineAlbumCards = (albums: readonly ProviderCollection[], t: TFunction): LibraryHomeCard[] => (
+/**
+ * 收藏专辑页签。
+ *
+ * `markSourceProvider` 与歌单那一份同理：「全部」视图里合进了各家的专辑，得记住各自来自哪家
+ * （角标、打开专辑取曲目、卡片 id 去重都靠它）。
+ */
+export const buildOnlineAlbumCards = (
+    albums: readonly ProviderCollection[],
+    t: TFunction,
+    { markSourceProvider = false }: { markSourceProvider?: boolean } = {},
+): LibraryHomeCard[] => (
     albums.map(album => ({
         id: album.id,
         name: album.name,
@@ -58,6 +67,7 @@ export const buildOnlineAlbumCards = (albums: readonly ProviderCollection[], t: 
         summary: album.description || '',
         type: 'album',
         raw: album,
+        ...(markSourceProvider && album.providerId ? { sourceProviderId: album.providerId } : {}),
     }))
 );
 
@@ -70,6 +80,8 @@ type RadioSource = {
     summary?: string;
     isFm?: boolean;
     isDailyRecommendations?: boolean;
+    /** 「全部」视图里这张推荐歌单来自哪家。 */
+    sourceProviderId?: string;
 };
 
 /**
@@ -78,7 +90,11 @@ type RadioSource = {
  */
 export const buildOnlineRadioCards = (
     feed: LibraryHomeRadioFeed | null,
-    { t, personalFmModeLabel = '' }: { t: TFunction; personalFmModeLabel?: string },
+    {
+        t,
+        personalFmModeLabel = '',
+        markSourceProvider = false,
+    }: { t: TFunction; personalFmModeLabel?: string; markSourceProvider?: boolean },
 ): LibraryHomeCard[] => {
     if (!feed) return [];
     const sources: RadioSource[] = [
@@ -105,6 +121,7 @@ export const buildOnlineRadioCards = (
                 coverUrl: collection.coverUrl,
                 description,
                 summary: description,
+                ...(collection.providerId ? { sourceProviderId: collection.providerId } : {}),
             };
         }),
     ];
@@ -121,6 +138,9 @@ export const buildOnlineRadioCards = (
                 ? 'daily_recommendations'
                 : 'playlist',
         raw: source,
+        // 私人 FM 与每日推荐在「全部」视图里各只有一张（各家的内容合进同一张卡），
+        // 所以不带角标；只有各家自己的推荐歌单才需要标出来自哪家。
+        ...(markSourceProvider && source.sourceProviderId ? { sourceProviderId: source.sourceProviderId } : {}),
     }));
 };
 

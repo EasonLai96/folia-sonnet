@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderCollection, ProviderPage } from '@/types/onlineMusic';
 import type { SongResult } from '@/types';
+import type { LibraryHomeFeedOwner } from '@/library/core/contracts/homeModel';
 import {
     createFavoriteAlbumsFeed,
     createHomeFeedResource,
@@ -13,6 +14,9 @@ import {
 // test/unit/library/core/onlineHomeFeeds.test.ts
 // 在线首页资源（原 Grid3D 的收藏专辑 / 电台加载）：分页读完、换归属清空并作废进行中的读取、晚到的应答
 // 按 generation 丢掉（切 provider 的竞态）、ensure 只读一次、reload 重新读、失败保留数据。
+//
+// 归属是一组而不是一个：「全部」视图把各家已登录平台合在一起看，收藏专辑与电台要一家一家
+// 问过去再合并。单归属是它的一个特例，多归属那几条钉的是合并本身。
 
 const album = (providerId: string, index: number): ProviderCollection => ({
     providerId,
@@ -20,6 +24,8 @@ const album = (providerId: string, index: number): ProviderCollection => ({
     name: `Album ${index}`,
     type: 'album',
 });
+
+const owner = (providerId: string): LibraryHomeFeedOwner => ({ providerId, userId: `user-${providerId}` });
 
 /** 可控的延迟：每次调用返回一个由测试决定何时完成的 promise。 */
 const deferred = <T>() => {
@@ -32,7 +38,7 @@ const deferred = <T>() => {
     return { promise, resolve, reject };
 };
 
-const pagedAlbums = (providerId: string, total: number) => vi.fn(async (_userId: unknown, page: { limit: number; offset: number }) => {
+const pagedAlbums = (providerId: string, total: number) => vi.fn(async (_providerId: unknown, _userId: unknown, page: { limit: number; offset: number }) => {
     const items = Array.from({ length: Math.max(0, Math.min(page.limit, total - page.offset)) }, (_, index) => album(providerId, page.offset + index));
     const nextOffset = page.offset + items.length;
     return { items, hasMore: nextOffset < total, nextOffset } satisfies ProviderPage<ProviderCollection>;
@@ -43,9 +49,9 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 describe('loadAllFavoriteAlbums', () => {
     it('reads every page in upstream order', async () => {
         const getUserAlbums = pagedAlbums('a', 120);
-        const albums = await loadAllFavoriteAlbums({ getUserAlbums }, 'user-a');
+        const albums = await loadAllFavoriteAlbums({ getUserAlbums }, [owner('a')]);
         expect(albums.map(item => item.id)).toEqual(Array.from({ length: 120 }, (_, index) => `a-album-${index}`));
-        expect(getUserAlbums.mock.calls.map(call => call[1])).toEqual([
+        expect(getUserAlbums.mock.calls.map(call => call[2])).toEqual([
             { limit: FAVORITE_ALBUMS_PAGE_SIZE, offset: 0 },
             { limit: FAVORITE_ALBUMS_PAGE_SIZE, offset: 50 },
             { limit: FAVORITE_ALBUMS_PAGE_SIZE, offset: 100 },
@@ -54,7 +60,7 @@ describe('loadAllFavoriteAlbums', () => {
 
     it('stops when the next offset does not move forward', async () => {
         const getUserAlbums = vi.fn(async () => ({ items: [album('a', 0)], hasMore: true, nextOffset: 0 }));
-        expect(await loadAllFavoriteAlbums({ getUserAlbums }, 'user-a')).toHaveLength(1);
+        expect(await loadAllFavoriteAlbums({ getUserAlbums }, [owner('a')])).toHaveLength(1);
         expect(getUserAlbums).toHaveBeenCalledTimes(1);
     });
 
@@ -65,8 +71,31 @@ describe('loadAllFavoriteAlbums', () => {
             current = false;
             return { items: [album('a', 0)], hasMore: true, nextOffset: 50 };
         });
-        await loadAllFavoriteAlbums({ getUserAlbums }, 'user-a', () => current);
+        await loadAllFavoriteAlbums({ getUserAlbums }, [owner('a')], () => current);
         expect(getUserAlbums).toHaveBeenCalledTimes(1);
+    });
+
+    // 「全部」：两家各读各的，按家的顺序拼起来，每条都记得自己来自哪家。
+    it('reads every owner in order and stamps the source provider on each album', async () => {
+        const getUserAlbums = vi.fn(async (providerId: string, _userId: unknown, page: { limit: number; offset: number }) => (
+            pagedAlbums(providerId, 2)(providerId, _userId, page)
+        ));
+        const albums = await loadAllFavoriteAlbums({ getUserAlbums }, [owner('a'), owner('b')]);
+        expect(albums.map(item => item.id)).toEqual(['a-album-0', 'a-album-1', 'b-album-0', 'b-album-1']);
+        expect(getUserAlbums.mock.calls.map(call => call[0])).toEqual(['a', 'b']);
+    });
+
+    // 一家读失败不该把别家已经读到的也拖没 —— 合起来看的时候这尤其要紧。
+    it('one failing owner does not drop the albums the others already returned', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const getUserAlbums = vi.fn(async (providerId: string, _userId: unknown, page: { limit: number; offset: number }) => {
+            if (providerId === 'a') throw new Error('offline');
+            return pagedAlbums(providerId, 2)(providerId, _userId, page);
+        });
+        const albums = await loadAllFavoriteAlbums({ getUserAlbums }, [owner('a'), owner('b')]);
+        expect(albums.map(item => item.id)).toEqual(['b-album-0', 'b-album-1']);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
     });
 });
 
@@ -77,27 +106,46 @@ describe('createHomeFeedResource', () => {
         await resource.ensure();
         expect(load).not.toHaveBeenCalled();
 
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         await resource.ensure();
         await resource.ensure();
         expect(load).toHaveBeenCalledTimes(1);
         expect(resource.getSnapshot()).toMatchObject({ status: 'ready', loaded: true, data: ['x'] });
     });
 
-    it('setting the same owner again keeps the data; a new owner clears it', async () => {
-        const resource = createHomeFeedResource<string[]>({ label: 'test', empty: [], load: async owner => [owner.providerId] });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+    it('setting the same owners again keeps the data; new owners clear it', async () => {
+        const resource = createHomeFeedResource<string[]>({
+            label: 'test',
+            empty: [],
+            load: async owners => owners.map(entry => entry.providerId),
+        });
+        resource.setOwners([owner('a')]);
         await resource.ensure();
-        resource.setOwner({ providerId: 'a', userId: '1' });
+        resource.setOwners([{ providerId: 'a', userId: 'user-a' }]);
         expect(resource.getSnapshot().data).toEqual(['a']);
 
-        resource.setOwner({ providerId: 'b', userId: 1 });
-        expect(resource.getSnapshot()).toMatchObject({ owner: { providerId: 'b' }, status: 'idle', loaded: false, data: [] });
+        resource.setOwners([owner('b')]);
+        expect(resource.getSnapshot()).toMatchObject({ owners: [{ providerId: 'b' }], status: 'idle', loaded: false, data: [] });
         await resource.ensure();
         expect(resource.getSnapshot().data).toEqual(['b']);
 
-        resource.setOwner(null);
-        expect(resource.getSnapshot()).toMatchObject({ owner: null, status: 'idle', data: [] });
+        resource.setOwners([]);
+        expect(resource.getSnapshot()).toMatchObject({ owners: [], status: 'idle', data: [] });
+    });
+
+    // 「全部」：归属从「两家」变成「一家」也算换了归属（数据要重读），不能只比第一个。
+    it('a different owner set is a new ownership even when the first owner is unchanged', async () => {
+        const resource = createHomeFeedResource<string[]>({
+            label: 'test',
+            empty: [],
+            load: async owners => owners.map(entry => entry.providerId),
+        });
+        resource.setOwners([owner('a'), owner('b')]);
+        await resource.ensure();
+        expect(resource.getSnapshot().data).toEqual(['a', 'b']);
+
+        resource.setOwners([owner('a')]);
+        expect(resource.getSnapshot()).toMatchObject({ status: 'idle', loaded: false, data: [] });
     });
 
     it('drops a late response for the previous owner (provider switch race)', async () => {
@@ -105,22 +153,22 @@ describe('createHomeFeedResource', () => {
         const resource = createHomeFeedResource<string[]>({
             label: 'test',
             empty: [],
-            load: owner => {
+            load: owners => {
                 const next = deferred<string[]>();
-                pending.set(owner.providerId, next);
+                pending.set(owners[0].providerId, next);
                 return next.promise;
             },
         });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         const loadA = resource.ensure();
-        resource.setOwner({ providerId: 'b', userId: 2 });
+        resource.setOwners([owner('b')]);
         const loadB = resource.ensure();
 
         pending.get('b')!.resolve(['b-1']);
         await loadB;
         pending.get('a')!.resolve(['a-1']);
         await loadA;
-        expect(resource.getSnapshot()).toMatchObject({ owner: { providerId: 'b' }, status: 'ready', data: ['b-1'] });
+        expect(resource.getSnapshot()).toMatchObject({ owners: [{ providerId: 'b' }], status: 'ready', data: ['b-1'] });
     });
 
     it('a reload supersedes the read in flight: the older result never lands', async () => {
@@ -134,7 +182,7 @@ describe('createHomeFeedResource', () => {
                 return next.promise;
             },
         });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         const first = resource.ensure();
         const second = resource.reload();
         reads[1].resolve(['new']);
@@ -155,7 +203,7 @@ describe('createHomeFeedResource', () => {
                 return next.promise;
             },
         });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         const first = resource.ensure();
         reads[0].resolve(['one']);
         await first;
@@ -176,7 +224,7 @@ describe('createHomeFeedResource', () => {
             .mockRejectedValueOnce(new Error('offline'))
             .mockResolvedValueOnce(['ok']);
         const resource = createHomeFeedResource<string[]>({ label: 'test', empty: [], load });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         await resource.ensure();
         expect(resource.getSnapshot()).toMatchObject({ status: 'error', loaded: false, data: [] });
         await resource.ensure();
@@ -195,7 +243,7 @@ describe('createHomeFeedResource', () => {
                 throw new DOMException('Active online provider changed', 'AbortError');
             },
         });
-        resource.setOwner({ providerId: 'a', userId: 1 });
+        resource.setOwners([owner('a')]);
         await resource.ensure();
         expect(resource.getSnapshot().status).toBe('error');
         expect(error).not.toHaveBeenCalled();
@@ -207,29 +255,29 @@ describe('online home feeds', () => {
     it('the favorite albums feed pages through the owner\'s albums', async () => {
         const getUserAlbums = pagedAlbums('a', 60);
         const feed = createFavoriteAlbumsFeed({ getUserAlbums });
-        feed.setOwner({ providerId: 'a', userId: 'user-a' });
+        feed.setOwners([owner('a')]);
         await feed.ensure();
         expect(feed.getSnapshot().data).toHaveLength(60);
-        expect(getUserAlbums.mock.calls.every(call => call[0] === 'user-a')).toBe(true);
+        expect(getUserAlbums.mock.calls.every(call => call[1] === 'user-a')).toBe(true);
     });
 
     it('a slow first page from the previous provider stops paging and never lands', async () => {
         const firstPage = deferred<ProviderPage<ProviderCollection>>();
-        const getUserAlbums = vi.fn(async (userId: unknown, page: { limit: number; offset: number }) => {
-            if (userId === 'user-a') return firstPage.promise;
-            return pagedAlbums('b', 3)(userId, page);
+        const getUserAlbums = vi.fn(async (providerId: string, userId: unknown, page: { limit: number; offset: number }) => {
+            if (providerId === 'a') return firstPage.promise;
+            return pagedAlbums('b', 3)(providerId, userId, page);
         });
         const feed = createFavoriteAlbumsFeed({ getUserAlbums });
-        feed.setOwner({ providerId: 'a', userId: 'user-a' });
+        feed.setOwners([owner('a')]);
         const loadA = feed.ensure();
-        feed.setOwner({ providerId: 'b', userId: 'user-b' });
+        feed.setOwners([owner('b')]);
         await feed.ensure();
         firstPage.resolve({ items: [album('a', 0)], hasMore: true, nextOffset: 50 });
         await loadA;
         await flush();
 
         expect(feed.getSnapshot().data.map(item => item.id)).toEqual(['b-album-0', 'b-album-1', 'b-album-2']);
-        expect(getUserAlbums.mock.calls.filter(call => call[0] === 'user-a')).toHaveLength(1);
+        expect(getUserAlbums.mock.calls.filter(call => call[0] === 'a')).toHaveLength(1);
     });
 
     it('the radio feed resolves covers for the owner\'s provider and counts the daily songs', async () => {
@@ -238,10 +286,10 @@ describe('online home feeds', () => {
         const getHomeFeed = vi.fn(async () => ({ personalFm: songs('fm', 2), dailySongs: songs('daily', 4), recommendedCollections: recommended }));
         const songCoverUrl = vi.fn((song: SongResult | undefined, providerId: string) => (song ? `${providerId}:${String(song.id)}` : undefined));
         const feed = createRadioFeed({ getHomeFeed, songCoverUrl });
-        feed.setOwner({ providerId: 'a', userId: 1 });
+        feed.setOwners([owner('a')]);
         await feed.ensure();
 
-        expect(getHomeFeed).toHaveBeenCalledWith(HOME_FEED_RECOMMENDATION_LIMIT);
+        expect(getHomeFeed).toHaveBeenCalledWith('a', HOME_FEED_RECOMMENDATION_LIMIT);
         expect(feed.getSnapshot().data).toEqual({
             personalFmCoverUrl: 'a:fm-0',
             dailyCoverUrl: 'a:daily-0',
@@ -256,7 +304,7 @@ describe('online home feeds', () => {
             getHomeFeed: async () => ({ personalFm: [], dailySongs: [], recommendedCollections: [] }),
             songCoverUrl: () => undefined,
         });
-        feed.setOwner({ providerId: 'a', userId: 1 });
+        feed.setOwners([owner('a')]);
         await feed.ensure();
         expect(feed.getSnapshot().data).toEqual({ personalFmCoverUrl: undefined, dailyCoverUrl: '', dailyCount: 0, recommended: [], supportsDailySongs: true });
     });
@@ -268,7 +316,7 @@ describe('online home feeds', () => {
             .mockResolvedValueOnce({ personalFm: [], dailySongs: [], recommendedCollections: recommended, partial: true as const })
             .mockResolvedValueOnce({ personalFm: [], dailySongs: [{ id: 'd-0' } as unknown as SongResult], recommendedCollections: recommended });
         const feed = createRadioFeed({ getHomeFeed, songCoverUrl: song => (song ? String(song.id) : undefined) });
-        feed.setOwner({ providerId: 'a', userId: 1 });
+        feed.setOwners([owner('a')]);
 
         await feed.ensure();
         expect(feed.getSnapshot()).toMatchObject({ status: 'ready', loaded: false, data: { recommended, dailyCount: 0, partial: true } });
@@ -279,5 +327,43 @@ describe('online home feeds', () => {
 
         await feed.ensure();
         expect(getHomeFeed).toHaveBeenCalledTimes(2);
+    });
+
+    /*
+     * 「全部」的电台：各家各读一次，FM / 每日推荐合进同一张卡（封面取第一个有内容的、
+     * 数量是各家之和），推荐歌单拼在一起并各自标上来自哪家。
+     */
+    it('the radio feed merges every owner: one FM card, summed daily count, tagged recommendations', async () => {
+        const songs = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({ id: `${prefix}-${index}` }) as unknown as SongResult);
+        const getHomeFeed = vi.fn(async (providerId: string) => ({
+            personalFm: providerId === 'a' ? [] : songs('fm', 1),
+            dailySongs: songs(`daily-${providerId}`, 3),
+            recommendedCollections: [album(providerId, 1)],
+        }));
+        const songCoverUrl = vi.fn((song: SongResult | undefined, providerId: string) => (song ? `${providerId}:${String(song.id)}` : undefined));
+        const feed = createRadioFeed({ getHomeFeed, songCoverUrl });
+        feed.setOwners([owner('a'), owner('b')]);
+        await feed.ensure();
+
+        expect(getHomeFeed.mock.calls.map(call => call[0])).toEqual(['a', 'b']);
+        const data = feed.getSnapshot().data!;
+        expect(data.personalFmCoverUrl).toBe('b:fm-0');
+        expect(data.dailyCount).toBe(6);
+        expect(data.recommended.map(item => item.providerId)).toEqual(['a', 'b']);
+    });
+
+    // 一家挂了只让这一屏标成 partial（照常显示、下次再读），全挂才算这一轮失败。
+    it('one provider failing the radio feed leaves a partial feed instead of an error', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const getHomeFeed = vi.fn(async (providerId: string) => {
+            if (providerId === 'a') throw new Error('offline');
+            return { personalFm: [], dailySongs: [], recommendedCollections: [album('b', 1)] };
+        });
+        const feed = createRadioFeed({ getHomeFeed, songCoverUrl: () => undefined });
+        feed.setOwners([owner('a'), owner('b')]);
+        await feed.ensure();
+
+        expect(feed.getSnapshot()).toMatchObject({ status: 'ready', loaded: false, data: { partial: true, recommended: [album('b', 1)] } });
+        warn.mockRestore();
     });
 });
