@@ -296,6 +296,54 @@ describe('prefetchNextSong —— 提前为下一首做准备', () => {
         expect(messages.map((entry) => entry.text)).toContain('aiDirector.toastPrefetchUploaded');
     });
 
+    /*
+     * 用户报的「提示两遍」：播 A 时预取了 B（真的上传 → 说一声），切到 B 再切回 A，
+     * B 又变成了下一首。可它的答案还躺在进程内的 recent 里、云端也已经有了 ——
+     * 这一趟是白拿，一个字节都没上传，不该再报一次「已提前为下一首生成并上传」。
+     *
+     * `source` 沿用的是当初那次的 'ai'（见 aiStage.readRecent 上的注释），它回答不了
+     * 「这一趟有没有真的贡献」，所以这里看的是 `reused`。
+     */
+    it('does not thank twice when the same next track is prefetched again', async () => {
+        omniLyricLines = buildLyricData('下一首的歌词');
+        const { director, playback } = await loadDirector();
+        const a = buildSong('a');
+        const b = buildSong('b');
+        playback.usePlaybackStore.setState({
+            currentSong: a,
+            playQueue: [a, b],
+            lyrics: buildLyricData('当前这首的歌词') as never,
+            transitionDisplay: null,
+        });
+
+        cloudHandler = async () => (
+            { value: { decision: { mode: 'flow', reason: 'r', params: {} } }, source: 'ai' }
+        );
+
+        const thanks = () => messages.filter((entry) => entry.text === 'aiDirector.toastPrefetchUploaded').length;
+
+        /* 第一遍：预取 b，真的上传了 —— 该说一声。 */
+        await runOnce(director);
+        expect(thanks()).toBe(1);
+
+        /* 切到 b，再切回 a：b 重新变成下一首。 */
+        playback.usePlaybackStore.setState({
+            currentSong: b,
+            lyrics: buildLyricData('下一首的歌词') as never,
+        });
+        director.notifyLyricDirectorSongChanged();
+        await runOnce(director);
+
+        playback.usePlaybackStore.setState({
+            currentSong: a,
+            lyrics: buildLyricData('当前这首的歌词') as never,
+        });
+        director.notifyLyricDirectorSongChanged();
+        await runOnce(director);
+
+        expect(thanks()).toBe(1);
+    });
+
     /* 命中缓存那次一个字节都没上传 —— 那不能说「感谢」，本来就是白拿别人的。 */
     it('stays quiet when the prefetch just pulled someone else’s answer', async () => {
         omniLyricLines = buildLyricData('下一首的歌词');

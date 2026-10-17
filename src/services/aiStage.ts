@@ -102,6 +102,17 @@ export interface StageRequest {
 
 export interface StageResult extends StageParts {
     source: AiCloudCacheSource;
+    /**
+     * 这一趟是「拿来主义」：答案直接从进程内取到（最近结果、或蹭了在飞的那次请求），
+     * **这次调用既没调模型、也没往云端写一个字节**。
+     *
+     * `source` 说的是「这份答案当初是哪来的」（进程内命中时沿用那一次真实的来源，
+     * 见 readRecent 上的注释），它回答不了「这一趟有没有真的贡献」—— 而「上传成功，
+     * 感谢你的贡献」「已提前为下一首生成并上传」这两句问的正是后者。少了这个标记，
+     * 同一首歌第二次问（切走再切回来、预取过的下一首再预取一次）会把那句感谢再说
+     * 一遍，其实那趟什么都没上传。
+     */
+    reused?: boolean;
 }
 
 const hasRequired = (parts: StageParts, require: StageRequirement): boolean => {
@@ -482,14 +493,14 @@ export const requestStage = async (request: StageRequest): Promise<StageResult> 
     if (!request.force) {
         const cached = readRecent(ctx.fingerprint);
         if (cached && hasRequired(cached.parts, ctx.requirement)) {
-            return { ...cached.parts, source: cached.source };
+            return { ...cached.parts, source: cached.source, reused: true };
         }
 
         const pending = inFlight.get(ctx.fingerprint);
         if (pending) {
             const shared = await pending.catch(() => null);
             if (shared && hasRequired(shared, ctx.requirement)) {
-                return { ...shared, source: shared.source };
+                return { ...shared, source: shared.source, reused: true };
             }
         }
     }

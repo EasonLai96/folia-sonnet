@@ -401,6 +401,8 @@ const requestDecision = async (input: {
 }): Promise<{
     decision: { mode: string; reason: string; params: Record<string, unknown> };
     source: AiCloudCacheSource;
+    /** 这一趟有没有真的往云端写东西（false = 只是拿了进程里现成的答案）。 */
+    contributed: boolean;
 }> => {
     const settings = readDirectorSettings();
     /*
@@ -411,7 +413,7 @@ const requestDecision = async (input: {
     const controller = new AbortController();
     inFlight.add(controller);
     try {
-        const { decision, source } = await requestStage({
+        const { decision, source, reused } = await requestStage({
             song: input.song,
             lines: input.lines,
             /* 没歌词就是纯音乐，和主题那条链路同一个判定 —— 指纹要对得上。 */
@@ -428,7 +430,7 @@ const requestDecision = async (input: {
             require: 'decision',
         });
         if (!decision) throw new Error('AI 没有返回可用的动画决策。');
-        return { decision, source };
+        return { decision, source, contributed: source !== 'cloud' && reused !== true };
     } finally {
         inFlight.delete(controller);
     }
@@ -469,7 +471,7 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
     inFlightSongKey = liveKey;
     refreshRuntime();
     try {
-        const { decision, source } = await requestDecision({
+        const { decision, contributed } = await requestDecision({
             song: songInfoOf(displaySong()),
             lines: currentLines(),
             targetSongKey: liveKey,
@@ -493,7 +495,14 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
          * apply 绑在一起，于是关掉那个开关的人**永远看不到自己贡献了什么**，明明每首
          * 歌都在替别人烧调用。
          */
-        if (announce && source !== 'cloud') toast(translate('aiDirector.toastUploaded'), 'success');
+        /*
+         * 只有**这一趟真的往云端写了东西**才说感谢。
+         *
+         * 切走再切回来时，这首歌的答案还在进程内的 recent 里，问一次直接拿现成的 ——
+         * `source` 沿用的是当初那次的 'ai'（那句注释见 aiStage.readRecent），可这一趟
+         * 一个字节都没上传。照着 source 判就会把「上传成功，感谢你的贡献」再说一遍。
+         */
+        if (announce && contributed) toast(translate('aiDirector.toastUploaded'), 'success');
 
         /* 开关关着：答案已经躺在云端了，别动用户手上的样式。 */
         if (!applyAllowed) {
@@ -648,19 +657,23 @@ const prefetchNextSong = async (): Promise<void> => {
          * 开始播放时，导演链路按同一个指纹命中它，就不用再等一次模型了。
          * 本地不再落盘 —— 结果只有一份，存在云端。
          */
-        const { source } = await requestDecision({
+        const { contributed } = await requestDecision({
             song: songInfoOf(song),
             lines,
             targetSongKey: key,
             force: false,
         });
         /*
-         * 提前这一趟也要说一声。
+         * 提前这一趟也要说一声 —— **但只在这一趟真上传了的时候**。
          *
          * 它真的把下一首的答案推上云端了 —— 那正是「感谢你的贡献」要说的事，跟切歌
          * 那条路一样。命中缓存的那次一个字节都没上传，也就不能说感谢。
+         *
+         * 「命中缓存」也包括**进程内**那一层：播 A 时预取过 B，切到 B 再切回 A，B 又
+         * 成了下一首，而它的答案还躺在 recent 里、且云端已经有了 —— 这一趟是白拿，
+         * 不该再报一次「已提前为下一首生成并上传」。这就是用户看到的「提示两遍」。
          */
-        if (source !== 'cloud') toast(translate('aiDirector.toastPrefetchUploaded'), 'success');
+        if (contributed) toast(translate('aiDirector.toastPrefetchUploaded'), 'success');
     } catch (error) {
         /*
          * 「没配 AI」不是这次运气不好，是这台机器的固定状态 —— 留着标记，别每切一首歌
