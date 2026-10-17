@@ -21,6 +21,9 @@ const MAX_PAYLOAD_BYTES = 64 * 1024;
 const MAX_TITLE_CHARS = 200;
 const MAX_LIST_LIMIT = 500;
 const DEFAULT_LIST_LIMIT = 200;
+/** 歌名清单：一次给多少条（客户端拿它铺一屏再往下取）。 */
+const MAX_SONGS_LIMIT = 200;
+const DEFAULT_SONGS_LIMIT = 60;
 const MAX_PLATFORM_CHARS = 64;
 /** 同一个键最多留几份旧版：够把被盖掉的那条捞回来，又不至于无限长。 */
 export const MAX_CACHE_BACKUPS = 10;
@@ -415,6 +418,80 @@ const buildRoutes = (options: { admin: boolean }) => {
     return c.json({
       ok: true,
       candidates: await findResolveCandidates(c.env.FOLIA_SYNC_DB, kind, songTitle),
+    });
+  });
+
+  /*
+   * GET /api/ai-cache/songs —— 「云端现在有哪些歌」。
+   *
+   * 给首页那个「AI 主题」页签用：它要的是**歌名清单**，客户端拿着这些名字去自己
+   * 登着的平台上一首一首搜出来，于是云端只需要记名字，不必存任何曲目、封面或链接。
+   *
+   * 按歌名去重：同一首歌换个版本的歌词就是另一个键（翻唱、现场、各平台的 LRC 本来
+   * 就不一样），列出来却该是一行 —— 用户眼里那就是一首歌。
+   *
+   * 挂在 `/:kind/:key` **之前**：那一条要两段路径，抢不到这里，但路由表里先来后到
+   * 更靠得住（`/resolve` 同理在它前面）。
+   */
+  routes.get('/songs', async (c) => {
+    const requestedLimit = Number.parseInt(String(c.req.query('limit') || ''), 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.min(MAX_SONGS_LIMIT, requestedLimit))
+      : DEFAULT_SONGS_LIMIT;
+    const requestedOffset = Number.parseInt(String(c.req.query('offset') || ''), 10);
+    const offset = Number.isFinite(requestedOffset) ? Math.max(0, requestedOffset) : 0;
+
+    /*
+     * 搜索框里那个「AI 主题」来源带 `q`：按歌名在云端筛。
+     *
+     * LIKE 的通配符（`%` 与 `_`）必须转义，否则用户敲一个下划线就配上了所有歌名 ——
+     * 那不是「搜得更宽」，那是把整个库都列出来。
+     */
+    const query = String(c.req.query('q') || '').trim().slice(0, MAX_TITLE_CHARS);
+    const filter = query ? " AND song_title LIKE ? ESCAPE '\\'" : '';
+
+    /*
+     * 总数先给：客户端要拿它**先把屏幕铺满**（占位行按总数排好），再一条一条往里填。
+     * 不先占位的话，每插一条整张表就重排一次 —— 几百条下来就是一直在抖。
+     * 带了 q 就是筛完之后的条数（不然「已加载 3 / 900」这种进度根本没法看）。
+     */
+    const totalRow = query
+      ? await c.env.FOLIA_SYNC_DB
+        .prepare(`SELECT COUNT(DISTINCT song_title) AS total FROM ai_cache WHERE song_title IS NOT NULL AND song_title <> ''${filter}`)
+        .bind(`%${escapeLike(query)}%`)
+        .first<{ total: number }>()
+      : await c.env.FOLIA_SYNC_DB
+        .prepare("SELECT COUNT(DISTINCT song_title) AS total FROM ai_cache WHERE song_title IS NOT NULL AND song_title <> ''")
+        .first<{ total: number }>();
+
+    const binds: unknown[] = query ? [`%${escapeLike(query)}%`, limit, offset] : [limit, offset];
+
+    const rows = await c.env.FOLIA_SYNC_DB
+      .prepare(
+        `SELECT song_title, MAX(updated_at) AS updated_at, SUM(hits) AS hits,
+                MAX(cache_key) AS cache_key, MAX(platform) AS platform, COUNT(*) AS versions
+         FROM ai_cache
+         WHERE song_title IS NOT NULL AND song_title <> ''${filter}
+         GROUP BY song_title
+         ORDER BY updated_at DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(...binds)
+      .all<{ song_title: string | null; updated_at: string | null; hits: number; cache_key: string | null; platform: string | null; versions: number }>();
+
+    return c.json({
+      ok: true,
+      total: Number(totalRow?.total ?? 0),
+      limit,
+      offset,
+      songs: (rows.results ?? []).map((row) => ({
+        songTitle: String(row.song_title ?? ''),
+        platform: String(row.platform ?? ''),
+        key: String(row.cache_key ?? ''),
+        updatedAt: String(row.updated_at ?? ''),
+        hits: Number(row.hits ?? 0),
+        versions: Number(row.versions ?? 1),
+      })),
     });
   });
 

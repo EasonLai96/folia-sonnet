@@ -107,16 +107,19 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
         const online = omni.getProviderSummaries()
             .filter(summary => omni.getProviderCapabilities(summary.providerId).search)
             .map(summary => summary.providerId);
+        // 「AI 主题」跟在「本地」后面：它同样不是某个在线平台，是云端缓存里那一批歌。
         return [
             activeOnlineProviderId,
             ...online.filter(id => id !== activeOnlineProviderId),
             'local',
+            'cloud',
             'navidrome',
         ];
     }, [activeOnlineProviderId, providerRegistryVersion]);
     const hasCollection = useCollectionNavigationStore(state => Boolean(state.snapshot?.stack.length));
     const getSourceLabel = (source: SearchSource) => {
         if (source === 'local') return t('search.sourceLocal');
+        if (source === 'cloud') return t('search.sourceCloudTheme');
         if (source === 'navidrome') return t('search.sourceNavidrome');
         return omni.getProviderLabel(source);
     };

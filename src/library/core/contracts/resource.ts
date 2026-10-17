@@ -7,7 +7,7 @@ import type { LibraryCollectionDescriptor } from './collection';
 // 在同目录的 capability / ports / mutations / session 里（原先都在 src/types/libraryUi.ts）。
 // 这里只有数据与语义标记，不出现 ReactNode、DOM 几何或动画值；任何 renderer 都按同一份契约消费。
 
-export type CollectionResourceKind = 'online' | 'navidrome' | 'static';
+export type CollectionResourceKind = 'online' | 'navidrome' | 'static' | 'cloud';
 
 /** idle：还没开始；loading：首屏或重新加载中（已有曲目会保留）；ready / error：本轮结束。 */
 export type CollectionLoadStatus = 'idle' | 'loading' | 'ready' | 'error';

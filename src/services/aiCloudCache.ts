@@ -38,6 +38,85 @@ export const resolveAiCloudCacheUrl = (kind: AiCloudCacheKind, key: string): str
 /** 精确键没命中时的兜底：按歌名要一批候选。 */
 const resolveAiCloudResolveUrl = (): string => resolveCloudApiUrl('ai-cache/resolve');
 
+/** 「云端现在有哪些歌」—— 首页「AI 主题」那一屏的歌名清单。 */
+const resolveAiCloudSongsUrl = (): string => resolveCloudApiUrl('ai-cache/songs');
+
+/**
+ * 歌名清单里的一行（按歌名去重：同一首歌的几个歌词版本合起来算一首）。
+ *
+ * `platform` 是推上去那次记下的平台名，只当作「去哪儿搜」的**建议** —— 客户端
+ * 用的是自己当前登着的那个平台，不是它（别人推的时候用的平台你未必登录了）。
+ */
+export type AiCloudCacheSongEntry = {
+    songTitle: string;
+    platform: string;
+    key: string;
+    updatedAt: string;
+    hits: number;
+    /** 这个歌名下存了几个歌词版本。 */
+    versions: number;
+};
+
+export type AiCloudCacheSongPage = {
+    /** 云端一共有多少首（去重后）—— 客户端拿它先把屏幕铺满。 */
+    total: number;
+    limit: number;
+    offset: number;
+    songs: AiCloudCacheSongEntry[];
+};
+
+/**
+ * 拉一段歌名。失败一律返回空页 —— 缓存的纪律是永不阻塞功能，
+ * 这一屏只是「看看云端有什么」，拉不到就当没有。
+ */
+export const listAiCloudCacheSongs = async (
+    { limit = 60, offset = 0, query = '' }: { limit?: number; offset?: number; query?: string } = {},
+): Promise<AiCloudCacheSongPage> => {
+    const empty: AiCloudCacheSongPage = { total: 0, limit, offset, songs: [] };
+    if (!isFoliaCloudCacheEnabled()) return empty;
+    const search = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+    });
+    // 搜索框里那个「AI 主题」来源：按歌名在云端筛。转义交给 URLSearchParams。
+    const trimmedQuery = String(query ?? '').trim();
+    if (trimmedQuery) search.set('q', trimmedQuery);
+    try {
+        const response = await createAiFetch()(`${resolveAiCloudSongsUrl()}?${search.toString()}`, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+            signal: withTimeout(),
+        });
+        if (!response.ok) return empty;
+        const data = await response.json().catch(() => null) as {
+            ok?: unknown; total?: unknown; limit?: unknown; offset?: unknown; songs?: unknown;
+        } | null;
+        const list = Array.isArray(data?.songs) ? data?.songs : [];
+        const songs: AiCloudCacheSongEntry[] = [];
+        list.forEach((entry: unknown) => {
+            if (!isPlainObject(entry)) return;
+            const songTitle = String(entry.songTitle ?? '').trim().slice(0, 200);
+            if (!songTitle) return;
+            songs.push({
+                songTitle,
+                platform: String(entry.platform ?? '').trim().slice(0, 64),
+                key: String(entry.key ?? '').trim().toLowerCase(),
+                updatedAt: String(entry.updatedAt ?? ''),
+                hits: Number(entry.hits ?? 0) || 0,
+                versions: Number(entry.versions ?? 1) || 1,
+            });
+        });
+        return {
+            total: Number(data?.total ?? songs.length) || 0,
+            limit: Number(data?.limit ?? limit) || limit,
+            offset: Number(data?.offset ?? offset) || offset,
+            songs,
+        };
+    } catch {
+        return empty;
+    }
+};
+
 /**
  * 歌词文件的指纹。
  *

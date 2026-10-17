@@ -4,6 +4,8 @@ import type { LibraryHomeTabKey } from '../../core/contracts/homeModel';
 import { isOnlineHomeTab } from '../../core/model/homeSources';
 import { useLibraryHomeSources } from '../../core/bindings/useLibraryHomeSources';
 import { useLibraryHomeOnline } from '../../core/bindings/useLibraryHomeOnline';
+import { useLibraryHomeCloudThemeEntry } from '../../core/bindings/useLibraryHomeCloudTheme';
+import { useTranslation } from 'react-i18next';
 import { useLibraryHomeActions } from '../../core/bindings/useLibraryHomeActions';
 import { useLibraryHomeDirectory } from '../../core/bindings/useLibraryHomeDirectory';
 import { useLibraryHomeTabsRegistration } from '../../core/bindings/useLibraryHomeSurfaceRegistration';
@@ -33,6 +35,7 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         isInteractive,
         declaredActions,
     } = props;
+    const { t } = useTranslation();
     const sources = useLibraryHomeSources({ account, user, playlists, cloudPlaylist, navidromeEnabled });
     const { tab, setTab, tabs, online } = sources;
     const onlineList = useLibraryHomeOnline(homeResources, sources);
@@ -41,6 +44,15 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         tab,
         providerId: online.providerId,
         localRow: localMusicState.activeRow,
+    });
+
+    // 「AI 主题」页签：不铺墙，直接开那一屏的曲目列表（云端没有歌单可列）。
+    useLibraryHomeCloudThemeEntry({
+        tab,
+        enabled: isInteractive,
+        onOpenCollection: collection => onOpenGridView(collection),
+        label: t('home.aiTheme'),
+        notice: t('home.aiThemeNotice'),
     });
 
     const selectTab = useCallback((key: LibraryHomeTabKey) => {
@@ -84,6 +96,10 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         >
             {isOnlineHomeTab(tab) ? (
                 <BravaisHomeOnline {...common} tab={tab} online={online} list={onlineList} account={account} />
+            ) : tab === 'cloud' ? (
+                // 「AI 主题」：那一屏的曲目列表自己开（useLibraryHomeCloudThemeEntry），
+                // 首页这层留空 —— 铺一面墙只会挡住刚打开的那层。
+                null
             ) : tab === 'local' ? (
                 <BravaisHomeLocal
                     {...common}

@@ -23,6 +23,7 @@ import type { LibraryHomeExtraTab, LibraryDeclaredActions } from '../../../core/
 import type { LibraryHomeCard, LibraryHomeListState } from '../../../core/contracts/homeModel';
 import { useLibraryHomeSources } from '../../../core/bindings/useLibraryHomeSources';
 import { useLibraryHomeOnline } from '../../../core/bindings/useLibraryHomeOnline';
+import { useLibraryHomeCloudThemeEntry } from '../../../core/bindings/useLibraryHomeCloudTheme';
 import { useLibraryHomeActions } from '../../../core/bindings/useLibraryHomeActions';
 import { useLibraryHomeDirectory } from '../../../core/bindings/useLibraryHomeDirectory';
 import { useLibraryHomeListRegistration, useLibraryHomeTabsRegistration } from '../../../core/bindings/useLibraryHomeSurfaceRegistration';
@@ -184,6 +185,15 @@ export const Grid3D: React.FC<Grid3DProps> = (props) => {
     const [scanDetailsExpanded, setScanDetailsExpanded] = useState(false);
 
     const showUpdateIndicator = useUpdateIndicator();
+
+    // 「AI 主题」页签：不铺墙，直接开那一屏的曲目列表（云端没有歌单可列）。
+    useLibraryHomeCloudThemeEntry({
+        tab: homeViewTab,
+        enabled: isInteractive,
+        onOpenCollection: collection => onOpenGridView?.(collection),
+        label: t('home.aiTheme'),
+        notice: t('home.aiThemeNotice'),
+    });
 
     // Reset focused index when switching tabs.
     useEffect(() => {
@@ -525,6 +535,10 @@ export const Grid3D: React.FC<Grid3DProps> = (props) => {
                         directoryKey={directoryKey}
                         declaredHomeActions={declaredActions}
                     />
+                ) : homeViewTab === 'cloud' ? (
+                    // 「AI 主题」：这一屏的曲目列表自己开（useLibraryHomeCloudThemeEntry），
+                    // 首页这层留空 —— 铺一面墙只会挡住刚打开的那层。
+                    null
                 ) : homeViewTab === 'local' ? (
                     <div className="w-full h-full flex-1">
                         <LocalGrid3DView

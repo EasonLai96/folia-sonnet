@@ -11,7 +11,7 @@ import type {
 // 原先定义在 components/app/home/gridViewCollectionAdapters.ts，store 为了拿类型不得不反向依赖组件目录；
 // 放到 types 之后，组件、store、Library Core 都从这里取；R1 起随 Library Core 归到 core/contracts（原 src/types/libraryCollection.ts）。
 
-export type GridViewCollectionSource = 'online' | 'local' | 'navidrome';
+export type GridViewCollectionSource = 'online' | 'local' | 'navidrome' | 'cloud';
 
 /**
  * 根集合从哪里打开（导航栈的 origin）：首页卡片、搜索结果、播放器面板。返回到底时落回这里；
@@ -71,10 +71,28 @@ export interface OnlineGridViewCollectionDescriptor extends BaseGridViewCollecti
     raw?: any;
 }
 
+/**
+ * 「AI 主题」：云缓存里所有做过主题的歌。
+ *
+ * 云端只存歌名，曲目由客户端拿这些名字去自己登着的平台搜出来（见
+ * core/services/cloudThemeCollection），所以它不是一个真集合 —— 没有 id，也没有
+ * 谁能往里增删曲目。类型记作 playlist 是为了让曲目那套渲染照常工作。
+ */
+export interface CloudGridViewCollectionDescriptor extends BaseGridViewCollectionDescriptor {
+    source: 'cloud';
+    type: 'playlist';
+    /** 只有一个（云端整个缓存就是这一屏），但类型留成 string：导航栈里集合会被复制改写。 */
+    id: string;
+}
+
+/** 「AI 主题」那一屏的集合 id。 */
+export const AI_THEME_COLLECTION_ID = 'ai-theme';
+
 export type GridViewCollectionDescriptor =
     | OnlineGridViewCollectionDescriptor
     | LocalGridViewCollectionDescriptor
-    | NavidromeGridViewCollectionDescriptor;
+    | NavidromeGridViewCollectionDescriptor
+    | CloudGridViewCollectionDescriptor;
 
 /** 与渲染形态无关的名字；新代码用它，旧的 GridView* 名字保留作兼容。 */
 export type LibraryCollectionDescriptor = GridViewCollectionDescriptor;
@@ -91,4 +109,4 @@ export type CollectionNavigationSnapshot = {
 /** 判定集合身份需要的最少字段：在线集合必须带 provider。 */
 export type LibraryCollectionIdentity =
     | Pick<OnlineGridViewCollectionDescriptor, 'source' | 'providerId' | 'type' | 'id'>
-    | Pick<LocalGridViewCollectionDescriptor | NavidromeGridViewCollectionDescriptor, 'source' | 'type' | 'id'>;
+    | Pick<LocalGridViewCollectionDescriptor | NavidromeGridViewCollectionDescriptor | CloudGridViewCollectionDescriptor, 'source' | 'type' | 'id'>;

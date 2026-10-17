@@ -13,7 +13,7 @@ import type {
 } from '../contracts/homeModel';
 import type { LibraryHiddenScope } from '../contracts/directory';
 import { resolveOnlineProviderAccountView } from './onlineProviderAccountView';
-import { directoryKey } from './directorySession';
+import { DEFAULT_DIRECTORY_SESSION_ID, directoryKey } from './directorySession';
 import { onlineHiddenScope } from './directoryVisibility';
 
 // src/library/core/model/homeSources.ts
@@ -116,6 +116,9 @@ export const resolveHomeTabs = ({
     ...(visibility.radio ? [{ key: 'radio' as const, label: { key: 'home.radio' }, disabledReason: resolveOnlineTabUnavailableReason(online, 'radio') }] : []),
     ...(visibility.albums ? [{ key: 'albums' as const, label: { key: 'home.albums' }, disabledReason: resolveOnlineTabUnavailableReason(online, 'albums') }] : []),
     ...(visibility.local ? [{ key: 'local' as const, label: { key: 'localMusic.folder' }, disabledReason: resolveLocalUnavailableReason(localAvailability) }] : []),
+    // 「AI 主题」：云端缓存里所有做过主题的歌。它排在「本地」后面 —— 两者都不是某个平台
+    // 的歌单，属于「别的来源」那一档。点它不铺墙（云端压根没有歌单），直接进曲目列表。
+    { key: 'cloud' as const, label: { key: 'home.aiTheme' } },
     ...(navidromeEnabled ? [{ key: 'navidrome' as const, label: { key: 'navidrome.title', fallback: 'Navidrome' } }] : []),
 ];
 
@@ -196,17 +199,25 @@ export const resolveHomeDirectoryKey = ({
 }): string => {
     if (tab === 'local') return directoryKey({ source: 'local', section: localSection });
     if (tab === 'navidrome') return directoryKey({ source: 'navidrome', section: navidromeSection });
+    // 「AI 主题」不铺首页目录（它直接进曲目列表），没有自己的目录会话。
+    if (tab === 'cloud') return DEFAULT_DIRECTORY_SESSION_ID;
     return directoryKey({ source: 'online', providerId, section: tab === 'playlist' ? 'playlists' : tab });
 };
 
 /** 首页当前列表的隐藏作用域：在线按 provider，本地与 Navidrome 各一个。 */
 export const resolveHomeHiddenScope = (tab: LibraryHomeTabKey, providerId: string): LibraryHiddenScope => (
-    tab === 'local' ? 'local' : tab === 'navidrome' ? 'navidrome' : onlineHiddenScope(providerId)
+    tab === 'local'
+        ? 'local'
+        : tab === 'navidrome'
+            ? 'navidrome'
+            : tab === 'cloud'
+                ? 'default'
+                : onlineHiddenScope(providerId)
 );
 
 /** 首页的一个来源：在线（歌单 / 电台 / 专辑三个页签）、本地、Navidrome。 */
 export type LibraryHomeSourceGroup = {
-    source: 'online' | 'local' | 'navidrome';
+    source: 'online' | 'local' | 'navidrome' | 'cloud';
     /** 这个来源下的页签（在线是三个，本地与 Navidrome 各一个），顺序同一级页签。 */
     tabs: LibraryHomeTabView[];
     /** 全部页签都不可用时为第一个页签的原因（来源整个不可用）。 */
@@ -226,6 +237,7 @@ export const resolveHomeSourceGroups = (tabs: readonly LibraryHomeTabView[]): Li
     };
     push('online', tabs.filter(tab => isOnlineHomeTab(tab.key)));
     push('local', tabs.filter(tab => tab.key === 'local'));
+    push('cloud', tabs.filter(tab => tab.key === 'cloud'));
     push('navidrome', tabs.filter(tab => tab.key === 'navidrome'));
     return groups;
 };

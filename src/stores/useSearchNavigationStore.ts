@@ -11,10 +11,13 @@ import {
 import { omni } from '../services/onlineMusic/omni';
 import { isLocalPlaybackSong, isNavidromePlaybackSong } from '../utils/appPlaybackGuards';
 import { supportsLocalMusicImport } from '../platform/runtime';
+import { listAiCloudCacheSongs } from '../services/aiCloudCache';
+import { resolveCloudThemeSong } from '../library/core/services/cloudThemeCollectionDeps';
 
 const LAST_HOME_VIEW_TAB_KEY = 'last_home_view_tab';
 const DEFAULT_SEARCH_LIMIT = 30;
-export type SearchSource = OnlineProviderId | 'local' | 'navidrome';
+/** 'cloud' = 「AI 主题」：在云端缓存的歌名里搜（曲目由客户端拿名字去平台上搜出来）。 */
+export type SearchSource = OnlineProviderId | 'local' | 'navidrome' | 'cloud';
 export type SearchReturnView = 'home' | 'player';
 
 type SearchExecutorDeps = {
@@ -76,7 +79,7 @@ const getSearchCacheKey = (query: string, sourceTab: SearchSource) => (
 );
 
 export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSource => {
-    if (tab === 'local' || tab === 'navidrome') {
+    if (tab === 'local' || tab === 'navidrome' || tab === 'cloud') {
         return tab;
     }
     if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio') return tab as OnlineProviderId;
@@ -86,7 +89,7 @@ export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSour
 /** 这条搜索来源对应的在线平台；本地 / Navidrome 没有平台，返回 null。 */
 const providerIdOf = (tab: SearchSource): OnlineProviderId | null => {
     const resolved = resolveSearchSource(tab);
-    return resolved === 'local' || resolved === 'navidrome' ? null : resolved;
+    return resolved === 'local' || resolved === 'navidrome' || resolved === 'cloud' ? null : resolved;
 };
 
 export const resolveCommandPaletteSearchSource = (
@@ -154,6 +157,28 @@ const searchNavidromeSongs = async (query: string): Promise<SearchExecutionResul
     };
 };
 
+/**
+ * 「AI 主题」：在云端缓存的歌名里搜。
+ *
+ * 云端只存歌名，所以先按名字在云端筛出一批，再拿这些名字去当前登着的平台把曲目搜出来
+ * —— 与首页那一屏同一条路（core/services/cloudThemeCollectionDeps），只是这里带上了查询词。
+ * 平台上搜不到的名字直接不出结果：列一行播不了的歌没有意义。
+ */
+const searchCloudThemeSongs = async (
+    query: string,
+    limit: number,
+    offset: number,
+): Promise<SearchExecutionResult> => {
+    const page = await listAiCloudCacheSongs({ limit, offset, query }).catch(() => null);
+    const names = page?.songs ?? [];
+    if (names.length === 0) return { results: [], hasMore: false, nextOffset: offset };
+    const found = await Promise.all(names.map(entry => resolveCloudThemeSong(entry.songTitle).catch(() => null)));
+    const results = found.filter((song): song is UnifiedSong => Boolean(song));
+    const total = Number(page?.total ?? 0);
+    const consumed = offset + names.length;
+    return { results, hasMore: consumed < total, nextOffset: consumed };
+};
+
 const searchOnlineProviderSongs = async (
     providerId: OnlineProviderId,
     query: string,
@@ -177,6 +202,10 @@ const executeSearch = async (
 
     if (sourceTab === 'navidrome') {
         return searchNavidromeSongs(query);
+    }
+
+    if (sourceTab === 'cloud') {
+        return searchCloudThemeSongs(query, limit, offset);
     }
 
     return searchOnlineProviderSongs(sourceTab, query, limit, offset);

@@ -8,6 +8,8 @@ import { createOnlineCollectionResource, type OnlineCollectionResourceDeps } fro
 import { createNavidromeCollectionResource } from './navidromeCollectionResource';
 import { resolveNavidromeServerScope } from './navidromeCollectionTracks';
 import { createStaticCollectionResource } from './staticCollectionResource';
+import { createCloudThemeCollectionResource } from './cloudThemeCollection';
+import { cloudThemeDeps } from './cloudThemeCollectionDeps';
 
 // src/library/core/services/createCollectionResource.ts
 // 资源的默认装配：在线走 omni 与在线缓存，Navidrome 走 Subsonic。单测直接构造各资源并注入依赖，
@@ -44,5 +46,7 @@ export const resolveCollectionResourceKey = (
 export const createCollectionResource = (key: string, descriptor: LibraryCollectionDescriptor): CollectionResource => {
     if (descriptor.source === 'online') return createOnlineCollectionResource(key, onlineDeps);
     if (descriptor.source === 'navidrome') return createNavidromeCollectionResource(key);
+    // 「AI 主题」：曲目不在任何一家平台上，是拿云端的歌名现搜出来的。
+    if (descriptor.source === 'cloud') return createCloudThemeCollectionResource(key, cloudThemeDeps);
     return createStaticCollectionResource(key, []);
 };

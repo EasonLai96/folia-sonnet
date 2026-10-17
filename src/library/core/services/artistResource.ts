@@ -76,7 +76,11 @@ const EMPTY: Omit<LibraryArtistSnapshot, 'key'> = {
     hint: 'urgent',
 };
 
-const sourceOf = (descriptor: LibraryCollectionDescriptor): LibraryArtistSource => descriptor.source;
+// 「AI 主题」那一屏里的歌都是**在线**歌曲（拿云端歌名在平台上搜出来的），只是它们不属于
+// 某个真集合；歌手页那一套按在线走。云集合本身也不会被当成歌手打开（它是 playlist）。
+const sourceOf = (descriptor: LibraryCollectionDescriptor): LibraryArtistSource => (
+    descriptor.source === 'cloud' ? 'online' : descriptor.source
+);
 
 /** 为一个歌手（一个 collectionKey）创建资源。只创建对象，不发请求（请求由 ensure 触发）。 */
 export const createArtistResource = (

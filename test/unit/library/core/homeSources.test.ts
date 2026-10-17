@@ -100,16 +100,16 @@ describe('home tabs', () => {
     const online = source();
     const supported = { supported: true, reason: null } as const;
 
-    it('lists playlist, radio, albums, local and navidrome in that order', () => {
+    it('lists playlist, radio, albums, local, AI themes and navidrome in that order', () => {
         const tabs = resolveHomeTabs({
             visibility: { playlist: true, radio: true, albums: true, local: true },
             navidromeEnabled: true,
             online,
             localAvailability: supported,
         });
-        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'radio', 'albums', 'local', 'navidrome']);
+        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'radio', 'albums', 'local', 'cloud', 'navidrome']);
         expect(tabs.every(tab => !tab.disabledReason)).toBe(true);
-        expect(translateHomeTabs(tabs, t).map(tab => tab.label)).toEqual(['home.playlists', 'home.radio', 'home.albums', 'localMusic.folder', 'navidrome.title']);
+        expect(translateHomeTabs(tabs, t).map(tab => tab.label)).toEqual(['home.playlists', 'home.radio', 'home.albums', 'localMusic.folder', 'home.aiTheme', 'navidrome.title']);
     });
 
     it('hides the tabs the layout settings turn off and Navidrome when it is disabled', () => {
@@ -119,7 +119,8 @@ describe('home tabs', () => {
             online,
             localAvailability: supported,
         });
-        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'albums']);
+        // 「AI 主题」不属于任何平台也没开关：本地那一项关掉了它照样在。
+        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'albums', 'cloud']);
     });
 
     it('gives each unavailable tab its reason, naming the provider', () => {
@@ -134,6 +135,8 @@ describe('home tabs', () => {
             ['radio', 'status.providerRecommendationsUnavailable(provider=fallback)'],
             ['albums', 'status.providerUserAlbumsUnavailable(provider=fallback)'],
             ['local', 'localMusic.insecureHttpDisabled'],
+            // 平台不可用也不影响它：云端那份缓存与当前登录的平台无关。
+            ['cloud', undefined],
         ]);
     });
 
