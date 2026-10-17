@@ -10,10 +10,10 @@ import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 /**
  * 与 FoliaPlaybackService / MainActivity 里的常量一一对应，改一处必须两处都改。
  */
-const ACTION_UPDATE_METADATA = 'top.izuna.folia.debug.action.UPDATE_METADATA';
-const ACTION_UPDATE_STATE = 'top.izuna.folia.debug.action.UPDATE_STATE';
-const ACTION_STOP_FOREGROUND = 'top.izuna.folia.debug.action.STOP_FOREGROUND';
-const ACTION_WEB_COMMAND = 'top.izuna.folia.debug.action.WEB_COMMAND';
+const ACTION_UPDATE_METADATA = 'top.izuna.foliamajor.action.UPDATE_METADATA';
+const ACTION_UPDATE_STATE = 'top.izuna.foliamajor.action.UPDATE_STATE';
+const ACTION_STOP_FOREGROUND = 'top.izuna.foliamajor.action.STOP_FOREGROUND';
+const ACTION_WEB_COMMAND = 'top.izuna.foliamajor.action.WEB_COMMAND';
 const EXTRA_COMMAND = 'command';
 
 type PlaybackSnapshot = 'playing' | 'paused' | 'stopped';
