@@ -1053,7 +1053,7 @@ export default {
     "settingRemember": "记住每首歌的选择",
     "settingRememberDesc": "同一首歌再次播放时复用上次的模式与参数，不再调用 AI。",
     "settingPrefetch": "提前为下一首做准备",
-    "settingPrefetchDesc": "当前歌决策完成后，趁下一首还没播放先问好 AI 并写入记忆，切歌瞬间就套用。只写记忆，不改画面。",
+    "settingPrefetchDesc": "当前歌决策完成后，趁下一首还没播放先问一次云缓存（缓存没有才问 AI），切歌瞬间就套用。只写缓存，不改画面。",
     "settingHint": "偏好提示（可选）",
     "settingHintPlaceholder": "例如「安静一点」「多来点转场」",
     "settingHintDesc": "会一并交给 AI。",

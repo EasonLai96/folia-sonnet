@@ -6,6 +6,8 @@ import { setStatusMessage } from '../../stores/useStatusMessageStore';
 import { omni } from '../onlineMusic/omni';
 import { requestStage } from '../aiStage';
 import type { AiCloudCacheSource } from '../aiCloudCache';
+import { isFoliaCloudCacheEnabled } from '../foliaCloud';
+import { getPrefetchedData } from '../prefetchService';
 import {
     describeAiTarget,
     isAiNotConfiguredError,
@@ -35,6 +37,7 @@ import {
     writeSnapshotOnce,
 } from './state';
 import { readStoredThemeAutoGenerateEnabled } from '../themePreferences';
+import { resolveSongPlatform } from '../../utils/songPlatform';
 import type { SongResult, VisualizerMode } from '../../types';
 
 // src/services/lyricDirector/director.ts
@@ -132,6 +135,15 @@ const songInfoOf = (song: unknown): DirectorSongInfo | null => {
         title: raw.name ?? '',
         artist: Array.isArray(raw.artists) ? raw.artists.map((artist) => artist?.name).filter(Boolean).join(' / ') : '',
         album: null,
+        /*
+         * 平台名跟着上传走：服务端拿它去对应平台把歌词原文件取回来重算哈希。
+         *
+         * 以前这里不带，于是导演这条链（含预取）推上去的条目平台名一律为空 —— 服务端
+         * 只能按 netease → qq → kugou 的顺序逐个试，很容易拿一首同名歌的歌词来比对，
+         * 于是把一份好答案判成「歌词对不上」拒掉。主题那条链一直带得对，两条链的待遇
+         * 就不一样了。
+         */
+        platform: resolveSongPlatform(raw as SongResult),
     };
 };
 
@@ -563,16 +575,50 @@ const nextQueuedSong = (): unknown => {
     return loopMode === 'all' ? (queue[0] ?? null) : null;
 };
 
+/*
+ * 下一首的歌词行 —— **优先用预取服务手里那份**。
+ *
+ * 播放时真正显示的就是它（onlinePlayback 直接吃 `prefetched.lyrics`）。另开一次
+ * `omni.getLyrics` 拿到的未必是同一份：IndexedDB 里的缓存、自动最佳匹配、手动在线
+ * 覆盖都会换掉它。指纹差一个字就是另一个键 —— 预取热好的是 A，真播那一刻查的是 B，
+ * 于是「提前准备」在用户眼里等于没做、云缓存也像是没拉，其实两份答案都在，只是对不上。
+ *
+ * 预取那份读不出来（还没跑到、或者这首歌不是在线源）才回落到现取一次。
+ */
+const nextSongLyricLines = async (song: SongResult): Promise<DirectorLyricLine[]> => {
+    try {
+        const prefetched = getPrefetchedData(song);
+        const lines = lyricLinesOf(prefetched?.lyrics);
+        if (lines.length > 0) return lines;
+        /*
+         * 只有预取明确记下「这首是纯音乐」才算真的没有歌词。
+         * 缓存里还没跑到这首歌时 lyrics 也是 null —— 那不是纯音乐，别拿歌名去当指纹。
+         */
+        if (prefetched?.lyricRaw?.isPureMusic === true) return [];
+    } catch {
+        /* 预取那份读不出来就当没有，回落到现取。 */
+    }
+    const result = await omni.getLyrics(song);
+    return lyricLinesOf((result as { lyrics?: unknown } | null)?.lyrics);
+};
+
 const prefetchNextSong = async (): Promise<void> => {
     const settings = readDirectorSettings();
     if (!settings.prefetchNext) return;
     // 导演关着也要预先问 —— 见 scheduleLyricDirectorDecision 里那条纪律。
     if (!settings.autoOnSongChange && !readStoredThemeAutoGenerateEnabled()) return;
     /*
-     * 本机发不出去请求 —— 预取这条路只是为了「等它开播时缓存里已经有答案」，
-     * 现在注定问不出结果，再排一次只是白跑一趟网络。
+     * 「这台机器发不出**模型**请求」**不再**一票否决预取。
+     *
+     * 那个标记说的是模型，而预取要做的第一件事是**拉云缓存** —— 拉缓存不是模型调用，
+     * 恰恰是没配密钥的人唯一能拿到答案的那条路。拿它当总闸，等于把最需要缓存的人挡在
+     * 门外：他的下一首永远只能等到真播那一刻才现问一次，而问也问不出来。它还不轻易复位
+     * （只在挂载与 AI 设置变更时），于是第一次失败之后整个会话的预取都死了。
+     *
+     * 云缓存也关着才真的没什么可预取的。缓存没命中时 `generate` 会在发出任何网络请求
+     * 之前就抛「未配置」（aiCompletion 里那句 `if (!configured) throw`），白跑的代价是零。
      */
-    if (aiUnavailable) return;
+    if (aiUnavailable && !isFoliaCloudCacheEnabled()) return;
     if (busy) return; // never race the song that is on screen
     const song = nextQueuedSong();
     if (!song) return;
@@ -583,14 +629,12 @@ const prefetchNextSong = async (): Promise<void> => {
 
     prefetchedSongKey = key;
     try {
-        const result = await omni.getLyrics(song as SongResult);
-        const lines = lyricLinesOf((result as { lyrics?: unknown } | null)?.lyrics);
-        if (lines.length === 0) {
-            prefetchedSongKey = null;
-            return;
-        }
+        const lines = await nextSongLyricLines(song as SongResult);
         if (busy || songKeyOf(displaySong()) === key) return;
         /*
+         * 纯音乐（没有歌词行）也要问：它的指纹是**歌名**，真播那一轮用的也是歌名，
+         * 云缓存照样能命中。以前在这里直接 return，于是下一首是伴奏时永远现算一次。
+         *
          * 预先问一次：答案由 requestStage 自己推进云端缓存与进程内缓存，等这首歌真正
          * 开始播放时，导演链路按同一个指纹命中它，就不用再等一次模型了。
          * 本地不再落盘 —— 结果只有一份，存在云端。
@@ -601,8 +645,12 @@ const prefetchNextSong = async (): Promise<void> => {
             targetSongKey: key,
             force: false,
         });
-    } catch {
-        prefetchedSongKey = null; // a failed prefetch must not block a later retry
+    } catch (error) {
+        /*
+         * 「没配 AI」不是这次运气不好，是这台机器的固定状态 —— 留着标记，别每切一首歌
+         * 都重试一次。其它错误才清掉，好让这一首还有下一次机会。
+         */
+        if (!isAiNotConfiguredError(error)) prefetchedSongKey = null;
     }
 };
 

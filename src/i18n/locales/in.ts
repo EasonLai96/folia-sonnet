@@ -1048,7 +1048,7 @@ export default {
     "settingRemember": "Ingat pilihan setiap lagu",
     "settingRememberDesc": "Memutar ulang lagu memakai mode dan parameter tersimpan, tanpa memanggil AI lagi.",
     "settingPrefetch": "Siapkan lagu berikutnya lebih awal",
-    "settingPrefetchDesc": "Setelah lagu saat ini selesai, lagu berikutnya diputuskan lebih awal ke memorinya, jadi langsung berlaku saat diputar.",
+    "settingPrefetchDesc": "Setelah lagu saat ini selesai, lagu berikutnya diputuskan lebih awal — cache cloud ditanya lebih dulu dan model hanya dipanggil kalau tidak ada — jadi langsung berlaku saat diputar. Yang ditulis hanya cache; tampilan tidak berubah.",
     "settingHint": "Petunjuk preferensi (opsional)",
     "settingHintPlaceholder": "Misalnya “lebih tenang”, “lebih banyak transisi”",
     "settingHintDesc": "Ikut diberikan kepada AI bersama lagunya.",

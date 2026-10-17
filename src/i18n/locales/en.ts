@@ -1053,7 +1053,7 @@ export default {
     "settingRemember": "Remember each song's pick",
     "settingRememberDesc": "Replaying a song reuses its stored mode and parameters instead of asking the AI again.",
     "settingPrefetch": "Prepare the next song ahead of time",
-    "settingPrefetchDesc": "Once the current song settles, the next queued track is decided into its memory, so it takes effect the moment it starts.",
+    "settingPrefetchDesc": "Once the current song settles, the next queued track is resolved ahead of time — the cloud cache is asked first and the model only when it misses — so it takes effect the moment it starts. Only the cache is written; nothing on screen changes.",
     "settingHint": "Preference hint (optional)",
     "settingHintPlaceholder": "For example “keep it calm”, “more transitions”",
     "settingHintDesc": "Handed to the AI along with the song.",
