@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isStagePayloadEmpty, verifyStageUpload } from '../../../sync-server/src/stageVerifier';
+import {
+  highlightWordsPresent,
+  isStagePayloadEmpty,
+  readHighlightWords,
+  verifyStageUpload,
+} from '../../../sync-server/src/stageVerifier';
 import { md5 } from '../../../sync-server/src/md5';
 import { lyricTextCandidates } from '../../../sync-server/src/stageLyricSources';
 import { resolveSongPlatform } from '../../../src/utils/songPlatform';
@@ -36,6 +41,32 @@ const stubNoResult = () => {
     { ok: true, status: 200, text: async () => JSON.stringify({ result: { songs: [] } }) } as unknown as Response
   )));
 };
+
+/** 搜索给好几首，歌词按 id 分别给 —— 第一条对不上时要能往下试。 */
+const stubNeteaseSongs = (songs: { id: number; name?: string; lyric: string }[]) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+    const url = String(input);
+    const body = url.includes('/api/search/get/web')
+      ? JSON.stringify({ result: { songs: songs.map((song) => ({ id: song.id, name: song.name ?? '晴天' })) } })
+      : JSON.stringify({ lrc: { lyric: songs.find((song) => song.id === Number(new URL(url).searchParams.get('id')))?.lyric ?? '' } });
+    return { ok: true, status: 200, text: async () => body } as unknown as Response;
+  }));
+};
+
+/** 带 AI 高亮词的主题：内容合规判的就是这些词。 */
+const withWords = (words: string[]) => ({
+  theme: {
+    light: {
+      ...goodPayload.theme.light,
+      wordColors: words.map((word) => ({ word, color: '#ff00aa' })),
+    },
+    dark: {
+      ...goodPayload.theme.dark,
+      wordColors: words.map((word) => ({ word, color: '#00aaff' })),
+    },
+  },
+  decision: goodPayload.decision,
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -179,6 +210,94 @@ describe('verifyStageUpload', () => {
   });
 
   /*
+   * 同一首歌在平台上有好几个版本：只比搜索结果第一条的哈希，会把大量正常上传误判成
+   * 「不一致」—— 上传者手里那份未必是第一条。
+   */
+  it('keeps looking through the search hits when the first one hashes elsewhere', async () => {
+    stubNeteaseSongs([
+      { id: 1, name: '晴天（现场版）', lyric: '[00:01.00]完全不一样的一句词' },
+      { id: 2, name: '晴天', lyric: '[00:01.00]故事的小黄花\n[00:04.00]从出生那年就飘着' },
+    ]);
+
+    const result = await verifyStageUpload({
+      payload: goodPayload,
+      songTitle: '晴天',
+      platform: 'netease',
+      lyricHash: md5('故事的小黄花\n从出生那年就飘着'),
+      strict: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.status).toBe('verified');
+      expect(result.note).toContain('晴天');
+    }
+  });
+
+  /* 命中就停：后面几首的歌词一次都不该去拉，那是白给公开接口加压力。 */
+  it('stops asking for lyrics once one of them matches', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input);
+      asked.push(url);
+      const body = url.includes('/api/search/get/web')
+        ? JSON.stringify({ result: { songs: [{ id: 1, name: '晴天' }, { id: 2, name: '晴天 现场' }, { id: 3, name: '晴天 翻唱' }] } })
+        : JSON.stringify({ lrc: { lyric: url.includes('id=1') ? '[00:01.00]故事的小黄花' : '[00:01.00]别的词' } });
+      return { ok: true, status: 200, text: async () => body } as unknown as Response;
+    }));
+
+    const result = await verifyStageUpload({
+      payload: goodPayload,
+      songTitle: '晴天',
+      platform: 'netease',
+      lyricHash: md5('故事的小黄花'),
+      strict: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(asked.filter((url) => url.includes('/api/song/lyric'))).toHaveLength(1);
+  });
+
+  /*
+   * 哈希对不上 ≠ 这条是假的：换了个版本的 LRC 哈希就变了，可它照样是照着这首歌做的。
+   * 用户定的合规标准就是这条：AI 标记的高亮词在这首歌的歌词里全都找得到。
+   */
+  it('accepts another lyric edition when every AI highlight word is in it', async () => {
+    stubNeteaseSongs([
+      { id: 1, lyric: '[00:01.00]故事的小黄花\n[00:04.00]童年的 荡秋千 一直飘着' },
+    ]);
+
+    const result = await verifyStageUpload({
+      payload: withWords(['小黄花', '荡秋千']),
+      songTitle: '晴天',
+      platform: 'netease',
+      lyricHash: md5('另一个版本的歌词'),
+      strict: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.status).toBe('word_matched');
+      expect(result.note).toContain('高亮词');
+    }
+  });
+
+  it('refuses when a highlight word is nowhere in the song', async () => {
+    stubNeteaseSongs([{ id: 1, lyric: '[00:01.00]故事的小黄花' }]);
+
+    const result = await verifyStageUpload({
+      payload: withWords(['小黄花', '这句词根本不在这首歌里']),
+      songTitle: '晴天',
+      platform: 'netease',
+      lyricHash: md5('另一个版本的歌词'),
+      strict: true,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe('lyric_mismatch');
+  });
+
+  /*
    * 平台上没有这首歌、或者接口这会儿不通 —— 放行，只记成「没验证过」。
    * 这条是纪律：第三方接口抖一次不该变成全站上传失败。
    */
@@ -208,6 +327,56 @@ describe('lyricTextCandidates', () => {
   it('has nothing to offer for blank lyrics', () => {
     expect(lyricTextCandidates('')).toEqual([]);
     expect(lyricTextCandidates('   \n  \n')).toEqual([]);
+  });
+});
+
+describe('readHighlightWords', () => {
+  it('reads what the AI marked in both the light and the dark theme', () => {
+    const words = readHighlightWords({
+      theme: {
+        light: { wordColors: [{ word: '小黄花', color: '#fff' }, { word: '  ', color: '#fff' }] },
+        dark: { wordColors: [{ word: '荡秋千', color: '#000' }, { word: '小黄花', color: '#000' }] },
+      },
+    });
+    /* 去重要去重：明暗两套主题标的是同一批词。 */
+    expect(words.sort()).toEqual(['小黄花', '荡秋千'].sort());
+  });
+
+  /* 早先推的条目可能把高亮词直接放在 theme 上，那层也要认。 */
+  it('also reads a single-level theme', () => {
+    expect(readHighlightWords({ theme: { wordColors: [{ word: '晴天' }] } })).toEqual(['晴天']);
+  });
+
+  it('has nothing to say about a payload without a theme', () => {
+    expect(readHighlightWords({ decision: { mode: 'classic' } })).toEqual([]);
+    expect(readHighlightWords(null)).toEqual([]);
+  });
+});
+
+describe('highlightWordsPresent', () => {
+  const lyric = '故事的小黄花\n童年的荡秋千';
+
+  it('is satisfied when every word appears', () => {
+    expect(highlightWordsPresent(['小黄花', '荡秋千'], lyric)).toBe(true);
+  });
+
+  /* 空白与大小写不算差异 —— LRC 里多一个空格不该判成「这不是同一个词」。 */
+  it('ignores whitespace and case', () => {
+    expect(highlightWordsPresent(['小 黄 花'], '故事的小黄花')).toBe(true);
+    expect(highlightWordsPresent(['Rainbow'], 'some RAINBOW here')).toBe(true);
+  });
+
+  it('is not satisfied when one word is missing', () => {
+    expect(highlightWordsPresent(['小黄花', '不存在的词'], lyric)).toBe(false);
+  });
+
+  /*
+   * 一个高亮词都没有时不算合规：哈希已经对不上了，再没有任何证据说明它属于这首歌。
+   * 反过来实现等于给「随便推一条」开了后门。
+   */
+  it('needs at least one word to go on', () => {
+    expect(highlightWordsPresent([], lyric)).toBe(false);
+    expect(highlightWordsPresent(['小黄花'], '')).toBe(false);
   });
 });
 

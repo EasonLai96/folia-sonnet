@@ -16,11 +16,38 @@ export type LyricSourceId = 'netease' | 'qq' | 'kugou';
 /** 没有平台名字时按这个顺序试，先匹配上谁算谁。 */
 export const LYRIC_SOURCE_ORDER: readonly LyricSourceId[] = ['netease', 'qq', 'kugou'];
 
+/** 一个搜索结果。id 是取歌词要用的那个号（各平台各不一样）。 */
+export interface LyricSearchHit {
+  id: string;
+  /** 歌名（顺手带上演唱者，比哈希对不上时好认是哪一首）。 */
+  title: string;
+}
+
+/*
+ * 一次搜索最多取几首候选。
+ *
+ * 同一首歌在平台上有好几个版本：翻唱、现场、别人重新上传的 LRC。上传者手里那份未必
+ * 就是搜索结果里的第一条 —— 只比第一条的哈希会把大量正常上传误判成「不一致」。
+ * 所以多留几条，但也不能太多：每多一条就多一次歌词请求，而这是公开接口。
+ */
+const MAX_SEARCH_RESULTS = 5;
+export const MAX_LYRIC_CANDIDATES = 3;
+
 export interface LyricSource {
   id: LyricSourceId;
   label: string;
-  /** 返回歌词正文（已规范化），找不到或取不到一律 null。 */
-  readLyricText: (title: string) => Promise<string | null>;
+  /** 搜索：返回最多 MAX_LYRIC_CANDIDATES 条候选，搜不到就是空数组。 */
+  searchSongs: (title: string) => Promise<LyricSearchHit[]>;
+  /** 按搜索结果给的 id 取歌词正文（已规范化），取不到一律 null。 */
+  readLyricById: (id: string) => Promise<string | null>;
+}
+
+/** 一个「搜到了、歌词还没拉」的候选 —— 拉一次就记住，重复问不发第二次请求。 */
+export interface LyricCandidate {
+  title: string;
+  source: LyricSourceId;
+  /** 惰性取歌词：只有真要比对时才发那一次请求，结果记在闭包里。 */
+  readLyric: () => Promise<string | null>;
 }
 
 const fetchText = async (url: string, headers: Record<string, string> = {}): Promise<string | null> => {
@@ -75,11 +102,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
+/** 搜索结果里「歌名 - 演唱者」；拼不出来就只留歌名。 */
+const joinTitle = (name: unknown, artists: unknown): string => {
+  const songName = typeof name === 'string' ? name.trim() : '';
+  const list = Array.isArray(artists)
+    ? artists
+      .map((entry) => (isRecord(entry) && typeof entry.name === 'string' ? entry.name.trim() : ''))
+      .filter(Boolean)
+    : [];
+  return list.length > 0 ? `${songName} - ${list.join('/')}` : songName;
+};
+
 /** 网易云：搜索走老版 web 接口，歌词接口不需要签名。 */
 const neteaseSource: LyricSource = {
   id: 'netease',
   label: '网易云音乐',
-  readLyricText: async (title) => {
+  searchSongs: async (title) => {
     const search = await fetchText(
       `https://music.163.com/api/search/get/web?s=${encodeURIComponent(title)}&type=1&offset=0&limit=5`,
       { Referer: 'https://music.163.com/' },
@@ -91,21 +129,26 @@ const neteaseSource: LyricSource = {
       return Array.isArray(list) ? list : [];
     })();
 
+    const hits: LyricSearchHit[] = [];
     for (const entry of songs) {
+      if (hits.length >= MAX_SEARCH_RESULTS) break;
       if (!isRecord(entry)) continue;
       const id = typeof entry.id === 'number' ? entry.id : Number(entry.id);
       if (!Number.isFinite(id) || id <= 0) continue;
-      const lyric = await fetchText(
-        `https://music.163.com/api/song/lyric?os=pc&id=${id}&lv=-1&kv=-1&tv=-1`,
-        { Referer: 'https://music.163.com/' },
-      );
-      const parsed = readJson(lyric);
-      if (!isRecord(parsed)) continue;
-      const lrc = isRecord(parsed.lrc) ? parsed.lrc.lyric : null;
-      const text = typeof lrc === 'string' ? stripLrcTags(lrc) : '';
-      if (text) return text;
+      hits.push({ id: String(id), title: joinTitle(entry.name, entry.artists) || String(id) });
     }
-    return null;
+    return hits;
+  },
+  readLyricById: async (id) => {
+    const lyric = await fetchText(
+      `https://music.163.com/api/song/lyric?os=pc&id=${encodeURIComponent(id)}&lv=-1&kv=-1&tv=-1`,
+      { Referer: 'https://music.163.com/' },
+    );
+    const parsed = readJson(lyric);
+    if (!isRecord(parsed)) return null;
+    const lrc = isRecord(parsed.lrc) ? parsed.lrc.lyric : null;
+    const text = typeof lrc === 'string' ? stripLrcTags(lrc) : '';
+    return text || null;
   },
 };
 
@@ -113,7 +156,7 @@ const neteaseSource: LyricSource = {
 const qqSource: LyricSource = {
   id: 'qq',
   label: 'QQ 音乐',
-  readLyricText: async (title) => {
+  searchSongs: async (title) => {
     const search = await fetchText(
       `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${encodeURIComponent(title)}&format=json&p=1&n=5`,
       { Referer: 'https://y.qq.com/' },
@@ -126,21 +169,30 @@ const qqSource: LyricSource = {
       return Array.isArray(items) ? items : [];
     })();
 
+    const hits: LyricSearchHit[] = [];
     for (const entry of list) {
+      if (hits.length >= MAX_SEARCH_RESULTS) break;
       if (!isRecord(entry)) continue;
-      const mid = typeof entry.songmid === 'string' ? entry.songmid : '';
+      const mid = typeof entry.songmid === 'string' ? entry.songmid.trim() : '';
       if (!mid) continue;
-      const lyric = await fetchText(
-        `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(mid)}&format=json&nobase64=1`,
-        { Referer: 'https://y.qq.com/' },
-      );
-      const parsed = readJson(lyric);
-      if (!isRecord(parsed)) continue;
-      const raw = typeof parsed.lyric === 'string' ? parsed.lyric : '';
-      const text = stripLrcTags(decodeNumericEntities(raw));
-      if (text) return text;
+      const singers = Array.isArray(entry.singer)
+        ? entry.singer.map((singer) => (isRecord(singer) && typeof singer.name === 'string' ? singer.name.trim() : '')).filter(Boolean)
+        : [];
+      const name = typeof entry.songname === 'string' ? entry.songname.trim() : '';
+      hits.push({ id: mid, title: singers.length > 0 ? `${name} - ${singers.join('/')}` : name || mid });
     }
-    return null;
+    return hits;
+  },
+  readLyricById: async (id) => {
+    const lyric = await fetchText(
+      `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(id)}&format=json&nobase64=1`,
+      { Referer: 'https://y.qq.com/' },
+    );
+    const parsed = readJson(lyric);
+    if (!isRecord(parsed)) return null;
+    const raw = typeof parsed.lyric === 'string' ? parsed.lyric : '';
+    const text = stripLrcTags(decodeNumericEntities(raw));
+    return text || null;
   },
 };
 
@@ -153,7 +205,7 @@ const qqSource: LyricSource = {
 const kugouSource: LyricSource = {
   id: 'kugou',
   label: '酷狗音乐',
-  readLyricText: async (title) => {
+  searchSongs: async (title) => {
     const search = await fetchText(
       `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(title)}&page=1&pagesize=5&platform=WebFilter`,
       { Referer: 'https://www.kugou.com/' },
@@ -165,18 +217,25 @@ const kugouSource: LyricSource = {
       return Array.isArray(items) ? items : [];
     })();
 
+    const hits: LyricSearchHit[] = [];
     for (const entry of list) {
+      if (hits.length >= MAX_SEARCH_RESULTS) break;
       if (!isRecord(entry)) continue;
-      const hash = typeof entry.FileHash === 'string' ? entry.FileHash : '';
+      const hash = typeof entry.FileHash === 'string' ? entry.FileHash.trim() : '';
       if (!hash) continue;
-      const lyric = await fetchText(
-        `https://krcs.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8&accesskey=&userid=0&id=${encodeURIComponent(hash)}`,
-        { Referer: 'https://www.kugou.com/' },
-      );
-      const text = lyric ? stripLrcTags(lyric) : '';
-      if (text) return text;
+      /* 酷狗的 SongName 里带「 - 演唱者」，直接用。 */
+      const name = typeof entry.SongName === 'string' ? entry.SongName.trim() : '';
+      hits.push({ id: hash, title: name || hash });
     }
-    return null;
+    return hits;
+  },
+  readLyricById: async (id) => {
+    const lyric = await fetchText(
+      `https://krcs.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8&accesskey=&userid=0&id=${encodeURIComponent(id)}`,
+      { Referer: 'https://www.kugou.com/' },
+    );
+    const text = lyric ? stripLrcTags(lyric) : '';
+    return text || null;
   },
 };
 
@@ -231,26 +290,43 @@ export const lyricTextCandidates = (text: string): string[] => {
     : [withBlanks];
 };
 
+const toCandidates = (source: LyricSource, hits: LyricSearchHit[]): LyricCandidate[] => (
+  hits.slice(0, MAX_LYRIC_CANDIDATES).map((hit) => {
+    /* 拉一次就记住：哈希没中还要按内容再判一次，不能因为判两次就发两次请求。 */
+    let cached: string | null | undefined;
+    return {
+      title: hit.title,
+      source: source.id,
+      readLyric: async () => {
+        if (cached === undefined) cached = await source.readLyricById(hit.id);
+        return cached;
+      },
+    };
+  })
+);
+
 /**
- * 按平台取歌词；没写平台就按 LYRIC_SOURCE_ORDER 顺序试，先拿到谁算谁。
+ * 按歌名去平台上**搜索**，把搜到的几首歌做成「还没拉歌词」的候选。
  *
- * `isPureMusic` 为真时指纹用的是**歌名**而不是歌词正文（客户端的
- * resolveStageLyricSource），这种情况压根不用去平台问，直接拿歌名比。
+ * 歌词是惰性的：谁要跟它比对谁才发那一次请求。哈希在第一首就命中时，后面几首的歌词
+ * 一次都不会拉 —— 多留候选是为了少误伤，不是为了多打接口。
+ *
+ * 没写平台就按 LYRIC_SOURCE_ORDER 顺序试，先搜到谁算谁。
  */
-export const readLyricTextForPlatform = async (
+export const searchLyricCandidates = async (
   platform: string,
   songTitle: string,
-): Promise<{ text: string | null; source: LyricSourceId | null }> => {
-  if (!songTitle) return { text: null, source: null };
+): Promise<{ candidates: LyricCandidate[]; source: LyricSourceId | null }> => {
+  if (!songTitle) return { candidates: [], source: null };
 
   const named = resolveLyricSource(platform);
   if (named) {
-    return { text: await named.readLyricText(songTitle), source: named.id };
+    return { candidates: toCandidates(named, await named.searchSongs(songTitle)), source: named.id };
   }
 
   for (const id of LYRIC_SOURCE_ORDER) {
-    const text = await SOURCES[id].readLyricText(songTitle);
-    if (text) return { text, source: id };
+    const hits = await SOURCES[id].searchSongs(songTitle);
+    if (hits.length > 0) return { candidates: toCandidates(SOURCES[id], hits), source: id };
   }
-  return { text: null, source: null };
+  return { candidates: [], source: null };
 };
