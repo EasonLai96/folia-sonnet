@@ -368,7 +368,8 @@ export type QishuiBridgeEnvelope =
     | { ok: false; error: { code: string; message: string } };
 
 interface FoliaQishuiPlugin {
-    request(options: { operation: string; params?: Record<string, unknown> }): Promise<QishuiBridgeEnvelope>;
+    // params 以字符串过桥（理由见 requestQishuiNative），所以这里两种形状都认。
+    request(options: { operation: string; params?: Record<string, unknown> | string }): Promise<QishuiBridgeEnvelope>;
     status(): Promise<{ ready: boolean; reason?: string }>;
     dispose(): Promise<void>;
 }
