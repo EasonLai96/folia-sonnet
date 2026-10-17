@@ -46,6 +46,7 @@ const KEY_D = 'd'.repeat(32);
 const KEY_E = 'e'.repeat(32);
 const KEY_F = 'f'.repeat(32);
 const KEY_G = 'a1b2c3d4'.repeat(4);
+const KEY_PUSHED = 'a2b3c4d5'.repeat(4);
 
 const payload = {
   theme: {
@@ -174,6 +175,54 @@ describe('pullAiCloudCache 的第二次机会', () => {
 
     if (result.status === 'hit') expect(result.matched).toBe('exact');
     expect(seen.some((url) => url.includes('/ai-cache/resolve'))).toBe(false);
+  });
+});
+
+describe('推上去之后自己要还能拉到', () => {
+  /*
+   * 推上去的那一键，本地必须立刻忘掉「刚才问过没有」。
+   *
+   * 队列播完从头再来一轮时最容易撞上：第一遍生成完把答案推上云端，本地 missCache
+   * 却还记着「5 分钟前这个键没有」—— 切回来时 pull 被这条 miss 直接挡掉，**连 GET
+   * 都不发**，于是又烧一次模型，而「已从云端拉取缓存」这句提示永远说不出来。
+   */
+  it('asks again after the answer was pushed, instead of calling it missing forever', async () => {
+    let stored = false;
+    const seen: string[] = [];
+    handlers.fetch = async (url, init) => {
+      seen.push(`${init?.method ?? 'GET'} ${url}`);
+      if (init?.method === 'PUT') {
+        stored = true;
+        return json({ ok: true, stored: true });
+      }
+      if (url.includes('/ai-cache/resolve')) return json({ ok: true, candidates: [] });
+      if (url.includes(KEY_PUSHED) && stored) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    /* 第一遍：云端没有 → 生成 → 推上去。 */
+    const first = await withAiCloudCache({
+      kind: 'stage',
+      fingerprint: KEY_PUSHED,
+      generate: async () => payload,
+      validate: (value) => (value && typeof value === 'object' ? value as Record<string, unknown> : null),
+      songTitle: '晴天',
+      lyricText: '故事的小黄花',
+    });
+    expect(first.source).toBe('ai');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stored).toBe(true);
+
+    /* 第二遍（切走再切回来 / 队列循环回来）：必须真的去问一次，并且命中。 */
+    const before = seen.length;
+    const second = await pullAiCloudCache('stage', KEY_PUSHED, {
+      songTitle: '晴天',
+      lyricText: '故事的小黄花',
+    });
+
+    expect(second.status).toBe('hit');
+    /* 被 missCache 挡掉的话这里一个请求都不会有。 */
+    expect(seen.length).toBeGreaterThan(before);
   });
 });
 

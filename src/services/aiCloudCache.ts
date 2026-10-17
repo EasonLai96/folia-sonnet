@@ -73,6 +73,18 @@ const wasRecentMiss = (kind: AiCloudCacheKind, key: string): boolean => {
     return true;
 };
 
+/**
+ * 刚推上去的那一键，本地别再当成「没有」。
+ *
+ * push 成功说明云端这个键**现在一定有了**，可 missCache 还记着「5 分钟前问过一次
+ * 没有」。于是切走再切回来（或队列播完从头再来一轮）时 pull 会被这条 miss 直接挡掉：
+ * 不发 GET、直接走去生成 —— 白烧一次模型，而「已从云端拉取缓存」这句提示也永远
+ * 说不出来，明明缓存就是自己刚推上去的。
+ */
+const forgetMiss = (kind: AiCloudCacheKind, key: string): void => {
+    missCache.delete(missKey(kind, key));
+};
+
 export type AiCloudCachePull =
     | {
         status: 'hit';
@@ -322,6 +334,7 @@ export const pushAiCloudCache = async (
             }),
             signal: withTimeout(),
         });
+        if (response.ok) forgetMiss(kind, key);
         return response.ok;
     } catch {
         return false;
