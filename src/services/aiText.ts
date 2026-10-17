@@ -60,6 +60,14 @@ export const generateThemeFromLyrics = async (
   lyricsText: string,
   options?: { isPureMusic?: boolean; songTitle?: string }
 ): Promise<DualTheme> => {
+  /*
+   * ⚠️ 主链路**不走这里**：useThemeController 用的是 services/gemini 那一版同名函数，
+   * 它经 requestStage 编排，先问云缓存、没有再生成、生成完回传。这里这一版不碰缓存，
+   * 只为 OBS 叠加层与兼容路径留着。
+   *
+   * 两份同名实现是上游合并留下的（它把 useThemeController 的 import 改到了这里，
+   * 主题链路于是绕开云缓存 —— 那就是「云缓存失效」）。别再用它做主链路。
+   */
   try {
     // Check if running in Electron environment
     if ((window as any).electron && typeof (window as any).electron.generateTheme === 'function') {
