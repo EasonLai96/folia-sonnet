@@ -260,6 +260,8 @@ function LoginWindowProbe(props: ProbeProps) {
                     chosen={view.chosen}
                     login={view.login}
                     buildReport={async () => '### Folia QR login diagnostics (a sample made by the probe)'}
+                    // 密码登录（飞牛）：探针里只记一句，不真的去登。
+                    onSubmitPassword={credentials => setSaid(`password for ${credentials.username}`)}
                     onChoose={providerId => {
                         setSaid(`chosen ${providerId}`);
                         const picked = rows.find(entry => entry.providerId === providerId);

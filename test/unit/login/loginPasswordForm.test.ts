@@ -41,9 +41,9 @@ describe('the password form of a sign-in', () => {
     ));
 
     const fields = (): { url: HTMLInputElement | null; name: HTMLInputElement | null; secret: HTMLInputElement | null } => ({
-        url: place.querySelector('input[type="text"]'),
-        name: place.querySelectorAll('input[type="text"]')[1] ?? null,
-        secret: place.querySelector('input[type="password"]'),
+        url: place.querySelector<HTMLInputElement>('input[type="text"]'),
+        name: place.querySelectorAll<HTMLInputElement>('input[type="text"]')[1] ?? null,
+        secret: place.querySelector<HTMLInputElement>('input[type="password"]'),
     });
 
     beforeEach(() => {
