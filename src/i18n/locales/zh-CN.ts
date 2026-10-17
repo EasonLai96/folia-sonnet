@@ -2088,7 +2088,7 @@ export default {
     "wallpaperOverlayEnabled": "可视化叠层",
     "wallpaperOverlayEnabledDesc": "总开关。关掉之后桌面和锁屏都不再挂这一层；打开后不再要求系统动态壁纸是 Folia，没设壁纸也能用。",
     "wallpaperOverlayLockScreen": "音乐锁屏",
-    "wallpaperOverlayLockScreenDesc": "音乐锁屏：亮屏时把叠层那一层搬到系统锁屏之上（注册的是真正的锁屏页面，不是悬浮窗）。画面与桌面叠层完全一致。锁屏页会占住触摸（盖在锁屏之上时系统的解锁手势收不到），退出方式是**上滑**或点底部的 **✕**，退掉后就是原本的锁屏，照常解锁。个别 ROM 会拦后台弹出界面，需要在系统设置里给本应用开「锁屏显示」。",
+    "wallpaperOverlayLockScreenDesc": "音乐锁屏：亮屏时把叠层那一层搬到系统锁屏之上（注册的是真正的锁屏页面，不是悬浮窗）。画面与桌面叠层完全一致。锁屏页会占住触摸（盖在锁屏之上时系统的解锁手势收不到），退出方式是**上滑**或点底部控制条上的 **ˇ**，退掉后就是原本的锁屏，照常解锁。个别 ROM 会拦后台弹出界面，需要在系统设置里给本应用开「锁屏显示」。",
     "wallpaperOverlayLockScreenBlocked": "锁屏页没能起来：系统拦下了后台弹出界面。请到系统设置里给本应用开「锁屏显示 / 后台弹出界面」权限后，再熄屏亮屏一次。",
     "wallpaperOverlayLockScreenWaiting": "还没到时机：在播放中熄屏，下一次亮屏时它就会出现在锁屏上。",
     "wallpaperOverlayLockScreenReady": "锁屏页已就绪：亮屏后的锁屏界面上会显示这一层。",

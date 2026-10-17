@@ -185,7 +185,7 @@
              后台被点通知栏时 Activity 未必还在，动态接收器收不到指令。 -->
         <receiver android:name=".FoliaCommandReceiver" android:exported="false">
             <intent-filter>
-                <action android:name="top.izuna.foliamajor.action.WEB_COMMAND" />
+                <action android:name="top.izuna.folia.debug.action.WEB_COMMAND" />
             </intent-filter>
         </receiver>
 
