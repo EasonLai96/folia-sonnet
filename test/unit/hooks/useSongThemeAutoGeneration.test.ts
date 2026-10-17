@@ -184,4 +184,55 @@ describe('useSongThemeAutoGeneration', () => {
 
         expect(calls).toEqual([{ songId: 'a' }]);
     });
+
+    /*
+     * 「播下一首再切回来，主题变成下一首的」就在这一条。
+     *
+     * 「已经问过」记的是**当前这一首**，不是「本次会话问过这首歌」。以前是个只增不减
+     * 的 Set，切回 a 时 `hasAttempted` 恒为真 → 不生成、也不去问云缓存，画面就一直
+     * 挂着 b 的主题（生成结果只存在云端，不问一次永远拿不回来）。
+     */
+    it('asks again when a song that already played comes back', async () => {
+        setHidden(true);
+        setPlayback(buildSong('a'), buildLyrics('first'));
+        await render(true, false);
+
+        setPlayback(buildSong('b'), buildLyrics('second'));
+        await flush();
+
+        /* 切回 a：必须重新问一次，否则 a 拿不到自己的主题。 */
+        setPlayback(buildSong('a'), buildLyrics('first'));
+        await flush();
+
+        expect(calls).toEqual([{ songId: 'a' }, { songId: 'b' }, { songId: 'a' }]);
+    });
+
+    /*
+     * 用户报的场景：一整张列表播完，再从头播一遍，前面的歌就没有 AI 高亮色了。
+     * 一轮里每一首都被记成「试过」，第二轮全部被挡回去。
+     */
+    it('keeps generating when the queue wraps around and plays from the top again', async () => {
+        setHidden(true);
+        setPlayback(buildSong('a'), buildLyrics('1'));
+        await render(true, false);
+
+        setPlayback(buildSong('b'), buildLyrics('2'));
+        await flush();
+        setPlayback(buildSong('c'), buildLyrics('3'));
+        await flush();
+
+        /* 队列播完，从头再来一轮。 */
+        setPlayback(buildSong('a'), buildLyrics('1'));
+        await flush();
+        setPlayback(buildSong('b'), buildLyrics('2'));
+        await flush();
+
+        expect(calls).toEqual([
+            { songId: 'a' },
+            { songId: 'b' },
+            { songId: 'c' },
+            { songId: 'a' },
+            { songId: 'b' },
+        ]);
+    });
 });

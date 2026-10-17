@@ -44,7 +44,21 @@ export function useSongThemeAutoGeneration({
     const latestSongKeyRef = useRef<string | null>(null);
     const latestEnabledRef = useRef(enabled);
     const latestGenerationInputRef = useRef({ currentSong, lyrics });
-    const attemptedSongKeysRef = useRef(new Set<string>());
+    /*
+     * 「这首歌已经发起过生成」—— **只记当前这一首**（一个 key，不是 Set）。
+     *
+     * 它要挡的只有一件事：同一首歌的 effect 会因为「歌词到了」「loading 变了」重跑
+     * 好几拍，别给同一首歌重复烧一次调用。所以它只要记住「现在这一首已经发过了」。
+     *
+     * 以前这里是个只增不减的 Set，语义变成了「本次会话已经试过这首歌」：一整张列表
+     * 播完之后，队列里每一首的 key 都躺在里面，再从头播、或者播下一首再切回来时
+     * `hasAttempted` 恒为真、直接挡回去 —— 既不去问云缓存（没有「已从云端拉取缓存」
+     * 的提示），也不生成（没有 AI 高亮色），画面就一直挂着上一首歌的主题。
+     * 生成结果只存在云端，不去问一次就永远拿不回来。
+     *
+     * 换一首歌这个标记自动失效：key 变了就是另一首歌，该重新问。
+     */
+    const attemptedSongKeyRef = useRef<string | null>(null);
     const generateAIThemeRef = useRef(generateAITheme);
     const songKey = getSongThemeAutoGenerationKey(currentSong);
     const hasPromptSource = currentSong
@@ -79,7 +93,7 @@ export function useSongThemeAutoGeneration({
             currentSong: scheduledSong,
             lyrics: scheduledInput.lyrics,
             isLyricsLoading,
-            hasAttempted: attemptedSongKeysRef.current.has(songKey),
+            hasAttempted: attemptedSongKeyRef.current === songKey,
             hasCachedTheme: false,
             requiresPromptSource,
         })) {
@@ -116,7 +130,7 @@ export function useSongThemeAutoGeneration({
                 currentSong: latestSong,
                 lyrics: latestInput.lyrics,
                 isLyricsLoading: false,
-                hasAttempted: attemptedSongKeysRef.current.has(targetSongKey),
+                hasAttempted: attemptedSongKeyRef.current === targetSongKey,
                 /* 生成结果只存云端：命中时 generateThemeFromLyrics 已经直接返回。 */
                 hasCachedTheme: false,
                 requiresPromptSource,
@@ -135,7 +149,7 @@ export function useSongThemeAutoGeneration({
                 return;
             }
 
-            attemptedSongKeysRef.current.add(targetSongKey);
+            attemptedSongKeyRef.current = targetSongKey;
             await generateAIThemeRef.current(latestInput.lyrics, latestSong, {
                 source: 'auto',
                 shouldApply: () => isSongThemeGenerationStillCurrent({
