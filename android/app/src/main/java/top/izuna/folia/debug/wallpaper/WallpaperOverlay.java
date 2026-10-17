@@ -578,6 +578,12 @@ public final class WallpaperOverlay {
             }
             // 三次都起不来：基本可以确定是系统那道限制（或 ROM 的「锁屏显示」开关）。
             lockScreenBlocked = true;
+            /*
+             * 把当时的环境一起记进事件流水：设置页直接显示给用户，
+             * 免得再问一遍「什么机型、悬浮窗开了吗」。
+             */
+            noteOverlayEvent("锁屏页起不来（" + lockScreenAttempts + " 次）→ "
+                    + top.izuna.folia.debug.lockscreen.RomPermissionGuide.describe(context));
             Log.w(TAG, "Lock screen page never came up after " + lockScreenAttempts
                     + " attempts (last error: " + lockScreenLastError + ")"
                     + " — likely blocked by the background activity start restriction"
