@@ -46,6 +46,9 @@ const KEY_D = 'd'.repeat(32);
 const KEY_E = 'e'.repeat(32);
 const KEY_F = 'f'.repeat(32);
 const KEY_G = 'a1b2c3d4'.repeat(4);
+const KEY_H = 'd4e5f6a7'.repeat(4);
+/* 每个用例用自己的键：missCache 会把「刚问过没有」记 5 分钟，复用会当场被挡掉。 */
+const KEY_I = 'e6f7a8b9'.repeat(4);
 const KEY_PUSHED = 'a2b3c4d5'.repeat(4);
 
 const payload = {
@@ -54,6 +57,11 @@ const payload = {
     dark: { backgroundColor: '#000000', primaryColor: '#eeeeee', wordColors: [{ word: '小黄花', color: '#ffcc00' }] },
   },
   decision: { mode: 'flow', reason: 'r', params: {} },
+};
+
+const secondPayload = {
+  ...payload,
+  decision: { mode: 'bloom', reason: 'r2', params: {} },
 };
 
 const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 404, json: async () => body }) as unknown as Response;
@@ -162,6 +170,46 @@ describe('pullAiCloudCache 的第二次机会', () => {
     handlers.fetch = async () => json({ hit: false }, false);
 
     expect(await pullAiCloudCache('stage', KEY_E, { songTitle: '', lyricText: '故事的小黄花' })).toEqual({ status: 'miss' });
+  });
+
+  /*
+   * 歌名一样、歌词不一样的一堆近亲，候选一次能来十来个 —— 挨着串行的话，前面有一个
+   * 慢（或卡到超时）就把后面明明合规的那条拖住。判定是本机字符串比较，先全筛完再
+   * 一起问。
+   */
+  it('asks every eligible candidate at once instead of one after another', async () => {
+    const seen: string[] = [];
+    handlers.fetch = async (url) => {
+      seen.push(url);
+      if (url.includes('/ai-cache/resolve')) {
+        return json({
+          ok: true,
+          candidates: [
+            { key: KEY_A, words: ['小黄花'] },
+            { key: KEY_H, words: ['荡秋千'] },
+          ],
+        });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      if (url.includes(KEY_H)) return json({ hit: true, entry: { payload: secondPayload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_I, {
+      songTitle: '晴天',
+      lyricText: '故事的小黄花\n童年的荡秋千',
+    });
+
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.matched).toBe('words');
+      /* 服务端已经按「歌名全等优先、更新时间倒序」排过 —— 取最靠前那条。 */
+      expect(result.sourceKey).toBe(KEY_A);
+      expect(result.payload).toEqual(payload);
+    }
+    /* 串行那条路问到第一个就返回了 —— 第二个也被问过才说明是一起发的。 */
+    expect(seen.some((url) => url.includes(KEY_A))).toBe(true);
+    expect(seen.some((url) => url.includes(KEY_H))).toBe(true);
   });
 
   it('answers from the exact key without ever asking for candidates', async () => {

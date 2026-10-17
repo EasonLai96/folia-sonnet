@@ -20,6 +20,13 @@ const CACHE_SCHEMA = 'v1';
 const REQUEST_TIMEOUT_MS = 12_000;
 /** 同一个键刚问过「没有」就别再问，省一次往返。 */
 const MISS_TTL_MS = 5 * 60 * 1000;
+/**
+ * 合规的候选最多同时拉几条。
+ *
+ * 服务端一次最多给 12 个候选，全并发既没必要也不礼貌；取前几条已经够覆盖「第一条
+ * 拉不动」这种常见情况。
+ */
+const MAX_CONCURRENT_ENTRY_FETCHES = 4;
 
 /*
  * 只有一种。
@@ -377,11 +384,37 @@ export const pullAiCloudCache = async (
     }
 
     const candidates = await fetchResolveCandidates(kind, songTitle);
-    for (const candidate of candidates) {
-        if (!highlightWordsPresent(candidate.words, lyricText)) continue;
-        const payload = await fetchEntry(kind, candidate.key);
-        if (payload === null) continue;
-        return { status: 'hit', payload, matched: 'words', sourceKey: candidate.key };
+
+    /*
+     * 合规判定**一次做齐**，再去发请求。
+     *
+     * 歌名一样、歌词不一样的歌本来就是一堆近亲（翻唱、现场、各平台的 LRC 差几个字
+     * 就是一个新键），候选一次能来十来个。原来是「判一个高亮词 → 拉一次」挨着串行，
+     * 前面只要有一个慢、或者卡到 12 秒超时，后面明明合规的那条就一直排不上 —— 用户
+     * 等的就是这一段。判定是本机字符串比较，零成本，先全筛完再一起问。
+     */
+    const eligible = candidates.filter(
+        (candidate) => highlightWordsPresent(candidate.words, lyricText),
+    );
+
+    if (eligible.length > 0) {
+        const batch = eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
+        const payloads = await Promise.all(
+            batch.map((candidate) => fetchEntry(kind, candidate.key)),
+        );
+        /*
+         * 取**顺序最靠前**的那个成功的：服务端已经按「歌名完全相等优先、更新时间倒序」
+         * 排过了，所以这里不必再挑，第一个到手的就是最该用的那条。
+         */
+        const index = payloads.findIndex((payload) => payload !== null);
+        if (index >= 0) {
+            return {
+                status: 'hit',
+                payload: payloads[index],
+                matched: 'words',
+                sourceKey: batch[index].key,
+            };
+        }
     }
 
     rememberMiss(kind, key);
