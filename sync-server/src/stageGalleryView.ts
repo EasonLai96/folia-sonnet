@@ -320,7 +320,7 @@ const STYLES = `
   .back { font-size: 12px; }
 `;
 
-const page = (title: string, body: string, script = ''): string => `<!DOCTYPE html>
+export const page = (title: string, body: string, script = ''): string => `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -476,7 +476,13 @@ const renderPalette = (
     </div>`;
 };
 
-export const renderDetailPage = (entry: GalleryEntry): string => {
+/*
+ * 一条缓存条目的**详情正文**：动画模式 + 主题颜色（含 AI 高亮词的本色）+ 参数表。
+ *
+ * 抽出来是因为管理面板也要看同一份东西 —— 而且管理面板以前只把 payload 当 JSON 摊开，
+ * 主题长什么样全靠人自己读色值。渲染逻辑只留一份，转义也只在服务端做一遍。
+ */
+export const renderStageDetail = (entry: GalleryEntry): string => {
   const { stage } = entry;
   const paramRows = stage.params.length === 0
     ? '<div class="empty">这一条没有带动画参数。</div>'
@@ -486,10 +492,7 @@ export const renderDetailPage = (entry: GalleryEntry): string => {
         .join('')
     }</tbody></table>`;
 
-  return page(
-    `${entry.songTitle || '未记歌名'} · AI 舞台缓存`,
-    `
-    <div class="back" style="margin-bottom:16px"><a href="/stage">← 返回检索</a></div>
+  return `
     <div class="card stage-head">
       <div>
         <div class="stage-title">${escapeHtml(entry.songTitle || '(未记歌名)')}</div>
@@ -526,9 +529,13 @@ export const renderDetailPage = (entry: GalleryEntry): string => {
       <h2>动画参数</h2>
       ${paramRows}
     </div>
-    `,
-  );
+  `;
 };
+
+export const renderDetailPage = (entry: GalleryEntry): string => page(
+  `${entry.songTitle || '未记歌名'} · AI 舞台缓存`,
+  `<div class="back" style="margin-bottom:16px"><a href="/stage">← 返回检索</a></div>${renderStageDetail(entry)}`,
+);
 
 export const renderMissingPage = (message: string): string => page(
   '没有这一条',

@@ -516,6 +516,64 @@ export const adminCacheRoutes = (() => {
  * 校验能挡住空数据，挡不住「一份能看但很糟的主题」。真被盖掉了，管理员在这里挑一版
  * 旧的捞回来，比让人重新生成一遍划算得多。
  */
+/**
+ * 把某一版副本捞回成当前那条 —— JSON 接口与管理页面共用这一份。
+ *
+ * 先把**现在这条**也存进备份再覆盖：万一捞错了还能再捞回来，不会把当前版本弄丢。
+ * 这一版捞回来之后自己就没必要留着了，删掉。
+ */
+export const restoreCacheBackup = async (
+  db: D1Database,
+  id: number,
+): Promise<{ ok: true; kind: string; key: string } | { ok: false; error: string; status: 400 | 404 }> => {
+  if (!Number.isFinite(id) || id <= 0) {
+    return { ok: false, error: 'invalid_id', status: 400 };
+  }
+  const row = await db
+    .prepare('SELECT id, kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, archived_at FROM ai_cache_backups WHERE id = ?')
+    .bind(id)
+    .first<AiCacheBackupRow>();
+  if (!row) return { ok: false, error: 'not_found', status: 404 };
+
+  await archiveExistingEntry(db, row.kind, row.cache_key);
+
+  const now = new Date().toISOString();
+  await db
+    .prepare(`
+      INSERT INTO ai_cache (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(kind, cache_key) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        payload_bytes = excluded.payload_bytes,
+        song_title = excluded.song_title,
+        provider = excluded.provider,
+        model = excluded.model,
+        platform = excluded.platform,
+        updated_at = excluded.updated_at
+    `)
+    .bind(
+      row.kind,
+      row.cache_key,
+      row.payload_json,
+      Number(row.payload_bytes ?? 0),
+      row.song_title ?? '',
+      row.provider ?? '',
+      row.model ?? '',
+      row.platform ?? '',
+      Number(row.hits ?? 0),
+      row.created_at ?? now,
+      now,
+    )
+    .run();
+
+  await db
+    .prepare('DELETE FROM ai_cache_backups WHERE id = ?')
+    .bind(id)
+    .run();
+
+  return { ok: true, kind: row.kind, key: row.cache_key };
+};
+
 export const adminCacheBackupRoutes = (() => {
   const routes = new Hono<{ Bindings: Env }>();
   routes.use('*', requireAdmin);
@@ -541,56 +599,12 @@ export const adminCacheBackupRoutes = (() => {
   /*
    * POST /admin/api/ai-cache-backups/:id/restore —— 把某一版捞回成当前那条。
    *
-   * 先把**现在这条**也存进备份再覆盖：万一捞错了还能再捞回来，不会把当前版本弄丢。
-   * 这一版捞回来之后自己就没必要留着了，删掉。
+   * 借口与页面共用同一个 `restoreCacheBackup`；这里只负责把结果说成 JSON。
    */
   routes.post('/:id/restore', async (c) => {
     const id = Number.parseInt(String(c.req.param('id') || ''), 10);
-    if (!Number.isFinite(id) || id <= 0) {
-      return c.json({ ok: false, error: 'invalid_id' }, 400);
-    }
-    const row = await c.env.FOLIA_SYNC_DB
-      .prepare('SELECT id, kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, archived_at FROM ai_cache_backups WHERE id = ?')
-      .bind(id)
-      .first<AiCacheBackupRow>();
-    if (!row) return c.json({ ok: false, error: 'not_found' }, 404);
-
-    await archiveExistingEntry(c.env.FOLIA_SYNC_DB, row.kind, row.cache_key);
-
-    const now = new Date().toISOString();
-    await c.env.FOLIA_SYNC_DB
-      .prepare(`
-        INSERT INTO ai_cache (kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(kind, cache_key) DO UPDATE SET
-          payload_json = excluded.payload_json,
-          payload_bytes = excluded.payload_bytes,
-          song_title = excluded.song_title,
-          provider = excluded.provider,
-          model = excluded.model,
-          platform = excluded.platform,
-          updated_at = excluded.updated_at
-      `)
-      .bind(
-        row.kind,
-        row.cache_key,
-        row.payload_json,
-        Number(row.payload_bytes ?? 0),
-        row.song_title ?? '',
-        row.provider ?? '',
-        row.model ?? '',
-        row.platform ?? '',
-        Number(row.hits ?? 0),
-        row.created_at ?? now,
-        now,
-      )
-      .run();
-
-    await c.env.FOLIA_SYNC_DB
-      .prepare('DELETE FROM ai_cache_backups WHERE id = ?')
-      .bind(id)
-      .run();
-
+    const result = await restoreCacheBackup(c.env.FOLIA_SYNC_DB, id);
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
     return c.json({ ok: true, restored: id });
   });
 

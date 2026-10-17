@@ -361,6 +361,11 @@ const renderCache = () => {
     + '<td>' + esc(entry.hits ?? 0) + '</td>'
     + '<td>' + esc(fmtTime(entry.updatedAt)) + '</td>'
     + '<td><button data-act="view" data-id="' + esc(entry.kind + '/' + entry.key) + '">查看</button> '
+    /*
+     * 「渲染」跳到服务端画好的那一页：主题色块、高亮词的本色，还有这一条被覆盖留下
+     * 的旧版 —— 弹窗里那坨 JSON 看不出这些。
+     */
+    + '<button data-act="render" data-id="' + esc(entry.kind + '/' + entry.key) + '">渲染</button> '
     + '<button class="danger" data-act="del" data-id="' + esc(entry.kind + '/' + entry.key) + '">删除</button></td>'
     + '</tr>'
   )).join('');
@@ -598,6 +603,10 @@ document.getElementById('cache-rows').addEventListener('click', async (event) =>
   if (button.dataset.act === 'view') {
     const data = await api('/admin/api/ai-cache/' + id).catch(() => null);
     if (data?.entry) showPayload('缓存内容 · ' + id, data.entry.payload);
+    return;
+  }
+  if (button.dataset.act === 'render') {
+    window.location.href = '/admin/cache/' + id;
     return;
   }
   if (button.dataset.act === 'del') {

@@ -9,6 +9,7 @@ import adminAuthRoutes, {
 } from './admin.js';
 import { renderLoginPage, renderPanelPage } from './panel.js';
 import { aiCacheRoutes, adminCacheBackupRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
+import { adminCachePages } from './adminCachePages.js';
 import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
 import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
@@ -678,6 +679,14 @@ app.get('/admin', async (c) => {
 app.route('/admin/api/fonts', adminFontRoutes);
 app.route('/admin/api/ai-cache', adminCacheRoutes);
 app.route('/admin/api/ai-cache-backups', adminCacheBackupRoutes);
+/*
+ * 管理面板的缓存详情页面：`/admin/cache/:kind/:key`。
+ *
+ * 面板那张表只能把 payload 当 JSON 摊开（主题长什么样得靠人自己读色值），覆盖副本
+ * 更是只有一套 JSON 接口。这里补一个能点的页面：当前这一版按访客检索页那套渲染
+ * （色块 + 高亮词用本色），下面挂着被覆盖留下的旧版，点一下就捞回来。
+ */
+app.route('/admin/cache', adminCachePages);
 // 概况图：`GET /admin/api/stats.svg`，挂在 /admin/api 下，跟面板同一道门。
 app.route('/admin/api', adminStatsImageRoutes);
 app.get('/admin/api/stats', requireAdmin, async (c) => {
