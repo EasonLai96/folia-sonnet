@@ -12,9 +12,15 @@ import {
     parseSyncedSettingsRecord,
     parseSyncedThemeRecords,
 } from './syncSchema';
+import { createAiFetch } from '../aiNativeFetch';
 
 // src/services/sync/syncClient.ts
 // HTTP adapter for Folia's user-hosted sync API.
+//
+// 同步服务是**用户手填地址**的自建服务，请求还带 `Authorization` 头 —— 在安卓容器里
+// 这必然被同源检查掐掉，报出来的是一个毫无特征的 `TypeError: Failed to fetch`，
+// 界面上只能显示「连接失败」，从现象几乎反推不到原因。所以走和 AI 云缓存、字体市场
+// 同一条原生 OkHttp 桥（`createAiFetch`）；桌面与浏览器那条它自己回落到全局 fetch。
 
 export class SyncClientError extends Error {
     status: number;
@@ -40,7 +46,7 @@ const requestJson = async <T,>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> => {
-    const response = await fetch(buildUrl(config, path), {
+    const response = await createAiFetch()(buildUrl(config, path), {
         ...init,
         headers: {
             Accept: 'application/json',
