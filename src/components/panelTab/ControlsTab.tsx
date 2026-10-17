@@ -4,6 +4,7 @@ import type { ThemeSourceModel } from '../../hooks/themeControllerState';
 import AudioEqualizerDialog from './AudioEqualizerDialog';
 import AppearanceSection from './controls/AppearanceSection';
 import SoundTiles from './controls/SoundTiles';
+import SleepTimerRow from './controls/SleepTimerRow';
 import ThemeNameRow from './controls/ThemeNameRow';
 import ThemeSourceRow from './controls/ThemeSourceRow';
 import VolumeRow from './controls/VolumeRow';
@@ -84,6 +85,11 @@ const ControlsTab: React.FC<ControlsTabProps> = ({
             onToggleLoop={onToggleLoop}
             loopToggleDisabled={loopToggleDisabled}
         />
+        {/* 定时关闭：上游重写控制页时这一行没被挂回来，组件成了孤儿（useSleepTimer 仍在 App 里跑，
+            只是没有入口）。默认收起，标题右侧始终显示当前配置或剩余时间。 */}
+        <div className="pt-2">
+            <SleepTimerRow theme={theme} isDaylight={isDaylight} />
+        </div>
 
         <GroupLine />
 

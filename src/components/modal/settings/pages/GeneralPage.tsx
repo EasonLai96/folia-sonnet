@@ -12,6 +12,7 @@ import { useSettingsKitTheme } from '../kit/kitTheme';
 import { settingsCardClassFor } from '../settingsCardClasses';
 import AndroidPhoneFitSetting from '../AndroidPhoneFitSetting';
 import AndroidScreenAwakeSetting from '../AndroidScreenAwakeSetting';
+import AndroidLyriconSetting from '../AndroidLyriconSetting';
 import DeviceTypeSetting from '../DeviceTypeSetting';
 import GlassSurfaceSetting from '../GlassSurfaceSetting';
 import LyricFlatSetting from '../LyricFlatSetting';
@@ -184,6 +185,8 @@ const GeneralPage: React.FC = () => {
                 <Row below={<DeviceTypeSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
                 <Row below={<AndroidScreenAwakeSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
                 <Row below={<AndroidPhoneFitSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
+                {/* 状态栏歌词：开关曾随 IntegrationSettingsSubview 一起被删，这里补回挂载点。 */}
+                <Row below={<AndroidLyriconSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
             </Group>
         </>
     );
