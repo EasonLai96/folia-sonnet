@@ -16,6 +16,7 @@ import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore'
 import { setPlayerState } from '../../../../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
+import { noteAnalyser, noteAudioContext } from '../../../../utils/mediaDiagnostics';
 
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
@@ -132,13 +133,37 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            const ctx = new AudioContextClass();
+            /*
+             * 放音乐要的是稳，不是浏览器那一小格交互缓冲 —— 但也**不能给 `playback`**。
+             *
+             * 默认的 `interactive` 只给几十毫秒，安卓 WebView 上 CPU 一被别的东西占满（可视化、
+             * 封面解码、整墙重渲染）音频线程就交不上样本 —— 缓冲空了一次就是一声撕裂/爆音。
+             *
+             * 但 `playback` 那条路是走反了的（真机二分实测，它是播放页掉帧的元凶）：它把输出
+             * 缓冲放得很大，而播放页的 rAF **每帧都要同步调一次**
+             * `analyser.getByteFrequencyData()` 取频谱（usePlaybackVisualizerBridge 的 updateLoop），
+             * 这个调用要等音频线程那一侧把最近一次渲染结果交出来，缓冲越大每帧等得越久 ——
+             * 于是整页掉帧，而且是**所有**可视化模式一起慢（与模式无关，卡的是取频谱这一步）。
+             * 壁纸叠层同期完全不卡，正因为它走原生的 Visualizer（WallpaperAudioTap），
+             * 压根不经过这个 AudioContext。
+             *
+             * `balanced` 是规范里的中间档：比 `interactive` 多一点余量抗欠载，又不至于把每帧
+             * 那次取频谱拖住。改完在开发者选项里读 audioContextLatencyHint / baseLatency /
+             * outputLatency 能确认到底落到哪一档。
+             *
+             * 上游重写播放桥时把这一档弄丢了（退化成 `new AudioContextClass()`，即回落默认的
+             * interactive），听感就是连续的撕裂/爆音 —— 见 services 侧的 mediaDiagnostics 注释。
+             */
+            const ctx = new AudioContextClass({ latencyHint: 'balanced' });
             audioContextRef.current = ctx;
+            noteAudioContext(ctx, 'balanced');
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;
             analyser.smoothingTimeConstant = 0.6;
             analyserRef.current = analyser;
+            // 只为那张频谱读数：让它能分清「analyser 没建」和「建了但没数据」。
+            noteAnalyser(analyser);
 
             const { gainNode, fadeNode, effectChain, decksConnected } = buildPlaybackGraph({
                 context: ctx,

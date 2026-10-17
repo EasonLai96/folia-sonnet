@@ -12,7 +12,7 @@ import { qrcDecrypt } from './qrcDecrypt';
 import { applyDetectedChorusEffects, applyChorusRangesByTime } from '../../../utils/lyrics/chorusEffects';
 import type { ChorusRange } from '../../../utils/lyrics/chorusEffects';
 import { getOriginalCoverUrl } from '../../../utils/coverUrl';
-import { lyricProxyWebUrl } from '../../lyricProxy';
+import { resolveProxiedUrl } from '../../proxiedUrl';
 
 const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
@@ -41,7 +41,7 @@ async function requestQQ(method: string, module: string, param: any): Promise<an
   };
 
   const targetUrl = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
-  const url = isElectron ? targetUrl : lyricProxyWebUrl(targetUrl);
+  const url = isElectron ? targetUrl : resolveProxiedUrl(targetUrl);
 
   const response = await fetch(url, {
     method: 'POST',

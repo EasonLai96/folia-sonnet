@@ -3,6 +3,7 @@ import { omni } from '../../services/onlineMusic/omni';
 import type { OnlineProviderId, ProviderUser } from '../../types/onlineMusic';
 import { onAccentColor } from '../modal/settings/kit/kitTheme';
 import { resolvePlatformMark } from './resolvePlatformMark';
+import { isCapacitorAndroid } from '../../platform/runtime';
 
 // src/components/login/PlatformMark.tsx
 // 平台的记号和账号的头像，登录窗口、主页的登录按钮、切换器和控制面板的账号页都画这两样。
@@ -10,6 +11,11 @@ import { resolvePlatformMark } from './resolvePlatformMark';
 // `--login-edge`（没有设就是卡片的颜色）。
 
 const EDGE = '0 0 0 2px var(--login-edge, var(--st-card))';
+
+/** 桌面端（Electron）与安卓（Capacitor）都算「App 里」：两者都不是会被 mixed-content 拦下的普通网页。 */
+const isAppRuntime = (): boolean => (
+    typeof window !== 'undefined' && (Boolean((window as { electron?: unknown }).electron) || isCapacitorAndroid())
+);
 
 /** 一个平台的记号的字和颜色，连同画在这种颜色上的字的颜色。 */
 export const platformMarkOf = (providerId: OnlineProviderId, label?: string) => {
@@ -43,11 +49,14 @@ export const PlatformMark: React.FC<PlatformMarkProps> = ({ providerId, label, s
 };
 
 /**
- * 账号头像的地址。网页端把 http 的地址换成 https（https 的页面不让载 http 的图）；桌面端原样用，
+ * 账号头像的地址。网页端把 http 的地址换成 https（https 的页面不让载 http 的图）；App 里原样用，
  * 有的平台的头像只在 http 上。
+ *
+ * 「App 里」不只是桌面端：安卓 WebView 里页面同样不是那个会被 mixed-content 拦下的普通网页，
+ * 而 QQ / 酷狗那几家的头像域名在 https 上未必给得出图 —— 一律改写成 https 就是「头像永远是空的」。
  */
-export const accountPictureSrc = (avatarUrl: string, inDesktopApp: boolean): string => (
-    inDesktopApp ? avatarUrl : avatarUrl.replace(/^http:/, 'https:')
+export const accountPictureSrc = (avatarUrl: string, inApp: boolean): string => (
+    inApp ? avatarUrl : avatarUrl.replace(/^http:/, 'https:')
 );
 
 type AccountPictureProps = {
@@ -66,7 +75,7 @@ export const AccountPicture: React.FC<AccountPictureProps> = ({ user, size, prov
         <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
             {user.avatarUrl ? (
                 <img
-                    src={accountPictureSrc(user.avatarUrl, typeof window !== 'undefined' && Boolean(window.electron))}
+                    src={accountPictureSrc(user.avatarUrl, isAppRuntime())}
                     alt=""
                     draggable={false}
                     className="h-full w-full rounded-full bg-[var(--st-fill)] object-cover"

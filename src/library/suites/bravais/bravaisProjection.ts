@@ -2,13 +2,17 @@ import type { SongResult } from '../../../types';
 import type { LibraryHomeCard } from '../../core/home/homeModel.contract';
 import type { BravaisItem, BravaisItemKind } from './bravaisLayer';
 import { formatCollectionBadge, resolveBravaisTileForm, resolveCollectionTrackCount } from './bravaisTileForm';
+import { getProviderAppIcon } from '../../../assets/providers/appIcons';
 
 // src/library/suites/bravais/bravaisProjection.ts
 // core 数据 → 磁贴条目（BravaisItem）的纯投影，surface 用它们拼层描述。曲目的展示字段（歌手、封面、时长、
 // 可播放性）由调用方经 describeTrack 注入：surface 用 services/onlineMusic 的元数据 helper，单测给假的。
 
-/** 首页卡片的条目 key（与集合的条目键分开命名空间：同一面墙上两种 key 不会撞）。 */
-export const homeCardItemKey = (card: Pick<LibraryHomeCard, 'id' | 'type'>) => `card:${card.type ?? 'item'}:${card.id}`;
+/** 首页卡片的条目 key（与集合的条目键分开命名空间：同一面墙上两种 key 不会撞）。
+ * 「全部」视图里再带上平台：不同平台的歌单 id 全是数字，撞了翻牌会认错内容（A 家的卡翻出 B 家的名）。 */
+export const homeCardItemKey = (card: Pick<LibraryHomeCard, 'id' | 'type' | 'sourceProviderId'>): string => (
+    `card:${card.type ?? 'item'}:${card.sourceProviderId ? `${card.sourceProviderId}:` : ''}${card.id}`
+);
 
 /** 卡片类型 → 磁贴种类。电台与每日推荐是 feed；未知类型当歌单（首页的在线集合大多是歌单）。 */
 export const homeCardKind = (type: string | undefined): BravaisItemKind => {
@@ -51,6 +55,10 @@ export const projectHomeCardItem = (
         badge: formatCollectionBadge(labels.kindLabel(kind), collectionCount),
     };
     if (collectionCount !== undefined) item.trackCountLabel = labels.trackCount(collectionCount);
+    // 「全部」视图：这张卡标了自己来自哪家 → 封面右下角的来源图标（图只有一份来源，见 bravaisLayer 的注释）。
+    // 上游重写投影时丢了这一行：数据侧（homeCards.ts）仍在写 sourceProviderId，
+    // 消费侧（BravaisTile）仍在读 sourceIcon，中间这一句没了 → 图标永远不出现，且不报错。
+    if (card.sourceProviderId) item.sourceIcon = getProviderAppIcon(card.sourceProviderId);
     return item;
 };
 

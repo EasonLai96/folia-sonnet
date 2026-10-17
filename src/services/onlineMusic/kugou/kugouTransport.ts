@@ -2,7 +2,8 @@ import md5 from 'blueimp-md5';
 import { OnlineProviderError } from '../../../types/onlineMusic';
 import { readProviderSessionValue, removeProviderSessionValue, writeProviderSessionValue } from '../providerStorage';
 import { isFoliaExtensionBridgeConfigured, requestFoliaExtension } from '../../foliaExtensionBridge';
-import { lyricProxyWebUrl, requestLyricProxyOnDesktop } from '../../lyricProxy';
+import { requestLyricProxyOnDesktop } from '../../lyricProxy';
+import { resolveProxiedUrl } from '../../proxiedUrl';
 import { withLoginRequestLimit } from '../login/loginRequestLimit';
 
 // src/services/onlineMusic/kugou/kugouTransport.ts
@@ -279,7 +280,7 @@ export const requestKugouAnonymousSearch = async (
     Object.entries(params).forEach(([key, value]) => targetUrl.searchParams.set(key, String(value)));
     const requestUrl = typeof window !== 'undefined' && window.electron
         ? targetUrl.toString()
-        : lyricProxyWebUrl(targetUrl.toString());
+        : resolveProxiedUrl(targetUrl.toString());
     const response = await fetch(requestUrl, {
         method: 'GET',
         credentials: 'omit',
@@ -364,7 +365,7 @@ export const requestKugouLegacyPlayInfo = async (hash: string): Promise<any> => 
 
     const requestUrl = typeof window !== 'undefined' && window.electron
         ? targetUrlString
-        : lyricProxyWebUrl(targetUrlString);
+        : resolveProxiedUrl(targetUrlString);
     const response = await fetch(requestUrl, {
         method: 'GET',
         credentials: 'omit',

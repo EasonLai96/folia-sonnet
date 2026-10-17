@@ -8,7 +8,7 @@ import {
     writeCoverAsset,
     type BinaryAssetWriteResult,
 } from './binaryAssetStore';
-import { lyricProxyWebUrl } from './lyricProxy';
+import { resolveProxiedUrl } from './proxiedUrl';
 
 interface StoredCoverDescriptor extends BinaryAssetWriteResult { }
 
@@ -28,7 +28,11 @@ const buildCoverRequestUrl = (coverUrl: string): string => {
         if (hostname === 'y.gtimg.cn'
             || hostname === 'kugou.com' || hostname.endsWith('.kugou.com')
             || hostname === 'kgimg.com' || hostname.endsWith('.kgimg.com')) {
-            return lyricProxyWebUrl(coverUrl);
+            // 安卓上这三个主机桥接得到（原生 OkHttp 直连，没有 CORS 这一说），
+            // 走 proxy 反而会打到同源的 /api/lyric-proxy —— WebView 自己的服务器回一个
+            // index.html，于是**一段 HTML 被当成封面 blob 存进缓存**（response.ok 还是 200，
+            // 全程不报错，只表现为封面坏图/空白）。resolveProxiedUrl 在桥接得上时给原地址。
+            return resolveProxiedUrl(coverUrl);
         }
     } catch {
         return coverUrl;
