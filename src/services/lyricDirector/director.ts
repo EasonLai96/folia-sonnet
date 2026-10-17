@@ -485,6 +485,16 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
             return { kind: 'stale' };
         }
 
+        /*
+         * 上传那条提示**不看**「允许自动切换」。
+         *
+         * 那个开关挡的是「AI 能不能动我当前在用的样式」，不是「AI 要不要算」—— 这条
+         * 纪律上面已经说过一遍。答案照样推上云端了，那就照样该跟用户说一声。以前它跟
+         * apply 绑在一起，于是关掉那个开关的人**永远看不到自己贡献了什么**，明明每首
+         * 歌都在替别人烧调用。
+         */
+        if (announce && source !== 'cloud') toast(translate('aiDirector.toastUploaded'), 'success');
+
         /* 开关关着：答案已经躺在云端了，别动用户手上的样式。 */
         if (!applyAllowed) {
             return { kind: 'produced', text: decision.reason };
@@ -510,7 +520,6 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
          * 命中缓存那次一个字节都没上传，也就不能说「上传成功」—— 那正是
          * 云缓存替用户省掉的那次调用。
          */
-        if (announce && source !== 'cloud') toast(translate('aiDirector.toastUploaded'), 'success');
         return { kind: 'applied', text };
     } catch (error) {
         /*
@@ -639,12 +648,19 @@ const prefetchNextSong = async (): Promise<void> => {
          * 开始播放时，导演链路按同一个指纹命中它，就不用再等一次模型了。
          * 本地不再落盘 —— 结果只有一份，存在云端。
          */
-        await requestDecision({
+        const { source } = await requestDecision({
             song: songInfoOf(song),
             lines,
             targetSongKey: key,
             force: false,
         });
+        /*
+         * 提前这一趟也要说一声。
+         *
+         * 它真的把下一首的答案推上云端了 —— 那正是「感谢你的贡献」要说的事，跟切歌
+         * 那条路一样。命中缓存的那次一个字节都没上传，也就不能说感谢。
+         */
+        if (source !== 'cloud') toast(translate('aiDirector.toastPrefetchUploaded'), 'success');
     } catch (error) {
         /*
          * 「没配 AI」不是这次运气不好，是这台机器的固定状态 —— 留着标记，别每切一首歌

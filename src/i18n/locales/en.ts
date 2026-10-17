@@ -1066,6 +1066,7 @@ export default {
     "fromMemory": " (reusing this song's last pick)",
     "toastFailed": "AI director failed: {{text}}",
     "toastUploaded": "Uploaded — thank you for your contribution.",
+    "toastPrefetchUploaded": "Prepared ahead of time for the next track and uploaded it — thank you for your contribution.",
     "unavailable": "No AI configured, so nothing can be generated — and the cloud cache has no animation decision for this song either.",
     "failed": "Failed: ",
     "restoreDone": "Restored the animation settings from before the AI director took over.",

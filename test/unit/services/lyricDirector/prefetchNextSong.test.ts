@@ -64,6 +64,18 @@ vi.mock('@/services/onlineMusic/omni', () => ({
 
 let cloudEnabled = true;
 
+/*
+ * 提示都从 `setStatusMessage` 出去 —— 换掉它，就能直接断言「这一趟有没有跟用户说一声」。
+ * i18n 被 mock 成「返回 key 本身」，所以断言的是 key 而不是文案。
+ */
+const { messages } = vi.hoisted(() => ({ messages: [] as { type: string; text: string }[] }));
+
+vi.mock('@/stores/useStatusMessageStore', () => ({
+  setStatusMessage: (value: { type: string; text: string }) => {
+    messages.push({ type: String(value?.type ?? ''), text: String(value?.text ?? '') });
+  },
+}));
+
 vi.mock('@/services/foliaCloud', () => ({
     isFoliaCloudCacheEnabled: () => cloudEnabled,
     resolveCloudApiUrl: (path: string) => `https://cloud.test/api/${path}`,
@@ -111,6 +123,7 @@ let calls: CloudCall[] = [];
 
 beforeEach(() => {
     calls = [];
+    messages.length = 0;
     prefetchedLyrics = null;
     prefetchedIsPureMusic = false;
     omniLyricLines = null;
@@ -249,6 +262,85 @@ describe('prefetchNextSong —— 提前为下一首做准备', () => {
         await runOnce(director);
 
         expect(calls[1].platform).toBe('kugou');
+    });
+
+    /*
+     * 提前生成**真的上传了** —— 那就跟切歌那条路一样该说一声「感谢你的贡献」。
+     * 以前预取拿到的结果直接丢掉，用户一句反馈都没有，看上去像什么都没做。
+     */
+    it('announces the upload it just made for the next track', async () => {
+        omniLyricLines = buildLyricData('下一首的歌词');
+        const { director, playback } = await loadDirector();
+        const current = buildSong('a');
+        const next = buildSong('b');
+        playback.usePlaybackStore.setState({
+            currentSong: current,
+            playQueue: [current, next],
+            lyrics: buildLyricData('当前这首的歌词') as never,
+            transitionDisplay: null,
+        });
+
+        cloudHandler = async (options) => {
+            calls.push({
+                fingerprint: String(options.fingerprint ?? ''),
+                platform: String(options.platform ?? ''),
+                songTitle: String(options.songTitle ?? ''),
+                skipPull: options.skipPull === true,
+                isPureMusic: options.isPureMusic === true,
+            });
+            return { value: { decision: { mode: 'flow', reason: 'r', params: {} } }, source: 'ai' };
+        };
+
+        await runOnce(director);
+
+        expect(messages.map((entry) => entry.text)).toContain('aiDirector.toastPrefetchUploaded');
+    });
+
+    /* 命中缓存那次一个字节都没上传 —— 那不能说「感谢」，本来就是白拿别人的。 */
+    it('stays quiet when the prefetch just pulled someone else’s answer', async () => {
+        omniLyricLines = buildLyricData('下一首的歌词');
+        const { director, playback } = await loadDirector();
+        const current = buildSong('a');
+        const next = buildSong('b');
+        playback.usePlaybackStore.setState({
+            currentSong: current,
+            playQueue: [current, next],
+            lyrics: buildLyricData('当前这首的歌词') as never,
+            transitionDisplay: null,
+        });
+
+        await runOnce(director);
+
+        expect(messages.map((entry) => entry.text)).not.toContain('aiDirector.toastPrefetchUploaded');
+    });
+
+    /*
+     * 「允许自动切换」只管**应用**，不管**生成** —— 关着照样要把答案推上云端，
+     * 那就照样该说一声。以前那条提示被绑在 apply 后面，于是关掉开关的人永远看不到
+     * 自己贡献了什么，而他们每首歌都在替别人烧调用。
+     */
+    it('still says thank you when auto-switch is off and nothing is applied', async () => {
+        omniLyricLines = buildLyricData('下一首的歌词');
+        localStorage.setItem('folia_lyric_director_v2', JSON.stringify({
+            settings: { autoOnSongChange: false, prefetchNext: false },
+        }));
+        const { director, playback } = await loadDirector();
+        const current = buildSong('a');
+        playback.usePlaybackStore.setState({
+            currentSong: current,
+            playQueue: [current],
+            lyrics: buildLyricData('当前这首的歌词') as never,
+            transitionDisplay: null,
+        });
+
+        cloudHandler = async () => (
+            { value: { decision: { mode: 'flow', reason: 'r', params: {} } }, source: 'ai' }
+        );
+
+        const outcome = await director.runLyricDirectorDecision({ announce: true });
+
+        expect(outcome.kind).toBe('produced');
+        expect(messages.map((entry) => entry.text)).toContain('aiDirector.toastUploaded');
     });
 
     it('云缓存也关着就没什么可预取的', async () => {
