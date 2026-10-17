@@ -103,6 +103,7 @@ const emptySnapshot: RemoteControlSnapshot = {
     exportState: idleVideoExportState(),
     isDaylight: false,
     lyrics: null,
+    subtitleContentMode: 'none',
     isLiked: false,
     canLike: false,
     updatedAt: 0,

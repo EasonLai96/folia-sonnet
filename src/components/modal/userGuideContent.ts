@@ -31,6 +31,23 @@ export const HELP_TAB_PRIMARY_SHORTCUTS: HelpTabShortcut[] = [
     { id: 'play-queue', titleKey: 'help.playQueue', fallback: 'Play queue', key: 'P' },
 ];
 
+export type HelpTabPlayerControl = {
+    id: string;
+    /** One action, or the two a row pairs: the Help tab joins their names with a slash. */
+    titleKeys: string[];
+    /** Held with the primary modifier, which the Help tab prints per platform. */
+    withPrimaryModifier?: boolean;
+    /** One key for each action. */
+    keys: string[];
+};
+
+// What the keyboard does on the player page, shown beside the entry points above.
+export const HELP_TAB_PLAYER_CONTROLS: HelpTabPlayerControl[] = [
+    { id: 'play-pause', titleKeys: ['help.playPause'], keys: ['Space'] },
+    { id: 'previous-next-track', titleKeys: ['help.previousTrack', 'help.nextTrack'], withPrimaryModifier: true, keys: ['←', '→'] },
+    { id: 'seek', titleKeys: ['help.seekBackward', 'help.seekForward'], keys: ['←', '→'] },
+];
+
 export const PLAYER_PAGE_SHORTCUTS: UserGuideShortcut[] = [
     {
         id: 'open-command-palette',

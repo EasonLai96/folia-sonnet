@@ -115,7 +115,8 @@ describe('presentPlaybackFailure while the interface is in the background', () =
         // 停下来了也要说一声，否则用户连「为什么没声了」都不知道。
         expect(showNativeToast).toHaveBeenCalledTimes(1);
         // 报告同样发一次，但这次不跳 —— 停播与「跳走」对模组是两回事。
-        expect(notifyFailure).toHaveBeenCalledWith({ song, reason: 'session-expired', phase: 'play', willAutoSkip: false });
+        // 报告给模组用的是对外那份代号（OnlineFailureCaseId）：「没登录」与「会话过期」都是 sign-in-needed。
+        expect(notifyFailure).toHaveBeenCalledWith({ song, reason: 'sign-in-needed', phase: 'play', willAutoSkip: false });
     });
 
     it('keeps going through several broken songs when each one is its own problem', () => {

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SongSortDirection, SongSortField } from '../../utils/songSorting';
-import { findSongSortPreset, type SongSortPreset } from '../../library/core/model/songSortOptions';
+import { findSongSortPreset, type SongSortPreset } from '../../library/core/collection/songSortOptions';
 
 // src/components/shared/TrackSortMenu.tsx
 // 曲目列表的排序菜单。选项不在这里写死：renderer 把「这个列表排得了哪些项」传进来，

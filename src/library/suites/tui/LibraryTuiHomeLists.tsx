@@ -1,10 +1,10 @@
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { LocalLibraryGroup, LocalPlaylist, LocalSong } from '../../../types';
-import type { LibraryAccountController } from '../../core/contracts/account';
-import type { LibraryCollectionDescriptor } from '../../core/contracts/collection';
-import type { LibraryDirectoryBatchController, LibraryHiddenScope } from '../../core/contracts/directory';
-import type { LibraryLocalCatalogSnapshot } from '../../core/contracts/home';
+import type { LibraryAccountController } from '../../core/account/account.contract';
+import type { LibraryCollectionDescriptor } from '../../core/collection/collection.contract';
+import type { LibraryDirectoryBatchController, LibraryHiddenScope } from '../../core/directory/directory.contract';
+import type { LibraryLocalCatalogSnapshot } from '../../core/home/home.contract';
 import type {
     LibraryHomeActionsController,
     LibraryHomeListAction,
@@ -13,16 +13,15 @@ import type {
     LibraryHomeTabKey,
     LibraryLocalDirectoryTreesResource,
     LibraryNavidromeHomeResource,
-} from '../../core/contracts/homeModel';
-import type { LibraryDeclaredActions, LibraryHomeActionId } from '../../core/contracts/suite';
-import { resolveLocalHomeActions, type LocalHomeRow } from '../../core/model/localHomeModel';
-import { isNavidromeHomeSection, resolveNavidromeCollectionType } from '../../core/model/navidromeHomeModel';
-import type { LibraryHomeOnlineList } from '../../core/bindings/useLibraryHomeOnline';
-import { useLibraryHomeLocal, useLocalDirectoryTrees, useLocalHomeBatchConfig } from '../../core/bindings/useLibraryHomeLocal';
-import { useLibraryHomeNavidrome } from '../../core/bindings/useLibraryHomeNavidrome';
-import { useLibraryHomeActions } from '../../core/bindings/useLibraryHomeActions';
-import { useLibraryHomeListRegistration } from '../../core/bindings/useLibraryHomeSurfaceRegistration';
-import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
+} from '../../core/home/homeModel.contract';
+import type { LibraryDeclaredActions, LibraryHomeActionId } from '../../core/suite/suite.contract';
+import { resolveLocalHomeActions, type LocalHomeRow } from '../../core/home/localHomeModel';
+import { isNavidromeHomeSection, resolveNavidromeCollectionType } from '../../core/home/navidrome/navidromeHomeModel';
+import type { LibraryHomeOnlineList } from '../../core/home/online/useLibraryHomeOnline';
+import { useLibraryHomeLocal, useLocalDirectoryTrees, useLocalHomeBatchConfig } from '../../core/home/useLibraryHomeLocal';
+import { useLibraryHomeNavidrome } from '../../core/home/navidrome/useLibraryHomeNavidrome';
+import { useLibraryHomeActions } from '../../core/home/useLibraryHomeActions';
+import { useLibraryHomeListRegistration } from '../../core/home/useLibraryHomeSurfaceRegistration';
 import LibraryTuiDirectory from './LibraryTuiDirectory';
 import LibraryTuiAccountList from './LibraryTuiAccountList';
 import type { LibraryTuiPromptRequest } from './LibraryTuiPrompt';
@@ -52,7 +51,6 @@ const LOCAL_ACTION_IDS: Record<string, LibraryHomeActionId> = {
     'import-folder': 'home-import-folder',
     'refresh-folders': 'home-refresh-folders',
     'import-playlist': 'home-import-playlist',
-    'scan-device-music': 'home-scan-device-music',
 };
 
 /** 列表右上角的一排动作（导入、刷新），等宽按钮。 */
@@ -184,7 +182,7 @@ export const LibraryTuiLocalList: React.FC<LibraryTuiListCommonProps & {
     const playlistFileInputRef = useRef<HTMLInputElement>(null);
     const directoryTrees = useLocalDirectoryTrees(treesResource, localSongs);
     const local = useLibraryHomeLocal({ localSongs, localPlaylists, catalog, activeRow });
-    const { snapshot: actionState } = useLibraryHomeActions(homeActions);
+    const { snapshot: actionState, importBusy } = useLibraryHomeActions(homeActions);
     const batchConfig = useLocalHomeBatchConfig({
         controller: directoryActions,
         selectionType: local.batchSelectionType,
@@ -194,17 +192,13 @@ export const LibraryTuiLocalList: React.FC<LibraryTuiListCommonProps & {
     });
     const activeSection = local.activeSection;
 
-    /*
-     * 四个导入动作都不需要网格的界面：导入文件夹、刷新与扫描设备音乐直接交给首页动作控制器，
-     * 歌单文件用一个隐藏的文件选择框。「扫描设备音乐」要不要出现由运行时决定（安卓原生才有，见 core/model/localHomeModel）。
-     */
-    const localActions = resolveLocalHomeActions(actionState, { deviceScan: isAndroidNativeRuntime() })
+    // 三个导入动作都不需要网格的界面：导入文件夹与刷新直接交给首页动作控制器，歌单文件用一个隐藏的文件选择框。
+    const localActions = resolveLocalHomeActions(actionState)
         .filter(action => common.declaredActions.actions.includes(LOCAL_ACTION_IDS[action.id]));
     const runAction = (id: string) => {
         if (id === 'import-folder') void homeActions.importFolder();
         else if (id === 'refresh-folders') void homeActions.refreshFolders();
         else if (id === 'import-playlist') playlistFileInputRef.current?.click();
-        else if (id === 'scan-device-music') void homeActions.scanDeviceMusic();
     };
     const isEmptyLibrary = directoryTrees.loaded && localSongs.length === 0 && directoryTrees.trees.length === 0;
 
@@ -254,30 +248,15 @@ export const LibraryTuiLocalList: React.FC<LibraryTuiListCommonProps & {
     );
 
     if (isEmptyLibrary) {
-        /*
-         * 空库这一屏跟网格那版一样，要把「扫描设备音乐」一起摆出来：它平时排在 ActionBar 里，
-         * 而 ActionBar 在空库早退之后才渲染 —— 安卓上库里还没有歌时恰恰最需要这一颗。
-         */
-        const emptyActions = localActions.filter(
-            action => action.id === 'import-folder' || action.id === 'scan-device-music',
-        );
         return (
             <StatusText status="empty-library">
                 {fileInput}
                 <span>{t('localMusic.noLocalMusic')}</span>
-                <div className="flex flex-wrap items-center gap-x-3 self-start">
-                    {emptyActions.map(action => (
-                        <button
-                            key={action.id}
-                            type="button"
-                            disabled={action.disabled}
-                            onClick={() => runAction(action.id)}
-                            className="opacity-70 hover:opacity-100 disabled:opacity-30"
-                        >
-                            {`[${action.pending ? '~' : ''}${t(action.labelKey)}]`}
-                        </button>
-                    ))}
-                </div>
+                {common.declaredActions.actions.includes('home-import-folder') ? (
+                    <button type="button" disabled={importBusy} onClick={() => void homeActions.importFolder()} className="self-start opacity-70 hover:opacity-100 disabled:opacity-30">
+                        {`[${actionState.scan?.active ? t('options.scanning') : actionState.importingFolder ? t('localMusic.importing') : t('localMusic.importFolder')}]`}
+                    </button>
+                ) : null}
             </StatusText>
         );
     }

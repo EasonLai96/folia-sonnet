@@ -80,6 +80,8 @@ const FIELD_GROUPS: Record<string, ImportGroup> = {
     showHarmonySubtitle: 'visualizer',
     harmonySubtitleBackground: 'visualizer',
     visualizerTunings: 'visualizer',
+    // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+    // new style. Do not add a lyric style here.
     classicTuning: 'visualizer',
     cadenzaTuning: 'visualizer',
     partitaTuning: 'visualizer',
@@ -160,6 +162,8 @@ const TRUTHY_GUARDED_FIELDS = new Set([
     'subtitleFontStyle',
     'subtitleFontFallbackFamilies',
     'visualizerTunings',
+    // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+    // new style. Do not add a lyric style here.
     'classicTuning',
     'cadenzaTuning',
     'partitaTuning',
@@ -188,6 +192,8 @@ const TRUTHY_GUARDED_FIELDS = new Set([
 // Per-renderer tunings the import skips whenever the visualizerTunings bundle is present. The three
 // background tunings are not in this set: they are applied unconditionally.
 const BUNDLED_TUNING_FIELDS = new Set([
+    // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+    // new style. Do not add a lyric style here.
     'classicTuning',
     'cadenzaTuning',
     'partitaTuning',

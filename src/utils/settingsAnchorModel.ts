@@ -1,92 +1,95 @@
 import type { SettingsSubviewId } from '../stores/useSettingsModalStore';
 
-// src/utils/settingsAnchorModel.ts
-//
-// 住在 utils 而不是 components/modal/settings/navigation：它只是一张表加两个取值函数，
-// 不碰 React，却被 services/ponder/pagePonderTarget 用（service 不能依赖组件目录）。
-// Which options-tab section each <SettingsAnchor> lives in and which translated label its expanded
-// sidebar entry uses. Commands and inactive sidebar sections both need this information before the
-// destination panel exists, so it is declared once here. settingsAnchorCoverage.test.ts holds the
-// table against the anchors actually rendered, so a section cannot silently drift away from its
-// navigation destination.
+// src/components/modal/settings/navigation/settingsAnchorModel.ts
+// The places inside the settings that other code names: commands, Ponder scenes and links open the
+// dialog on one of these. Each entry says which category's page the place is on, which a caller has
+// to know before that page exists. The id itself is carried by a group or a row of the page:
+// settingsAnchorCoverage.test.ts holds this table against the options the pages declare. The
+// settings search finds a place by that group or row, under the page's name for it, and leaves it
+// out where the page does not draw it (kit/options.ts); the table says nothing about either.
 
 export const SETTINGS_ANCHOR_DEFINITIONS = {
-    // AppearanceSettingsSubview
-    lyricsRenderer: { section: 'appearance', labelKey: 'options.lyricsRenderer' },
-    // 渲染在 lyricsRenderer 那一节里面（LyricsWallpaperSettingsSection）。Android 专有，
-    // 非安卓组件返回 null，于是这一条自己也就不会出现。
-    lyricsWallpaper: { section: 'appearance', labelKey: 'options.lyricsWallpaperSection' },
-    themePresets: { section: 'appearance', labelKey: 'options.themePresets' },
-    stageTrackPill: { section: 'appearance', labelKey: 'options.stageTrackPill' },
-    grid3dCardStyle: { section: 'appearance', labelKey: 'options.grid3dCardStyle' },
-    latticeSettings: { section: 'appearance', labelKey: 'options.latticeSettings' },
-    gridViewCardSettings: { section: 'appearance', labelKey: 'options.gridViewCardSettings' },
-    videoLayerSettings: { section: 'appearance', labelKey: 'options.videoLayerSettings' },
-    importExportTitle: { section: 'appearance', labelKey: 'options.importExportTitle' },
+    // pages/AppearancePage
+    lyricsRenderer: { section: 'appearance' },
+    // 歌词动态壁纸那一节（fork 独有，只有安卓画；见 LyricsWallpaperSettingsSection）。
+    lyricsWallpaper: { section: 'appearance' },
+    themePresets: { section: 'appearance' },
+    electronSettings: { section: 'appearance' },
 
-    // GeneralSettingsSubview (PinnedCommandSettings and PonderHintSettingsSection render inside it)
-    languageSettings: { section: 'general', labelKey: 'options.languageSettings' },
-    homeTabsVisibility: { section: 'general', labelKey: 'options.homeTabsVisibility' },
-    rememberHomeCardPosition: { section: 'general', labelKey: 'options.rememberHomeCardPosition' },
-    playbackEntryView: { section: 'general', labelKey: 'options.playbackEntryView' },
-    // Rendered only when more than one library suite is available (hasLibrarySuiteChoice).
-    librarySuite: { section: 'general', labelKey: 'options.librarySuite', requiresLibrarySuiteChoice: true },
-    // bravais 独有的设置（透光、每块窗数、集合叠页边）：只在生效 suite 是 bravais 时渲染（isBravaisLibraryActive）。
-    bravaisSettings: { section: 'general', labelKey: 'options.bravaisSettings', requiresBravaisSuite: true },
-    bottomUiSettings: { section: 'general', labelKey: 'options.bottomUiSettings' },
-    pinnedCommands: { section: 'general', labelKey: 'options.pinnedCommands' },
-    ponderHints: { section: 'general', labelKey: 'options.ponderHints' },
+    // pages/PlayerPage
+    playbackEntryView: { section: 'player' },
+    latticeSettings: { section: 'player' },
+    bottomUiSettings: { section: 'player' },
+    stageTrackPill: { section: 'player' },
+    videoLayerSettings: { section: 'player' },
+    labPlayerUi: { section: 'player' },
 
-    // PlaybackSettingsSubview (TransitionSettingsSection renders inside it)
-    queueSettings: { section: 'playback', labelKey: 'options.queueSettings' },
-    scrobbleSettings: { section: 'playback', labelKey: 'options.scrobbleSettings' },
-    transitionSettings: { section: 'playback', labelKey: 'options.transitionSettings' },
-    replayGainSettings: { section: 'playback', labelKey: 'options.replayGainSettings' },
-    lyrics: { section: 'playback', labelKey: 'options.lyrics' },
-    audioOutputSettings: { section: 'playback', labelKey: 'options.audioOutputSettings' },
+    // pages/HomePage; the library UI is drawn only where there is more than one to choose from, and
+    // the Bravais group only while bravais is the one in effect.
+    librarySuite: { section: 'home' },
+    bravaisSettings: { section: 'home' },
+    homeTabsVisibility: { section: 'home' },
+    grid3dCardStyle: { section: 'home' },
+    rememberHomeCardPosition: { section: 'home' },
+    gridViewCardSettings: { section: 'home' },
 
-    // InteractionSettingsSubview
-    gridActionButton: { section: 'interaction', labelKey: 'options.gridActionButton' },
-    gridPaletteHotkey: { section: 'interaction', labelKey: 'options.gridPaletteHotkey' },
-    customShortcut: { section: 'interaction', labelKey: 'options.customShortcut' },
+    // pages/PlaybackPage
+    automixModels: { section: 'playback' },
 
-    // IntegrationSettingsSubview — stageMode is declared twice on purpose, the Electron and web
-    // panels being mutually exclusive; it is still one destination.
-    discordRichPresence: { section: 'integration', labelKey: 'options.discordRichPresence', electronOnly: true },
-    obsBrowserSource: { section: 'integration', labelKey: 'options.obsBrowserSource', electronOnly: true },
-    // ColorOS 那节只在 ColorOS 16+ 上渲染，跟上面的 Electron 专用项一样靠渲染侧收起来。
-    colorOsLyrics: { section: 'integration', labelKey: 'options.colorOsLyrics' },
-    lyricApi: { section: 'integration', labelKey: 'options.lyricApi', electronOnly: true },
-    stageMode: { section: 'integration', labelKey: 'options.stageMode' },
-    navidrome: { section: 'integration', labelKey: 'navidrome.settings' },
-    // 状态栏歌词只在 Android 上出现，但这里没有 androidOnly 标记，所以与 Electron 专用项
-    // 一样靠渲染侧的条件判断收起来；声明必须存在，否则覆盖率测试会把它当成漂移。
-    lyricon: { section: 'integration', labelKey: 'options.lyricon' },
+    // pages/LyricsPage
+    localLyricFormatOrder: { section: 'lyrics' },
 
-    // StorageSettingsSection (LocalLibraryWatchSection renders inside it)
-    cacheDetails: { section: 'storage', labelKey: 'options.cacheDetails' },
-    r2Sync: { section: 'storage', labelKey: 'options.r2Sync' },
-    localLibraryWatch: { section: 'storage', labelKey: 'options.localLibraryWatch' },
-    mediaCache: { section: 'storage', labelKey: 'options.mediaCache' },
+    // pages/PlaybackPage, pages/LyricsPage, and the listening report on pages/IntegrationPage
+    queueSettings: { section: 'playback' },
+    transitionSettings: { section: 'playback' },
+    replayGainSettings: { section: 'playback' },
+    audioOutputSettings: { section: 'playback' },
+    lyrics: { section: 'lyrics' },
+    scrobbleSettings: { section: 'integration' },
 
-    // DesktopSettingsSubview
-    desktopTrayBehavior: { section: 'desktop', labelKey: 'options.desktopTrayBehavior', electronOnly: true },
-    wallpaperMode: { section: 'desktop', labelKey: 'options.wallpaperMode', electronOnly: true },
-    updateCheck: { section: 'desktop', labelKey: 'options.updateCheck', electronOnly: true },
-    electronSettings: { section: 'desktop', labelKey: 'options.electronSettings', electronOnly: true },
+    // pages/GeneralPage, and the pinned commands on pages/InteractionPage
+    languageSettings: { section: 'general' },
+    ponderHints: { section: 'general' },
+    pinnedCommands: { section: 'interaction' },
 
-    // GraphicsSettingsSubview
-    graphicsPerformance: { section: 'graphics', labelKey: 'options.labPerformanceSection' },
-    graphicsMotion: { section: 'graphics', labelKey: 'options.reduceMotionSection' },
+    // pages/GeneralPage (start-up and window)
+    labWindowAndTools: { section: 'general' },
 
-    // ModsSettingsSubview
-    modSystem: { section: 'mods', labelKey: 'options.enableModSystem', electronOnly: true },
-    modList: { section: 'mods', labelKey: 'mods.title', electronOnly: true },
+    // pages/InteractionPage
+    gridActionButton: { section: 'interaction' },
+    gridPaletteHotkey: { section: 'interaction' },
+    customShortcut: { section: 'interaction' },
 
-    // LabSettingsModal
-    labPlayerUi: { section: 'lab', labelKey: 'options.labPlayerUiSection' },
-    labWindowAndTools: { section: 'lab', labelKey: 'options.labWindowAndToolsSection' },
-} as const satisfies Record<string, { section: SettingsSubviewId; labelKey: string; electronOnly?: boolean; requiresLibrarySuiteChoice?: boolean; requiresBravaisSuite?: boolean }>;
+    // pages/IntegrationPage — the desktop app and the web build draw stage mode with different
+    // rows; it is one destination.
+    discordRichPresence: { section: 'integration' },
+    obsBrowserSource: { section: 'integration' },
+    lyricApi: { section: 'integration' },
+    stageMode: { section: 'integration' },
+    navidrome: { section: 'integration' },
+
+    // pages/StoragePage, and the sync server on pages/IntegrationPage
+    cacheDetails: { section: 'storage' },
+    localLibraryWatch: { section: 'storage' },
+    mediaCache: { section: 'storage' },
+    r2Sync: { section: 'integration' },
+
+    // pages/StoragePage (backup and import)
+    importExportTitle: { section: 'storage' },
+
+    // pages/DesktopPage, and the update check on pages/GeneralPage
+    desktopTrayBehavior: { section: 'desktop' },
+    wallpaperMode: { section: 'desktop' },
+    updateCheck: { section: 'general' },
+
+    // pages/GraphicsPage
+    graphicsPerformance: { section: 'graphics' },
+    graphicsMotion: { section: 'graphics' },
+
+    // pages/ModsPage
+    modSystem: { section: 'mods' },
+    modList: { section: 'mods' },
+} as const satisfies Record<string, { section: SettingsSubviewId }>;
 
 export type SettingsAnchorId = keyof typeof SETTINGS_ANCHOR_DEFINITIONS;
 

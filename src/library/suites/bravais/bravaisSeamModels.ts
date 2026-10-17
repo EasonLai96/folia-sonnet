@@ -1,6 +1,6 @@
 import type { BravaisFormState } from './bravaisFormModel';
 import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
-import type { SongSortPreset } from '../../core/model/songSortOptions';
+import type { SongSortPreset } from '../../core/collection/songSortOptions';
 
 // src/library/suites/bravais/bravaisSeamModels.ts
 // B7 集合页挂在层描述上的扩展类型（设计稿 §10.2 / §10.6）：缝里的收藏星标、补页进度、状态行、结果提示、过滤输入位（每面墙都有）、

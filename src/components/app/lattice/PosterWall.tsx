@@ -1,21 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { SongResult } from '../../../types';
 import {
-    getLatticeGeometry,
-    layoutExpandedBlock,
-    layoutLattice,
     overlaps,
     toBounds,
     type Bounds,
     type ReflowTile,
     type WallMetrics,
 } from '../../wall/layout';
+import { createQueueLayout, type WallSection } from './wallLayout';
+import { createExploreLayout } from './exploreLayout';
 import { useWallCameraPan, type LatticeCamera } from '../../wall/useWallCameraPan';
 import { useLatticePosterSelection } from './useLatticePosterSelection';
 import { useWallKeyboardFocus } from './useWallKeyboardFocus';
 import { useWallPointerPan } from '../../wall/useWallPointerPan';
+import { formatWorldTransform } from '../../wall/wallView';
 import type { LatticeTile } from './latticeModel';
 import LatticePoster from './LatticePoster';
+import LatticeHeading from './LatticeHeading';
+import LatticeSectionFinder from './LatticeSectionFinder';
+import { useWallSections } from './useWallSections';
 import { countRender } from '../../../dev/renderCount';
 import {
     useLatticePlaybackFocus,
@@ -25,16 +28,24 @@ import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { useDevicePixelRatio } from '../../../hooks/useMediaQuery';
 import { useReducedMotionFor } from '../../../hooks/useReducedMotionFor';
 import { EXPANSION_SPAN } from '../../wall/blockTemplates';
-import { useLatticeSettingsStore, WALL_ZOOM_MAX, WALL_ZOOM_MIN } from '../../../stores/useLatticeSettingsStore';
+import { useLatticeSettingsStore } from '../../../stores/useLatticeSettingsStore';
 import { resolveWallHandoffRole, useWallHandoffStore } from '../../../stores/useWallHandoffStore';
 import { useLatticeWallHandoff } from './useLatticeWallHandoff';
+import { wallIsLeftForPage } from './wallLayer';
 
-// Draggable poster field: one greedily packed block template repeats over the queue.
+// Draggable poster field: one greedily packed block template repeats over the wall's list
+// (the play queue). The explore page's entries are laid out by the page's sections instead,
+// each section a lot with its heading as a tile (exploreLayout.ts); the field asks either
+// layout the same questions (`WallLayout` in wallLayout.ts).
 // 翻牌交接（设计稿 §7「进入队列」）：从资料库墙进来时不跑自己的入场波次，海报侧立着等资料库墙翻出、再按到起点的距离翻进；
 // 回资料库墙时海报按距离翻出（useLatticeWallHandoff）。
 
 type PosterWallProps = {
     tiles: LatticeTile[];
+    /** The explore wall only: the sections `tiles` stand in, by which that wall is laid out. Without them the wall is the queue's. */
+    sections?: WallSection[];
+    /** The tile the wall opens on in place of the playing song: the one it was left on for a collection's page. */
+    startTileId?: string | null;
     /** Only for playback focus and visibility tracking; the chrome reads transport state from context. */
     currentSong: SongResult | null;
     onPlay: (tile: LatticeTile) => void;
@@ -48,8 +59,6 @@ type PosterWallProps = {
 const CELL_SIZE = 128;
 const GAP = 8;
 const OVERSCAN = 500;
-// 性能优先时的裁剪余量：默认那 500px 是为了让快速拖动不露白，但它同时也是 world 层被重画的面积。
-const PERFORMANCE_OVERSCAN = 140;
 // How much of the flight path may stay rendered while the camera travels, in viewports.
 const MAX_RESERVED_VIEWPORTS = 3;
 // Metro tile landing: the wave starts at the top-left of the viewport and runs down the diagonal.
@@ -61,12 +70,11 @@ const METRICS: WallMetrics = { cellSize: CELL_SIZE, gap: GAP };
 const EXPANDED_SIZE = EXPANSION_SPAN.cols * (CELL_SIZE + GAP) - GAP;
 
 
-/**
- * 墙面的基准缩放档位（按视口宽度）。2026-10-12 整档调小约 15%：原来手机上卡片偏大，一屏放不下几张。
- * 用户还能用双指捏合 / Ctrl+滚轮在这个档位上下改（倍率存在 useLatticeSettingsStore 的 wallZoom）。
- * bravais 资料库墙用的是同一组数（bravaisConstants.getBravaisScale），改这里时一并改。
- */
-const getScale = (width: number) => width < 640 ? 0.44 : width < 1100 ? 0.54 : 0.65;
+// Where the wall's own top left stands in the window when the wall opens with nothing to go to:
+// under the wall's buttons. A section the explore wall is taken to has its heading put there.
+const CAMERA_HOME = { x: 34, y: 80 };
+
+const getScale = (width: number) => width < 640 ? 0.52 : width < 1100 ? 0.64 : 0.76;
 
 const getWorldBounds = (camera: LatticeCamera, viewport: { width: number; height: number }): Bounds => ({
     left: -camera.x / camera.scale,
@@ -77,6 +85,8 @@ const getWorldBounds = (camera: LatticeCamera, viewport: { width: number; height
 
 export default function PosterWall({
     tiles,
+    sections,
+    startTileId = null,
     currentSong,
     onPlay,
     onTogglePlayback,
@@ -87,11 +97,7 @@ export default function PosterWall({
     countRender('PosterWall');
     const containerRef = useRef<HTMLDivElement>(null);
     const worldRef = useRef<HTMLDivElement>(null);
-    // 缩放倍率（捏合 / Ctrl+滚轮改它，落定时写回 store；基准档位仍按宽度断点走）。
-    const wallZoom = useLatticeSettingsStore(state => state.wallZoom);
-    const setWallZoom = useLatticeSettingsStore(state => state.handleSetWallZoom);
-    const zoomRef = useRef(wallZoom);
-    const cameraRef = useRef<LatticeCamera>({ x: 34, y: 80, scale: 0.65 * wallZoom });
+    const cameraRef = useRef<LatticeCamera>({ ...CAMERA_HOME, scale: 0.76 });
     const viewportRef = useRef({ width: 1280, height: 720 });
     const frameRef = useRef<number | null>(null);
     const trackedCurrentPosterRef = useRef<{
@@ -103,28 +109,35 @@ export default function PosterWall({
     // Nothing is drawn until the field reports its size: the seeded camera and the default
     // viewport would otherwise place the entering wave, and the playing song, off centre.
     const [measured, setMeasured] = useState(false);
-    const [entranceDone, setEntranceDone] = useState(false);
+    // A wall come back to from a collection's page (`startTileId`) stands as it was left from
+    // its first frame, for that page's cover flies back to the tile: no opening wave, nothing
+    // drawn until the camera is on the tile and the tile is grown (`opened`), and the posters
+    // of the render that draws it first mounted as they are drawn (`hasDrawnRef`).
+    const isReturn = startTileId !== null;
+    const [entranceDone, setEntranceDone] = useState(isReturn);
+    const [opened, setOpened] = useState(!isReturn);
+    const hasDrawnRef = useRef(!isReturn);
+    useEffect(() => {
+        if (opened) hasDrawnRef.current = true;
+    }, [opened]);
     // Camera scale, mirrored into state only so posters can size their artwork. It follows the
     // width breakpoints, so this settles after the first measure and then only moves on a resize.
-    // 基准档位（不含用户的缩放倍率）：捏合的上下限以它为基准，转屏 / 改窗口大小时跟着走。
-    const baseScaleRef = useRef(0.65);
     const [cameraScale, setCameraScale] = useState(() => cameraRef.current.scale);
     const reducedMotion = useReducedMotionFor('lattice');
     // 从资料库墙翻牌交接进来（或淡入交叉）：入场由交接代替，不跑抬起落下的波次。
     const entranceSuppressed = useWallHandoffStore(state => resolveWallHandoffRole(state.session, 'lattice') === 'in');
     const autoFocusOnSongChange = useLatticeSettingsStore(state => state.autoFocusOnSongChange);
-    const performanceMode = useLatticeSettingsStore(state => state.latticePerformanceMode);
     const devicePixelRatio = useDevicePixelRatio();
-    // 性能优先：封面按世界尺寸取档（而不是设备像素），高 DPR 屏上不再为每张卡解一张大一档的图。
-    const pixelScale = performanceMode
-        ? Math.min(cameraScale * devicePixelRatio, 1)
-        : cameraScale * devicePixelRatio;
-    // 相机行程（见 clampFiniteCamera）与裁剪余量都跟着收窄：性能优先时不再无限铺下去。
-    const overscan = performanceMode ? PERFORMANCE_OVERSCAN : OVERSCAN;
-    const reservedViewports = performanceMode ? 1 : MAX_RESERVED_VIEWPORTS;
+    const pixelScale = cameraScale * devicePixelRatio;
 
-    const geometry = useMemo(() => getLatticeGeometry(tiles.length, METRICS), [tiles.length]);
-    const [activePoster, setActivePoster] = useLatticePosterSelection(tiles, geometry, METRICS);
+    const wallLayout = useMemo(
+        () => (sections ? createExploreLayout(sections, METRICS) : createQueueLayout(tiles.length, METRICS)),
+        [sections, tiles.length],
+    );
+    const [activePoster, setActivePoster] = useLatticePosterSelection(tiles, wallLayout);
+    // What follows the camera besides the posters: which section the explore wall stands in
+    // (useWallSections, further down, which needs the pan this camera is applied by).
+    const cameraWatchRef = useRef<(camera: LatticeCamera) => void>(() => undefined);
 
     const publishCurrentPosterVisibility = useCallback((camera: LatticeCamera) => {
         const tracked = trackedCurrentPosterRef.current;
@@ -139,23 +152,10 @@ export default function PosterWall({
     const applyCamera = useCallback((next: LatticeCamera, updateBounds = false) => {
         cameraRef.current = next;
         if (worldRef.current) {
-            /*
-             * 相机用**二维** transform，不要用 translate3d。
-             *
-             * translate3d 会把整面墙提成常驻合成层，而 world 的实际 bounds 是
-             * 12212x11580（受限的另一头）—— 任何一张磁贴在这个层里repaint，
-             * 都要按这个尺寸重新栅格化一遍 tile。桌面 GPU 撑得住，
-             * Android WebView 的合成器面对超限层会反复丢弃重建，用户看到的就是
-             * 「选歌时整屏闪烁」。实测 Trajectory：world 层整屏级 paint 6~10 次/次选歌，
-             * 改成二维 transform 之后降到 0 —— 层不再存在，重绘被 `.lattice-field`
-             * 的 paint containment 裁在保证可见的那一小块里。
-             *
-             * 平移本身不受影响：2D transform 同样可以被合成器处理，
-             * pan 期间 Chromium 会临时提层，pan 结束自动降级。
-             */
-            worldRef.current.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.scale})`;
+            worldRef.current.style.transform = formatWorldTransform(next.x, next.y, next.scale);
         }
         publishCurrentPosterVisibility(next);
+        cameraWatchRef.current(next);
         if (!updateBounds || frameRef.current !== null) return;
         frameRef.current = requestAnimationFrame(() => {
             setBounds(getWorldBounds(cameraRef.current, viewportRef.current));
@@ -168,10 +168,7 @@ export default function PosterWall({
         if (!container) return;
         const observer = new ResizeObserver(([entry]) => {
             viewportRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
-            // 倍率不跟着尺寸重置：转屏、改窗口大小之后还是用户捏出来的那一档。
-            const base = getScale(entry.contentRect.width);
-            baseScaleRef.current = base;
-            const scale = base * zoomRef.current;
+            const scale = getScale(entry.contentRect.width);
             applyCamera({ ...cameraRef.current, scale }, true);
             setCameraScale(previous => previous === scale ? previous : scale);
             setMeasured(true);
@@ -183,16 +180,6 @@ export default function PosterWall({
             frameRef.current = null;
         };
     }, [applyCamera]);
-
-    // 缩放倍率变了（捏合落定、设置里重置）：按新的倍率重写相机，并把倍率同步给海报取图。
-    // 手势途中不经过这里 —— 那时只写 cameraRef，倍率落定才交回来，所以整面墙不会按帧重渲染。
-    useEffect(() => {
-        zoomRef.current = wallZoom;
-        const scale = baseScaleRef.current * wallZoom;
-        if (Math.abs(cameraRef.current.scale - scale) < 0.0005) return;
-        applyCamera({ ...cameraRef.current, scale }, true);
-        setCameraScale(previous => previous === scale ? previous : scale);
-    }, [applyCamera, wallZoom]);
 
     // Widens the culled region to cover a pan's destination the moment it starts. Held arrow
     // keys interrupt each pan before it settles, so bounds cannot wait for the animation to end.
@@ -214,40 +201,13 @@ export default function PosterWall({
             const mergedArea = (merged.right - merged.left) * (merged.bottom - merged.top);
             const destinationArea = (destination.right - destination.left)
                 * (destination.bottom - destination.top);
-            return mergedArea > destinationArea * reservedViewports ? destination : merged;
+            return mergedArea > destinationArea * MAX_RESERVED_VIEWPORTS ? destination : merged;
         });
-    }, [reservedViewports]);
-
-    /**
-     * 性能优先：把相机拴在「一个格子 + 一屏余量」的框里，拖到底就停住，不再无限铺下去
-     * （world 层的 bounds 因此始终在一屏上下，而不是用户拖到哪就长到哪）。
-     * 只用在拖动 / 滚轮 / 惯性上：键盘与播放跟随（panTo）要能把任意一张卡带到眼前；它们真把相机带出框外时，
-     * 框会把当前视口并进去一起放宽，所以下一次拖动不会被拽回来。
-     */
-    const clampFiniteCamera = useCallback((camera: LatticeCamera): LatticeCamera => {
-        if (!performanceMode) return camera;
-        const viewport = viewportRef.current;
-        const marginX = viewport.width / camera.scale;
-        const marginY = viewport.height / camera.scale;
-        const visible = getWorldBounds(camera, viewport);
-        const range = {
-            left: Math.min(-marginX, visible.left - marginX),
-            right: Math.max(geometry.cellWidth + marginX, visible.right + marginX),
-            top: Math.min(-marginY, visible.top - marginY),
-            bottom: Math.max(geometry.cellHeight + marginY, visible.bottom + marginY),
-        };
-        const minX = viewport.width - range.right * camera.scale;
-        const maxX = -range.left * camera.scale;
-        const minY = viewport.height - range.bottom * camera.scale;
-        const maxY = -range.top * camera.scale;
-        return {
-            ...camera,
-            x: minX > maxX ? camera.x : Math.min(maxX, Math.max(minX, camera.x)),
-            y: minY > maxY ? camera.y : Math.min(maxY, Math.max(minY, camera.y)),
-        };
-    }, [geometry.cellHeight, geometry.cellWidth, performanceMode]);
+    }, []);
 
     const { panTo, stopPan, animationRef } = useWallCameraPan({ cameraRef, viewportRef, reducedMotion, applyCamera, reserveBounds });
+    const wallSections = useWallSections({ layout: wallLayout, cameraRef, viewportRef, animationRef, panTo, corner: CAMERA_HOME });
+    cameraWatchRef.current = wallSections.watchCamera;
 
     useEffect(() => {
         if (!measured || entranceDone) return;
@@ -277,7 +237,10 @@ export default function PosterWall({
     // when it actually leaves, so the wave is still measured against the corner of the moment.
     const exitWaveRef = useRef({ bounds, reducedMotion });
     exitWaveRef.current = { bounds, reducedMotion };
+    // No wave where the wall is left for a collection's page: it fades as a whole then, in a
+    // moment (wallLayer.ts), under the cover that flies from its tile.
     const getExitDelay = useCallback((rect: { x: number; y: number }) => {
+        if (wallIsLeftForPage()) return null;
         const { bounds: corner, reducedMotion: reduced } = exitWaveRef.current;
         if (reduced) return 0;
         const steps = Math.max(0, rect.x - corner.left) + Math.max(0, rect.y - corner.top);
@@ -285,14 +248,16 @@ export default function PosterWall({
         return ENTRANCE_MAX_DELAY - entranceDelay;
     }, []);
 
-    const instances = useMemo(() => {
-        if (!measured) return [];
-        const visible = layoutLattice(geometry, tiles.length, bounds, overscan, METRICS);
-        if (!activePoster || visible.some(instance => instance.instanceId === activePoster.instance.instanceId)) {
+    // The posters, and on the explore wall the headings, that are drawn.
+    const drawn = useMemo(() => {
+        if (!measured || !opened) return { posters: [], headings: [] };
+        const visible = wallLayout.near(bounds, OVERSCAN);
+        if (!activePoster || visible.posters.some(instance => instance.instanceId === activePoster.instance.instanceId)) {
             return visible;
         }
-        return [...visible, activePoster.instance];
-    }, [activePoster, bounds, geometry, measured, overscan, tiles.length]);
+        return { posters: [...visible.posters, activePoster.instance], headings: visible.headings };
+    }, [activePoster, bounds, wallLayout, measured, opened]);
+    const instances = drawn.posters;
 
     // World point the viewport is centred on; both the keyboard seed and playback follow need it.
     const getViewportCenter = useCallback(() => {
@@ -304,37 +269,53 @@ export default function PosterWall({
         };
     }, []);
 
-    // 只跟 instances 走，不跟每次渲染走：少了它的话跟随逻辑会拿不到"哪张卡还在屏幕上"。
-    const renderedInstanceIds = useMemo(
-        () => new Set(instances.map(instance => instance.instanceId)), [instances]);
-
     const { didDragRef, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture } = useWallPointerPan({
         applyCamera,
         animationRef,
         stopPan,
         containerRef,
         reducedMotion,
-        overscan,
-        // 性能优先时的相机行程上限（拖动 / 滚轮 / 惯性）；键盘与播放跟随不走这条路。
-        clampCamera: clampFiniteCamera,
+        overscan: OVERSCAN,
         bounds,
         cameraRef,
         getWorldBounds,
         viewportRef,
-        zoom: {
-            baseScale: () => baseScaleRef.current,
-            minFactor: WALL_ZOOM_MIN,
-            maxFactor: WALL_ZOOM_MAX,
-            onZoomEnd: factor => setWallZoom(factor),
-        },
     });
 
     // Only the block holding the open card is re-geared; every other poster keeps its base rect.
+    // (On the explore wall: only the lot.)
     const layout = useMemo(() => (
         activePoster
-            ? layoutExpandedBlock(geometry, tiles.length, activePoster.instance, METRICS)
+            ? wallLayout.grown(activePoster.instance)
             : new Map<string, { x: number; y: number; width: number; height: number }>()
-    ), [activePoster, geometry, tiles.length]);
+    ), [activePoster, wallLayout]);
+
+    // A new list may seat the grown card elsewhere: the grid of blocks follows the list's length,
+    // and a tile's seats its place in the list; on the explore wall the lots, and the places they
+    // stand at, follow the page's sections (useLatticePosterSelection keeps the card, on the
+    // nearest seat of its tile). While the card is in the window the camera then moves by as much
+    // as the card did, at once and before the paint that moves it: the card stays where it was in
+    // the window, also where the listener had dragged it to, and a flight or a coast under way
+    // ends there. Nothing while the card is out of the window (the listener looks elsewhere), for
+    // a card that keeps its place, when another card is grown, or while none is.
+    const grownRect = activePoster ? layout.get(activePoster.instance.instanceId) ?? activePoster.instance : null;
+    const grownId = activePoster?.tile.id ?? null;
+    const seatedRef = useRef({ tiles, id: grownId, rect: grownRect });
+    useLayoutEffect(() => {
+        const before = seatedRef.current;
+        seatedRef.current = { tiles, id: grownId, rect: grownRect };
+        if (before.tiles === tiles || before.id !== grownId || !before.rect || !grownRect) return;
+        const dx = grownRect.x - before.rect.x;
+        const dy = grownRect.y - before.rect.y;
+        if (dx === 0 && dy === 0) return;
+        const camera = cameraRef.current;
+        if (!overlaps(toBounds(before.rect), getWorldBounds(camera, viewportRef.current))) return;
+        console.log(`[Lattice] A new list (${before.tiles.length} to ${tiles.length} entries) moved the grown card: camera moved with it`);
+        stopPan();
+        const moved = { x: camera.x - dx * camera.scale, y: camera.y - dy * camera.scale, scale: camera.scale };
+        reserveBounds(moved);
+        applyCamera(moved, true);
+    }, [applyCamera, grownId, grownRect, reserveBounds, stopPan, tiles]);
 
     useEffect(() => {
         const currentSongKey = currentSong ? getPlaybackSongKey(currentSong) : null;
@@ -354,7 +335,7 @@ export default function PosterWall({
     const { focused, setFocused, handleKeyDown, handleFocusCapture, handleBlurCapture } = useWallKeyboardFocus({
         activePoster,
         containerRef,
-        geometry,
+        layout: wallLayout,
         getViewportCenter,
         instances,
         metrics: METRICS,
@@ -369,29 +350,27 @@ export default function PosterWall({
     // Permanent identities for the two handlers every poster receives. An arrow per poster is
     // re-created on each wall render, which alone would defeat LatticePoster's memo and put all
     // 50+ poster bodies back on the critical path of every unrelated App re-render.
-    const latestWall = useRef({ geometry, instances, tiles });
-    latestWall.current = { geometry, instances, tiles };
+    const latestWall = useRef({ wallLayout, instances, tiles });
+    latestWall.current = { wallLayout, instances, tiles };
     const expandPoster = useCallback((instanceId: string) => {
-        const { geometry: currentGeometry, instances: currentInstances, tiles: currentTiles } = latestWall.current;
+        const { wallLayout: currentLayout, instances: currentInstances, tiles: currentTiles } = latestWall.current;
         const instance = currentInstances.find(item => item.instanceId === instanceId);
         const tile = instance ? currentTiles[instance.queueIndex] : undefined;
         if (!instance || !tile) return;
         setFocused(instance);
         setActivePoster({ instance, tile });
         // Expansion reflows both the position and size of the selected slot.
-        const expandedRect = layoutExpandedBlock(currentGeometry, currentTiles.length, instance, METRICS).get(instanceId);
+        const expandedRect = currentLayout.grown(instance).get(instanceId);
         if (expandedRect) panTo(expandedRect);
     }, [panTo, setActivePoster, setFocused]);
     const collapsePoster = useCallback(() => setActivePoster(null), [setActivePoster]);
 
     useLatticePlaybackFocus({
         currentSong,
+        startTileId,
         ready: measured,
         tiles,
-        activePoster,
-        renderedInstanceIds,
-        geometry,
-        metrics: METRICS,
+        layout: wallLayout,
         getViewportCenter,
         setActivePoster,
         setFocused,
@@ -410,12 +389,38 @@ export default function PosterWall({
         waitingForFocus: autoFocusOnSongChange && !activePoster && currentSongKey !== null
             && tiles.some(tile => tile.id === currentSongKey),
     });
+    // After the effects of the hook above, which put the camera on the start tile and grow it.
+    useEffect(() => {
+        if (measured) setOpened(true);
+    }, [measured]);
+
+    // A flight to a section leaves the focused poster far outside the window, where it is taken
+    // down: with the focus still on it the field would hear no key after. The field takes the
+    // focus, and the next arrow starts from what is on screen (as after Escape).
+    const leaveForSection = useCallback(() => {
+        setFocused(null);
+        containerRef.current?.focus({ preventScroll: true });
+    }, [setFocused]);
+    const goToSection = wallSections.goToSection;
+    const chooseSection = useCallback((section: number) => {
+        leaveForSection();
+        goToSection(section);
+    }, [goToSection, leaveForSection]);
+
+    // PageDown and PageUp are the explore wall's (the next and the previous section); every
+    // other key, and both of these on the queue wall, goes on to the wall's own handler.
+    const handleFieldKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (wallSections.handleKeyDown(event)) leaveForSection();
+        else handleKeyDown(event);
+    };
+
     return (
+        <>
         <div
             ref={containerRef}
             className="lattice-field"
             tabIndex={-1}
-            onKeyDown={handleKeyDown}
+            onKeyDown={handleFieldKeyDown}
             onFocusCapture={handleFocusCapture}
             onBlurCapture={handleBlurCapture}
             onPointerDown={onPointerDown}
@@ -429,6 +434,26 @@ export default function PosterWall({
             onClickCapture={onClickCapture}
         >
             <div ref={worldRef} className="lattice-world">
+                {/* The explore wall's headings: tiles of the wall that are no posters. */}
+                {drawn.headings.map(heading => {
+                    const section = wallLayout.sections[heading.section];
+                    if (!section) return null;
+                    return (
+                        <LatticeHeading
+                            key={heading.instanceId}
+                            rect={heading}
+                            section={section}
+                            number={heading.section + 1}
+                            count={wallLayout.sections.length}
+                            part={heading.part + 1}
+                            parts={heading.parts}
+                            entranceDelay={getEntranceDelay(heading)}
+                            mountsInPlace={!hasDrawnRef.current}
+                            getExitDelay={getExitDelay}
+                            reducedMotion={reducedMotion}
+                        />
+                    );
+                })}
                 {instances.map(instance => {
                     const tile = tiles[instance.queueIndex];
                     if (!tile) return null;
@@ -445,6 +470,7 @@ export default function PosterWall({
                             pixelScale={pixelScale}
                             expandedSize={EXPANDED_SIZE}
                             entranceDelay={getEntranceDelay(rect)}
+                            mountsInPlace={!hasDrawnRef.current}
                             getExitDelay={getExitDelay}
                             handoff={handoff.getPosterHandoff(instance.instanceId, rect)}
                             expanded={expanded}
@@ -461,5 +487,10 @@ export default function PosterWall({
             </div>
 
         </div>
+        {/* Outside the field, whose keys and drags are the wall's: the explore wall's way to a section. */}
+        {wallSections.section !== null && (
+            <LatticeSectionFinder sections={wallLayout.sections} current={wallSections.section} onChoose={chooseSection} />
+        )}
+        </>
     );
 }

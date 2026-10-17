@@ -51,6 +51,12 @@ export const PLAYBACK_FADE_KEY = 'folia_playback_fade_enabled';
 export const KEEP_SCREEN_ON_WHILE_PLAYING_KEY = 'folia_keep_screen_on_while_playing';
 
 /**
+ * Whether a song that cannot be played for an account restriction or an unknown reason counts down to
+ * a skip, like a taken-down one (services/onlineMusic/failure/onlineFailureCase). Off unless asked for.
+ */
+export const AUTO_SKIP_UNPLAYABLE_KEY = 'folia_auto_skip_unplayable';
+
+/**
  * 后台与其他音源同时播放（Android）。
  *
  * 关（默认）：别的应用一出声，系统就把 WebView 持有的音频焦点收走，Chromium 收到
@@ -68,7 +74,7 @@ export const DEFAULT_MEDIA_CACHE_LIMIT_GB = 5;
 export type AudioQuality = AudioQualityPreference;
 
 export const resolveStoredAudioQuality = (saved: string | null): AudioQuality => (
-    saved === 'standard' || saved === 'lossless' || saved === 'hires' ? saved : 'high'
+    saved === 'standard' || saved === 'ultra' || saved === 'lossless' || saved === 'hires' ? saved : 'high'
 );
 
 /**
@@ -173,6 +179,8 @@ export type AudioSettingsState = {
     neteaseScrobbleEnabled: boolean;
     /** Short fade when pausing and resuming instead of cutting the sound. On by default. */
     playbackFadeEnabled: boolean;
+    /** Count down to a skip when a song is restricted or fails for an unknown reason. Off by default. */
+    autoSkipUnplayable: boolean;
     /** 播放时保持屏幕常亮（Android 的 FLAG_KEEP_SCREEN_ON）。Off by default. */
     keepScreenOnWhilePlaying: boolean;
     /** 后台与其他音源同时播放（Android）。Off by default，见 MIX_WITH_OTHER_AUDIO_KEY。 */
@@ -192,6 +200,7 @@ export type AudioSettingsState = {
     handleToggleTranscodeFallback: (enable: boolean) => void;
     handleToggleNeteaseScrobble: (enable: boolean) => void;
     handleTogglePlaybackFade: (enable: boolean) => void;
+    handleToggleAutoSkipUnplayable: (enable: boolean) => void;
     handleToggleKeepScreenOnWhilePlaying: (enable: boolean) => void;
     handleToggleMixWithOtherAudio: (enable: boolean) => void;
     handleSetAudioOutputDeviceId: (deviceId: string) => void;
@@ -222,6 +231,8 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     // Off unless asked for: it writes to the listener's music account, so it is never a default.
     neteaseScrobbleEnabled: getStoredBoolean(NETEASE_SCROBBLE_KEY, false),
     playbackFadeEnabled: getStoredBoolean(PLAYBACK_FADE_KEY, true),
+    // Off unless asked for: skipping a song the listener picked is not something to do by default.
+    autoSkipUnplayable: getStoredBoolean(AUTO_SKIP_UNPLAYABLE_KEY, false),
     // 默认关：常亮等于放弃系统那套自动熄屏，该由用户点头，不该替他决定。
     keepScreenOnWhilePlaying: getStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, false),
     mixWithOtherAudio: getStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, false),
@@ -285,6 +296,10 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     handleTogglePlaybackFade: (enable) => {
         setStoredBoolean(PLAYBACK_FADE_KEY, enable);
         set({ playbackFadeEnabled: enable });
+    },
+    handleToggleAutoSkipUnplayable: (enable) => {
+        setStoredBoolean(AUTO_SKIP_UNPLAYABLE_KEY, enable);
+        set({ autoSkipUnplayable: enable });
     },
     handleToggleKeepScreenOnWhilePlaying: (enable) => {
         setStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, enable);

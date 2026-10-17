@@ -11,7 +11,7 @@ import { resolvePlaybackNeighbors } from '../../../utils/playbackNeighbors';
 import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { getSongArtistLabel } from '../../../services/onlineMusic/songMetadata';
 import { setPlayerState } from '../../../stores/usePlaybackStore';
-import { focusLatticeCurrentSong } from '../../../stores/useLatticeControlsStore';
+import { locatePlayingSongOnWall } from '../lattice/wallLocate';
 import { setIsDevDebugOverlayVisible, setIsMemoryMonitorVisible } from '../../../stores/useAppChromeStore';
 import type { SlotContextFromApp } from '../../FloatingPlayerControls';
 import type { PlayerControlSlotActionId } from '../../../types/playerControlSlots';
@@ -206,7 +206,7 @@ export const buildAppOverlaysModel = ({
             onActivate: currentView === 'home'
                 ? navigateToPlayer
                 : currentView === 'lattice'
-                    ? () => { focusLatticeCurrentSong(); }
+                    ? locatePlayingSongOnWall
                     : openSongCardPanel,
             activateLabel: currentView === 'home'
                 ? stageTrackPillOpenPlayerLabel
@@ -289,11 +289,7 @@ export const buildAppOverlaysModel = ({
             secondaryColor: 'var(--text-secondary)',
             theme,
             isDaylight,
-            // 搜索页是整屏接管（fixed inset-0），而胶囊的 z 比它高、又贴着底边，最后几行结果
-            // 会被压在下面 —— 于是「搜索页底部的播放条和内容重叠」。搜索开着就整条收起来，
-            // 关掉搜索（hideSearchOverlay）它自然会回来。
-            isHidden: (currentView === 'player' && isPlayerChromeHidden)
-                || (currentView === 'home' && isSearchOpen),
+            isHidden: currentView === 'player' && isPlayerChromeHidden,
             hideControlBar: shouldHidePlayerProgressBar,
             slotPrimary: playerControlSlotPrimary,
             slotSecondary: playerControlSlotSecondary,

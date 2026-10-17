@@ -1,9 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Lock, LockOpen } from 'lucide-react';
+import type { Theme } from '../../types';
+import { SettingsKitThemeContext } from '../modal/settings/kit/kitTheme';
+import { SheetLayerContext } from '../shared/Sheet';
 import TitlebarDragZone from '../TitlebarDragZone';
 import WindowControls from '../WindowControls';
+import { usePlayerOverlayRoot, usePlayerOverlayReservation } from '../../hooks/usePlayerOverlayLayout';
+import type { FoliumLayoutRect } from '../../mods/folium/contract';
 
 // Shared shell for the app container, Electron titlebar, and mounted audio node.
 type AppShellProps = {
@@ -20,9 +25,15 @@ type AppShellProps = {
     showMainWindowClickThroughToggle: boolean;
     onToggleMainWindowClickThrough: () => void;
     isDaylight: boolean;
+    theme: Theme;
     audioElement: React.ReactNode;
     children: React.ReactNode;
 };
+
+const TITLEBAR_REVEAL_HEIGHT = 56;
+const titlebarRevealArea = (bounds: FoliumLayoutRect): FoliumLayoutRect => ({
+    left: bounds.left, top: bounds.top, width: bounds.width, height: TITLEBAR_REVEAL_HEIGHT,
+});
 
 const AppShell: React.FC<AppShellProps> = ({
     appStyle,
@@ -38,10 +49,17 @@ const AppShell: React.FC<AppShellProps> = ({
     showMainWindowClickThroughToggle,
     onToggleMainWindowClickThrough,
     isDaylight,
+    theme,
     audioElement,
     children,
 }) => {
     const { t } = useTranslation();
+    const layoutRootRef = useRef<HTMLDivElement>(null);
+    usePlayerOverlayRoot(layoutRootRef, isPlayerView, { top: usesCustomWindowChrome ? TITLEBAR_REVEAL_HEIGHT : 0, right: 0, bottom: 0, left: 0 });
+    usePlayerOverlayReservation('window-titlebar-reveal', 'window', titlebarRevealArea, usesCustomWindowChrome);
+    // Light or dark and the theme, for the shared parts that colour themselves wherever they open (a dialog's sheet).
+    const kitTheme = useMemo(() => ({ isDaylight, theme }), [isDaylight, theme]);
+    const [sheetLayer, setSheetLayer] = useState<HTMLDivElement | null>(null);
     const [isWindowMaximized, setIsWindowMaximized] = useState(false);
     const hasFullscreenTitlebarButton = isElectronWindow && !hideFullscreenButton;
 
@@ -91,6 +109,7 @@ const AppShell: React.FC<AppShellProps> = ({
     return (
         <div
             data-folia-app-shell="true"
+            ref={layoutRootRef}
             className="fixed inset-0 w-full h-full flex flex-col overflow-hidden font-sans transition-colors duration-500"
             style={{
                 ...appStyle,
@@ -153,7 +172,13 @@ const AppShell: React.FC<AppShellProps> = ({
             )}
 
             {audioElement}
-            {children}
+            <SettingsKitThemeContext.Provider value={kitTheme}>
+                <SheetLayerContext.Provider value={sheetLayer}>
+                    {children}
+                </SheetLayerContext.Provider>
+            </SettingsKitThemeContext.Provider>
+            {/* Dialogs are drawn here: after every page and window of the app, inside its colour variables. */}
+            <div ref={setSheetLayer} />
         </div>
     );
 };

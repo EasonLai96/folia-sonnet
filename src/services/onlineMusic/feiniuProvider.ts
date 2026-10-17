@@ -61,6 +61,7 @@ export const feiniuProvider: OnlineMusicProvider = {
         playlistTrackMutations: true, playbackReports: true,
         passwordLogin: true, passwordLoginServerUrl: true,
     },
+    mark: { letter: '飞', color: '#0ea5e9' },
     normalizeSong: normalizeFeiniuSong,
     normalizeUser: normalizeFeiniuUser,
     normalizeCollection: normalizeFeiniuCollection,
@@ -119,6 +120,7 @@ export const feiniuProvider: OnlineMusicProvider = {
     },
 
     auth: {
+        getLoginTexts: () => ({ title: 'home.loginTitleFeiniu', note: 'home.loginNoteFeiniu' }),
         async getLoginStatus() {
             const user = readFeiniuUser();
             // 没填过地址就是没登录，别把「地址缺失」报成一次刷新失败。

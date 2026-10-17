@@ -4,6 +4,7 @@ import type { WallViewCenter } from '../../../components/wall/wallView';
 import type { WallSlot } from '../../../components/wall/wallSlots';
 import { BRAVAIS_METRICS, BRAVAIS_REVEAL_PAD_PX } from './bravaisConstants';
 import { resolveFocusReflow } from './bravaisDisplay';
+import type { BravaisWallShape } from './bravaisWallShape';
 import { resolvePosterRevealCenter } from './bravaisPosterReveal';
 import type { BravaisFrameState } from './useBravaisFrame';
 
@@ -19,6 +20,7 @@ export const useBravaisFocus = ({
     tweenTo,
     getBottomInset,
     onFocusEntry,
+    getShape,
 }: {
     frameRef: MutableRefObject<BravaisFrameState>;
     tweenTo: (center: WallViewCenter) => void;
@@ -26,6 +28,8 @@ export const useBravaisFocus = ({
     getBottomInset: () => number;
     /** 键盘焦点换到了某个 slot：stage 把它换成条目 key 交给层描述。 */
     onFocusEntry: (slotKey: string | null) => void;
+    /** 墙此刻的形状（聚焦卡的让位按它算）。 */
+    getShape: () => BravaisWallShape;
 }) => {
     const [focusedSlotKey, setFocusedSlotKey] = useState<string | null>(null);
     const [expandedSlotKey, setExpandedSlotKey] = useState<string | null>(null);
@@ -34,15 +38,17 @@ export const useBravaisFocus = ({
     const expandedRef = useRef(expandedSlotKey);
     expandedRef.current = expandedSlotKey;
 
-    const reflow = useMemo(() => resolveFocusReflow(expandedSlotKey), [expandedSlotKey]);
+    // 形状只在换层 / 换形状时变，那时聚焦卡已经收起：按展开那一刻的形状算。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const reflow = useMemo(() => resolveFocusReflow(expandedSlotKey, getShape()), [expandedSlotKey]);
     const reflowRef = useRef(reflow);
     reflowRef.current = reflow;
 
     /** slot 此刻画在哪（聚焦块里取让位后的矩形）。 */
     const drawnRect = useCallback((slot: WallSlot): WallSlot => reflowRef.current.get(slot.key) ?? slot, []);
 
-    /** `mode`：见 revealRect —— 键盘焦点移动用最小平移，「定位正在播放」用居中。 */
-    const reveal = useCallback((rect: RevealRect, mode: 'minimal' | 'centered' = 'minimal') => {
+    // centered：把矩形移到屏幕中间（定位，与网格集合页把卡片居中同一个意思）；海报在场时照旧最小平移。
+    const reveal = useCallback((rect: RevealRect, { centered = false }: { centered?: boolean } = {}) => {
         const frame = frameRef.current;
         if (!frame.view) return;
         // 开口正在张开时按张开后的宽度让位（交接回来时缝张开与聚焦卡展开同时进行）。
@@ -76,26 +82,26 @@ export const useBravaisFocus = ({
             seamWidth,
             pad: BRAVAIS_REVEAL_PAD_PX,
             bottomInset: getBottomInset(),
-            mode,
+            centered,
         }));
     }, [frameRef, getBottomInset, tweenTo]);
 
-    const focusSlot = useCallback((slot: WallSlot | null, options: { reveal?: boolean; center?: boolean } = {}) => {
+    const focusSlot = useCallback((slot: WallSlot | null, options: { reveal?: boolean } = {}) => {
         const key = slot?.key ?? null;
         if (focusedRef.current !== key) {
             focusedRef.current = key;
             setFocusedSlotKey(key);
             onFocusEntry(key);
         }
-        if (slot && options.reveal) reveal(drawnRect(slot), options.center ? 'centered' : 'minimal');
+        if (slot && options.reveal) reveal(drawnRect(slot));
     }, [drawnRect, onFocusEntry, reveal]);
 
-    const expand = useCallback((slot: WallSlot) => {
+    const expand = useCallback((slot: WallSlot, options: { centered?: boolean } = {}) => {
         expandedRef.current = slot.key;
         setExpandedSlotKey(slot.key);
-        const rect = resolveFocusReflow(slot.key).get(slot.key);
-        if (rect) reveal(rect);
-    }, [reveal]);
+        const rect = resolveFocusReflow(slot.key, getShape()).get(slot.key);
+        if (rect) reveal(rect, options);
+    }, [getShape, reveal]);
 
     const collapse = useCallback(() => {
         if (expandedRef.current === null) return;

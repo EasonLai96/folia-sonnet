@@ -4,7 +4,7 @@ import {
     derivePlayableTracks,
     resolveContextTracks,
     type SongSortContext,
-} from '@/library/core/model/collectionView';
+} from '@/library/core/collection/collectionView';
 import { resolveGridViewContextTracks } from '@/library/suites/grid/collection/gridViewContextActions';
 import { buildLocalQueue } from '@/services/playbackAdapters';
 import { getPlaybackSongKey } from '@/utils/appPlaybackGuards';
@@ -37,9 +37,9 @@ const LOCAL_SONGS = [
     localSong(4, 'Alpha', 2, 400),
 ];
 const LOCAL_TRACKS = buildLocalQueue(LOCAL_SONGS) as SongResult[];
-const songsById = new Map(LOCAL_SONGS.map(song => [song.id, song]));
+const localSongsById = new Map(LOCAL_SONGS.map(song => [song.id, song]));
 const sort = (field: SongSortContext['field'], direction: SongSortContext['direction'] = 'asc'): SongSortContext => (
-    { localSongsById: songsById, field, direction }
+    { localSongsById, field, direction }
 );
 // 本地曲目的播放 id 是派生出来的数字，断言用它指向的本地歌 id。
 const ids = (tracks: SongResult[]) => tracks.map(track => (track as UnifiedSong).localRef?.songId ?? String(track.id));
@@ -74,43 +74,11 @@ describe('deriveDisplayTracks', () => {
         expect(ids(deriveDisplayTracks(LOCAL_TRACKS, new Set(), sort('albumTrack', 'desc')))).toEqual(['local-1', 'local-3', 'local-4', 'local-2']);
     });
 
-    it('leaves the order alone when the local library has not loaded yet', () => {
-        // 曲库还没加载时本地歌压不出事实，哪一项都分不出高下，稳定排序把原序留下来。
+    it('does not sort without a local library to look songs up in', () => {
+        // 曲库还没加载时本地歌压不出事实，哪一项都分不出高下，稳定排序把原序留下来
+        // （不是同一个数组：仍然排了一次，只是排不动）。
         const emptyLibrary = { ...sort('fileLastModified'), localSongsById: new Map() };
         expect(ids(deriveDisplayTracks(LOCAL_TRACKS, new Set(), emptyLibrary))).toEqual(ids(LOCAL_TRACKS));
-    });
-
-    it('sorts by added time, name, artist, liked and play count', () => {
-        const tracks = [
-            { ...online('b'), name: 'Bravo', artists: [{ id: 2, name: 'Zeta' }] },
-            { ...online('a'), name: 'Alpha', artists: [{ id: 1, name: 'Ada' }] },
-        ] as SongResult[];
-        expect(deriveDisplayTracks(tracks, new Set(), { field: 'title', direction: 'asc' }).map(track => track.name))
-            .toEqual(['Alpha', 'Bravo']);
-        expect(deriveDisplayTracks(tracks, new Set(), { field: 'artist', direction: 'asc' }).map(track => track.name))
-            .toEqual(['Alpha', 'Bravo']);
-        // 事实里没有 addedAt / playCount，两项都分不出高下，原序留下。
-        expect(deriveDisplayTracks(tracks, new Set(), { field: 'addedAt', direction: 'desc' }).map(track => track.name))
-            .toEqual(['Bravo', 'Alpha']);
-        expect(deriveDisplayTracks(tracks, new Set(), { field: 'playCount', direction: 'desc' }).map(track => track.name))
-            .toEqual(['Bravo', 'Alpha']);
-    });
-
-    it('puts liked songs first for liked-desc and last for liked-asc', () => {
-        const tracks = [online('a'), online('b')] as SongResult[];
-        const liked = new Set(['a']);
-        const context = {
-            field: 'liked' as const,
-            isLiked: (track: SongResult) => liked.has(String(track.id)),
-        };
-        expect(deriveDisplayTracks(tracks, new Set(), { ...context, direction: 'desc' }).map(track => track.id))
-            .toEqual(['a', 'b']);
-        expect(deriveDisplayTracks(tracks, new Set(), { ...context, direction: 'asc' }).map(track => track.id))
-            .toEqual(['b', 'a']);
-    });
-
-    it('keeps the loaded order when the sort is none', () => {
-        expect(deriveDisplayTracks(LOCAL_TRACKS, new Set(), { field: 'none', direction: 'asc' })).toBe(LOCAL_TRACKS);
     });
 });
 

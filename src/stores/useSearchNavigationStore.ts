@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
 import type { HomeViewTab, LocalSong, SongResult, UnifiedSong } from '../types';
-import { OnlineProviderError, type OnlineProviderId } from '../types/onlineMusic';
+import { DEFAULT_ONLINE_PROVIDER_ID, OnlineProviderError, type OnlineProviderId } from '../types/onlineMusic';
 import { noteProviderAuthExpired } from '../services/onlineMusic/authExpiry';
 import {
     applyLocalLibraryEntityDisplay,
@@ -12,7 +12,7 @@ import { omni } from '../services/onlineMusic/omni';
 import { isLocalPlaybackSong, isNavidromePlaybackSong } from '../utils/appPlaybackGuards';
 import { supportsLocalMusicImport } from '../platform/runtime';
 import { listAiCloudCacheSongs } from '../services/aiCloudCache';
-import { resolveCloudThemeSong } from '../library/core/services/cloudThemeCollectionDeps';
+import { resolveCloudThemeSong } from '../library/core/collection/resource/cloudThemeCollectionDeps.service';
 
 const LAST_HOME_VIEW_TAB_KEY = 'last_home_view_tab';
 const DEFAULT_SEARCH_LIMIT = 30;
@@ -82,8 +82,8 @@ export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSour
     if (tab === 'local' || tab === 'navidrome' || tab === 'cloud') {
         return tab;
     }
-    if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio') return tab as OnlineProviderId;
-    return 'netease';
+    if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio' && tab !== 'explore') return tab as OnlineProviderId;
+    return DEFAULT_ONLINE_PROVIDER_ID;
 };
 
 /** 这条搜索来源对应的在线平台；本地 / Navidrome 没有平台，返回 null。 */
@@ -99,7 +99,7 @@ export const resolveCommandPaletteSearchSource = (
 ): SearchSource => {
     if (currentSong && isLocalPlaybackSong(currentSong)) return 'local';
     if (currentSong && isNavidromePlaybackSong(currentSong)) return 'navidrome';
-    if (currentSong || searchSourceTab === 'netease') return activeOnlineProviderId;
+    if (currentSong || searchSourceTab === DEFAULT_ONLINE_PROVIDER_ID) return activeOnlineProviderId;
     return searchSourceTab;
 };
 
@@ -221,6 +221,7 @@ const getInitialHomeViewTab = (): HomeViewTab => {
         || savedTab === 'albums'
         || savedTab === 'navidrome'
         || savedTab === 'radio'
+        || savedTab === 'explore'
         ? savedTab
         : 'playlist';
 };
@@ -228,7 +229,7 @@ const getInitialHomeViewTab = (): HomeViewTab => {
 export const useSearchNavigationStore = create<SearchNavigationState>((set, get) => ({
     homeViewTab: getInitialHomeViewTab(),
     searchQuery: '',
-    searchSourceTab: 'netease',
+    searchSourceTab: DEFAULT_ONLINE_PROVIDER_ID,
     searchResults: null,
     searchReturnView: 'home',
     isSearchOpen: false,

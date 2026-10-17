@@ -1,6 +1,7 @@
 import { WallTitle } from '../../wall/WallTitle';
 import { lazy, memo, Suspense, useMemo } from 'react';
-import { motion, type TransformProperties, type Variants } from 'framer-motion';
+import { motion, type TransformProperties } from 'framer-motion';
+import { ArrowUpRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useRef, type KeyboardEvent, type MouseEvent, type MutableRefObject, type PointerEvent } from 'react';
 import type { ReflowTile } from '../../wall/layout';
@@ -11,7 +12,6 @@ import { useLatticeExpansionSettled } from './useLatticeExpansionSettled';
 import { prewarmLatticeLyrics } from './lyrics/prewarmLatticeLyrics';
 import { prewarmWallPosterArtwork, useWallPosterArtwork } from '../../wall/useWallPosterArtwork';
 import { countRender } from '../../../dev/renderCount';
-import { useLatticeSettingsStore } from '../../../stores/useLatticeSettingsStore';
 import {
     WALL_HANDOFF_FLIP_IN_MS,
     WALL_HANDOFF_FLIP_OUT_MS,
@@ -21,8 +21,19 @@ import {
 } from '../../wall/wallHandoff';
 import type { LatticePosterHandoff } from './useLatticeWallHandoff';
 import { WALL_REFLOW_CONTROLS_REVEAL, WALL_REFLOW_SPRING } from '../../wall/wallReflowMotion';
+import { LATTICE_TILE_ATTR, MORPH_SHADE_ATTR } from '../../collectionFlight';
+import { ENTRANCE_LIFT, LEAVING } from './tileMotion';
+import { useFlightBackTo } from './wallFlight';
 
-// Renders one poster and its expanded Player Chrome controls.
+// Renders one poster and its expanded Player Chrome controls. A poster of the explore page that
+// is a collection (album, playlist, artist, mix) has one button there instead, which opens its page.
+// Grown, that poster is also the one card of the wall the cover's flight to and from its page
+// reads (the grid's morph, through components/collectionFlight): it carries the mark of that,
+// draws its cover as an <img>, and marks its shade as the layer the flying cover wears. While a
+// flight back to it is armed it is not shown (`is-awaiting-flight`): the cover that flies stands
+// for it until it lands.
+// Such a poster also carries a class for what it is (`is-kind-…`), by which Lattice.css marks
+// its cover while it is not grown.
 const LatticeLyrics = lazy(() => import('./lyrics/LatticeLyrics'));
 
 type LatticePosterProps = {
@@ -39,12 +50,19 @@ type LatticePosterProps = {
     /** Seconds this poster waits before dropping into its slot, or null outside the opening wave. */
     entranceDelay: number | null;
     /**
-     * Reverse-wave delay for the moment the complete wall leaves the viewport. A function, not a
-     * number, because it measures from a corner that moves with the camera: a card is not
-     * re-rendered before it leaves, and a number handed down per render would either go stale or
-     * re-render every mounted card on each re-cull. Identity must stay stable.
+     * The poster is mounted as it is drawn, with no entrance of its own: one of the first posters
+     * of a wall that is come back to from a collection's page, which stands as it was left. Read
+     * at the mount only.
      */
-    getExitDelay: (rect: { x: number; y: number }) => number;
+    mountsInPlace: boolean;
+    /**
+     * Reverse-wave delay for the moment the complete wall leaves the viewport; null where the wall
+     * leaves with no wave (for a collection's page). A function, not a number, because it measures
+     * from a corner that moves with the camera: a card is not re-rendered before it leaves, and a
+     * number handed down per render would either go stale or re-render every mounted card on each
+     * re-cull. Identity must stay stable.
+     */
+    getExitDelay: (rect: { x: number; y: number }) => number | null;
     /**
      * 翻牌交接（设计稿 §7「进入队列」）里这张海报的排期：hold = 侧立着等开翻；in / out = 过 delay 秒后翻进 / 翻出半圈；
      * static = 淡入淡出交叉里进来（不跑入场）。不在交接里为 null。同一段里是同一个对象（PosterWall 缓存）。
@@ -54,28 +72,11 @@ type LatticePosterProps = {
     reducedMotion: boolean | null;
     didDragRef: MutableRefObject<boolean>;
     onExpand: (instanceId: string) => void;
+    /** The tile's own action: plays a song, opens a collection's page. */
     onPlay: (tile: LatticeTile) => void;
     onTogglePlayback: () => void;
     onSeek: (time: number) => void;
     onOpenPlayer: () => void;
-};
-
-// How far above its slot a landing tile starts, in world units.
-const ENTRANCE_LIFT = 90;
-
-/**
- * 性能优先时封面最多按这么大取档（ coverUrl.ts 的档位是 256 / 512 / 1024，再往上就是原图）。
- * 展开的那张不压：它是此刻的主角，糊了比多解一张图更碍眼。
- */
-const PERFORMANCE_COVER_MAX_PX = 512;
-
-// Resolved at exit time from the card's own `custom`, so the leaving wave reads the live camera.
-const LEAVING: Variants = {
-    leaving: (resolve: () => { y: number; delay: number }) => {
-        const { y, delay } = resolve();
-        return { y, opacity: 0, scale: 0.88, scaleX: 1, scaleY: 1,
-            transition: { duration: 0.28, delay, ease: [0.4, 0, 1, 1] } };
-    },
 };
 
 // Lift for the card under the pointer or the wall's keyboard cursor. It scales the whole article,
@@ -94,18 +95,23 @@ const LEAVING: Variants = {
 // change. Every other prop is a scalar, a ref or a permanently-identified callback. Transport state
 // is deliberately absent: it reaches the expanded chrome through `LatticeTransportContext`, because
 // as a prop it changed on every pause and resume and no comparison here could absorb that.
+// `mountsInPlace` is read at the mount only, so a change of it is no reason to render.
 const sameRect = (a: LatticePosterProps['rect'], b: LatticePosterProps['rect']) => (
     a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 );
 
 const sameTile = (a: LatticeTile, b: LatticeTile) => (
     a.id === b.id && a.queueIndex === b.queueIndex && a.section === b.section
-    && a.title === b.title && a.artist === b.artist && a.coverUrl === b.coverUrl && a.song === b.song
+    && a.title === b.title && a.artist === b.artist && a.coverUrl === b.coverUrl
+    && a.label === b.label && a.heading === b.heading && a.entryKind === b.entryKind
+    && (a.kind === 'song'
+        ? b.kind === 'song' && a.song === b.song && a.queue === b.queue
+        : b.kind === 'collection' && a.collection === b.collection)
 );
 
 const arePosterPropsEqual = (previous: LatticePosterProps, next: LatticePosterProps) => {
     for (const key of Object.keys(next) as (keyof LatticePosterProps)[]) {
-        if (key === 'tile' || key === 'rect') continue;
+        if (key === 'tile' || key === 'rect' || key === 'mountsInPlace') continue;
         if (!Object.is(previous[key], next[key])) return false;
     }
     return sameTile(previous.tile, next.tile) && sameRect(previous.rect, next.rect);
@@ -140,6 +146,7 @@ function LatticePoster({
     pixelScale,
     expandedSize,
     entranceDelay,
+    mountsInPlace,
     getExitDelay,
     handoff,
     expanded,
@@ -159,20 +166,18 @@ function LatticePoster({
     const popScaleX = popped && rect.width > 0 ? (rect.width + gap * 2) / rect.width : 1;
     const popScaleY = popped && rect.height > 0 ? (rect.height + gap * 2) / rect.height : 1;
     const isCurrent = tile.section === 'now';
+    // Where a cover's flight to this tile's page starts, and where the flight back lands.
+    const isFlightEnd = expanded && tile.kind === 'collection';
+    // Asked here, in the render: the commit that first draws the poster on a wall come back to
+    // already draws it hidden. Hidden after that paint, it would be seen for a frame.
+    const awaitsFlight = useFlightBackTo(isFlightEnd ? tile.id : null);
     // The lyric scene is a Pixi renderer whose layout is rebuilt from the card's box, so mounting it
     // mid-expansion would rasterize every line once per animation frame. It waits for the spring.
     const [expansionSettled, onExpansionComplete] = useLatticeExpansionSettled(expanded, Boolean(reducedMotion));
     // The artwork only has to cover the card's own box, and a square cover is scaled to the longer
     // edge. Both inputs are discrete - gears are integer spans and the camera only rescales on a
     // breakpoint - so this is not a per-frame value even while the card animates towards the size.
-    // 性能优先时封面不再按设备像素取档：高 DPR 屏上那意味着每张卡都要解一张大一档的图。
-    const performanceMode = useLatticeSettingsStore(state => state.latticePerformanceMode);
-    const lightsOn = useLatticeSettingsStore(state => state.latticeLightsOn);
-    const coverTargetPx = Math.max(rect.width, rect.height) * pixelScale;
-    const coverUrl = useWallPosterArtwork(
-        tile.coverUrl,
-        performanceMode && !expanded ? Math.min(coverTargetPx, PERFORMANCE_COVER_MAX_PX) : coverTargetPx,
-    );
+    const coverUrl = useWallPosterArtwork(tile.coverUrl, Math.max(rect.width, rect.height) * pixelScale);
     // Hover and press are the last moments before the open: warming here keeps the lyric chunk,
     // the Pixi module and the first shader compile off the click path.
     const warmLyrics = () => { if (isCurrent) prewarmLatticeLyrics(); };
@@ -201,24 +206,11 @@ function LatticePoster({
     const baseTransition = reducedMotion
         ? { duration: 0 }
         : landing === null
-            /*
-             * 这里（入场波之外的一切重排：展开 / 收起 / 队列变化）刻意**不用 spring**
-             * （上游的 WALL_REFLOW_SPRING 也是弹簧，同样的账）。
-             *
-             * 一次展开会让同一格里的 12 张卡同时改变 x / y / width / height ——
-             * 而 width / height 是布局属性，每一帧都要重新布局并重新绘制那张卡
-             * （封面底图 + 三层渐变 + 描边），弹簧的收尾还会把这个过程拖长。
-             * 桌面 GPU 扛得住，Android WebView 上就是「选歌时整屏闪烁」
-             * （轨迹实测：卡片 paint 106 次 → 换成缓出后 16 次）。
-             * 换成一段固定时长的缓出：帧数可控，观感是「滑过去然后稳住」。
-             * 0.46s 是这两个约束的中间值 —— 再短显得生硬，再长把重绘拖得更久。
-             */
             ? {
-                duration: 0.46,
-                ease: [0.22, 1, 0.36, 1] as const,
-                opacity: { duration: 0.34, ease: 'easeOut' as const },
-                scaleX: { duration: 0.36, ease: 'easeOut' as const },
-                scaleY: { duration: 0.36, ease: 'easeOut' as const },
+                ...WALL_REFLOW_SPRING,
+                opacity: { duration: 0.26, ease: 'easeOut' as const },
+                scaleX: { duration: 0.3, ease: 'easeOut' as const },
+                scaleY: { duration: 0.3, ease: 'easeOut' as const },
             }
             : {
                 type: 'spring' as const, stiffness: 360, damping: 24, delay: landing,
@@ -239,6 +231,8 @@ function LatticePoster({
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter') {
             event.preventDefault();
+            // A key held down repeats: the press that grew the poster does not go on to open it.
+            if (event.repeat) return;
             if (!expanded) {
                 onExpand(instanceId);
                 return;
@@ -263,9 +257,10 @@ function LatticePoster({
             onFocusCapture={chrome.onFocusCapture}
             onBlurCapture={chrome.onBlurCapture}
             key={instanceId}
-            className={`lattice-poster ${expanded ? 'is-expanded' : ''} ${isFocused ? 'is-focused' : ''} ${isCurrent ? 'is-current' : ''}`}
+            className={`lattice-poster ${expanded ? 'is-expanded' : ''} ${isFocused ? 'is-focused' : ''} ${isCurrent ? 'is-current' : ''} ${tile.kind === 'collection' ? 'is-collection' : ''} ${tile.entryKind && tile.entryKind !== 'song' ? `is-kind-${tile.entryKind}` : ''} ${awaitsFlight ? 'is-awaiting-flight' : ''}`}
             data-instance-id={instanceId}
-            initial={reducedMotion || handoff?.kind === 'static'
+            {...(isFlightEnd ? { [LATTICE_TILE_ATTR]: tile.id } : {})}
+            initial={reducedMotion || mountsInPlace || handoff?.kind === 'static'
                 ? false
                 // 交接进来：落在原位、不透明，只是侧立着（看不见），等自己的时刻翻进来。
                 : handoff?.kind === 'hold' || handoff?.kind === 'in'
@@ -310,14 +305,21 @@ function LatticePoster({
             aria-expanded={expanded ? undefined : false}
             aria-label={`${tile.title} · ${tile.artist}`}
         >
-            {/* shade 是标题与播放条的可读性底衬，留着；tint 是纯装饰，性能优先时不渲染；
-                lights-out 开灯时是一层永远透明的黑，同样只在真的熄灯时才挂上。 */}
-            <span className="lattice-poster-shade" />
-            {(!performanceMode || !lightsOn) && <span className="lattice-poster-lights-out" />}
-            {!performanceMode && <span className="lattice-poster-tint" />}
+            {/* The morph reads a card's picture off an <img>: the picture this card paints as its
+                background, drawn once more over it. */}
+            {isFlightEnd && coverUrl && (
+                <img className="lattice-poster-cover" src={coverUrl} alt="" draggable={false} decoding="sync" />
+            )}
+            <span className="lattice-poster-shade" {...(isFlightEnd ? { [MORPH_SHADE_ATTR]: '' } : {})} />
+            <span className="lattice-poster-lights-out" />
+            <span className="lattice-poster-tint" />
             <span className={`lattice-poster-badge ${isCurrent ? 'is-current' : ''}`}>
                 {isCurrent && <>{t('home.latticeBadgeNow')} · </>}
-                {String(tile.queueIndex + 1).padStart(2, '0')}
+                {/* An entry of the explore page says what it is where a queue tile has its number;
+                    a collection, grown, also the heading it stands under on the page. */}
+                {tile.label === undefined
+                    ? String(tile.queueIndex + 1).padStart(2, '0')
+                    : tile.kind === 'collection' && expanded && tile.heading ? `${tile.label} · ${tile.heading}` : tile.label}
             </span>
             {expanded && expansionSettled && isCurrent ? (
                 <Suspense fallback={<span className="lattice-poster-copy"><WallTitle title={tile.title} expanded={expanded} targetPosterWidth={rect.width} /><small>{tile.artist}</small></span>}>
@@ -339,14 +341,26 @@ function LatticePoster({
                         duration: reducedMotion ? 0 : WALL_REFLOW_CONTROLS_REVEAL.durationMs / 1000,
                     }}
                 >
-                    <LatticePlaybackControls
-                        revealed={chrome.revealed}
-                        tile={tile}
-                        onPlay={onPlay}
-                        onTogglePlayback={onTogglePlayback}
-                        onSeek={onSeek}
-                        onOpenPlayer={onOpenPlayer}
-                    />
+                    {tile.kind === 'collection' ? (
+                        // Nothing to play or seek: the one thing to do with a collection is open its page.
+                        <div className="lattice-chrome">
+                            <div className="lattice-chrome-transport">
+                                <button type="button" className="lattice-open-collection" onClick={() => onPlay(tile)}>
+                                    <ArrowUpRight />
+                                    <span>{t('home.latticeOpenCollection')}</span>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <LatticePlaybackControls
+                            revealed={chrome.revealed}
+                            tile={tile}
+                            onPlay={onPlay}
+                            onTogglePlayback={onTogglePlayback}
+                            onSeek={onSeek}
+                            onOpenPlayer={onOpenPlayer}
+                        />
+                    )}
                 </motion.div>
             )}
         </motion.article>

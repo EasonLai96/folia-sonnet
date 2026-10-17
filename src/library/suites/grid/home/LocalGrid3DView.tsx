@@ -1,27 +1,25 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileUp, FolderOpen, Loader2, Music, ListMusic, User, Disc3, RefreshCw, Smartphone, ListChecks } from 'lucide-react';
+import { FileUp, FolderOpen, Loader2, Music, ListMusic, User, Disc3, RefreshCw } from 'lucide-react';
 import DesktopGrid3DSurface, { DesktopGrid3DAction } from './DesktopGrid3DSurface';
-import LocalSongManagerDialog from '../../../shared/LocalSongManagerDialog';
 import { LocalPlaylist, LocalSong, Theme } from '../../../../types';
 import type { GridViewCollectionDescriptor } from '../../../../components/app/home/gridViewCollectionAdapters';
 import { useDebouncedFocusSync } from '../../../../hooks/useDebouncedFocusSync';
 import type { GridMapBatchConfig } from '../directory/GridMap';
-import type { LibraryDirectoryBatchController } from '../../../core/contracts/directory';
-import type { LibraryLocalCatalogSnapshot } from '../../../core/contracts/home';
-import type { LibraryHomeActionsController, LibraryHomeListState, LibraryLocalDirectoryTreesResource } from '../../../core/contracts/homeModel';
-import type { LibraryDeclaredActions } from '../../../core/contracts/suite';
-import type { LocalHomeRow, LocalHomeSectionKey } from '../../../core/model/localHomeModel';
-import { resolveLocalHomeActions } from '../../../core/model/localHomeModel';
-import { useLibraryHomeLocal, useLocalDirectoryTrees, useLocalHomeBatchConfig } from '../../../core/bindings/useLibraryHomeLocal';
-import { useLibraryHomeActions } from '../../../core/bindings/useLibraryHomeActions';
-import { useLibraryHomeListRegistration } from '../../../core/bindings/useLibraryHomeSurfaceRegistration';
-import { isAndroidNativeRuntime } from '../../../../services/nativeLocalMusic';
+import type { LibraryDirectoryBatchController } from '../../../core/directory/directory.contract';
+import type { LibraryLocalCatalogSnapshot } from '../../../core/home/home.contract';
+import type { LibraryHomeActionsController, LibraryHomeListState, LibraryLocalDirectoryTreesResource } from '../../../core/home/homeModel.contract';
+import type { LibraryDeclaredActions } from '../../../core/suite/suite.contract';
+import type { LocalHomeRow, LocalHomeSectionKey } from '../../../core/home/localHomeModel';
+import { resolveLocalHomeActions } from '../../../core/home/localHomeModel';
+import { useLibraryHomeLocal, useLocalDirectoryTrees, useLocalHomeBatchConfig } from '../../../core/home/useLibraryHomeLocal';
+import { useLibraryHomeActions } from '../../../core/home/useLibraryHomeActions';
+import { useLibraryHomeListRegistration } from '../../../core/home/useLibraryHomeSurfaceRegistration';
 
 // src/library/suites/grid/home/LocalGrid3DView.tsx
 // Desktop-only local music Grid3D overview that opens GridView instead of legacy carousel details.
-// 分组、section、卡片、导入动作与文件夹树都来自 Library Core 的首页模型（core/model/localHomeModel、
-// core/bindings/useLibraryHomeLocal、首页动作控制器）；这里只剩网格的展示：图标、焦点记忆、文件选择框。
+// 分组、section、卡片、导入动作与文件夹树都来自 Library Core 的首页模型（core/home/localHomeModel、
+// core/home/useLibraryHomeLocal、首页动作控制器）；这里只剩网格的展示：图标、焦点记忆、文件选择框。
 
 const SECTION_ICONS: Record<LocalHomeSectionKey, React.ReactNode> = {
     folders: <FolderOpen size={13} />,
@@ -34,8 +32,6 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
     'import-folder': <FolderOpen size={13} />,
     'refresh-folders': <RefreshCw size={13} />,
     'import-playlist': <FileUp size={13} />,
-    'scan-device-music': <Smartphone size={13} />,
-    'manage-songs': <ListChecks size={13} />,
 };
 
 interface LocalGrid3DViewProps {
@@ -57,12 +53,12 @@ interface LocalGrid3DViewProps {
     homeActions: LibraryHomeActionsController;
     /** 本地文件夹树（首页宿主持有，见 homeResources.localDirectoryTrees；换 suite 不重读）。 */
     directoryTreesResource: LibraryLocalDirectoryTreesResource;
-    /** 首页模型算好的目录会话 key（core/model/homeSources 的 resolveHomeDirectoryKey）。 */
+    /** 首页模型算好的目录会话 key（core/home/homeSources 的 resolveHomeDirectoryKey）。 */
     directoryKey: string;
     /** 网格 suite 声明的首页动作（交给 GridMap 的目录 surface 取交集）。 */
     declaredHomeActions?: LibraryDeclaredActions;
     onOpenGridView?: (collection: GridViewCollectionDescriptor) => void;
-    /** 批量动作控制器（宿主创建；规则在 core/services/localDirectoryActions）。没有时 GridMap 不提供批量。 */
+    /** 批量动作控制器（宿主创建；规则在 core/directory/localDirectoryActions.service）。没有时 GridMap 不提供批量。 */
     directoryActions?: LibraryDirectoryBatchController;
     theme: Theme;
     isDaylight: boolean;
@@ -97,11 +93,9 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
 }) => {
     const { t } = useTranslation();
     const playlistFileInputRef = useRef<HTMLInputElement>(null);
-    // 「管理歌曲」对话框：本地曲库删歌的唯一入口（文件夹里的逐首删在集合视图，这里是整库的管理）。
-    const [isManageOpen, setIsManageOpen] = useState(false);
     const directoryTrees = useLocalDirectoryTrees(directoryTreesResource, localSongs);
     const local = useLibraryHomeLocal({ localSongs, localPlaylists, catalog: localLibraryCatalog, activeRow });
-    const { snapshot: actionState } = useLibraryHomeActions(homeActions);
+    const { snapshot: actionState, importBusy } = useLibraryHomeActions(homeActions);
 
     const [localFolderIndex, setLocalFolderIndex] = useDebouncedFocusSync(focusedFolderIndex, setFocusedFolderIndex);
     const [localAlbumIndex, setLocalAlbumIndex] = useDebouncedFocusSync(focusedAlbumIndex, setFocusedAlbumIndex);
@@ -118,7 +112,7 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
     const [activeFocusedIndex, setActiveFocusedIndex] = focus[activeSection.key];
 
     // 批量配置只装配 section 与目录树；动作的规则（路径规则、刷新顺序、pending 与重复提交）在 core 的控制器里。
-    // 删除与恢复忽略目录之后重读目录树（core/bindings 的 useLocalHomeBatchConfig，TUI 的目录列表用同一个）。
+    // 删除与恢复忽略目录之后重读目录树（core 的 useLocalHomeBatchConfig，TUI 的目录列表用同一个）。
     const { trees } = directoryTrees;
     const localBatchConfig: GridMapBatchConfig | undefined = useLocalHomeBatchConfig({
         controller: directoryActions,
@@ -140,16 +134,9 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
         if (id === 'import-folder') void homeActions.importFolder();
         else if (id === 'refresh-folders') void homeActions.refreshFolders();
         else if (id === 'import-playlist') playlistFileInputRef.current?.click();
-        else if (id === 'scan-device-music') void homeActions.scanDeviceMusic();
-        else if (id === 'manage-songs') setIsManageOpen(true);
     };
 
-    // 安卓原生才有「扫描设备音乐库」：core 不做平台判定，由这里按运行时告诉它。
-    // 「管理歌曲」的对话框是这个 suite 挂的，所以也由这里告诉 core 有这条入口。
-    const localActions = resolveLocalHomeActions(actionState, {
-        deviceScan: isAndroidNativeRuntime(),
-        manageSongs: true,
-    });
+    const localActions = resolveLocalHomeActions(actionState);
     const actions: DesktopGrid3DAction[] = localActions.map(action => ({
         id: action.id,
         label: t(action.labelKey),
@@ -191,33 +178,19 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
     });
 
     if (isEmptyLibrary) {
-        /*
-         * 空库那一屏把「导入文件夹」与「扫描本机音乐」一起摆出来。
-         *
-         * 以前这里只给「导入文件夹」，而别的入口（含安卓的「扫描本机音乐」）只挂在 Galgame/TUI 那排动作里，
-         * 那一排在空库早退之后才渲染 —— 于是安卓上必须先导入一个文件夹、脱离空态，才看得见扫歌按钮。
-         * 对一台刚装好、库里一首歌都没有的手机来说，这个顺序正好把最该点的那颗藏起来了。
-         */
-        const emptyActions = localActions.filter(
-            action => action.id === 'import-folder' || action.id === 'scan-device-music',
-        );
+        const scanning = Boolean(actionState.scan?.active);
         return (
             <div className="w-full h-full flex flex-col items-center justify-center gap-4 opacity-60">
                 <Music size={64} />
                 <p className="text-lg">{t('localMusic.noLocalMusic')}</p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                    {emptyActions.map(action => (
-                        <button
-                            key={action.id}
-                            onClick={() => runAction(action.id)}
-                            disabled={action.disabled}
-                            className="px-6 py-3 rounded-full transition-colors text-sm flex items-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {action.pending ? <Loader2 size={16} className="animate-spin" /> : ACTION_ICONS[action.id]}
-                            {t(action.labelKey)}
-                        </button>
-                    ))}
-                </div>
+                <button
+                    onClick={() => void homeActions.importFolder()}
+                    disabled={importBusy}
+                    className="px-6 py-3 rounded-full transition-colors text-sm flex items-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {importBusy ? <Loader2 size={16} className="animate-spin" /> : <FolderOpen size={16} />}
+                    {scanning ? t('options.scanning') : actionState.importingFolder ? t('localMusic.importing') : t('localMusic.importFolder')}
+                </button>
             </div>
         );
     }
@@ -239,7 +212,6 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
                 focusMemoryScope={JSON.stringify(['local', activeSection.key])}
                 title={String(activeSection.label)}
                 mapButtonLabel={t('home.allAlbums')}
-                directoryButtonLabel={t('localMusic.directory')}
                 items={activeSection.cards}
                 focusedIndex={activeFocusedIndex}
                 onFocusedIndexChange={setActiveFocusedIndex}
@@ -262,16 +234,6 @@ export const LocalGrid3DView: React.FC<LocalGrid3DViewProps> = ({
                 batchConfig={localBatchConfig}
                 ponderControls="local-grid-controls"
                 gridMapPonderScope="local-grid-map-page"
-            />
-            <LocalSongManagerDialog
-                isOpen={isManageOpen}
-                songs={localSongs}
-                isDaylight={isDaylight}
-                onDelete={async (songIds) => {
-                    await homeActions.deleteLocalSongs(songIds);
-                }}
-                onRename={async (songId, name) => (await homeActions.renameLocalSong(songId, name)).ok}
-                onClose={() => setIsManageOpen(false)}
             />
         </>
     );

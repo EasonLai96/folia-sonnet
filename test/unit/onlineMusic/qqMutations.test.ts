@@ -6,13 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const requestMock = vi.hoisted(() => vi.fn());
 const transportState = vi.hoisted(() => ({ hasSession: true }));
 
-vi.mock('@/services/onlineMusic/qqTransport', () => ({
+vi.mock('@/services/onlineMusic/qq/qqTransport', () => ({
     hasQqSession: () => transportState.hasSession,
     requestQq: requestMock,
 }));
 
-import { canEditQqPlaylistTracks, getQqSubscriptionStatus, qqMutations } from '@/services/onlineMusic/qqMutations';
-import { normalizeQqCollection, normalizeQqSong } from '@/services/onlineMusic/qqNormalize';
+import { canEditQqPlaylistTracks, getQqSubscriptionStatus, qqMutations } from '@/services/onlineMusic/qq/qqMutations';
+import { normalizeQqCollection, normalizeQqSong } from '@/services/onlineMusic/qq/qqNormalize';
 import { OnlineProviderError, type ProviderCollection } from '@/types/onlineMusic';
 
 // GetPlaylistByUin 的自建条目带 dirName（据此判为自建）；收藏条目是另一套字段。

@@ -1,4 +1,5 @@
 import type { StatusMessage } from '../../types';
+import type { OnlineFailureCaseId } from '../../types/onlineMusic';
 import type {
     PlaybackFailure,
     PlaybackFailureAction,
@@ -210,6 +211,33 @@ export const resolvePlaybackFailurePolicy = (
  * 这次失败按策略是否倒计时跳歌（不看连跳次数和有没有下一首）。presenter 用同一个判断决定倒计时，
  * 队列控制器用它决定「跳过」是否累计连跳次数：只有走倒计时的原因才累计，否则受限类在设置打开时会无限连跳。
  */
+/**
+ * 两套失败分类之间的桥：这套策略表按 PlaybackFailureReason 分（界面文案、倒计时、按钮都挂在它上面），
+ * 而 host 往扩展层（Folium 的 playback.failed）报的是上游那套 OnlineFailureCaseId。
+ * 只用于报告，不参与策略判定 —— 上面对不上号的都归 'unknown'。
+ */
+const FAILURE_REASON_TO_CASE: Readonly<Record<PlaybackFailureReason, OnlineFailureCaseId>> = {
+    'not-signed-in': 'sign-in-needed',
+    'session-expired': 'sign-in-needed',
+    'membership-required': 'subscription-required',
+    'purchase-required': 'purchase-required',
+    'entitlement-required': 'entitlement-required',
+    'preview-only': 'preview-only',
+    'region-restricted': 'region-restricted',
+    'taken-down': 'taken-down',
+    network: 'unreachable',
+    timeout: 'retry-later',
+    'service-unavailable': 'retry-later',
+    'rate-limited': 'retry-later',
+    'invalid-response': 'unknown',
+    unknown: 'unknown',
+};
+
+/** 报告给扩展层时用的情况代号。 */
+export const toOnlineFailureCaseId = (reason: PlaybackFailureReason): OnlineFailureCaseId => (
+    FAILURE_REASON_TO_CASE[reason] ?? 'unknown'
+);
+
 export const isAutoSkipFailure = (
     failure: PlaybackFailure,
     context: PlaybackFailureContext,

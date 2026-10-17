@@ -20,7 +20,9 @@ import type { SongResult } from '@/types';
 // 这里不 mock `requestStage`，而是 mock 它下面的 `withAiCloudCache`（拉缓存那一层），
 // 于是「有没有问云端」是被直接断言的，不是靠调用次数猜的。
 
-vi.mock('@/i18n/config', () => ({ default: { t: (key: string) => key } }));
+// 上游的 ytm / spotify provider 在模块加载时就往 i18n 上挂 languageChanged，
+// 所以这个替身也得有 on / off（真机上是真的 i18next 实例）。
+vi.mock('@/i18n/config', () => ({ default: { t: (key: string) => key, on: () => { }, off: () => { } } }));
 
 /*
  * `withAiCloudCache` 是唯一被换掉的那个：它正是「先问云端，没有再生成」的实现，

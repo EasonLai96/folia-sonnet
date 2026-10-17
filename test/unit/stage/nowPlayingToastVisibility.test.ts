@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildAppOverlaysModel } from '../../../src/components/app/overlays/buildAppOverlaysModel';
-import {
-    isNowPlayingToastHiddenWithChrome,
-    shouldShowNowPlayingToast,
-} from '../../../src/components/app/overlays/now-playing-toast/nowPlayingToastVisibility';
-import { useLatticeControlsStore } from '../../../src/stores/useLatticeControlsStore';
+import { shouldShowNowPlayingToast } from '../../../src/components/app/overlays/now-playing-toast/nowPlayingToastVisibility';
+import { wallPageKey } from '../../../src/components/app/lattice/wallLocate';
+import { useAppViewStore } from '../../../src/stores/useAppViewStore';
+import { usePlaybackStore } from '../../../src/stores/usePlaybackStore';
+import { usePlayingSongLocatorStore } from '../../../src/stores/usePlayingSongLocatorStore';
 import { PlayerState, type SongResult } from '../../../src/types';
+import { getPlaybackSongKey } from '../../../src/utils/appPlaybackGuards';
 
 // test/unit/stage/nowPlayingToastVisibility.test.ts
 
@@ -25,33 +26,7 @@ describe('now playing toast visibility', () => {
         expect(shouldShowNowPlayingToast({ mode: 'never', view: 'lattice', showOnHome: true })).toBe(false);
     });
 
-    // 判据必须是显式传进来的 view，不能读 PlayerBottomBarLayoutContext：那个 Provider 只包住
-    // VisualizerRenderer，而卡片挂在 AppOverlays 里，读它恒为 false —— 卡片就永远不跟随隐藏。
-    it('hides with the player chrome on the lyrics page, and only there', () => {
-        const hidden = { isPlayerChromeHidden: true, autoHidePlayerChrome: false };
-        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'player' })).toBe(true);
-        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'lattice' })).toBe(false);
-        expect(isNowPlayingToastHiddenWithChrome({ ...hidden, view: 'home' })).toBe(false);
-    });
-
-    it('leaves the card alone while the auto-hide clock owns the chrome', () => {
-        // 那一档里「藏着」是常态，跟着收等于卡片再也不出现。
-        expect(isNowPlayingToastHiddenWithChrome({
-            view: 'player',
-            isPlayerChromeHidden: true,
-            autoHidePlayerChrome: true,
-        })).toBe(false);
-    });
-
-    it('shows the card again once the chrome is back', () => {
-        expect(isNowPlayingToastHiddenWithChrome({
-            view: 'player',
-            isPlayerChromeHidden: false,
-            autoHidePlayerChrome: false,
-        })).toBe(false);
-    });
-
-    it('routes a Lattice card click to the registered current-song focus action', () => {
+    it('routes a Lattice card click to the locate of the wall', () => {
         const song: SongResult = {
             id: 'now',
             name: 'Now',
@@ -60,8 +35,9 @@ describe('now playing toast visibility', () => {
             durationMs: 180000,
             sourceRef: { kind: 'online', providerId: 'netease', mediaId: 'now' },
         };
-        const focus = vi.fn();
-        const unregister = useLatticeControlsStore.getState().registerFocus(focus);
+        // The locator asks about the song the player has, on the wall that is up.
+        usePlaybackStore.setState({ currentSong: song, playQueue: [song] });
+        useAppViewStore.setState({ view: 'lattice', latticeSource: 'queue' });
         const navigateToPlayer = vi.fn();
         const openSongCardPanel = vi.fn();
         const model = buildAppOverlaysModel({
@@ -84,14 +60,18 @@ describe('now playing toast visibility', () => {
             openSongCardPanel,
             stageTrackPillOpenPlayerLabel: 'Open player',
             stageTrackPillOpenSongCardLabel: 'Open song card',
-            stageTrackPillFocusLatticeLabel: 'Focus current song',
+            stageTrackPillFocusLatticeLabel: 'Locate the playing song on this page',
         } as unknown as Parameters<typeof buildAppOverlaysModel>[0]);
 
-        expect(model.nowPlayingToast?.activateLabel).toBe('Focus current song');
+        expect(model.nowPlayingToast?.activateLabel).toBe('Locate the playing song on this page');
         model.nowPlayingToast?.onActivate?.();
-        expect(focus).toHaveBeenCalledOnce();
+        expect(usePlayingSongLocatorStore.getState().request).toMatchObject({
+            collectionKey: wallPageKey('queue'), songKey: getPlaybackSongKey(song), waits: false,
+        });
         expect(navigateToPlayer).not.toHaveBeenCalled();
         expect(openSongCardPanel).not.toHaveBeenCalled();
-        unregister();
+        usePlayingSongLocatorStore.getState().setRequest(null);
+        usePlaybackStore.setState({ currentSong: null, playQueue: [] });
+        useAppViewStore.setState({ view: 'home' });
     });
 });

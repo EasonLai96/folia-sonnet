@@ -109,6 +109,9 @@ const resolveProviderErrorReason = (
         case 'preview-only':
             return resolvePreviewOnlyReason(error, account);
         case 'region-restricted':
+        // 上游新分的「要订阅」：与「要会员」是同一件事，界面给的也是同一句（去开通）。
+        case 'subscription-required':
+            return 'membership-required';
         case 'membership-required':
         case 'purchase-required':
         case 'entitlement-required':

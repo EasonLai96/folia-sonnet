@@ -1,13 +1,13 @@
-import type { HomeViewTab, ReplayGainMode, VisualizerMode } from '../../types';
+import type { HomeViewTab, ReplayGainMode, VisualizerBackgroundMode, VisualizerMode } from '../../types';
 import type { AppLanguagePreference } from '../../i18n/config';
 import type { PanelTab } from '../UnifiedPanel';
 import type { AudioEqualizerModeId } from '../../utils/audioEqualizer';
 import type { GridSurfaceActionId } from '../../types/gridCommandSurface';
-import type { LibraryDirectorySurfaceActionId } from '../../library/core/contracts/directory';
-import { useLibraryHomeSurfaceStore } from '../../library/core/state/useLibraryHomeSurfaceStore';
-import type { LibraryArtistSurfaceActionId } from '../../library/core/contracts/artist';
-import type { LibrarySuiteChromeActionMeta } from '../../library/core/contracts/suiteChrome';
-import { libraryChromeCommandId } from '../../library/core/model/suiteChrome';
+import type { LibraryDirectorySurfaceActionId } from '../../library/core/directory/directory.contract';
+import { useLibraryHomeSurfaceStore } from '../../library/core/home/useLibraryHomeSurfaceStore';
+import type { LibraryArtistSurfaceActionId } from '../../library/core/artist/artist.contract';
+import type { LibrarySuiteChromeActionMeta } from '../../library/core/suite/suiteChrome.contract';
+import { libraryChromeCommandId } from '../../library/core/suite/suiteChrome';
 import { settingsAnchorSubview, type SettingsAnchorId } from '../../utils/settingsAnchorModel';
 import type { CommandPaletteCommand, CommandPaletteContext, CommandPaletteGroup } from './types';
 
@@ -260,15 +260,13 @@ export const createHomeTabCommand = (
     tab: HomeViewTab,
     title: string,
     description: string,
-    keywords: string[],
-    platform?: CommandPaletteCommand['platform'],
+    keywords: string[]
 ): CommandPaletteCommand => ({
     id: `home-${tab}`,
     group: 'navigation',
     title,
     description,
     keywords,
-    ...(platform ? { platform } : {}),
     execute: (_input, context) => {
         // The mounted surface also dismisses an owned page when reselecting the current source.
         // Without it (Lattice, or home hidden under the player) the host's selectHomeViewTab dismisses the page itself.
@@ -317,6 +315,23 @@ export const createVisualizerCommand = (
     keywords,
     execute: (_input, context) => {
         context.visualizer.setVisualizerMode(mode);
+        return true;
+    },
+});
+
+export const createBackgroundCommand = (
+    mode: VisualizerBackgroundMode,
+    title: string,
+    description: string,
+    keywords: string[]
+): CommandPaletteCommand => ({
+    id: `background-${mode}`,
+    group: 'visualizer',
+    title,
+    description,
+    keywords,
+    execute: (_input, context) => {
+        context.visualizer.setVisualizerBackgroundMode(mode);
         return true;
     },
 });

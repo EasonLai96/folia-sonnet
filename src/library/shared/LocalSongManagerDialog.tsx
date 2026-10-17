@@ -149,7 +149,7 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
                 isDaylight={isDaylight}
                 title={t('localMusic.manageSongsTitle')}
                 description={t('localMusic.manageSongsHint')}
-                maxWidthClass="max-w-2xl"
+                size="l"
                 panelKind="local-song-manager"
                 closeDisabled={deleting || renaming}
                 footer={(
@@ -249,7 +249,7 @@ export const LocalSongManagerDialog: React.FC<LocalSongManagerDialogProps> = ({
                 description={isAndroidNativeRuntime()
                     ? t('localMusic.renameSongHintAndroid')
                     : t('localMusic.renameSongHint')}
-                maxWidthClass="max-w-md"
+                size="m"
                 panelKind="local-song-rename"
                 closeDisabled={renaming}
                 footer={(

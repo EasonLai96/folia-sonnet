@@ -5,7 +5,8 @@ import { formatGridMapFolderTitle } from '../../../../utils/gridMapFolderPath';
 import { getSizedCoverUrl } from '../../../../utils/coverUrl';
 import { useHomeLayoutSettingsStore } from '../../../../stores/useHomeLayoutSettingsStore';
 import { useReducedMotionFor } from '../../../../hooks/useReducedMotionFor';
-import { useCompactUiScale } from '../../../../hooks/useCompactUiScale';
+import { useCompactUiScale } from '../../../../hooks/useCompactUiScale';import { hasBlockingWindow } from '../../../../utils/keyboardTargets';
+import { CARD_TITLE_ATTR, MORPH_FRAME_ATTR } from '../transitions/gridMorphContract';
 
 // src/library/suites/grid/home/Grid3DSlider.tsx
 // Controlled desktop Grid3D slider shared by Netease, local music, and Navidrome overview surfaces.
@@ -708,6 +709,8 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
         if (!isInteractive) return;
 
         const handleKeyDown = (event: KeyboardEvent) => {
+            // A window or a dialog over the page has the keyboard.
+            if (hasBlockingWindow()) return;
             const target = event.target;
             if (
                 target instanceof HTMLElement
@@ -891,6 +894,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                                         </div>
                                     ) : (
                                         <div
+                                            {...{ [MORPH_FRAME_ATTR]: '' }}
                                             data-grid3d-card="polaroid"
                                             className="rounded-xl border p-4 flex flex-col items-center backdrop-blur-md shadow-lg hover:shadow-2xl theme-polaroid-card"
                                             style={{ width: coverSize }}
@@ -904,7 +908,7 @@ export const Grid3DSlider: React.FC<Grid3DSliderProps> = ({
                                             </div>
 
                                             <div data-grid3d-card-text className="w-full text-left pt-2 min-w-0">
-                                                <h3 className="font-bold text-sm truncate max-w-full tracking-tight">
+                                                <h3 {...{ [CARD_TITLE_ATTR]: '' }} className="font-bold text-sm truncate max-w-full tracking-tight">
                                                     {displayName}
                                                 </h3>
                                                 {secondaryText && (

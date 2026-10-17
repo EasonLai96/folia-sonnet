@@ -6,6 +6,7 @@ import {
     buildPlaybackFailureMessageText,
     buildPlaybackFailureStatus,
     resolvePlaybackFailurePolicy,
+    toOnlineFailureCaseId,
 } from '../../../services/playbackRecovery/playbackFailurePolicy';
 import {
     isPlaybackInterfaceHidden,
@@ -52,6 +53,8 @@ export interface PlaybackFailurePresenterDeps {
 /** 按策略表展示一次失败：倒计时跳歌、停播提示或带按钮的持久消息。陈旧请求直接忽略。 */
 export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps: PlaybackFailurePresenterDeps): void => {
     const { failure, song, context, isCurrent, skipCount, retry, skip } = input;
+    // 报告用的是上游那套情况代号（扩展层只认它），策略与文案仍按这套原因走。
+    const reportedReason = toOnlineFailureCaseId(failure.reason);
     if (!isCurrent()) return;
 
     const policy = resolvePlaybackFailurePolicy(failure, context);
@@ -109,7 +112,7 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
         if (isHidden) {
             notifyBackgroundPlaybackNotice(`${messageText} · ${deps.t('status.autoSkippedNext')}`);
             if (isCurrent()) skip();
-            deps.notifyFailure({ song, reason: failure.reason, phase: context, willAutoSkip: true });
+            deps.notifyFailure({ song, reason: reportedReason, phase: context, willAutoSkip: true });
             return;
         }
         // 用户点「取消」就是这次不跳：退回该原因原本的停播与按钮，和倒计时没出现时一样。否则播放中失败会停在 PLAYING
@@ -121,7 +124,7 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
         deps.showTimedSkipPrompt(policy.countdownKey, () => {
             if (isCurrent()) skip();
         }, onCancel);
-        deps.notifyFailure({ song, reason: failure.reason, phase: context, willAutoSkip: true });
+        deps.notifyFailure({ song, reason: reportedReason, phase: context, willAutoSkip: true });
         return;
     }
 
@@ -129,5 +132,5 @@ export const presentPlaybackFailure = (input: PlaybackFailurePresentation, deps:
     if (isHidden) notifyBackgroundPlaybackNotice(messageText);
 
     showReasonMessage();
-    deps.notifyFailure({ song, reason: failure.reason, phase: context, willAutoSkip: false });
+    deps.notifyFailure({ song, reason: reportedReason, phase: context, willAutoSkip: false });
 };

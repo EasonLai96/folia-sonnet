@@ -1,20 +1,20 @@
 import React, { useCallback } from 'react';
-import type { LibraryHomeSurfaceProps } from '../../core/contracts/suite';
-import type { LibraryHomeTabKey } from '../../core/contracts/homeModel';
-import { isOnlineHomeTab } from '../../core/model/homeSources';
-import { useLibraryHomeSources } from '../../core/bindings/useLibraryHomeSources';
-import { useLibraryHomeOnline } from '../../core/bindings/useLibraryHomeOnline';
-import { useLibraryHomeCloudThemeEntry } from '../../core/bindings/useLibraryHomeCloudTheme';
-import { useTranslation } from 'react-i18next';
-import { useLibraryHomeActions } from '../../core/bindings/useLibraryHomeActions';
-import { useLibraryHomeDirectory } from '../../core/bindings/useLibraryHomeDirectory';
-import { useLibraryHomeTabsRegistration } from '../../core/bindings/useLibraryHomeSurfaceRegistration';
+import type { LibraryHomeSurfaceProps } from '../../core/suite/suite.contract';
+import type { LibraryHomeTabKey } from '../../core/home/homeModel.contract';
+import { isOnlineHomeTab } from '../../core/home/homeSources';
+import { useLibraryHomeSources } from '../../core/home/useLibraryHomeSources';
+import { useLibraryHomeOnline } from '../../core/home/online/useLibraryHomeOnline';
+import { useLibraryHomeActions } from '../../core/home/useLibraryHomeActions';
+import { useLibraryHomeDirectory } from '../../core/home/useLibraryHomeDirectory';
+import { useLibraryHomeTabsRegistration } from '../../core/home/useLibraryHomeSurfaceRegistration';
 import { setBravaisSearchOpen } from './bravaisHomeUiStore';
 import { useBravaisHomeChrome } from './useBravaisHomeChrome';
 import { BravaisHomeLocal, BravaisHomeNavidrome, BravaisHomeOnline } from './BravaisHomeSources';
+import BravaisHomeExplore from './BravaisHomeExplore';
 
 // src/library/suites/bravais/BravaisHome.tsx
-// 首页 surface（B9，设计稿 §10.5）：五个页签（歌单 / 电台 / 专辑 / 本地 / Navidrome）都铺墙。与 TUI、网格用同一套首页
+// 首页 surface（B9，设计稿 §10.5）：六个页签（歌单 / 电台 / 专辑 / 探索 / 本地 / Navidrome）都铺墙；探索按网格探索拼贴的
+// 排法铺（BravaisHomeExplore）。与 TUI、网格用同一套首页
 // 绑定（来源与页签、在线列表、首页资源与动作都来自 core，换 suite 不重新请求），按当前来源挂一个来源组件
 // （BravaisHomeSources），它把当前页签 / section 的卡片投影成首页层推进 stage store；这里自己只渲染一个不可见的锚点。
 // 切页签 = 换首页层（`home:<页签>`）：stage 整墙出场 → 入场；本地四行、Navidrome 的 section 是缝里的二级切换，不换层。
@@ -35,7 +35,6 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         isInteractive,
         declaredActions,
     } = props;
-    const { t } = useTranslation();
     const sources = useLibraryHomeSources({ account, user, playlists, cloudPlaylist, navidromeEnabled });
     const { tab, setTab, tabs, online } = sources;
     const onlineList = useLibraryHomeOnline(homeResources, sources);
@@ -44,15 +43,6 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         tab,
         providerId: online.providerId,
         localRow: localMusicState.activeRow,
-    });
-
-    // 「AI 主题」页签：不铺墙，直接开那一屏的曲目列表（云端没有歌单可列）。
-    useLibraryHomeCloudThemeEntry({
-        tab,
-        enabled: isInteractive,
-        onOpenCollection: collection => onOpenGridView(collection),
-        label: t('home.aiTheme'),
-        notice: t('home.aiThemeNotice'),
     });
 
     const selectTab = useCallback((key: LibraryHomeTabKey) => {
@@ -94,12 +84,17 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
             aria-hidden
             className="pointer-events-none absolute inset-0"
         >
-            {isOnlineHomeTab(tab) ? (
+            {tab === 'explore' ? (
+                <BravaisHomeExplore
+                    chrome={chrome}
+                    online={online}
+                    account={account}
+                    isInteractive={isInteractive}
+                    onPlaySong={props.onPlaySong}
+                    onOpenGridView={onOpenGridView}
+                />
+            ) : isOnlineHomeTab(tab) ? (
                 <BravaisHomeOnline {...common} tab={tab} online={online} list={onlineList} account={account} />
-            ) : tab === 'cloud' ? (
-                // 「AI 主题」：那一屏的曲目列表自己开（useLibraryHomeCloudThemeEntry），
-                // 首页这层留空 —— 铺一面墙只会挡住刚打开的那层。
-                null
             ) : tab === 'local' ? (
                 <BravaisHomeLocal
                     {...common}

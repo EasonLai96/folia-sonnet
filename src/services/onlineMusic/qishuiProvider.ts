@@ -1,4 +1,4 @@
-import type { OnlineMusicProvider, ProviderAudioSource, ProviderCollection } from '../../types/onlineMusic';
+import type { LoginDiagnosticLine, OnlineMusicProvider, ProviderAudioSource, ProviderCollection } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
 import { parseQishuiLyrics } from '../../utils/lyrics/qishuiLyrics';
@@ -7,6 +7,7 @@ import { normalizeQishuiCollection, normalizeQishuiSong, normalizeQishuiUser, qi
 import { QISHUI_FEED_PLAYLIST_ID, qishuiCatalog } from './qishuiCatalog';
 import { clearQishuiLibraryCache, qishuiLibrary } from './qishuiLibrary';
 import { qishuiMutations } from './qishuiMutations';
+import { diagnosticLine } from './login/loginDiagnosticReport';
 
 // src/services/onlineMusic/qishuiProvider.ts
 
@@ -14,6 +15,9 @@ import { qishuiMutations } from './qishuiMutations';
 const QISHUI_PAGE_MAX = 18;
 // 主进程没给二维码有效期时的兜底：汽水二维码按 5 分钟算。
 const QISHUI_QR_TTL_MS = 5 * 60 * 1000;
+
+// 诊断报告的一行：provider 那几行交给报告时都过这里，报告只印这里写成的那句话（见 loginDiagnosticReport）。
+const line = (text: string): LoginDiagnosticLine => diagnosticLine`${text}`;
 
 // 汽水扫码登录一步就返回 token 与二维码，而 Omni 走的是 getQrKey -> createQr 两步，
 // 所以这里用 token 记住这一次会话的二维码，再由 createQr 取出来。
@@ -40,6 +44,8 @@ function qishuiNotOurs(): OnlineProviderError {
 
 export const qishuiProvider: OnlineMusicProvider = {
     id: 'qishui', displayName: '汽水音乐', shortName: '汽水',
+    // 登录窗口里这个平台的记号（一个字 + 一种颜色）；不声明的话窗口会拿短名第一个字配中性灰。
+    mark: { letter: '汽', color: '#f97316' },
     getAvailability: getQishuiTransportAvailability,
     capabilities: {
         search: true, playback: true, lyrics: true, wordByWordLyrics: true, auth: true,
@@ -100,6 +106,7 @@ export const qishuiProvider: OnlineMusicProvider = {
         },
     },
     auth: {
+        getLoginTexts: () => ({ title: 'home.loginTitleQishui', note: 'home.loginNoteQishui' }),
         async getLoginStatus() {
             // 请求本身失败时也要留下痕迹：否则诊断只会写「last status: none」，
             // 看不出是没走到这一步，还是这一步抛了错。
@@ -127,7 +134,7 @@ export const qishuiProvider: OnlineMusicProvider = {
             return { ...user, id: user.id || 'qishui-account' };
         },
         async logout() { clearQishuiLibraryCache(); await requestQishui('login.logout', {}); },
-        async getQrKey() {
+        async startLogin() {
             const data = await requestQishui<any>('login.qr', {});
             const token = qishuiText(data?.token);
             const imageUrl = qishuiText(data?.qrDataUrl || data?.qrcode || data?.qrCodeUrl);
@@ -160,7 +167,7 @@ export const qishuiProvider: OnlineMusicProvider = {
             }
             return imageUrl;
         },
-        async checkQr(key) {
+        async checkLogin(key) {
             let data: any;
             try {
                 data = await requestQishui<any>('login.check', { token: key });
@@ -200,17 +207,17 @@ export const qishuiProvider: OnlineMusicProvider = {
                     : { state: 'waiting' };
             }
         },
-        async cancelQr(key) { qrSessions.delete(key); },
-        getQrTtlMs: () => qrTtlMs,
-        async getQrLoginDiagnostics() {
+        async cancelLogin(key) { qrSessions.delete(key); },
+        getLoginTtlMs: () => qrTtlMs,
+        async getLoginDiagnostics() {
             return [
-                `last status: ${lastQishuiLoginStatus ?? 'none'}`,
-                `last qr: ${lastQishuiQrNote ?? 'none'}`,
-                `last check: ${lastQishuiCheckNote ?? 'none'}`,
-                `last refresh: ${lastQishuiRefreshNote ?? 'none'}`,
+                line(`last status: ${lastQishuiLoginStatus ?? 'none'}`),
+                line(`last qr: ${lastQishuiQrNote ?? 'none'}`),
+                line(`last check: ${lastQishuiCheckNote ?? 'none'}`),
+                line(`last refresh: ${lastQishuiRefreshNote ?? 'none'}`),
                 // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能
                 // 回退 a_bogus —— 这条说明让「歌单/播放拿不到」有据可查。
-                'signed requests: passport=a_bogus (verified), luna=a_bogus fallback (bdms.node is Windows-only)',
+                line('signed requests: passport=a_bogus (verified), luna=a_bogus fallback (bdms.node is Windows-only)'),
             ];
         },
     },

@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { MotionValue, useMotionValueEvent } from 'framer-motion';
-import { FoliumControlButtonSlot, FoliumProgressLayers, useFoliumProgressContext } from '../mods/folium/registries/progress';
+import { FoliumProgressButtons, FoliumProgressLayers, useFoliumProgressContext } from '../mods/folium/registries/progress';
 
 // Folium public parts (mods/README.md): `data-folium-part` marks what mod CSS may
 // restyle — progress.root / track / fill / thumb / time / duration. Colors come
@@ -185,7 +185,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
                 '--folium-progress-text': secondaryColor,
             } as React.CSSProperties}
         >
-            <FoliumControlButtonSlot slot="progress.leading" ctx={foliumCtx} collapsed={collapsed} />
+            <FoliumProgressButtons slot="progress.leading" ctx={foliumCtx} collapsed={collapsed} />
 
             <span
                 ref={timeRef}
@@ -251,7 +251,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
                 {formatTime(duration)}
             </span>
 
-            <FoliumControlButtonSlot slot="progress.trailing" ctx={foliumCtx} collapsed={collapsed} />
+            <FoliumProgressButtons slot="progress.trailing" ctx={foliumCtx} collapsed={collapsed} />
         </div>
     );
 };

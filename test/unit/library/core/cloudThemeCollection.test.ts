@@ -5,7 +5,7 @@ import {
     isCloudThemePendingTrack,
     type CloudThemeCollectionDeps,
     type CloudThemeNameEntry,
-} from '@/library/core/services/cloudThemeCollection';
+} from '@/library/core/collection/resource/cloudThemeCollection.service';
 
 // test/unit/library/core/cloudThemeCollection.test.ts
 // 「AI 主题」那一屏的懒加载：云端只给歌名，曲目要客户端一首一首搜出来。

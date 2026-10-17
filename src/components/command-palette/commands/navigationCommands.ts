@@ -1,6 +1,6 @@
 import type { CommandPaletteCommand } from '../types';
 import { defineCommand, createToggleCommand, createHomeTabCommand } from '../commandFactories';
-import { LOCAL_MUSIC_COMMAND_PLATFORMS } from '../../../platform/runtime';
+import { omni } from '../../../services/onlineMusic/omni';
 
 // src/components/command-palette/commands/navigationCommands.ts
 // Commands in the `navigation` group: moving between home tabs, the player, and window-level views.
@@ -8,12 +8,20 @@ import { LOCAL_MUSIC_COMMAND_PLATFORMS } from '../../../platform/runtime';
 export const navigationCommands: CommandPaletteCommand[] = [
     defineCommand({
         id: 'lattice-focus-current', group: 'navigation', scope: 'lattice',
-        title: 'Lattice focus current song', description: 'Center the playing song in the queue collage',
-        keywords: ['lattice', 'lattice focus', 'queue collage', 'recenter', 'now playing', '队列拼贴', '聚焦当前歌曲', '回到当前歌曲'],
+        title: 'Lattice locate playing song', description: 'Centre the poster of the playing song on the collage',
+        keywords: ['lattice', 'lattice focus', 'lattice locate', 'queue collage', 'recenter', 'now playing', '队列拼贴', '定位', '聚焦当前歌曲', '回到当前歌曲'],
         executeShortcut: 'c',
-        isAvailable: context => !context || context.navigation.canFocusLatticeCurrentSong,
-        execute: (_input, context) => context.navigation.focusLatticeCurrentSong(),
+        // The wall's locate button, from the keyboard: there whenever that button is (a song plays).
+        isAvailable: context => !context || Boolean(context.shared.currentSong),
+        execute: (_input, context) => {
+            context.navigation.locatePlayingSongOnWall();
+            return true;
+        },
     }),
+    createToggleCommand('locate-playing-song', 'navigation', 'Locate the playing song', 'Open the album or playlist it is in and centre its card',
+        ['locate', 'find playing song', 'now playing', 'where is this song', '定位', '定位当前歌曲', '正在播放的歌', '所在歌单'],
+        context => context.navigation.locatePlayingSong(),
+        { isAvailable: context => !context || Boolean(context.shared.currentSong) }),
     createToggleCommand('navigate-home', 'navigation', 'Go home', 'Return to home view', ['home', '首页', '主页'], context => context.navigation.navigateToHome()),
     createToggleCommand('navigate-player', 'navigation', 'Go player', 'Return to player view', ['player', '播放页', '播放器'], context => context.navigation.navigateToPlayer()),
     createToggleCommand('navigate-lattice', 'navigation', 'Lattice open', 'Show the play queue as a queue collage', ['lattice', 'queue collage', 'song wall', 'poster wall', '队列拼贴', '歌曲墙', '海报墙'], context => context.navigation.navigateToLattice(),
@@ -33,10 +41,15 @@ export const navigationCommands: CommandPaletteCommand[] = [
         execute: (_input, context) => context.navigation.toggleBrowserFullscreen(),
     },
     createHomeTabCommand('playlist', 'Open playlists', 'Open playlist home tab', ['playlist', 'playlists', '歌单']),
-    createHomeTabCommand('local', 'Open local music', 'Open local music tab', ['local music', 'local', '本地', '本地音乐'], [...LOCAL_MUSIC_COMMAND_PLATFORMS]),
+    createHomeTabCommand('local', 'Open local music', 'Open local music tab', ['local music', 'local', '本地', '本地音乐']),
     createHomeTabCommand('albums', 'Open albums', 'Open albums tab', ['albums', 'album', '专辑']),
     createHomeTabCommand('navidrome', 'Open Navidrome', 'Open Navidrome tab', ['navidrome', 'navi', '服务器']),
     createHomeTabCommand('radio', 'Open radio', 'Open radio tab', ['radio', 'fm', '电台']),
+    {
+        ...createHomeTabCommand('explore', 'Open explore', 'Open explore tab', ['explore', 'discover', 'recommendations', '探索', '推荐']),
+        // Only a provider with a recommendation page of its own has the tab.
+        isAvailable: () => omni.getActiveCapabilities().explore === true,
+    },
     {
         id: 'desktop-toggle-remote-control',
         platform: ['electron'],

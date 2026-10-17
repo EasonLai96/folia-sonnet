@@ -38,13 +38,19 @@ export const qishuiLibrary: OnlineLibraryProvider = {
     async getLikedSongIds() {
         const ids = new Set<MediaId>();
         let offset = 0;
+        // 翻到平台说没有下一页才算整份；中途 break 的都是「只拿到一部分」。
+        let whole = false;
         while (true) {
             const page = await qishuiTrackPage(QISHUI_LIKED_PLAYLIST_ID, 100, offset);
             const previousCount = ids.size;
             page.items.forEach(song => ids.add(song.id));
-            if (!page.hasMore || page.nextOffset <= offset || ids.size === previousCount) break;
+            if (!page.hasMore) {
+                whole = true;
+                break;
+            }
+            if (page.nextOffset <= offset || ids.size === previousCount) break;
             offset = page.nextOffset;
         }
-        return [...ids];
+        return { ids: [...ids], whole };
     },
 };

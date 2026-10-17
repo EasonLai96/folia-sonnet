@@ -57,7 +57,7 @@ https://omarchyplugins.com/plugin.html?id=lia.folia-lyrics
 windowrule {
   name = folia-remote
   float = on
-  size = 520 315
+  size = 602 184
   center = on
   pin = on
   no_blur = on
@@ -251,7 +251,7 @@ vercel dev
 | 设置持久化、visualizer tuning、偏好 store | `src/stores/useSettingsUiStore.ts` |
 | 命令面板命令 | `src/components/command-palette/commands/<group>Commands.ts`（`commandRegistry.ts` 只做拼接与过滤） |
 | visualizer 共享契约和注册 | `src/components/visualizer/definition.ts`、`src/components/visualizer/registry.tsx` |
-| visualizer 预览和设置面板 | `src/components/visualizer/VisPlayground.tsx`、`src/components/visualizer/VisPlaygroundSettingsPanel.tsx` |
+| visualizer 预览和设置面板 | `src/components/visualizer/window/VisPlayground.tsx`、`src/components/visualizer/window/VisPlaygroundSettingsPanel.tsx` |
 | visualizer 模式实现 | `src/components/visualizer/<mode>/*` |
 | 歌词解析和渲染提示 | `src/utils/lyrics/*` |
 | 智能过渡（混音过渡开关背后的全部实现） | `src/services/automix/*`，先读该目录的 `README.md` |

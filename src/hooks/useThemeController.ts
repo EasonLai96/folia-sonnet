@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
-import { notifyStageResolved } from '../services/aiStage';
+import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/aiText';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -35,8 +34,6 @@ import {
     resolveBgModeTheme,
 } from './themeControllerState';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
-import { resolveSongPlatform } from '../utils/songPlatform';
-import { recordAiThemeSkip } from '../utils/aiThemeDiagnostics';
 import { setStatusMessage as setStatusMsg } from '../stores/useStatusMessageStore';
 import { useStableCallbacks } from './useStableCallbacks';
 
@@ -44,8 +41,6 @@ type StatusSetter = Dispatch<SetStateAction<StatusMessage | null>>;
 export type GenerateAIThemeOptions = {
     source?: 'manual' | 'auto';
     shouldApply?: () => boolean;
-    /** 「重新生成」：不看缓存重新问一次模型，结果覆盖掉云端已有的那条。 */
-    force?: boolean;
 };
 
 export type GenerateAIThemeResult =
@@ -424,6 +419,10 @@ export function useThemeController({
         setBgMode('ai');
         void saveToCache('last_dual_theme', sanitized);
         const syncSong = songOrKey && typeof songOrKey === 'object' ? songOrKey : null;
+        const songKey = syncSong ? getPlaybackSongKey(syncSong) : songOrKey;
+        if (songKey != null) {
+            void saveToCache(`dual_theme_${songKey}`, sanitized);
+        }
         if (syncSong) {
             saveSyncedThemeWithoutBlocking(syncSong, sanitized, 'edited');
         }
@@ -565,6 +564,7 @@ export function useThemeController({
         const coverTheme = applyStoredAnimationIntensityToDualTheme(buildBuiltinDualTheme({ coverColors }));
 
         if (currentSong) {
+            await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, coverTheme);
             saveSyncedThemeWithoutBlocking(currentSong, coverTheme, 'fallback');
             setCurrentSongHasLocalAiTheme(true);
         }
@@ -602,7 +602,6 @@ export function useThemeController({
         const source = options.source ?? 'manual';
         const songKey = currentSong ? getPlaybackSongKey(currentSong) : '__no_song__';
         if (themeGenerationSongKeysRef.current.has(songKey)) {
-            recordAiThemeSkip('in-flight', source);
             return { status: 'skipped', reason: 'in-flight' };
         }
 
@@ -613,8 +612,6 @@ export function useThemeController({
             // The cover source never touches the model, so it also never needs a lyric prompt:
             // an instrumental with no title still gets a theme from its artwork.
             if (themeGenerationSource === 'cover') {
-                // 生成来源是「封面取色」时不会调用模型：报告里要能看出这一点，而不是「什么都没发生」。
-                recordAiThemeSkip('source-cover', source);
                 return await applyCoverDerivedTheme(
                     currentSong,
                     () => options.shouldApply?.() ?? true,
@@ -628,47 +625,19 @@ export function useThemeController({
             const promptText = (isPureMusic ? songTitle : allText) || allText;
 
             if (!promptText) {
-                recordAiThemeSkip('empty-prompt', source);
                 if (source === 'manual') {
                     setStatusMsg({ type: 'error', text: t('status.themeGenerationFailed') });
                 }
                 return { status: 'skipped', reason: 'empty-prompt' };
             }
 
-            const { theme: dualTheme, source: themeSource } = await generateThemeFromLyrics(promptText, {
+            const dualTheme = await generateThemeFromLyrics(promptText, {
                 isPureMusic,
                 songTitle: songTitle || undefined,
-                /*
-                 * 艺人信息只为了提示词更准，不参与缓存指纹（同一份歌词换个人唱
-                 * 也会是同一个答案，没必要多存一份）。
-                 */
-                artist: currentSong?.artists?.map(artist => artist.name).filter(Boolean).join('、') || undefined,
-                /*
-                 * 歌词行一起传进去：云缓存的指纹由「歌词正文 + 设置」算出，
-                 * 导演那条链路算的是同一个值，两边才会共用一条缓存。
-                 */
-                lines: lyrics?.lines ?? [],
-                trigger: source,
-                /*
-                 * 平台名只跟着上传走，服务端拿它去对应平台核对歌词；本地歌曲留空，
-                 * 服务端再按顺序逐个平台试。键仍然是那个 MD5。
-                 */
-                platform: resolveSongPlatform(currentSong),
-                /*
-                 * 手动点「生成 AI 主题」就是「我对现在这个不满意，再给一个」——
-                 * 所以不看缓存，直接重新问模型，生成完把云端那条**覆盖**掉。
-                 *
-                 * 自动触发（切歌）相反，必须走缓存：那正是云缓存要省掉的那次调用。
-                 */
-                force: options.force === true || source === 'manual',
             });
             const normalizedDualTheme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme));
             if (currentSong) {
-                /*
-                 * 只往云端同步一份。本地不再落 `dual_theme_*` 缓存 —— 生成结果
-                 * 只存在云端（services/aiStage.ts），本地再存一份就是两份真相，
-                 * 老版本攒下来的那份永远传不上去，等于白生成。
-                 */
+                await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, normalizedDualTheme);
                 saveSyncedThemeWithoutBlocking(currentSong, normalizedDualTheme, source === 'auto' ? 'auto' : 'manual');
                 setCurrentSongHasLocalAiTheme(true);
             }
@@ -680,16 +649,13 @@ export function useThemeController({
 
             applyDualTheme(normalizedDualTheme);
 
-            /*
-             * 一次生成，两种说法：这次真调了模型就说「主题生成成功，已缓存到云端」，
-             * 下一个人撞上同一段歌词时（source === 'cloud'）说「已从云端拉取缓存」。
-             * 两条互斥 —— 命中那次根本没走生成，不该报「生成成功」。
-             */
-            if (bgMode === 'custom' && customTheme) {
-                setStatusMsg({ type: 'success', text: t('notifications.aiThemeUpdatedCustomPreferred') });
-            } else {
-                notifyStageResolved(themeSource);
-            }
+            const selectedTheme = getSelectedDualTheme(normalizedDualTheme, isDaylight);
+            setStatusMsg({
+                type: 'success',
+                text: bgMode === 'custom' && customTheme
+                    ? t('notifications.aiThemeUpdatedCustomPreferred')
+                    : t('status.themeApplied', { themeName: selectedTheme.name }),
+            });
 
             return { status: 'generated', applied: true };
         } catch (error: unknown) {

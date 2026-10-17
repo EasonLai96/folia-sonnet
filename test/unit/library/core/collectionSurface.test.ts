@@ -6,35 +6,28 @@ import {
     isGridSurfaceActionDeclared,
     runGridSurfaceAction,
     type GridSurfaceParams,
-} from '@/library/core/model/collectionSurface';
-import { LIBRARY_ACTION_IDS } from '@/library/core/model/librarySuites';
-import { EMPTY_COLLECTION_MUTATION_SNAPSHOT } from '@/library/core/model/collectionMutationCapabilities';
-import {
-    resolveAvailableSongSortPresets,
-    resolveSongSortCapability,
-    type SongSortCapability,
-} from '@/library/core/model/songSortOptions';
-import type { LibraryDeclaredActions } from '@/library/core/contracts/suite';
-import { resolveCollectionSyncCounts } from '@/library/core/model/collectionProgress';
+} from '@/library/core/collection/collectionSurface';
+import { LIBRARY_ACTION_IDS } from '@/library/core/suite/librarySuites';
+import { EMPTY_COLLECTION_MUTATION_SNAPSHOT } from '@/library/core/collection/mutations/collectionMutationCapabilities';
+import type { LibraryDeclaredActions } from '@/library/core/suite/suite.contract';
+import { resolveCollectionSyncCounts } from '@/library/core/collection/collectionProgress';
+import { SONG_SORT_PRESETS } from '@/library/core/collection/songSortOptions';
 
 // test/unit/library/core/collectionSurface.test.ts
 // 只有核心动作的 renderer（没有信息面板、侧栏、编辑模式）注册到命令面板时，
 // 面板只能给出它真能做到的那几件事。
 
 const core = (overrides: Partial<Parameters<typeof buildCoreSurfaceParams>[0]> = {}) => buildCoreSurfaceParams({
-    supportsTrackSorting: false,
+    supportsLocalTrackSorting: false,
     canReloadOnlineCollection: true,
     filteredTrackCount: 3,
     isFilterActive: false,
     sortField: 'fileName',
     sortDirection: 'asc',
-    // 排序命令与菜单同源：这个列表排得了哪些项，命令面板就有哪几条（本地：8 项里没有播放量）。
-    availableSortPresets: resolveAvailableSongSortPresets(resolveSongSortCapability('local')),
     playFiltered: vi.fn(),
     enqueueFiltered: vi.fn(),
     setSortField: vi.fn(),
     setSortDirection: vi.fn(),
-    setSortPreset: vi.fn(),
     reloadOnlineCollection: vi.fn(),
     mutationSnapshot: EMPTY_COLLECTION_MUTATION_SNAPSHOT,
     mutations: null,
@@ -51,22 +44,8 @@ describe('core collection surface', () => {
     });
 
     it('adds the local sort actions when the collection supports them', () => {
-        expect(buildGridSurfaceState(core({ supportsTrackSorting: true, canReloadOnlineCollection: false })).availableActions)
-            .toEqual([
-                'play-filtered',
-                'enqueue-filtered',
-                'sort-newest',
-                'sort-oldest',
-                'sort-title',
-                'sort-artist',
-                'sort-liked-desc',
-                'sort-liked-asc',
-                'sort-default',
-                'sort-file-name',
-                'sort-file-modified',
-                'sort-album-track',
-                'sort-toggle-direction',
-            ]);
+        expect(buildGridSurfaceState(core({ supportsLocalTrackSorting: true, canReloadOnlineCollection: false })).availableActions)
+            .toEqual(['play-filtered', 'enqueue-filtered', 'sort-file-name', 'sort-file-modified', 'sort-album-track', 'sort-toggle-direction']);
     });
 
     it('refuses renderer-only actions and dispatches core ones', () => {
@@ -78,17 +57,10 @@ describe('core collection surface', () => {
     });
 });
 
-/** 每条排序命令都用得上的能力（没有任何单一来源同时给出全部字段，测试里才造得出）。 */
-const EVERY_SORT_CAPABILITY: SongSortCapability = {
-    addedAt: true, liked: true, playCount: true, fileName: true, fileLastModified: true, albumTrack: true,
-};
-
 /** 网格那样什么分支都打开的参数：每个命令都可用，好看出声明过滤掉了哪些。 */
 const everything = (declaredActions?: LibraryDeclaredActions): GridSurfaceParams => ({
-    ...core({
-        supportsTrackSorting: true,
-        availableSortPresets: resolveAvailableSongSortPresets(EVERY_SORT_CAPABILITY),
-    }),
+    // 排得了所有排序项：本地那三项之外，按加入时间 / 标题 / 歌手 / 喜欢 / 播放次数的命令也都在。
+    ...core({ supportsLocalTrackSorting: true, availableSortPresets: SONG_SORT_PRESETS }),
     hasInfoPanel: true,
     hasTrackList: true,
     canResyncFolder: true,
@@ -121,6 +93,11 @@ describe('suite-declared actions on the command surface', () => {
         expect(buildGridSurfaceState(everything(declared)).availableActions).toEqual([
             'play-filtered',
             'enqueue-filtered',
+            'sort-file-name',
+            'sort-file-modified',
+            'sort-album-track',
+            'sort-toggle-direction',
+            // 预设那几项（菜单与命令面板同一个来源）。
             'sort-newest',
             'sort-oldest',
             'sort-title',
@@ -130,10 +107,6 @@ describe('suite-declared actions on the command surface', () => {
             'sort-play-count-desc',
             'sort-play-count-asc',
             'sort-default',
-            'sort-file-name',
-            'sort-file-modified',
-            'sort-album-track',
-            'sort-toggle-direction',
             'reload-online-collection',
         ]);
         // 声明了但 core 此刻不允许的，照样不出现。

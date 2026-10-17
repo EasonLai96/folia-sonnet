@@ -99,14 +99,13 @@ export const feiniuLibrary: OnlineLibraryProvider = {
 
     async getLikedSongIds() {
         const items = await collectAll<{ guid?: unknown }>('/favorite-track/list');
-        return items
-            .map(item => String(item?.guid ?? ''))
-            .filter((guid): guid is string => Boolean(guid)) as MediaId[];
-    },
-
-    async getLikedSongs() {
-        const items = await collectAll<unknown>('/favorite-track/list');
-        return backfillSongCovers(items.map(normalizeFeiniuSong));
+        // collectAll 一直翻到没有下一页，所以这一份是完整的。
+        return {
+            ids: items
+                .map(item => String(item?.guid ?? ''))
+                .filter((guid): guid is string => Boolean(guid)) as MediaId[],
+            whole: true,
+        };
     },
 };
 

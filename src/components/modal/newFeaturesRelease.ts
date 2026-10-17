@@ -6,8 +6,6 @@ import type { LucideIcon } from 'lucide-react';
 type NewFeatureCard = {
     id: string;
     icon: LucideIcon;
-    daylightIconClassName: string;
-    darkIconClassName: string;
 };
 
 type NewFeaturesRelease = {
@@ -21,11 +19,11 @@ type NewFeaturesRelease = {
 export const NEW_FEATURES_RELEASE: NewFeaturesRelease = {
     i18nKey: 'releaseNotes.v0_7_20',
     features: [
-        { id: 'qqMusic', icon: Music, daylightIconClassName: 'text-emerald-600', darkIconClassName: 'text-emerald-400' },
-        { id: 'autoSkip', icon: SkipForward, daylightIconClassName: 'text-amber-600', darkIconClassName: 'text-amber-400' },
-        { id: 'videoExport', icon: Video, daylightIconClassName: 'text-rose-600', darkIconClassName: 'text-rose-400' },
-        { id: 'automixIntelMac', icon: Cpu, daylightIconClassName: 'text-sky-600', darkIconClassName: 'text-sky-400' },
-        { id: 'modHomePages', icon: Puzzle, daylightIconClassName: 'text-violet-600', darkIconClassName: 'text-violet-400' },
-        { id: 'stabilityFixes', icon: Wrench, daylightIconClassName: 'text-cyan-600', darkIconClassName: 'text-cyan-400' },
+        { id: 'qqMusic', icon: Music },
+        { id: 'autoSkip', icon: SkipForward },
+        { id: 'videoExport', icon: Video },
+        { id: 'automixIntelMac', icon: Cpu },
+        { id: 'modHomePages', icon: Puzzle },
+        { id: 'stabilityFixes', icon: Wrench },
     ],
 };

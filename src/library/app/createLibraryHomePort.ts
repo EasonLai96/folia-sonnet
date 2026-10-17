@@ -1,7 +1,7 @@
 import i18n from '../../i18n/config';
-import type { LibraryHomePort, LibraryHomeScanProgress } from '../core/contracts/homeModel';
+import type { LibraryHomePort, LibraryHomeScanProgress } from '../core/home/homeModel.contract';
 import type { HomeSurfaceProps } from '../../components/app/home/homeSurfaceTypes';
-import { translateHomeMessage } from '../core/model/homeSources';
+import { translateHomeMessage } from '../core/home/homeSources';
 import {
     deleteSongsByIds,
     importFolder,
@@ -10,7 +10,6 @@ import {
     LOCAL_MUSIC_SCAN_PROGRESS_EVENT,
 } from '../../services/localMusicService';
 import { getLocalLibraryAvailability } from '../../services/localLibraryAvailability';
-import { isAndroidNativeRuntime, scanAndroidDeviceMusic } from '../../services/nativeLocalMusic';
 import { importLocalPlaylistFile } from '../../services/localPlaylistFileService';
 import { omni } from '../../services/onlineMusic/omni';
 import {
@@ -29,13 +28,6 @@ type HomePortSurface = Pick<HomeSurfaceProps, 'localSongs' | 'onRefreshLocalSong
 export const createLibraryHomePort = (getSurface: () => HomePortSurface): LibraryHomePort => ({
     localAvailability: () => getLocalLibraryAvailability(),
     importFolder: async () => (await importFolder()).length,
-    // 只有安卓原生有这条：网页端没有「设备音乐库」可言，端口不给这个方法，
-    // core 那边会回 unsupported。
-    // 显式点「扫描设备音乐」= 用户要把设备里的歌要回来（含之前删掉的那个根目录），
-    // 所以带 includeRemovedRoots；「刷新」走的是 resyncAllFolders，那条路尊重删除。
-    scanDeviceMusic: isAndroidNativeRuntime()
-        ? async () => (await scanAndroidDeviceMusic({ includeRemovedRoots: true })).length
-        : undefined,
     resyncAllFolders: async () => (await resyncAllFolders())?.length ?? 0,
     importPlaylistFile: async (file) => {
         const result = await importLocalPlaylistFile(file, getSurface().localSongs);

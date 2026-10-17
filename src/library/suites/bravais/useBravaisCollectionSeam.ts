@@ -1,15 +1,15 @@
 import { useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SongResult, UnifiedSong } from '../../../types';
-import type { LibraryActionId, LibraryCollectionSurfaceProps } from '../../core/contracts/suite';
-import type { CollectionMutationController, CollectionMutationSnapshot, LibraryMutationResult } from '../../core/contracts/mutations';
-import type { CollectionResourceSnapshot } from '../../core/contracts/resource';
-import { resolveCollectionSyncCounts } from '../../core/model/collectionProgress';
-import { resolveCollectionDescription } from '../../core/model/collectionDescription';
-import type { CollectionActions } from '../../core/bindings/useCollectionActions';
-import type { CollectionView } from '../../core/bindings/useCollectionView';
+import type { LibraryActionId, LibraryCollectionSurfaceProps } from '../../core/suite/suite.contract';
+import type { CollectionMutationController, CollectionMutationSnapshot, LibraryMutationResult } from '../../core/collection/mutations/mutations.contract';
+import type { CollectionResourceSnapshot } from '../../core/shared/resource.contract';
+import { resolveCollectionSyncCounts } from '../../core/collection/collectionProgress';
+import { resolveCollectionDescription } from '../../core/collection/collectionDescription';
+import type { CollectionActions } from '../../core/collection/mutations/useCollectionActions';
+import type { CollectionView } from '../../core/collection/useCollectionView';
+import { type SongSortPreset } from '../../core/collection/songSortOptions';
 import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
-import type { SongSortPreset } from '../../core/model/songSortOptions';
 import { projectCollectionStatus, resolveWallPeriodCount } from './bravaisCollectionStatus';
 import type { BravaisLayerEntries, BravaisLayerWall, BravaisSeamCollection, BravaisSeamFilter, BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { useBravaisCollectionForms } from './useBravaisCollectionForms';
@@ -45,8 +45,8 @@ export type BravaisCollectionSeamInput = {
         supported: boolean;
         field: SongSortField;
         direction: SongSortDirection;
-        /** 这个列表排得了的项，与网格菜单同源。 */
-        presets: SongSortPreset[];
+        /** 这个列表排得了的项，与网格菜单同源（按数据来源算能力，见 songSortOptions）。 */
+        presets: readonly SongSortPreset[];
         setPreset: (preset: SongSortPreset) => void;
         setDirection: (direction: SongSortDirection) => void;
     };
@@ -273,8 +273,11 @@ export const useBravaisCollectionSeam = (input: BravaisCollectionSeamInput) => {
             field: sortInput.field,
             direction: sortInput.direction,
             directionLabel: sortInput.direction === 'asc' ? t('localMusic.sortAscending') : t('localMusic.sortDescending'),
-            selectPreset: (preset) => latest.current.sort.setPreset(preset),
-            toggleDirection: () => latest.current.sort.setDirection(latest.current.sort.direction === 'asc' ? 'desc' : 'asc'),
+            selectPreset: preset => latest.current.sort.setPreset(preset),
+            toggleDirection: () => {
+                const sort = latest.current.sort;
+                sort.setDirection(sort.direction === 'asc' ? 'desc' : 'asc');
+            },
         } : undefined,
         menuFor: key => {
             const { offers: has, trackByKey } = latest.current;

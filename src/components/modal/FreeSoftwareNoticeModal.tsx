@@ -3,7 +3,7 @@ import { Check, Copy, ShieldCheck, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ThemedDialog from '../shared/ThemedDialog';
 import { QQ_COMMUNITY_GROUP_NUMBER } from '../shared/qqCommunity';
-import { copyTextToClipboard } from '../../utils/clipboard';
+import { copyText } from '../../utils/system/clipboard';
 
 // src/components/modal/FreeSoftwareNoticeModal.tsx
 // 首次启动的免费软件声明。
@@ -35,7 +35,7 @@ const FreeSoftwareNoticeModal: React.FC<FreeSoftwareNoticeModalProps> = ({ isOpe
     // QQ 群没有能直接打开的入群链接，与设置 → 帮助里那个入口同一套做法：复制群号。
     const copyGroupNumber = async () => {
         try {
-            await copyTextToClipboard(QQ_COMMUNITY_GROUP_NUMBER);
+            await copyText(QQ_COMMUNITY_GROUP_NUMBER);
             setGroupCopied(true);
         } catch (error) {
             console.error('Failed to copy the QQ group number:', error);
@@ -58,7 +58,7 @@ const FreeSoftwareNoticeModal: React.FC<FreeSoftwareNoticeModalProps> = ({ isOpe
             onClose={onClose}
             isDaylight={isDaylight}
             title={t('freeSoftwareNotice.title', 'Folia 是免费软件')}
-            maxWidthClass="max-w-lg"
+            size="m"
         >
             <div className={`space-y-3 text-sm leading-6 ${textSecondary}`}>
                 <p>{t('freeSoftwareNotice.freeForever', 'Folia 完全免费，所有功能对所有人开放。')}</p>

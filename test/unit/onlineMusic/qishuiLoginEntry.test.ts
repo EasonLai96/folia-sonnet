@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { omni } from '@/services/onlineMusic/omni';
 import { getOnlineMusicProvider, listOnlineMusicProviders } from '@/services/onlineMusic/providerRegistry';
-import { resolveLoginCopy } from '@/library/core/model/accountRules';
+import { resolveLoginCopy } from '@/library/core/account/accountRules';
 import { qishuiProvider } from '@/services/onlineMusic/qishuiProvider';
 
 // test/unit/onlineMusic/qishuiLoginEntry.test.ts
@@ -13,6 +13,8 @@ afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
+
+const qishuiAvailability = () => omni.getProviderSummaries().find(summary => summary.providerId === 'qishui')?.availability;
 
 const stubQishuiBridge = (handler: (operation: string, params?: Record<string, unknown>) => unknown) => {
     vi.stubGlobal('window', {
@@ -32,10 +34,10 @@ describe('Qishui login entry', () => {
 
     it('桌面端（preload 给了 qishuiRequest）登录入口可用；没有桥时明确标成 runtime-unavailable', () => {
         stubQishuiBridge(() => ({ ok: true, data: {} }));
-        expect(omni.getProviderAvailability('qishui')).toEqual({ configured: true });
+        expect(qishuiAvailability()).toEqual({ configured: true });
 
         vi.stubGlobal('window', { electron: {} });
-        expect(omni.getProviderAvailability('qishui')).toEqual({ configured: false, reason: 'runtime-unavailable' });
+        expect(qishuiAvailability()).toEqual({ configured: false, reason: 'runtime-unavailable' });
     });
 
     it('登录面板的标题与说明用自己的文案，不是网易那一份', () => {
@@ -54,18 +56,18 @@ describe('Qishui login entry', () => {
             return { ok: true, data: { status: 'waiting', errorCode: 0 } };
         });
 
-        const { key, imageUrl } = await omni.createQrLogin('qishui');
+        const { key, imageUrl } = await omni.startLogin('qishui');
         expect(key).toBe('tok-1');
         expect(imageUrl).toBe('data:image/png;base64,AAA');
         expect(calls[0][0]).toBe('login.qr');
 
-        const state = await omni.checkQrLogin('qishui', key);
+        const state = await omni.checkLogin('qishui', key);
         expect(state.state).toBe('waiting');
         expect(calls[1]).toEqual(['login.check', { token: 'tok-1' }]);
     });
 
     it('没有 Electron 桥时登录直接报 unavailable，而不是静默返回一个空二维码', async () => {
         vi.stubGlobal('window', { electron: {} });
-        await expect(omni.createQrLogin('qishui')).rejects.toMatchObject({ code: 'unavailable' });
+        await expect(omni.startLogin('qishui')).rejects.toMatchObject({ code: 'unavailable' });
     });
 });

@@ -61,7 +61,6 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
             {secondaryAction.label}
         </button>
     ) : null;
-
     React.useEffect(() => {
         if (!isOpen) {
             setSubmittingId(null);
@@ -76,23 +75,27 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
             isDaylight={isDaylight}
             title={title}
             description={description}
-            maxWidthClass="max-w-lg"
+            size="m"
+            fill
             panelKind="playlist-selection"
         >
+            {/* data-folia-playlist-selection：手机适配 CSS 靠它给「新建歌单」按钮单独排版。 */}
+            <div data-folia-playlist-selection="true" className="flex min-h-0 flex-1 flex-col">
+            {onCreate && (
+                <button
+                    type="button"
+                    onClick={onCreate}
+                    disabled={submittingId !== null}
+                    className="st-t-fast mb-3 flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--st-fill)] text-[13px] transition-colors enabled:hover:bg-[var(--st-fill2)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                    <Plus size={16} />
+                    {createLabel || t('localMusic.saveQueueAsPlaylist') || 'Create Playlist'}
+                </button>
+            )}
             {playlists.length > 0 ? (
-                <div data-folia-playlist-selection="true" className="space-y-3">
-                    {onCreate && (
-                        <button
-                            type="button"
-                            onClick={onCreate}
-                            disabled={submittingId !== null}
-                            className={`flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${panelClass}`}
-                        >
-                            <Plus size={16} />
-                            {createLabel || t('localMusic.saveQueueAsPlaylist') || 'Create Playlist'}
-                        </button>
-                    )}
-                    <div data-folia-playlist-list="true" className="max-h-[320px] space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                // The list scrolls; the line above it stays.
+                // data-folia-playlist-list：手机适配 CSS 靠它收掉写死的高度（src/styles/androidPhoneFit.css）。
+                <div data-folia-playlist-list="true" className="st-card st-scroll min-h-0 overflow-y-auto rounded-xl bg-[var(--st-card)] shadow-[0_0_0_1px_var(--st-line)]">
                     {playlists.map((playlist) => (
                         <button
                             key={playlist.id}
@@ -108,39 +111,25 @@ const PlaylistSelectionDialog: React.FC<PlaylistSelectionDialogProps> = ({
                                 }
                             }}
                             disabled={submittingId !== null}
-                            className={`flex w-full items-center gap-3 rounded-2xl border px-5 py-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${panelClass}`}
+                            className="st-row st-focus-inside st-t-fast relative flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left transition-colors enabled:hover:bg-[var(--st-fill)] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-semibold">{playlist.name}</div>
+                                <div className="truncate text-sm leading-5">{playlist.name}</div>
                                 {playlist.description && (
-                                    <div className="truncate text-xs opacity-50">{playlist.description}</div>
+                                    <div className="truncate text-xs leading-[18px] text-[color:var(--st-t2)]">{playlist.description}</div>
                                 )}
                             </div>
-                            <Plus size={16} className="opacity-35" />
+                            <Plus size={16} className="shrink-0 text-[color:var(--st-t3)]" />
                         </button>
                     ))}
-                    </div>
-                    {secondaryButton}
                 </div>
             ) : (
-                <div data-folia-playlist-selection="true" className="space-y-3">
-                    {onCreate && (
-                        <button
-                            type="button"
-                            onClick={onCreate}
-                            disabled={submittingId !== null}
-                            className={`flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${panelClass}`}
-                        >
-                            <Plus size={16} />
-                            {createLabel || t('localMusic.saveQueueAsPlaylist') || 'Create Playlist'}
-                        </button>
-                    )}
-                    <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm opacity-50">
-                        {t('localMusic.noPlaylistsFound') || 'No playlists yet'}
-                    </div>
-                    {secondaryButton}
+                <div className="py-8 text-center text-[13px] text-[color:var(--st-t3)]">
+                    {t('localMusic.noPlaylistsFound') || 'No playlists yet'}
                 </div>
             )}
+            {secondaryButton}
+            </div>
         </ThemedDialog>
     );
 };

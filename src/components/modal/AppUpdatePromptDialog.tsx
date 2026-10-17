@@ -35,7 +35,7 @@ const AppUpdatePromptDialog: React.FC<AppUpdatePromptDialogProps> = ({
             isDaylight={isDaylight}
             title={t('options.androidUpdatePromptTitle')}
             description={t('options.androidUpdatePromptDescription')}
-            maxWidthClass="max-w-sm"
+            size="s"
             panelKind="app-update"
             footer={(
                 <>

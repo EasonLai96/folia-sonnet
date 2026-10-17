@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import type { LineRenderHints } from './utils/lyrics/renderHints';
-import type { MediaId, PlaybackSourceRef, ProviderCatalogRef } from './types/onlineMusic';
+import type { LyricProviderSource } from './utils/lyrics/lyricSources';
+import type { MediaId, OnlineProviderId, PlaybackSourceRef, ProviderCatalogRef } from './types/onlineMusic';
 
 export interface LyricRuby {
   text: string;
@@ -127,16 +128,10 @@ export type BuiltinVisualizerMode = 'classic' | 'cadenza' | 'partita' | 'fume' |
 export type VisualizerMode = BuiltinVisualizerMode | (string & {});
 export type VisualizerFrameRate = 'off' | 120 | 90 | 60 | 30;
 
-export type HomeViewTab = 'playlist' | 'local' | 'albums' | 'navidrome' | 'radio' | 'cloud';
+export type HomeViewTab = 'playlist' | 'local' | 'albums' | 'navidrome' | 'radio' | 'cloud' | 'explore';
 
 export type PlaybackContext = 'main' | 'stage';
 export type StageSource = 'stage-api' | 'now-playing' | 'playercap';
-/**
- * 播放顺序（播放模式）。
- *
- * `shuffle` = 随机播放：进入时把队列打乱（当前这首留在首位），然后照这个新顺序往下走；
- * 走到最后一首时**再打乱一次**接着播，所以不会停在队尾。见 utils/playbackShuffle.ts。
- */
 export type StageLoopMode = 'off' | 'all' | 'one' | 'shuffle';
 export type QueueAddBehavior = 'append' | 'next';
 export type StageActiveEntryKind = 'lyrics' | 'media';
@@ -1159,6 +1154,16 @@ export enum PlayerState {
 export interface StatusMessage {
   type: 'error' | 'success' | 'info';
   text: string;
+  /** A second line under the text: what to do about it. */
+  note?: string;
+  /** Words quoted from outside the app (a platform's own answer), with their code. */
+  quote?: { text: string; code?: string };
+  /** A count down to the action happening on its own (the skip to the next song): its line ("5 秒后跳到下一首"),
+   *  the whole seconds left and the whole time, so the action button fills over it without stepping. Kept out
+   *  of `text` so the toast stays the same one while it counts. */
+  countdown?: { text: string; seconds: number; totalMs: number };
+  /** The online platform the message is about: its mark stands before the text, in place of the type's icon. */
+  providerId?: OnlineProviderId;
   nonce?: number;
   durationMs?: number;
   actionLabel?: string;
@@ -1170,29 +1175,7 @@ export interface StatusMessage {
   persistent?: boolean;
 }
 
-// Netease / Search API Types
-
-export interface NeteaseUser {
-  userId: number;
-  nickname: string;
-  avatarUrl: string;
-  backgroundUrl?: string;
-  vipType?: number;
-}
-
-export interface NeteasePlaylist {
-  id: number;
-  name: string;
-  coverImgUrl: string;
-  trackCount: number;
-  playCount: number;
-  updateTime: number;
-  trackUpdateTime: number;
-  creator: NeteaseUser;
-  description?: string;
-  // 'cloud' 是本地合成的云盘卡；数字是网易云 `/user/playlist` 原样给的（0 普通歌单，5「我喜欢的音乐」）。
-  specialType?: 'cloud' | number;
-}
+// Search API Types
 
 export interface Artist {
   id: MediaId;
@@ -1228,14 +1211,14 @@ export interface NoCopyrightRecommendation {
   expInfo?: unknown | null;
 }
 
-export type LyricProviderSource = 'netease' | 'qq' | 'kugou' | 'amll';
+// The names of the lyric sources, read off the table in utils/lyrics/lyricSources.ts.
+export type { LyricProviderSource };
+
 /**
- * 设置里可选的歌词来源。除了上面那几个具体平台，还有一个「跟随播放平台来源」：
- * 在线歌按自己所在平台取；本地歌曲 / Navidrome 这类没有平台的退回「本地歌曲的歌词来源」。
+ * 设置里存的那一项：可以是一个具体平台，也可以是「跟随播放平台来源」。
  *
- * 具体平台才是真正能拿去搜索的取值，所以两个类型是分开的：凡是「要发请求」的地方
- * （autoMatchBestLyric、各个匹配弹窗）都只收 LyricProviderSource，中间必须经过
- * resolveLyricSourcePreference 解析一次。
+ * 两层不是多此一举 —— 具体平台才能发请求，而「跟随」要等拿到歌才知道是哪个平台，
+ * 所以每个消费点传 preferredSource 之前都要过 resolveLyricSourcePreference 解析一次。
  */
 export type LyricSourcePreference = LyricProviderSource | 'follow-source';
 export type AmllDbPlatform = 'ncm' | 'qq';
@@ -1353,7 +1336,7 @@ export interface LocalSong {
   matchedLyricsSource?: LyricProviderSource;
   matchedLyricsProviderPlatform?: AmllDbPlatform;
 
-  // User preferences for online data override (set via LyricMatchModal)
+  // User preferences for online data override (set via LocalSongLyricMatch)
   lyricsSource?: 'local' | 'embedded' | 'online';  // Explicit lyrics source selection; undefined = the configured automatic priority
   useOnlineCover?: boolean;     // Prefer online cover over embedded cover
 
@@ -1447,6 +1430,9 @@ export type {
 // Extend SongResult to support local files and Navidrome files
 export interface UnifiedSong extends SongResult {
   sourceRef: PlaybackSourceRef;
+  // The row this song was read from, where its collection names its rows: a YouTube Music
+  // playlist may hold a song twice, and a removal names the row. It says nothing of the song.
+  collectionRowId?: string;
   isLocal?: boolean;
   localRef?: import('./types/localLibrary').LocalSongReference;
   isNavidrome?: boolean;

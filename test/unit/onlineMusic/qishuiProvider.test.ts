@@ -175,28 +175,28 @@ describe('Qishui login', () => {
 
     it('bridges the one-step QR payload into the two-step getQrKey/createQr contract', async () => {
         request.mockResolvedValueOnce({ token: 'qr-1', qrcode: 'data:image/png;base64,AAA', expireTime: 0 });
-        const key = await qishuiProvider.auth!.getQrKey!();
+        const key = await qishuiProvider.auth!.startLogin!();
         expect(key).toBe('qr-1');
         await expect(qishuiProvider.auth!.createQr!(key)).resolves.toBe('data:image/png;base64,AAA');
         // 上游没给有效期时按 5 分钟兜底。
-        expect(qishuiProvider.auth!.getQrTtlMs!()).toBe(5 * 60 * 1000);
+        expect(qishuiProvider.auth!.getLoginTtlMs!()).toBe(5 * 60 * 1000);
 
         request.mockResolvedValueOnce({ token: 'qr-2', qrcode: 'data:image/png;base64,BBB', ttlMs: 90_000 });
-        await qishuiProvider.auth!.getQrKey!();
-        expect(qishuiProvider.auth!.getQrTtlMs!()).toBe(90_000);
+        await qishuiProvider.auth!.startLogin!();
+        expect(qishuiProvider.auth!.getLoginTtlMs!()).toBe(90_000);
 
         await expect(qishuiProvider.auth!.createQr!('qr-unknown'))
             .rejects.toMatchObject({ code: 'invalid-response' });
 
         request.mockResolvedValueOnce({ token: 'qr-3', qrcode: 'data:image/png;base64,CCC' });
-        const third = await qishuiProvider.auth!.getQrKey!();
-        await qishuiProvider.auth!.cancelQr!(third);
+        const third = await qishuiProvider.auth!.startLogin!();
+        await qishuiProvider.auth!.cancelLogin!(third);
         await expect(qishuiProvider.auth!.createQr!(third)).rejects.toMatchObject({ code: 'invalid-response' });
     });
 
     it('rejects an incomplete QR payload instead of showing a broken dialog', async () => {
         request.mockResolvedValueOnce({ token: 'qr-4' });
-        await expect(qishuiProvider.auth!.getQrKey!()).rejects.toMatchObject({ code: 'invalid-response' });
+        await expect(qishuiProvider.auth!.startLogin!()).rejects.toMatchObject({ code: 'invalid-response' });
     });
 
     it.each([
@@ -208,25 +208,25 @@ describe('Qishui login', () => {
         ['new', 0, { state: 'waiting' }],
     ])('maps the scan status %s (errorCode %i)', async (status, errorCode, expected) => {
         request.mockResolvedValueOnce({ status, errorCode, message: 'success' });
-        await expect(qishuiProvider.auth!.checkQr!('qr-x')).resolves.toEqual(expected);
+        await expect(qishuiProvider.auth!.checkLogin!('qr-x')).resolves.toEqual(expected);
     });
 
     it('only reports a login failure when the bridge gives a non-zero error code', async () => {
         request.mockResolvedValueOnce({ status: 'new', errorCode: 5, message: '登录失败' });
-        await expect(qishuiProvider.auth!.checkQr!('qr-x')).resolves.toEqual({ state: 'error', message: '登录失败' });
+        await expect(qishuiProvider.auth!.checkLogin!('qr-x')).resolves.toEqual({ state: 'error', message: '登录失败' });
 
         request.mockResolvedValueOnce({ status: 'rate_limited', errorCode: 7, retryAfterMs: 60_000, message: '操作太快' });
-        await expect(qishuiProvider.auth!.checkQr!('qr-x'))
+        await expect(qishuiProvider.auth!.checkLogin!('qr-x'))
             .resolves.toEqual({ state: 'error', message: '操作太快', retryAfterMs: 60_000 });
     });
 
     it('restores a device-side cancellation as a retryable state', async () => {
         request.mockRejectedValueOnce(new OnlineProviderError('auth-required', '已取消', 'qishui', 'mfa-cancelled'));
-        await expect(qishuiProvider.auth!.checkQr!('qr-x'))
+        await expect(qishuiProvider.auth!.checkLogin!('qr-x'))
             .resolves.toEqual({ state: 'error', reason: 'canceled-on-device', message: '已取消' });
 
         request.mockRejectedValueOnce(new OnlineProviderError('network', '桥断了', 'qishui'));
-        await expect(qishuiProvider.auth!.checkQr!('qr-x')).resolves.toEqual({ state: 'error', message: '桥断了' });
+        await expect(qishuiProvider.auth!.checkLogin!('qr-x')).resolves.toEqual({ state: 'error', message: '桥断了' });
     });
 
     it('drops the cached library when the account logs out', async () => {
@@ -313,7 +313,8 @@ describe('Qishui library', () => {
     it('walks the virtual liked playlist and de-duplicates its ids', async () => {
         request.mockResolvedValueOnce({ tracks: [track], total: 3 });
         request.mockResolvedValueOnce({ tracks: [track, { ...track, id: '2' }], total: 3 });
-        await expect(qishuiProvider.library!.getLikedSongIds!('u1')).resolves.toEqual(['7669756492397283344', '2']);
+        // 翻完整份就回 whole:true；拿到的 id 仍是去重后的那几个。
+        await expect(qishuiProvider.library!.getLikedSongIds!('u1')).resolves.toEqual({ ids: ['7669756492397283344', '2'], whole: true });
         expect(request).toHaveBeenNthCalledWith(1, 'playlist.tracks', { id: QISHUI_LIKED_PLAYLIST_ID, limit: 100, offset: 0 });
         expect(request).toHaveBeenNthCalledWith(2, 'playlist.tracks', { id: QISHUI_LIKED_PLAYLIST_ID, limit: 100, offset: 1 });
     });

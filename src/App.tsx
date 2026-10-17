@@ -15,6 +15,8 @@ import Home from './components/app/Home';
 import PlayerPanel from './components/app/PlayerPanel';
 import ThemeQuickEditorHost from './components/panelTab/ThemeQuickEditor';
 import AppDialogs from './components/app/dialogs/AppDialogs';
+import { useProviderSignOut } from './components/app/dialogs/useProviderSignOut';
+import LoginHost from './components/login/LoginHost';
 import { useSettingsDialogModel } from './components/app/dialogs/useSettingsDialogModel';
 import AppOverlays from './components/app/overlays/AppOverlays';
 import AutomixModelReminder from './components/modal/AutomixModelReminder';
@@ -24,6 +26,8 @@ import PonderHost from './components/ponder/PonderHost';
 const AutomixTransitionAnimation = lazy(() => import('./components/app/overlays/AutomixTransitionAnimation'));
 const loadLattice = () => import('./components/app/lattice/Lattice');
 const Lattice = lazy(loadLattice);
+import { useVisualizerAroundWall, wallExitCompleted, WALL_LAYER } from './components/app/lattice/wallLayer';
+import { useMorphKeepsHost } from './components/collectionFlight';
 import { UserGuideModal } from './components/modal/UserGuideModal';
 import ReleaseNotesDialog from './components/modal/ReleaseNotesDialog';
 import FreeSoftwareNoticeModal from './components/modal/FreeSoftwareNoticeModal';
@@ -37,6 +41,7 @@ import { useHomeModel } from './components/app/home/useHomeModel';
 import { createLyricFilterPatternSaver } from './components/app/home/createLyricFilterPatternSaver';
 import { nextLyricStaffAbsorbMode, nextLyricStaffPolicy } from './utils/lyrics/staffCreditsPolicy';
 import { createPanelNavigation } from './components/app/navigation/createPanelNavigation';
+import { usePlayingSongLocatorStore } from './stores/usePlayingSongLocatorStore';
 import { createOnlineGridViewCollection, type GridViewCollectionDescriptor } from './components/app/home/gridViewCollectionAdapters';
 import { buildAppStyle } from './components/app/presentation/buildAppStyle';
 import { buildDebugSnapshot } from './components/app/presentation/buildDebugSnapshot';
@@ -52,8 +57,9 @@ import { createLyricsSetter } from './components/app/playback/createLyricsSetter
 import { createLyricSegmentationActions } from './components/app/playback/createLyricSegmentationActions';
 import { useLyricWordSegmentation } from './hooks/useLyricWordSegmentation';
 import { useIcuFoliaSegmentation } from './hooks/useIcuFoliaSegmentation';
-import { createOnlineRecoveryController } from './components/app/playback/createOnlineRecoveryController';
 import { handleOnlineMediaFailure } from './components/app/playback/handleOnlineMediaFailure';
+import { createOnlineRecoveryController } from './components/app/playback/restore/createOnlineRecoveryController';
+import { notePreviewPlaying } from './components/app/playback/source/previewNotice';
 import { persistPlaybackCache } from './components/app/playback/persistPlaybackCache';
 import { useAppOverlaysModel } from './components/app/overlays/useAppOverlaysModel';
 import { resolveNextUpTrack } from './components/app/overlays/now-playing-toast/resolveNextUpTrack';
@@ -76,24 +82,20 @@ import { getSongArtistLabel, getSongCoverUrl } from './services/onlineMusic/song
 import { isNavidromeEnabled } from './services/navidromeService';
 import { useAppNavigation } from './hooks/useAppNavigation';
 import { useNeteaseLibrary } from './hooks/useNeteaseLibrary';
-import { useKugouLibrary } from './hooks/useKugouLibrary';
-import { useQqLibrary } from './hooks/useQqLibrary';
-import { useBodianLibrary } from './hooks/useBodianLibrary';
-import { useFeiniuLibrary } from './hooks/useFeiniuLibrary';
-import { useQishuiLibrary } from './hooks/useQishuiLibrary';
+
 import { useLibraryAccountController } from './library/app/useLibraryAccountController';
 import { createLibraryAccountSwitchCleanupPort } from './library/app/createLibraryAccountPort';
 import { useAppWallToolsHost } from './components/app/wall-tools/useAppWallToolsHost';
-import { useLibraryAccountProviders } from './library/core/bindings/useLibraryAccount';
-import { resolveActiveProviderSummary } from './library/core/model/accountRules';
+import { useLibraryAccountProviders } from './library/core/account/useLibraryAccount';
+import { resolveActiveProviderSummary } from './library/core/account/accountRules';
 import { useAppPreferences } from './hooks/useAppPreferences';
-import { useElectronPlaybackBridge } from './hooks/useElectronPlaybackBridge';
+import { useElectronPlaybackBridge } from './components/app/playback/bridges/useElectronPlaybackBridge';
 import { useElectronDisplaySleepBlocker } from './hooks/useElectronDisplaySleepBlocker';
 import { useSleepTimer } from './hooks/useSleepTimer';
-import { useElectronNeteaseApiStatus } from './hooks/useElectronNeteaseApiStatus';
+import { useProviderNotices } from './components/app/useProviderNotices';
 import { useLocalLibraryAutoScan } from './hooks/useLocalLibraryAutoScan';
 import { useElectronVideoExportController } from './hooks/useElectronVideoExportController';
-import { useElectronWindowPlaybackHandoff } from './hooks/useElectronWindowPlaybackHandoff';
+import { useElectronWindowPlaybackHandoff } from './components/app/playback/restore/useElectronWindowPlaybackHandoff';
 import { useMediaSessionBridge } from './hooks/useMediaSessionBridge';
 import { useCapacitorSystemBars } from './hooks/useCapacitorSystemBars';
 import { useCapacitorPlaybackBridge } from './hooks/useCapacitorPlaybackBridge';
@@ -106,28 +108,29 @@ import { useColorOsLyricFeed } from './hooks/useColorOsLyricFeed';
 import { useImmersiveLyricsBars } from './hooks/useImmersiveLyricsBars';
 import { useScreenAwake } from './hooks/useScreenAwake';
 import { usePlayerChromeAutoHide } from './hooks/usePlayerChromeAutoHide';
+import { usePlaybackAudioBridge } from './components/app/playback/bridges/usePlaybackAudioBridge';
 import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
-import { usePlaybackAudioBridge } from './hooks/usePlaybackAudioBridge';
 import { useTranscodeFallback } from './hooks/useTranscodeFallback';
 import { useAutomixDecks, type AutomixDeckId } from './services/automix/useAutomixDecks';
-import { usePlaybackInteractionBridge } from './hooks/usePlaybackInteractionBridge';
+import { usePlaybackInteractionBridge } from './components/app/playback/bridges/usePlaybackInteractionBridge';
 import { usePersonalFmModeController } from './hooks/usePersonalFmModeController';
 import { PERSONAL_FM_MODE_COMMAND_ID } from './components/command-palette/commands/fmModeCommand';
-import { usePlaybackUiEffects } from './hooks/usePlaybackUiEffects';
+import { usePlaybackUiEffects } from './components/app/playback/bridges/usePlaybackUiEffects';
+import { useLibraryPlaybackController } from './components/app/playback/start/useLibraryPlaybackController';
 import { useLocalCoverQueueSync } from './hooks/useLocalCoverQueueSync';
-import { useLibraryPlaybackController } from './hooks/useLibraryPlaybackController';
 import { useNavidromeScrobbleReporter } from './hooks/useNavidromeScrobbleReporter';
-import { useNeteaseScrobbleReporter } from './hooks/useNeteaseScrobbleReporter';
-import { usePlaybackQueueController } from './hooks/usePlaybackQueueController';
-import { usePlaybackTransportController } from './hooks/usePlaybackTransportController';
+import { usePlaybackReporter } from './components/app/playback/bridges/usePlaybackReporter';
+import { useRecentPlaysRecorder } from './components/app/home/explore/useRecentPlaysRecorder';
+import { usePlaybackQueueController } from './components/app/playback/start/usePlaybackQueueController';
+import { usePlaybackTransportController } from './components/app/playback/bridges/usePlaybackTransportController';
 import { useLocalLibraryCatalog } from './hooks/useLocalLibraryCatalog';
-import { usePlaybackVisualizerBridge } from './hooks/usePlaybackVisualizerBridge';
+import { usePlaybackVisualizerBridge } from './components/app/playback/bridges/usePlaybackVisualizerBridge';
 import { useRandomVisualizerMode } from './hooks/useRandomVisualizerMode';
 import { useLyricAnimationDirector } from './hooks/useLyricAnimationDirector';
 import { useObsBrowserSourcePublisher } from './hooks/useObsBrowserSourcePublisher';
 import { useLyricApiPublisher } from './hooks/useLyricApiPublisher';
-import { useSessionRestoreController } from './hooks/useSessionRestoreController';
-import { useStagePlaybackController } from './hooks/useStagePlaybackController';
+import { useSessionRestoreController } from './components/app/playback/restore/useSessionRestoreController';
+import { useStagePlaybackController } from './components/app/playback/useStagePlaybackController';
 import { useSongThemeAutoGeneration } from './hooks/useSongThemeAutoGeneration';
 import { useThemeController } from './hooks/useThemeController';
 import { useOnlineSongMetadataHydration } from './hooks/useOnlineSongMetadataHydration';
@@ -135,7 +138,7 @@ import { resolveCommandPaletteSearchSource, resolveSearchSource, useSearchNaviga
 import { useOnlineProviderAccountStore } from './stores/useOnlineProviderAccountStore';
 import { useShallow } from 'zustand/react/shallow';
 import { clampMediaVolume, toSafeRemoteUrl } from './utils/appPlaybackHelpers';
-import { getOnlineProviderIdForSong, getPlaybackSongKey, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong } from './utils/appPlaybackGuards';
+import { getOnlineProviderIdForSong, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong } from './utils/appPlaybackGuards';
 import { readLyricOffset, writeLyricOffset } from './utils/lyrics/lyricOffsetMemory';
 import { FALLBACK_AI_DUAL_THEME } from './services/themeSanitizer';
 import { BASE_DUAL_THEME, DAYLIGHT_THEME, DEFAULT_THEME } from './services/baseThemes';
@@ -159,7 +162,8 @@ import { useSettingsModalStore } from './stores/useSettingsModalStore';
 import { audioBands, audioPower, bass, currentTime, lowMid, lyricCurrentTime, mid, spectrum, treble, vocal } from './stores/motionSignals';
 import { useAppChromeStore } from './stores/useAppChromeStore';
 import { useAppViewStore } from './stores/useAppViewStore';
-import { selectDisplayCoverUrl, selectDisplayDuration, selectDisplayLyrics, selectDisplayPlayerState, selectDisplaySong, selectIsShowingTail, usePlaybackStore } from './stores/usePlaybackStore';
+import { endLoadingToPlay, selectDisplayCoverUrl, selectDisplayDuration, selectDisplayLyrics, selectDisplayPlayerState, selectDisplaySong, selectIsShowingTail, usePlaybackStore } from './stores/usePlaybackStore';
+import { askForSong, showSong } from './components/app/playback/currentSong';
 import { useLibraryStore } from './stores/useLibraryStore';
 import { selectLibraryOccludesPlayer, selectLibraryPlayerBackdrop, useLibraryPlayerOcclusionStore } from './stores/useLibraryPlayerOcclusionStore';
 import { resolveVisualizerBackdropBlur, visualizerBackdropStyle } from './components/app/presentation/playerVisualizerBackdrop';
@@ -171,18 +175,20 @@ import { resolveLikeAvailability } from './utils/playerLikeAvailability';
 import StageSessionEmptyState from './components/app/stage/StageSessionEmptyState';
 import { useVisualizerRendererModel } from './components/visualizer/useVisualizerRendererModel';
 import { useVisualizerTunings } from './components/visualizer/useVisualizerTunings';
-import { usePlaybackRuntimeRefs } from './hooks/usePlaybackRuntimeRefs';
+import { usePlaybackRuntimeRefs } from './components/app/playback/usePlaybackRuntimeRefs';
 import { useElectronWindowChrome } from './hooks/useElectronWindowChrome';
-import { useTransportCommandRefs } from './hooks/useTransportCommandRefs';
-import { useHomeProviderRefresh } from './hooks/useHomeProviderRefresh';
+import { useTransportCommandRefs } from './components/app/playback/bridges/useTransportCommandRefs';
+import { useAccountReads } from './hooks/useAccountReads';
 import { useAudioOutputDevice } from './hooks/useAudioOutputDevice';
 import { useThemeQuickEditorContext } from './hooks/useThemeQuickEditorContext';
 import { usePlayerBottomBarOffset } from './hooks/usePlayerBottomBarOffset';
 import { usePlayerBottomBarPositioningEntry } from './hooks/usePlayerBottomBarPositioningEntry';
 import { PlayerBottomBarLayoutContext } from './components/floating-player/PlayerBottomBarLayoutContext';
-import { useFoliumHostBridge } from './mods/folium/hostBridge';
-import { useFoliumHostActions } from './mods/folium/hostActions';
+import { useFoliumHostBridge } from './mods/runtime/hostBridge';
+import { useFoliumHostActions } from './mods/runtime/hostActions';
 import { FoliumStageLayerSlot } from './mods/folium/registries/stageLayers';
+import { errorFields } from './utils/errorText';
+import { runsOnWindows } from './utils/platform';
 
 const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 const DEV_DEBUG_SHORTCUT_LABEL = 'Alt+Shift+D';
@@ -216,7 +222,7 @@ export default function App() {
         playerState, setPlayerState,
         playQueue, setPlayQueue,
         activePlaybackContext,
-        isFmMode, setIsFmMode,
+        isFmMode,
         setReplayGainMode,
         lyricTimelineOffsetMs, setLyricTimelineOffsetMs,
     } = usePlaybackStore(useShallow(state => ({
@@ -229,18 +235,17 @@ export default function App() {
         setCurrentLineIndex: state.setCurrentLineIndex,
         playQueue: state.playQueue, setPlayQueue: state.setPlayQueue,
         activePlaybackContext: state.activePlaybackContext, setActivePlaybackContext: state.setActivePlaybackContext,
-        isFmMode: state.isFmMode, setIsFmMode: state.setIsFmMode,
+        isFmMode: state.isFmMode,
         replayGainMode: state.replayGainMode, setReplayGainMode: state.setReplayGainMode,
         lyricTimelineOffsetMs: state.lyricTimelineOffsetMs, setLyricTimelineOffsetMs: state.setLyricTimelineOffsetMs,
     })));
     const {
         isPanelOpen, setIsPanelOpen,
-        panelTab, setPanelTab,
+        setPanelTab,
         isHomeFullyHidden, setIsHomeFullyHidden,
     } = useAppViewStore(useShallow(state => ({
         isPanelOpen: state.isPanelOpen,
         setIsPanelOpen: state.setIsPanelOpen,
-        panelTab: state.panelTab,
         setPanelTab: state.setPanelTab,
         isHomeFullyHidden: state.isHomeFullyHidden,
         setIsHomeFullyHidden: state.setIsHomeFullyHidden,
@@ -280,7 +285,7 @@ export default function App() {
 
     // UI State
     const statusMsg = useStatusMessage();
-    useElectronNeteaseApiStatus(t);
+    useProviderNotices(t);
     // Watches the imported local folders and rescans them when their contents change.
     useLocalLibraryAutoScan();
 
@@ -328,7 +333,7 @@ export default function App() {
         if (!config) return;
 
         try {
-            const songs = await navidromeApi.getStarred2(config);
+            const songs = await navidromeApi.getStarred2(config) ?? [];
             setStarredNavidromeSongIds(new Set(songs.map(song => song.id)));
         } catch (error) {
             console.warn('[App] Failed to load Navidrome favorites:', error);
@@ -370,7 +375,6 @@ export default function App() {
         animationFrameRef,
         shouldAutoPlay,
         currentSongRef,
-        playbackGenerationRef,
         currentSongFullRef,
         playbackAutoSkipCountRef,
         volumePreviewFrameRef,
@@ -392,7 +396,14 @@ export default function App() {
     // Buffer progress debug helper. Uncomment this ref, the reset effect below,
     // and the audio `onProgress` handler to log buffered percent again.
     // const lastBufferedPercentLogRef = useRef<number | null>(null);
-    const [isLyricsLoading, setIsLyricsLoading] = useState(false);
+    const [isLyricsLoading, setIsLyricsLoadingState] = useState(false);
+    // Every write of the loading mark is counted, so a play that gives up late can tell whether the
+    // mark is still the one it set (onPlayNavidromeSong).
+    const lyricsLoadingWritesRef = useRef(0);
+    const setIsLyricsLoading = useCallback<typeof setIsLyricsLoadingState>(next => {
+        lyricsLoadingWritesRef.current += 1;
+        setIsLyricsLoadingState(next);
+    }, []);
     const isNowPlayingControlDisabledRef = useRef(false);
 
 
@@ -511,6 +522,7 @@ export default function App() {
     const {
         playerChromeVisibilityMode,
         cyclePlayerChromeVisibilityMode,
+        setPlayerChromeVisibilityModeTo,
     } = usePlayerChromeAutoHide({
         autoHidePlayerChrome,
         initialPlayerChromeHidden: isPlayerChromeHidden,
@@ -623,8 +635,6 @@ export default function App() {
         currentSong,
         audioSrc,
         audioRef,
-        currentSongRef,
-        playbackGenerationRef,
         blobUrlRef,
         shouldAutoPlayRef: shouldAutoPlay,
         pendingResumeTimeRef,
@@ -632,10 +642,9 @@ export default function App() {
         lastAudioRecoverySourceRef,
         currentOnlineAudioUrlFetchedAtRef,
         persistLastPlaybackCache,
-        playQueue,
         onlineAudioUrlTtlMs: ONLINE_AUDIO_URL_TTL_MS,
         onlineAudioUrlRefreshBufferMs: ONLINE_AUDIO_URL_REFRESH_BUFFER_MS,
-    }), [audioQuality, audioSrc, audioRef, blobUrlRef, currentOnlineAudioUrlFetchedAtRef, currentSong, currentSongRef, lastAudioRecoverySourceRef, onlinePlaybackRecoveryRef, pendingResumeTimeRef, persistLastPlaybackCache, playQueue, playbackGenerationRef, setAudioSrc, setCurrentSong, setPlayQueue, shouldAutoPlay]);
+    }), [audioQuality, audioSrc, audioRef, blobUrlRef, currentOnlineAudioUrlFetchedAtRef, currentSong, lastAudioRecoverySourceRef, onlinePlaybackRecoveryRef, pendingResumeTimeRef, persistLastPlaybackCache, setAudioSrc, setCurrentSong, setPlayQueue, shouldAutoPlay]);
 
     const getCoverUrl = useMemo(
         () => createCoverUrlResolver(cachedCoverUrl, currentSong),
@@ -721,11 +730,7 @@ export default function App() {
         backCollection,
     } = useAppNavigation();
     const reduceLatticeMotion = useReducedMotionFor('lattice');
-    const [hasLatticeExited, setHasLatticeExited] = useState(currentView !== 'lattice');
-
-    useEffect(() => {
-        if (currentView === 'lattice') setHasLatticeExited(false);
-    }, [currentView]);
+    const visualizerAroundWall = useVisualizerAroundWall();
 
     usePlayerBottomBarOffset(playerBottomBarOffset);
     usePlayerBottomBarPositioningEntry(navigateToPlayer);
@@ -756,63 +761,31 @@ export default function App() {
     })));
 
     // Netease Library Hook
-    // manages user data, playlists, liked songs, and related actions
+    // the NetEase account as the account store holds it
     const {
         user,
         playlists,
         cloudPlaylist,
-        likedSongIds,
-        isSyncing,
-        cacheSize,
-        refreshUserData,
-        updateCacheSize,
-        handleClearCache,
-        handleSyncData,
-        handleLogout,
-        setLikedSongIds,
-    } = useNeteaseLibrary({
-        t,
-    });
+    } = useNeteaseLibrary();
 
-    const {
-        refresh: refreshKugouLibrary,
-        logout: logoutKugouLibrary,
-        checkLoginStatus: checkKugouLoginStatus,
-    } = useKugouLibrary();
-    const {
-        refresh: refreshQqLibrary,
-        logout: logoutQqLibrary,
-    } = useQqLibrary();
-    const { refresh: refreshBodianLibrary, logout: logoutBodianLibrary } = useBodianLibrary();
-    const { refresh: refreshFeiniuLibrary, logout: logoutFeiniuLibrary } = useFeiniuLibrary();
-    const { refresh: refreshQishuiLibrary, logout: logoutQishuiLibrary } = useQishuiLibrary();
-    const onlineProviderRefreshers = useMemo<Partial<Record<OnlineProviderId, () => Promise<unknown>>>>(() => ({
-        netease: refreshUserData,
-        kugou: refreshKugouLibrary,
-        qq: refreshQqLibrary,
-        bodian: refreshBodianLibrary,
-        feiniu: refreshFeiniuLibrary,
-        qishui: refreshQishuiLibrary,
-    }), [refreshKugouLibrary, refreshQqLibrary, refreshBodianLibrary, refreshFeiniuLibrary, refreshQishuiLibrary, refreshUserData]);
-    const onlineProviderLogouts = useMemo<Partial<Record<OnlineProviderId, () => Promise<void>>>>(() => ({
-        netease: handleLogout,
-        kugou: logoutKugouLibrary,
-        qq: logoutQqLibrary,
-        bodian: logoutBodianLibrary,
-        feiniu: logoutFeiniuLibrary,
-        qishui: logoutQishuiLibrary,
-    }), [handleLogout, logoutKugouLibrary, logoutQqLibrary, logoutBodianLibrary, logoutFeiniuLibrary, logoutQishuiLibrary]);
-
-    // 在线账户 controller（Library v2 · A4）：扫码登录、选平台、切换确认与登出都在 core，App 只交出 per-provider 的
-    // 刷新与登出，以及确认切换后的播放清理端口。端口读的三样（audio / automix 句柄、歌词写入）都是稳定引用，建一次。
+    // Every platform's account is read and signed out of through omni (services/onlineMusic/account/),
+    // NetEase like the others. One entry per platform registered at start; a mod's source has none.
+    const onlineProviderRefreshers = useMemo<Partial<Record<OnlineProviderId, () => Promise<unknown>>>>(() => Object.fromEntries(
+        omni.getProviderSummaries().map(({ providerId }) => [providerId, async () => await omni.readAccount(providerId, 'sync') === 'read']),
+    ), []);
+    // 在线账户 controller（Library v2 · A4）：登录、选平台、切换确认与登出都在 core，App 只交出退出与退出前的那一问
+    // （useProviderSignOut），以及换平台时清空播放器的端口。端口读的句柄都是稳定引用，建一次。
+    const { confirmLogout, signOut, dialog: signOutDialog } = useProviderSignOut();
     const [providerSwitchCleanup] = useState(() => createLibraryAccountSwitchCleanupPort(() => ({
         audioRef,
         automixRef,
+        shouldAutoPlay,
         setLyrics: setLyricsStable,
+        setIsLyricsLoading,
     })));
     const accountController = useLibraryAccountController({
-        refreshers: onlineProviderRefreshers,
-        logouts: onlineProviderLogouts,
+        logout: signOut,
+        confirmLogout,
         switchCleanup: providerSwitchCleanup,
     });
     const { providers: onlineProviders, activeProviderId } = useLibraryAccountProviders(accountController);
@@ -824,13 +797,16 @@ export default function App() {
     // （resolveSongLiked → omni.isSongLiked）经 getState 读各平台的 likedSongIds，账户摘要里没有它，
     // 只订阅 controller 快照的话收藏之后心形不会当场更新。取值没有用处。
     useOnlineProviderAccountStore(state => state.accounts);
+    // 当前平台的已喜欢列表：resolveSongLiked 判在线歌的「已收藏」只认这个集合。
+    const likedOnlineSongIds = useOnlineProviderAccountStore(
+        state => state.accounts[state.activeProviderId]?.likedSongIds,
+    );
+    const likedSongIds = useMemo(
+        () => new Set<string | number>(likedOnlineSongIds ?? []),
+        [likedOnlineSongIds],
+    );
     const handleActiveProviderSyncData = useCallback(async () => {
         const providerId = activeProviderId;
-        if (providerId === 'netease') {
-            await handleSyncData();
-            return;
-        }
-
         setIsProviderSyncing(true);
         try {
             const synced = await onlineProviderRefreshers[providerId]?.();
@@ -843,25 +819,17 @@ export default function App() {
                     : t('status.dataSynced'),
             });
         } catch (error) {
-            console.warn('[OmniSync] Provider data sync failed', { providerId, error });
+            console.warn('[OmniSync] Provider data sync failed', { providerId, ...errorFields(error) });
             setStatusMsg({ type: 'error', text: t('status.syncFailed') });
         } finally {
             setIsProviderSyncing(false);
         }
-    }, [activeProviderId, handleSyncData, onlineProviderRefreshers, setStatusMsg, t]);
-    const isActiveProviderSyncing = activeProviderId === 'netease'
-        ? isSyncing
-        : isProviderSyncing;
+    }, [activeProviderId, onlineProviderRefreshers, setStatusMsg, t]);
     const refreshActiveProviderPlaylists = useCallback(
         () => omni.refreshProviderPlaylists(activeProviderId),
         [activeProviderId],
     );
-    useHomeProviderRefresh({
-        activeProviderId,
-        activeProviderFreshness: activeProvider?.freshness,
-        refreshActiveProviderPlaylists,
-        checkKugouLoginStatus,
-    });
+    useAccountReads();
     const {
         stageStatus,
         setStageStatus,
@@ -898,8 +866,6 @@ export default function App() {
         isDev,
         isElectronWindow,
         audioRef,
-        currentSongRef,
-        playbackGenerationRef,
         shouldAutoPlayRef: shouldAutoPlay,
         pendingResumeTimeRef,
         lastAudioRecoverySourceRef,
@@ -932,8 +898,6 @@ export default function App() {
         setIsLyricsLoading,
         blobUrlRef,
         shouldAutoPlayRef: shouldAutoPlay,
-        currentSongRef,
-        playbackGenerationRef,
         pendingResumeTimeRef,
         lastAudioRecoverySourceRef,
         currentOnlineAudioUrlFetchedAtRef,
@@ -946,18 +910,20 @@ export default function App() {
         () => createPanelNavigation(navigateDirectHome),
         [navigateDirectHome],
     );
+    // "Locate the playing song" moves between screens with the app's own navigation.
+    useEffect(() => {
+        usePlayingSongLocatorStore.getState().setNavigator({ navigateToHome, navigateToCollection, pushCollection });
+        return () => usePlayingSongLocatorStore.getState().setNavigator(null);
+    }, [navigateToCollection, navigateToHome, pushCollection]);
 
     // --- Local Music Functions ---
 
     const {
         localSongs,
         localPlaylists,
-        showLyricMatchModal,
-        setShowLyricMatchModal,
-        showNaviLyricMatchModal,
-        setShowNaviLyricMatchModal,
-        showOnlineLyricMatchModal,
-        setShowOnlineLyricMatchModal,
+        isLyricMatchOpen,
+        openLyricMatch,
+        closeLyricMatch,
         loadLocalSongs,
         loadLocalPlaylists,
         onRefreshLocalSongs,
@@ -966,6 +932,7 @@ export default function App() {
         addCurrentSongToLocalPlaylist,
         createCurrentLocalPlaylist,
         addCurrentSongToOnlinePlaylist,
+        createCurrentOnlinePlaylist,
         addCurrentSongToNavidromePlaylist,
         createCurrentNavidromePlaylist,
         loadCurrentSongLyricPreview,
@@ -974,10 +941,8 @@ export default function App() {
         onPlayNavidromeSong,
         handleUpdateLocalLyrics,
         handleChangeLyricsSource,
-        handleManualMatchOnline,
         handleImportOnlineLyrics,
         handleChangeOnlineLyricsSource,
-        handleMatchOnlineLyrics,
         handleLyricMatchComplete,
         handleLyricMatchPureMusicMarkChanged,
         handleToggleCurrentSongPureMusicMark,
@@ -987,19 +952,19 @@ export default function App() {
         handleAutoMatchBestLyricForCurrentSong,
         handleLike,
     } = useLibraryPlaybackController({
-        likedSongIds,
         userId: user?.id,
         setLyrics,
         setIsLyricsLoading,
-        setLikedSongIds,
+        lyricsLoadingWritesRef,
         navigateToPlaybackView,
         persistLastPlaybackCache,
         restoreCachedThemeForSong,
         interruptStagePlaybackForMainTransition,
         blobUrlRef,
         shouldAutoPlayRef: shouldAutoPlay,
-        currentSongRef,
         currentOnlineAudioUrlFetchedAtRef,
+        pendingResumeTimeRef,
+        lastAudioRecoverySourceRef,
     });
 
     useSessionRestoreController({
@@ -1014,8 +979,6 @@ export default function App() {
         loadLocalPlaylists,
         canRestoreSession: windowPlaybackHandoffRestoreStatus === 'none',
         shouldAutoPlayRef: shouldAutoPlay,
-        currentSongRef,
-        playbackGenerationRef,
         // 「进入应用后自动播放」下面那一项：同一个开关组，起播的同时切到歌词页。
         jumpToPlayerOnLaunch: navigateToPlayer,
     });
@@ -1112,8 +1075,6 @@ export default function App() {
         audioRef,
         blobUrlRef,
         shouldAutoPlayRef: shouldAutoPlay,
-        currentSongRef,
-        playbackGenerationRef,
         mainPlaybackSnapshotRef,
         playbackAutoSkipCountRef,
         pendingResumeTimeRef,
@@ -1159,7 +1120,6 @@ export default function App() {
 
     usePlaybackUiEffects({
         statusMsg,
-        updateCacheSize,
         loadLocalSongs,
         loadLocalPlaylists,
         localMusicUpdatedEvent: LOCAL_MUSIC_UPDATED_EVENT,
@@ -1422,7 +1382,6 @@ export default function App() {
         syncOutputGain,
         getTargetPlaybackVolume,
         getCoverUrl,
-        updateCacheSize,
     });
 
     const handleTranscodeFallback = useTranscodeFallback({
@@ -1479,7 +1438,12 @@ export default function App() {
         currentSong,
         activeDeck: automix.activeDeck,
     });
-    useNeteaseScrobbleReporter({
+    usePlaybackReporter({
+        audioRef,
+        currentSong,
+        activeDeck: automix.activeDeck,
+    });
+    useRecentPlaysRecorder({
         audioRef,
         currentSong,
         activeDeck: automix.activeDeck,
@@ -1615,6 +1579,7 @@ export default function App() {
         isElectronWindow,
         playerChromeVisibilityMode,
         onRemotePlayerChromeVisibilityModeCycle: cyclePlayerChromeVisibilityMode,
+        onRemotePlayerChromeVisibilityModeSet: setPlayerChromeVisibilityModeTo,
         isStagePlayerSnapshotEnabled: stageStatus?.enabled === true,
         isNowPlayingControlDisabledRef,
         audioRef,
@@ -2019,15 +1984,13 @@ export default function App() {
         generateAITheme: generateCurrentSongTheme,
         themeGenerationSource,
         setThemeGenerationSource: handleThemeGenerationSourceChange,
-        voiceInputPauseSupported: isElectronWindow && typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('win'),
+        voiceInputPauseSupported: isElectronWindow && runsOnWindows(),
         canUseTransitionPerformance,
     }, lyricSegmentationActions);
     const commandPalette = useCommandPalette({
         isBlocked: isSettingsModalOpen
             || (currentView === 'home' && isSearchOpen)
-            || showLyricMatchModal
-            || showNaviLyricMatchModal
-            || showOnlineLyricMatchModal
+            || isLyricMatchOpen
             || Boolean(pendingUnavailableReplacement),
         context: commandPaletteContext,
     });
@@ -2174,7 +2137,7 @@ export default function App() {
         const wasArmed = automix.cancelBlendKeepingTail();
         if (keepSrc) setAudioSrc(keepSrc);
         // Put the display and the queue pointer back on the outgoing song (both key off currentSong).
-        setCurrentSong(exitingSong);
+        showSong(exitingSong);
         if (resume) {
             // Force PLAYING: the advance dropped the transport to IDLE and only the incoming deck
             // starting would have cleared it - but that deck is the one being discarded.
@@ -2202,8 +2165,8 @@ export default function App() {
         // The advance pointed this at the incoming track; playSong normally moves it, but this path
         // does not run playSong. Left stale, every callback gated on "is this still the current song"
         // (recovery, scrobble, the deck-playing handler) would answer for a track that isn't playing.
-        currentSongRef.current = getPlaybackSongKey(exitingSong);
-        playbackGenerationRef.current += 1;
+        // Put back, not started again: the outgoing song never stopped playing.
+        askForSong(exitingSong, { putBack: true });
         // One line per cancel, because everything this path does is invisible by design - it is the
         // absence of a song change. Without it a report of "I pressed something and it went wrong"
         // has nothing in the log to sit next to, which is exactly how the wrong-duration bug above
@@ -2321,6 +2284,7 @@ export default function App() {
         openVolume: () => commandPalette.invokeCommandById('playback-volume'),
         isLiked: commandPaletteContext.playback.isSongLiked,
         controlsDisabled: isNowPlayingControlDisabled,
+        isLyricsLoading,
     });
 
     const visualizerRendererModel = useVisualizerRendererModel({
@@ -2464,18 +2428,17 @@ export default function App() {
         canGenerateAITheme,
         theme,
         setTheme,
-        bgMode,
         handleBgModeChange,
         hasCustomTheme,
         themeSourceModel,
         handleResetTheme,
         toggleTransparentModeWithHandoff,
-        handleManualMatchOnline,
+        handleManualMatchOnline: openLyricMatch,
         handleUpdateLocalLyrics,
         handleChangeLyricsSource,
         handleImportOnlineLyrics,
         handleChangeOnlineLyricsSource,
-        handleMatchOnlineLyrics,
+        handleMatchOnlineLyrics: openLyricMatch,
         handleClearOnlineLyricsState,
         handleLyricTimelineOffsetChange,
         handleChangeReplayGainMode,
@@ -2497,16 +2460,12 @@ export default function App() {
         moveQueueSongToEnd,
         moveQueueSongToNext,
         saveCurrentQueueAsLocalPlaylist,
-        user,
         accountController,
-        cacheSize,
-        handleClearCache,
         handleSyncData: handleActiveProviderSyncData,
-        isSyncing: isActiveProviderSyncing,
+        isSyncing: isProviderSyncing,
         handleToggleDaylight: toggleDaylightMode,
         // Derived inside the hook, but these are the sources only App.tsx holds.
         isLocalSongLiked,
-        likedSongIds,
         shouldHidePlayerRightPanelButton,
         localSongs,
         localLibraryCatalog,
@@ -2574,13 +2533,9 @@ export default function App() {
         onToggleTransparentPlayerBackground: toggleTransparentModeWithHandoff,
     });
     const appDialogsModel = useAppDialogsModel({
-        showLyricMatchModal,
-        showNaviLyricMatchModal,
-        showOnlineLyricMatchModal,
+        isLyricMatchOpen,
         localSongs,
-        setShowLyricMatchModal,
-        setShowNaviLyricMatchModal,
-        setShowOnlineLyricMatchModal,
+        closeLyricMatch,
         handleLyricMatchComplete,
         handleLyricMatchPureMusicMarkChanged,
         handleNaviLyricMatchComplete,
@@ -2621,22 +2576,29 @@ export default function App() {
         isPanelOpen,
         keepsHomeForHandoff: wallHandoff.keepsHome,
     });
+    // Home is taken down for the wall. A collection's page that was opened from the wall is left
+    // with its cover flying back to the wall's tile (collectionOpenMorph): Home, which holds that
+    // page and the flight's overlay, then stays under the wall until the flight is over: shown as
+    // it was, for the wall fades in over it.
+    const holdsHomeForFlight = useMorphKeepsHost(currentView === 'lattice');
+    const isHomeSurfaceRevealed = shouldRevealHomeSurface || holdsHomeForFlight;
     useEffect(() => {
-        if (shouldKeepHomeMounted) {
+        if (shouldKeepHomeMounted || holdsHomeForFlight) {
             setIsHomeFullyHidden(false);
         } else {
             // Wait for the 300ms opacity transition to finish before applying display: none
             const timer = setTimeout(() => setIsHomeFullyHidden(true), 350);
             return () => clearTimeout(timer);
         }
-    }, [shouldKeepHomeMounted]);
+    }, [shouldKeepHomeMounted, holdsHomeForFlight]);
     // 资料库 stage 完全遮挡播放页时（bravais 实色档，stage 自己报告）也卸载 visualizer：首页淡入结束后才卸载，
     // 首页一被面板盖住 / 离开就立即重挂；设置弹窗盖着时首页仍显示在遮罩下面，不重挂。App 只认报告，不认识 suite。
     const libraryOccludesPlayer = useLibraryPlayerOcclusionStore(selectLibraryOccludesPlayer);
     const hasLibraryOcclusionSettled = useLibraryOcclusionSettled(shouldRevealHomeSurface && libraryOccludesPlayer);
     const shouldMountVisualizer = shouldMountPlayerVisualizer({
         currentView,
-        hasLatticeExited,
+        // Around a wall, the visualizer is taken down and put back by wallLayer.ts's rule.
+        hasLatticeExited: visualizerAroundWall.isUp,
         shouldRevealHomeSurface,
         libraryOccludesPlayer,
         hasLibraryOcclusionSettled,
@@ -2706,6 +2668,8 @@ export default function App() {
                 // The source plays, so a later TTL refresh of the same media is legitimate again.
                 lastAudioRecoverySourceRef.current = null;
                 setPlayerState(PlayerState.PLAYING);
+                // A preview clip is told of as it is heard, once per start of the song.
+                notePreviewPlaying(e.currentTarget.currentSrc, t);
                 // Last chance to refuse the blend, now that we know when this deck really started.
                 automix.handleActiveDeckPlaying();
             }}
@@ -2875,6 +2839,10 @@ export default function App() {
                     return;
                 }
 
+                // A song that was loading to play has failed: it stops showing as playing while the
+                // fallback, the address refresh or the skip below decide what comes next.
+                if (isActiveDeck) endLoadingToPlay();
+
                 if (handleTranscodeFallback(audioElement)) return;
 
                 if (!isActiveDeck) {
@@ -2891,7 +2859,6 @@ export default function App() {
                 if (currentSong && failedSrc && !isLocalPlaybackSong(currentSong) && !isNavidromePlaybackSong(currentSong) && !isStagePlaybackSong(currentSong)) {
                     void handleOnlineMediaFailure({
                         audioElement, failedSrc, song: currentSong, recoverOnlinePlaybackSource, skipAfterPlaybackFailure,
-                        playbackGeneration: playbackGenerationRef.current,
                         autoplay: (!audioElement.paused && !audioElement.ended) || playerState === PlayerState.PLAYING || shouldAutoPlay.current,
                     });
                     return;
@@ -2915,6 +2882,7 @@ export default function App() {
             isMainWindowClickThroughEnabled={isMainWindowClickThroughEnabled}
             showMainWindowClickThroughToggle={isMainWindowClickThroughEnabled ? isClickThroughToggleHotspotActive : isTitlebarRevealed}
             isDaylight={isDaylight}
+            theme={theme}
             onToggleMainWindowClickThrough={() => {
                 const nextEnabled = !isMainWindowClickThroughEnabled;
                 if (!nextEnabled) {
@@ -2939,8 +2907,8 @@ export default function App() {
                 data-wall-handoff-layer="home"
                 style={{
                     pointerEvents: shouldShowHomeSurface && !wallHandoff.active ? 'auto' : 'none',
-                    visibility: shouldRevealHomeSurface ? 'visible' : 'hidden',
-                    transition: shouldRevealHomeSurface
+                    visibility: isHomeSurfaceRevealed ? 'visible' : 'hidden',
+                    transition: isHomeSurfaceRevealed
                         ? 'visibility 0s linear 0s'
                         : 'visibility 0s linear 0.25s',
                     display: isHomeFullyHidden && !wallHandoff.keepsHome ? 'none' : 'block',
@@ -2949,11 +2917,14 @@ export default function App() {
                 <motion.div
                     className="absolute inset-0"
                     initial={false}
-                    animate={{ opacity: shouldRevealHomeSurface ? 1 : 0 }}
+                    animate={{ opacity: isHomeSurfaceRevealed ? 1 : 0 }}
                     // 交接期间不跑整层淡入淡出：进 Lattice 时首页墙保持完全显示，回来时下面的墙要立刻是实的。
-                    transition={{ duration: wallHandoff.active ? 0 : 0.25, ease: 'easeInOut' }}
+                    // Come up from the wall (it has not left the screen yet), Home is shown at
+                    // once too: the wall is over it, and is what fades. A fade of both at a time
+                    // lets what is under them through.
+                    transition={{ duration: wallHandoff.active || !visualizerAroundWall.hasWallLeft ? 0 : 0.25, ease: 'easeInOut' }}
                 >
-                    {currentView === 'home' || currentView === 'player' || wallHandoff.keepsHome ? (
+                    {currentView === 'home' || currentView === 'player' || wallHandoff.keepsHome || holdsHomeForFlight ? (
                         <Home
                             model={homeModel}
                             isHomeFullyHidden={isHomeFullyHidden && !wallHandoff.keepsHome}
@@ -2965,7 +2936,7 @@ export default function App() {
 
             <AnimatePresence
                 initial={false}
-                onExitComplete={() => setHasLatticeExited(useAppViewStore.getState().view !== 'lattice')}
+                onExitComplete={wallExitCompleted}
             >
                 {(currentView === 'lattice' || wallHandoff.keepsLattice) && (
                     <motion.div
@@ -2976,8 +2947,12 @@ export default function App() {
                             ? { opacity: wallHandoff.latticeOpacity.initial }
                             : false}
                         animate={{ opacity: wallHandoff.latticeOpacity?.animate ?? 1 }}
-                        exit={{ opacity: 0 }}
                         // 交接期间：淡入淡出交叉用它自己的时长；翻牌交接时 Lattice 在翻完那一刻卸载，不再淡出。
+                        // Otherwise how long the layer takes to leave depends on what the wall is left
+                        // for, which is known when it leaves and not before (wallLayer.ts).
+                        variants={WALL_LAYER}
+                        custom={reduceLatticeMotion}
+                        exit={wallHandoff.active ? { opacity: 0 } : 'gone'}
                         transition={{
                             duration: wallHandoff.latticeOpacity
                                 ? wallHandoff.fadeSeconds
@@ -3008,6 +2983,13 @@ export default function App() {
                                 }}
                                 onTogglePlayback={togglePlay}
                                 onSeek={seekMainAudio}
+                                // For a wall opened from the explore tab: the page that tab shows, named as
+                                // Grid3D names it, and a card's page opened as the tab opens it.
+                                exploreProviderId={activeProviderId}
+                                exploreAccountId={String(homeModel.surfaceProps.user?.id ?? '')}
+                                onOpenCollection={collection => openHomeCollection(
+                                    createOnlineGridViewCollection(collection, activeProviderId),
+                                )}
                             />
                         </Suspense>
                     </motion.div>
@@ -3019,8 +3001,10 @@ export default function App() {
             {/* 指针隐藏跟着控制栏的空闲时钟走，不另起一套计时：控件收起时页面上已经没有可点的东西，
                 所以指针一起消失；任何鼠标移动都会同时唤回两者。class 只挂在这个视觉层容器上，
                 弹窗、命令面板、浮动控件和标题栏按钮都是它的兄弟节点，不在作用域内。 */}
+            {/* The visualizer is away while the wall covers it. When it is taken down and put
+                back, and when it comes up in a fade of this layer, is wallLayer.ts's. */}
             <div
-                className={`absolute inset-0 z-0${shouldHidePlayerCursor ? ' cursor-auto-hidden' : ''}`}
+                className={`absolute inset-0 z-0${shouldHidePlayerCursor ? ' cursor-auto-hidden' : ''}${visualizerAroundWall.fadesIn ? ' visualizer-comes-up' : ''}`}
                 data-testid="player-visual-surface"
                 // 歌词扁平化开关的作用域：CSS 只在这一层里关发光与渐变，弹窗、命令面板这些
                 // 兄弟节点不受影响（见 index.css 的 [data-lyric-flat] 段）。
@@ -3038,7 +3022,7 @@ export default function App() {
                 onPointerCancel={handleSwipePointerCancel}
             >
                 <PlayerBottomBarLayoutContext.Provider value={currentView === 'player'}>
-                    {shouldMountVisualizer && <VisualizerRenderer {...visualizerRendererModel} />}
+                    {shouldMountVisualizer && <VisualizerRenderer {...visualizerRendererModel} animateStyleSwitch />}
                 </PlayerBottomBarLayoutContext.Provider>
             </div>
 
@@ -3056,7 +3040,7 @@ export default function App() {
                 slot="app.overlay"
                 theme={theme}
                 isDaylight={isDaylight}
-                paused={playerState !== PlayerState.PLAYING}
+                paused={displayPlayerState !== PlayerState.PLAYING}
                 className="fixed inset-0 pointer-events-none z-[1000]"
             />
 
@@ -3082,7 +3066,7 @@ export default function App() {
                 animejs 不进 bootstrap chunk。 */}
             <PonderHost theme={theme} isDaylight={isDaylight} />
 
-            {currentView === 'player' && !showLyricMatchModal && (
+            {currentView === 'player' && !(isLyricMatchOpen && isLocalPlaybackSong(currentSong)) && (
                 <PlayerPanel model={playerPanelModel} />
             )}
 
@@ -3097,6 +3081,7 @@ export default function App() {
                 onAddCurrentSongToLocalPlaylist={addCurrentSongToLocalPlaylist}
                 onCreateCurrentLocalPlaylist={createCurrentLocalPlaylist}
                 onAddCurrentSongToOnlinePlaylist={addCurrentSongToOnlinePlaylist}
+                onCreateCurrentOnlinePlaylist={createCurrentOnlinePlaylist}
                 onAddCurrentSongToNavidromePlaylist={addCurrentSongToNavidromePlaylist}
                 onCreateCurrentNavidromePlaylist={createCurrentNavidromePlaylist}
             />
@@ -3140,10 +3125,12 @@ export default function App() {
                 isDaylight={isDaylight}
                 onClose={startupExperience.closeFreeSoftwareNotice}
             />
+            {/* 登录窗口挂在最外层：每个资料库界面（网格、Bravais、文本）都用 openLoginWindow 打开同一个窗口。 */}
+            <LoginHost account={accountController} />
+            {signOutDialog}
             <ReleaseNotesDialog
                 isOpen={startupExperience.isReleaseNotesOpen}
                 isDaylight={isDaylight}
-                theme={theme}
                 onClose={startupExperience.closeReleaseNotes}
             />
             <UserGuideModal theme={theme} />

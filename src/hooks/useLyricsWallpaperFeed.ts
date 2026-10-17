@@ -3,7 +3,7 @@ import { isCapacitorAndroid } from '../platform/runtime';
 import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, setWallpaperFloatingPreview, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
 import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
 import { flattenTuning, tuningFieldFor, withGlobalSettings } from '../platform/wallpaperVisualizerTuning';
-import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
+import { useVisualizerSettingsStore, type VisualizerSettingsState } from '../stores/useVisualizerSettingsStore';
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';
 import { useThemeSettingsStore } from '../stores/useThemeSettingsStore';
 import { useMotionSettingsStore } from '../stores/useMotionSettingsStore';
@@ -290,8 +290,12 @@ export const useLyricsWallpaperFeed = ({
     // 实验台里当前模式那份配置。取原始引用交给 useMemo 摊平，
     // 直接在 selector 里摊平会让 zustand 每次都拿到新对象而无限重渲染。
     const tuningField = tuningFieldFor(wallpaperVisualizer);
+    // tuning 表的字段名是运行期算出来的，state 上没有对应的索引签名，
+    // 所以这里过一次 unknown 再取值（不改动 store 的类型定义）。
     const rawTuning = useVisualizerSettingsStore(
-        tuningField ? (state: Record<string, unknown>) => state[tuningField] : () => null);
+        tuningField
+            ? (state: VisualizerSettingsState) => (state as unknown as Record<string, unknown>)[tuningField]
+            : () => null);
     // 背景那几个全局开关也一起跟随（不透明度 / 暗角 / 几何背景）。
     const backgroundOpacity = useVisualizerSettingsStore(state => state.backgroundOpacity);
     const wallpaperOverlayOpacity = useVisualizerSettingsStore(state => state.wallpaperOverlayOpacity);

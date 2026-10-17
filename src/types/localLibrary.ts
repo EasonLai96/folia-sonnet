@@ -1,3 +1,5 @@
+import type { PlatformLyricSource } from '../utils/lyrics/lyricSources';
+
 // src/types/localLibrary.ts
 // Defines stable local-library identities independently from file paths and online source ids.
 
@@ -17,13 +19,11 @@ export interface LocalLibraryEntity {
 
 export type LocalLibraryAssignmentOrigin = 'import' | 'auto-match' | 'manual-match' | 'manual' | 'split';
 
-/**
- * 'manual' 是用户在「管理歌曲」里直接改的名字（安卓上改不了磁盘文件名，改的就是它）。
- * 它不是在线匹配来的 —— 判断「歌手 / 专辑该看导入快照还是在线元数据」时和 'import' 一类，
- * 一律走 utils/localSongMetadata 的 usesImportedSongMetadata，别在这里手写 === 'import'。
- */
 export type LocalSongTitleOrigin = 'import' | 'auto-match' | 'manual-match' | 'manual';
-export type LocalSongMetadataSource = 'netease' | 'qq' | 'kugou';
+// Every lyric source that is a platform: a lyric matched from one brings that platform's metadata
+// along. The metadata dialog searches NetEase, QQ and KuGou only; `spotify` comes only with lyrics
+// matched from Spotify.
+export type LocalSongMetadataSource = PlatformLyricSource;
 
 export interface LocalSongImportedMetadata {
   title: string;

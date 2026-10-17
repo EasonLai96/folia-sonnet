@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, Copy, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { QQ_COMMUNITY_GROUP_NUMBER } from './qqCommunity';
-import { copyTextToClipboard } from '../../utils/clipboard';
+import { copyText } from '../../utils/system/clipboard';
 
 // src/components/shared/JoinCommunityButton.tsx
 // 帮助页的「加入社区」：一颗胶囊，点开向上弹出去处——目前只有 QQ 自助交流群（复制群号）。
@@ -47,7 +47,7 @@ export const JoinCommunityButton: React.FC = () => {
     // QQ 群没有能直接打开的入群链接：复制群号，菜单留着让这一项显示「群号已复制」。
     const copyQqGroup = async () => {
         try {
-            await copyTextToClipboard(QQ_COMMUNITY_GROUP_NUMBER);
+            await copyText(QQ_COMMUNITY_GROUP_NUMBER);
             setQqCopied(true);
         } catch (error) {
             console.error('Failed to copy the QQ group number:', error);

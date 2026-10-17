@@ -1,14 +1,15 @@
 import type { TFunction } from 'i18next';
 import type { UnifiedSong } from '../../types';
-import type { LocalGridViewCollectionDescriptor } from '../core/contracts/collection';
-import type { LibraryMutationPort, LibraryPlaylistOption } from '../core/contracts/ports';
-import { deleteFolderSongs, deleteSongsByIds, resyncAllFolders, resyncFolder } from '../../services/localMusicService';
+import type { LocalGridViewCollectionDescriptor } from '../core/collection/collection.contract';
+import type { LibraryMutationPort, LibraryPlaylistOption } from '../core/shared/ports.contract';
+import { deleteFolderSongs, resyncAllFolders, resyncFolder } from '../../services/localMusicService';
 import { deleteLocalPlaylist, removeSongsFromLocalPlaylist, updateLocalPlaylist } from '../../services/localPlaylistService';
 import { downloadLocalPlaylistM3u8 } from '../../services/localPlaylistFileService';
 import { getNavidromeConfig, navidromeApi } from '../../services/navidromeService';
 import { isLocalGridViewCollection } from '../../components/app/home/gridViewCollectionAdapters';
 import type { HomeSurfaceProps } from '../../components/app/home/homeSurfaceTypes';
 import { FAVORITE_ALBUMS_CHANGED_EVENT } from './useLibraryHomeResources';
+import { useExploreFeedStore } from '../../stores/useExploreFeedStore';
 
 // src/library/app/createLibraryMutationPort.ts
 // 把首页 surface 上的来源动作装配成 Library Core 的变更端口：本地曲库与 Navidrome 的读写、
@@ -91,11 +92,6 @@ export const createLibraryMutationPort = ({
         removePlaylistSongs: async (playlistId, songIds) => {
             await removeSongsFromLocalPlaylist(playlistId, songIds);
         },
-        removeLocalSongs: async (songIds) => {
-            // 曲库里删掉（安卓上连导入时复制的音频一起删）；服务自己会通知曲库更新，这里再刷一次宿主的状态。
-            await deleteSongsByIds(songIds);
-            await surface.onRefreshLocalSongs();
-        },
     },
     navidrome: {
         availablePlaylists: navidromePlaylists,
@@ -151,4 +147,6 @@ export const createLibraryMutationPort = ({
     notifyFavoriteAlbumsChanged: () => {
         window.dispatchEvent(new CustomEvent(FAVORITE_ALBUMS_CHANGED_EVENT));
     },
+    // The explore page stops showing a collection taken out of the library.
+    onCollectionSaved: (collection, saved) => useExploreFeedStore.getState().noteSaved(collection, saved),
 });

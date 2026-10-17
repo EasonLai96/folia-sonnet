@@ -1,7 +1,7 @@
 import i18n from '@/i18n/config';
 import type { PonderSceneScript, PonderTargetDefinition } from '@/types/ponder';
 import type { FoliumLabel } from './contract';
-import { resolveFoliumLabel } from './params';
+import { resolveFoliumLabel } from '../params/params';
 
 // src/mods/folium/ponderText.ts
 // Text in a mod's Ponder target. The host renders every Ponder string through t(key), and a mod has
