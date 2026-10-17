@@ -41,6 +41,8 @@ export type LoginScene =
     | 'browser'         // 等浏览器里确认
     | 'scanned'
     | 'reading'         // 确认了，正在读账号
+    /** 密码登录（飞牛这类自建服务没有二维码）：等用的人填地址 / 用户名 / 密码。 */
+    | 'password'
     | 'failed';
 
 /**
@@ -51,7 +53,7 @@ export const accountView = (status: RowStatus | null, hasUser: boolean): 'user' 
     status !== 'signed-in' ? 'gone' : hasUser ? 'user' : 'nameless'
 );
 
-export const loginScene = ({ lead, phase, inBrowser, failed }: {
+export const loginScene = ({ lead, phase, inBrowser, failed, password }: {
     /** 选中的那一行通向什么；null 是没有选。 */
     lead: RowLead | null;
     /** 这一行的登录走到哪一步；还没有登录会话（正在开始）是 null。 */
@@ -59,6 +61,12 @@ export const loginScene = ({ lead, phase, inBrowser, failed }: {
     inBrowser: boolean;
     /** 登录交出了一种失败。「浏览器没有打开」时登录还在等，也算。 */
     failed: boolean;
+    /**
+     * 这一次登录是密码登录（快照里有 `passwordForm`）。密码登录提交中 phase 会变成 'loading'
+     * （账户 controller 借它表示「界面转圈」），但那一幅仍然是表单 —— 少了这一个判断，飞牛点下
+     * 「登录」之后表单会当场消失、退回「正在取二维码」那个转圈，再也回不来。
+     */
+    password?: boolean;
 }): LoginScene => {
     if (lead === null) return 'none';
     if (lead === 'account' || lead === 'accountless') return lead;
@@ -69,6 +77,9 @@ export const loginScene = ({ lead, phase, inBrowser, failed }: {
         case 'waiting': return inBrowser ? 'browser' : 'code';
         case 'scanned': return 'scanned';
         case 'confirmed': return 'reading';
+        case 'password': return 'password';
+        // 密码登录提交中：还是表单那一幅，转圈由表单自己画。
+        case 'loading': return password ? 'password' : 'preparing';
         default: return 'preparing';
     }
 };
@@ -82,6 +93,8 @@ export const sceneHeadline = (scene: LoginScene, inBrowser: boolean): string => 
         case 'none': return 'login.choosePlatform';
         case 'account': case 'accountless': return 'name';
         case 'methods': return 'home.loginMethodTitle';
+        // 密码登录用平台自己的登录标题（飞牛是「登录飞牛音乐」）。
+        case 'password': return 'title';
         case 'preparing': return inBrowser ? 'home.loginBrowserLoading' : 'title';
         case 'browser': return 'home.loginCodeWaiting';
         case 'scanned': return 'home.qrScanned';

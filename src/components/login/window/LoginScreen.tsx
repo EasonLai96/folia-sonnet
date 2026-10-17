@@ -4,7 +4,7 @@ import type { LibraryLoginSessionSnapshot } from '../../../library/core/account/
 import { resolveLoginSessionReportRoute, translateLoginSelfCheck } from '../../../library/core/account/useLibraryAccount';
 import { LOGIN_REPORT_ELSEWHERE_COPY, retryOpensAt } from '../../../library/core/account/accountRules';
 import type { LoginFailure } from '../../../types/loginFailure';
-import type { OnlineProviderId, ProviderAccountSummary } from '../../../types/onlineMusic';
+import type { OnlineProviderId, PasswordLoginCredentials, ProviderAccountSummary } from '../../../types/onlineMusic';
 import { useKitReducedMotion } from '../../modal/settings/kit/motion';
 import { Unfold } from '../../modal/settings/kit/Reveal';
 import { LoginDoneFlight, LoginDoneFlood, LoginDoneTile, loginDoneColours, useLoginDone } from '../done/LoginDone';
@@ -15,6 +15,7 @@ import { rowStatus } from '../platformRows';
 import { LOGIN_CASE_TEXTS } from './loginCaseTexts';
 import LoginMessage, { LoginDetails, type MessageAction } from './LoginMessage';
 import LoginTile from './LoginTile';
+import PasswordLoginForm from './PasswordLoginForm';
 import { accountView, failureNoteKey, failureQuote, loginScene, sceneHeadline, stepMarks, type RowLead } from './loginView';
 import LoginWindow from './LoginWindow';
 import PlatformColumn from './PlatformColumn';
@@ -45,6 +46,8 @@ export type LoginScreenProps = {
     onRestartService: () => void;
     onSwitch: () => void;
     onSignOut: () => void;
+    /** 提交一次密码登录（飞牛这类没有二维码的自建服务）。 */
+    onSubmitPassword: (credentials: PasswordLoginCredentials) => void;
     /** 这一次登录的诊断报告（生成不了是空串）。 */
     buildReport: () => Promise<string>;
     /** 按下去打开窗口的那个东西在哪：窗口从那一边出来。 */
@@ -73,7 +76,7 @@ const useReached = (at: number): boolean => {
 };
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
-    isOpen, onClose, rows, activeProviderId, chosen, login, onChoose, onStart, onSelectMethod, onReopenBrowser, onRestartService, onSwitch, onSignOut,
+    isOpen, onClose, rows, activeProviderId, chosen, login, onChoose, onStart, onSelectMethod, onReopenBrowser, onRestartService, onSwitch, onSignOut, onSubmitPassword,
     buildReport, origin, done = false, onDoneLeave = nothing, onDoneEnd = nothing,
 }) => {
     const { t } = useTranslation();
@@ -84,7 +87,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     const inBrowser = login?.inBrowser ?? false;
     const service = login?.localService ?? null;
     const failure: LoginFailure | null = providerId ? login?.failure ?? null : null;
-    const scene = loginScene({ lead: chosen?.lead ?? null, phase: login?.phase ?? null, inBrowser, failed: Boolean(failure) });
+    // 密码登录（飞牛）没有二维码：快照里的 passwordForm 非空就是它。提交中 phase 会变成 'loading'，
+    // 这一幅仍然是表单，所以要把 password 一并告诉 loginScene，否则表单当场消失、退回转圈。
+    const passwordLogin = login?.passwordForm ?? null;
+    const scene = loginScene({
+        lead: chosen?.lead ?? null,
+        phase: login?.phase ?? null,
+        inBrowser,
+        failed: Boolean(failure),
+        password: passwordLogin !== null,
+    });
+    const submittingPassword = passwordLogin !== null && login?.phase === 'loading';
     const texts = login?.texts ?? null;
     const retry = onStart;
     const retryLabel = t(inBrowser ? 'home.loginBrowserRetry' : 'home.retryQr');
@@ -224,21 +237,34 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 />
             )}
             message={(
-                <LoginMessage
-                    sceneKey={sceneKey}
-                    headline={headline}
-                    note={note}
-                    quote={quote}
-                    methods={login && login.methods.length > 0 && chosen?.lead === 'sign-in' ? {
-                        options: login.methods.map(method => ({ value: method.id, label: t(method.labelKey), icon: loginMethodIcon(method.iconKey) })),
-                        value: login.selectedMethodId,
-                        onChange: onSelectMethod,
-                    } : undefined}
-                    actions={actions}
-                    waitFor={waitFor}
-                    details={details ? { open: detailsOpen, onToggle: () => setDetailsOpen(open => !open) } : undefined}
-                    steps={stepMarks(scene, inBrowser)}
-                />
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
+                    <LoginMessage
+                        sceneKey={sceneKey}
+                        headline={headline}
+                        note={note}
+                        quote={quote}
+                        methods={login && login.methods.length > 0 && chosen?.lead === 'sign-in' ? {
+                            options: login.methods.map(method => ({ value: method.id, label: t(method.labelKey), icon: loginMethodIcon(method.iconKey) })),
+                            value: login.selectedMethodId,
+                            onChange: onSelectMethod,
+                        } : undefined}
+                        actions={actions}
+                        waitFor={waitFor}
+                        details={details ? { open: detailsOpen, onToggle: () => setDetailsOpen(open => !open) } : undefined}
+                        steps={stepMarks(scene, inBrowser)}
+                    />
+                    {scene === 'password' && passwordLogin && (
+                        <PasswordLoginForm
+                            // 换了一个平台、或者重开一次登录（会话代次变了），就是另一张空表。
+                            key={`${providerId}:${login?.id ?? 0}`}
+                            needsServerUrl={passwordLogin.needsServerUrl}
+                            serverUrl={passwordLogin.serverUrl}
+                            error={passwordLogin.error}
+                            busy={submittingPassword}
+                            onSubmit={onSubmitPassword}
+                        />
+                    )}
+                </div>
             )}
             below={details ? <Unfold open={detailsOpen}>{details}</Unfold> : undefined}
         />

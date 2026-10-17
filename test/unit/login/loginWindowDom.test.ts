@@ -79,7 +79,7 @@ describe('the sign-in window, drawn', () => {
                 failure: null, selfCheck: null, passwordForm: null, backend: { failed: false, detail: null, restarting: false, canRestart: false }, copy: { title: { key: 'home.loginTitle' }, note: { key: 'home.loginNote' }, status: null }, localService: { available: false, failed: false, error: null, restarting: false }, texts: null,
             },
             onChoose: () => { }, onStart: () => { }, onSelectMethod: () => { }, onReopenBrowser: () => { }, onRestartService: () => { },
-            onSwitch: () => { }, onSignOut: () => { }, buildReport: async () => '',
+            onSwitch: () => { }, onSignOut: () => { }, onSubmitPassword: () => { }, buildReport: async () => '',
         } satisfies LoginScreenProps);
         draw(screen(true, 'scanned'));
         expect(seen.done).toEqual({ playing: true, providerId: 'a' });

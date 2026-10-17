@@ -117,6 +117,8 @@ const LoginHost: React.FC<LoginHostProps> = ({ account }) => {
             onRestartService={() => void account.restartLocalService()}
             onSwitch={host.switchToChosen}
             onSignOut={host.signOutChosen}
+            // 密码登录（飞牛这类自建服务）：提交交给 controller，失败原因回到快照的 passwordForm.error。
+            onSubmitPassword={credentials => { void account.submitPasswordLogin(credentials); }}
             buildReport={async () => {
                 const result = await account.buildLoginDiagnosticReport();
                 return result.status === 'ok' ? result.report : '';

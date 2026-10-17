@@ -178,6 +178,16 @@ describe('the scene on the right of the column', () => {
         expect(scene('sign-in', 'choosing-method', { failed: true })).toBe('failed');
     });
 
+    // 飞牛这类自建服务没有二维码：那一幅是地址 / 用户名 / 密码的表单。提交中 controller 把
+    // phase 借成 'loading'（要界面转圈），那一幅仍然是表单 —— 漏了 password 就会退回「正在取二维码」，
+    // 于是只看见一个转圈的弧、一个输入框都没有。
+    it('shows the password form for a service that has no code, also while a submit is on its way', () => {
+        expect(scene('sign-in', 'password', { password: true })).toBe('password');
+        expect(scene('sign-in', 'loading', { password: true })).toBe('password');
+        // 不是密码登录时 'loading' 照旧是「正在取二维码」。
+        expect(scene('sign-in', 'loading')).toBe('preparing');
+    });
+
     // Which sentence stands as the headline. Until the window was rebuilt the sign-in hook made
     // these (its `statusText`); the rule that a sign-in in the browser has its own sentences is kept here.
     it('gives each scene its headline: a sentence, the platform\'s own title, a name or the case', () => {
