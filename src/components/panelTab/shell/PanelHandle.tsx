@@ -326,6 +326,14 @@ const PanelHandle: React.FC<PanelHandleProps> = ({
                     onUpdate={invalidateLayout}
                     style={{ bottom: bottomBarBottomPx }}
                     className="pointer-events-auto fixed right-0 z-[60] pr-4 md:pr-8 group w-20 flex justify-end"
+                    /*
+                     * 边到边（targetSdk 36）之后，系统导航栏那条是**画在页面底下的**：
+                     * bottomBarBottomPx 只是「32 + 用户抬升」的像素基线，从不算安全区，
+                     * 于是这个手柄落在导航栏里、手指按不到 —— 展开的面板同理（PanelShell
+                     * 用的是同一个基线）。这里让开 bottom / right，横屏挖孔在右时也一并让掉。
+                     */
+                    data-folia-safe-bottom="shift"
+                    data-folia-safe-right="shift"
                     onMouseEnter={handleToggleButtonMouseEnter}
                     onMouseLeave={handleToggleButtonMouseLeave}
                     onPointerDown={handleToggleHotspotPointerDown}

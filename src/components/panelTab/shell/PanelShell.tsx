@@ -153,6 +153,9 @@ const PanelShell: React.FC<PanelShellProps> = ({ isOpen, handle, ...surface }) =
             style={{ bottom: bottomBarBottomPx }}
             onUpdate={invalidateLayout}
             className="absolute right-0 z-[60] flex flex-col items-end pointer-events-none"
+            // 与手柄同一条基线：同样要从系统导航栏里让出来（见 PanelHandle 的注释）。
+            data-folia-safe-bottom="shift"
+            data-folia-safe-right="shift"
             onClick={(e) => e.stopPropagation()}
         >
             <div className="pr-4 md:pr-8">
