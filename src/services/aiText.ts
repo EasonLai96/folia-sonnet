@@ -2,6 +2,8 @@ import { DualTheme } from "../types";
 import { applyStoredAnimationIntensityToDualTheme } from "./themePreferences";
 import { sanitizeDualTheme } from "./themeSanitizer";
 import { getWebAiProvider, type WebAiProvider } from "./runtimeConfig";
+import { isCapacitorAndroid } from "../platform/runtime";
+import { generateThemeWithConfiguredAi, isLocalAiThemeAvailable } from "./aiThemeClient";
 
 // src/services/aiText.ts
 
@@ -63,6 +65,17 @@ export const generateThemeFromLyrics = async (
     if ((window as any).electron && typeof (window as any).electron.generateTheme === 'function') {
       const dualTheme = await (window as any).electron.generateTheme(lyricsText, options);
       return sanitizeDualTheme(dualTheme);
+    }
+
+    // 安卓（Capacitor）没有同源的 /api 路由 —— 同源就是 WebView 自己的那个服务器，
+    // 认不出的路径一律回 index.html，于是 `response.json()` 抛
+    // "Unexpected token '<', "<!DOCTYPE " ..."。看着像 AI 挂了，其实请求压根没出去。
+    // App 里走第三条路：用户填的 Key，经原生 OkHttp 桥直连服务商（services/aiThemeClient.ts）。
+    if (isCapacitorAndroid()) {
+      // 还没填 Key 就别发一次注定 403 的请求：抛一个 isMissingAiApiKeyError 认得出的错，
+      // 界面才能提示「去设置里填 Key」，而不是报一个看不懂的 HTTP 403。
+      if (!isLocalAiThemeAvailable()) throw new Error(WEB_ROUTE_WITHOUT_KEY);
+      return generateThemeWithConfiguredAi(lyricsText, options);
     }
 
     const response = await fetch(themeRoute(getWebAiProvider()), {
@@ -129,9 +142,16 @@ const getSegmentationBridge = (): SegmentationBridge | null => {
 };
 
 /** Whether an AI segmentation request can be made at all from this build. */
-export const isLyricSegmentationAiAvailable = (): boolean => (
-  typeof window !== 'undefined' && (Boolean(getSegmentationBridge()) || typeof fetch === 'function')
-);
+export const isLyricSegmentationAiAvailable = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  // 桌面端走 IPC，由主进程拿着用户设置里的模型去问。
+  if (getSegmentationBridge()) return true;
+  // 安卓（Capacitor）没有同源的 /api/segment-lyrics：那个请求会拿到 WebView 自己的
+  // index.html，`response.json()` 悄悄解析成 {}，于是「AI 分词」永远静默失败 ——
+  // 界面上看不出它跑过，也看不出它没跑成。这里直接说不可用，让调用方走规则分词。
+  if (isCapacitorAndroid()) return false;
+  return typeof fetch === 'function';
+};
 
 /**
  * One segmentation request: the desktop build goes through IPC so it can use the model the user
