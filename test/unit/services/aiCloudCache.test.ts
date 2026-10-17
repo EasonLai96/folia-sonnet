@@ -1,0 +1,213 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// test/unit/services/aiCloudCache.test.ts
+// 精确键没命中时，还能不能靠**歌名 + 内容合规**把库里那条答案捞出来。
+//
+// 键是「歌词 + policy」的 MD5，于是同一首歌换个版本的歌词就是另一个键 —— 翻唱、现场、
+// 平台之间同一首歌的 LRC 本来就不一样。只赌精确键的话，「库里明明躺着答案却取不到」
+// 是常态，这也是「缓存命中率还是有问题」的来处。
+//
+// 第二次机会**不看哈希，看内容**：候选条目标的高亮词都在你手上这段歌词里，那条答案
+// 就是照着这首歌做的。判定留在本机（服务端只回高亮词），歌词正文因此不用上传。
+
+const { handlers } = vi.hoisted(() => ({
+  handlers: {
+    fetch: null as null | ((url: string, init?: RequestInit) => Promise<Response>),
+  },
+}));
+
+vi.mock('@/services/foliaCloud', () => ({
+  isFoliaCloudCacheEnabled: () => true,
+  resolveCloudApiUrl: (path: string) => `https://cloud.test/api/${path}`,
+  DEFAULT_CLOUD_BASE_URL: 'https://cloud.test',
+}));
+
+vi.mock('@/services/aiNativeFetch', () => ({
+  createAiFetch: () => (input: RequestInfo | URL, init?: RequestInit) =>
+    (handlers.fetch as NonNullable<typeof handlers.fetch>)(String(input), init),
+  fetchAiCacheViaNative: async () => null,
+}));
+
+vi.mock('@/services/aiCompletion', () => ({
+  describeAiTarget: () => null,
+}));
+
+const { highlightWordsPresent, pullAiCloudCache, withAiCloudCache } = await import('@/services/aiCloudCache');
+
+const KEY_A = 'a'.repeat(32);
+const KEY_B = 'b'.repeat(32);
+/*
+ * 每个用例用自己的键：`missCache` 会把「刚问过没有」记 5 分钟，共用一把键的话后面
+ * 的用例会被 `wasRecentMiss` 当场挡掉，看起来通过其实根本没走到兜底逻辑。
+ */
+const KEY_C = 'c'.repeat(32);
+const KEY_D = 'd'.repeat(32);
+const KEY_E = 'e'.repeat(32);
+const KEY_F = 'f'.repeat(32);
+const KEY_G = 'a1b2c3d4'.repeat(4);
+
+const payload = {
+  theme: {
+    light: { backgroundColor: '#111111', primaryColor: '#222222', wordColors: [{ word: '小黄花', color: '#ffcc00' }] },
+    dark: { backgroundColor: '#000000', primaryColor: '#eeeeee', wordColors: [{ word: '小黄花', color: '#ffcc00' }] },
+  },
+  decision: { mode: 'flow', reason: 'r', params: {} },
+};
+
+const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 404, json: async () => body }) as unknown as Response;
+
+beforeEach(() => {
+  handlers.fetch = null;
+});
+
+describe('highlightWordsPresent', () => {
+  const lyric = '故事的小黄花\n童年的荡秋千';
+
+  it('is satisfied when every marked word is in the lyric', () => {
+    expect(highlightWordsPresent(['小黄花', '荡秋千'], lyric)).toBe(true);
+  });
+
+  /* LRC 里多一个空格不该判成「这不是同一个词」。 */
+  it('ignores whitespace and case', () => {
+    expect(highlightWordsPresent(['小 黄 花'], '故事的小黄花')).toBe(true);
+    expect(highlightWordsPresent(['Rainbow'], 'some RAINBOW here')).toBe(true);
+  });
+
+  it('is not satisfied when a word is missing', () => {
+    expect(highlightWordsPresent(['小黄花', '根本不在这首歌里'], lyric)).toBe(false);
+  });
+
+  /*
+   * 一个高亮词都没有时不算合规 —— 反过来实现等于「随便一条答案都能算命中」，
+   * 会把别人给别的歌做的主题套到你这首上。
+   */
+  it('needs at least one word to go on', () => {
+    expect(highlightWordsPresent([], lyric)).toBe(false);
+    expect(highlightWordsPresent(['小黄花'], '')).toBe(false);
+  });
+});
+
+describe('pullAiCloudCache 的第二次机会', () => {
+  it('takes a title match whose highlight words are all in the lyric', async () => {
+    const seen: string[] = [];
+    handlers.fetch = async (url) => {
+      seen.push(url);
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_B, {
+      songTitle: '晴天',
+      lyricText: '故事的小黄花\n从出生那年就飘着',
+    });
+
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.matched).toBe('words');
+      expect(result.sourceKey).toBe(KEY_A);
+      expect(result.payload).toEqual(payload);
+    }
+    /* 顺带钉住顺序：先精确，再 resolve，最后按候选的键取回。 */
+    expect(seen[0]).toContain(KEY_B);
+    expect(seen[1]).toContain('/ai-cache/resolve');
+    expect(seen[2]).toContain(KEY_A);
+  });
+
+  /* 合规是硬门槛：词对不上就是另一首歌的答案，宁可不命中。 */
+  it('refuses a title match whose words are not in this lyric', async () => {
+    /*
+     * 候选那一键**是给了内容的** —— 这两条要验的是合规判定本身，不是「接口没给」。
+     * 少了 `url.includes(KEY_A)` 这一支，测试会因为别的原因通过，把实现改坏也不红。
+     */
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_C, {
+      songTitle: '晴天',
+      lyricText: '完全不同的一首歌',
+    });
+
+    expect(result.status).toBe('miss');
+  });
+
+  /*
+   * 没有高亮词的候选一律跳过 —— 否则一条「什么都没标」的条目会命中所有歌，
+   * 命中率是上去了，主题却是乱套的。
+   */
+  it('skips candidates that marked nothing', async () => {
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: [] }] });
+      }
+      /* 内容照样给：只有「一个词都没标」该让这条候选出局。 */
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    expect(await pullAiCloudCache('stage', KEY_D, { songTitle: '晴天', lyricText: '故事的小黄花' })).toEqual({ status: 'miss' });
+  });
+
+  /* 没歌名或没歌词就无从判定，老老实实按没命中走。 */
+  it('gives up quietly when there is nothing to judge against', async () => {
+    handlers.fetch = async () => json({ hit: false }, false);
+
+    expect(await pullAiCloudCache('stage', KEY_E, { songTitle: '', lyricText: '故事的小黄花' })).toEqual({ status: 'miss' });
+  });
+
+  it('answers from the exact key without ever asking for candidates', async () => {
+    const seen: string[] = [];
+    handlers.fetch = async (url) => {
+      seen.push(url);
+      return json({ hit: true, entry: { payload } });
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_F, { songTitle: '晴天', lyricText: '故事的小黄花' });
+
+    if (result.status === 'hit') expect(result.matched).toBe('exact');
+    expect(seen.some((url) => url.includes('/ai-cache/resolve'))).toBe(false);
+  });
+});
+
+describe('withAiCloudCache 把按内容捞到的那条回填', () => {
+  /*
+   * 同一份歌词下次还是同一个键 —— 不回填就得再走一遍「搜歌名 + 逐条判」，白花两次
+   * 往返。回填之后下一次是精确命中，命中率才会真的涨上去。
+   */
+  it('writes the borrowed answer back under the exact key', async () => {
+    const puts: string[] = [];
+    handlers.fetch = async (url, init) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
+      }
+      if (init?.method === 'PUT') {
+        puts.push(String(init.body ?? ''));
+        return json({ ok: true, stored: true });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await withAiCloudCache({
+      kind: 'stage',
+      fingerprint: KEY_G,
+      generate: async () => { throw new Error('不该轮到模型'); },
+      validate: (value) => (value && typeof value === 'object' ? value as Record<string, unknown> : null),
+      songTitle: '晴天',
+      lyricText: '故事的小黄花',
+    });
+
+    expect(result.source).toBe('cloud');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(puts).toHaveLength(1);
+    expect(JSON.parse(puts[0]).payload).toEqual(payload);
+  });
+});

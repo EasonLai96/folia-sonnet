@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { requireAdmin } from './admin.js';
 import type { D1Database, Env } from './app.js';
-import { verifyStageUpload } from './stageVerifier.js';
+import { readHighlightWords, verifyStageUpload } from './stageVerifier.js';
 
 // src/aiCache.ts
 // The AI cloud cache: a shared shelf of "this lyric file already got an answer".
@@ -320,9 +320,103 @@ const handlePut = async (
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+/** 一个键一次给多少条候选去判合规 —— 多了只是让客户端多比几遍。 */
+const MAX_RESOLVE_CANDIDATES = 12;
+
+export interface ResolveCandidate {
+  key: string;
+  songTitle: string;
+  platform: string;
+  provider: string;
+  model: string;
+  updatedAt: string;
+  /** 这条答案里 AI 标记的高亮词 —— 客户端拿它跟自己手上的歌词比。 */
+  words: string[];
+}
+
+/*
+ * 按**歌名**找同类条目 —— 精确键没命中时的兜底。
+ *
+ * 键是「歌词 + policy」的 MD5，于是同一首歌换个版本的歌词（翻唱、现场、平台之间
+ * 同一首歌的 LRC 也常常不一样）就是另一个键，明明库里躺着答案却取不到。这里改按歌名
+ * 找，把每条候选的高亮词带回去，由客户端拿自己那段歌词判「合不合规」。
+ *
+ * 只返回高亮词、不返回 payload：判定的活留在客户端，歌词正文也就不用上传。
+ */
+export const findResolveCandidates = async (
+  db: D1Database,
+  kind: string,
+  songTitle: string,
+): Promise<ResolveCandidate[]> => {
+  const title = String(songTitle ?? '').trim().slice(0, MAX_TITLE_CHARS);
+  if (!title) return [];
+  const rows = await db
+    .prepare(
+      `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
+       FROM ai_cache
+       WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\')
+       ORDER BY (song_title = ?) DESC, updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(kind, title, `%${escapeLike(title)}%`, title, MAX_RESOLVE_CANDIDATES)
+    .all<{
+      cache_key: string;
+      song_title: string | null;
+      provider: string | null;
+      model: string | null;
+      platform: string | null;
+      updated_at: string | null;
+      payload_json: string | null;
+    }>();
+
+  return (rows.results ?? []).map((row) => {
+    let payload: unknown = null;
+    try {
+      payload = JSON.parse(String(row.payload_json ?? ''));
+    } catch {
+      payload = null;
+    }
+    return {
+      key: String(row.cache_key ?? ''),
+      songTitle: String(row.song_title ?? ''),
+      platform: String(row.platform ?? ''),
+      provider: String(row.provider ?? ''),
+      model: String(row.model ?? ''),
+      updatedAt: String(row.updated_at ?? ''),
+      words: isRecord(payload) ? readHighlightWords(payload) : [],
+    };
+  });
+};
+
 const buildRoutes = (options: { admin: boolean }) => {
   const routes = new Hono<{ Bindings: Env }>();
   if (options.admin) routes.use('*', requireAdmin);
+
+  /*
+   * POST /api/ai-cache/resolve —— 公开，因为要拉缓存的人本来就没 token。
+   *
+   * 客户端拿精确键问过一次没中，再来这里按歌名要一批候选；判「合不合规」的活由客户端
+   * 做（它才有自己那段歌词），这里只给高亮词。歌词正文因此一次都不用上传。
+   */
+  routes.post('/resolve', async (c) => {
+    const body = await c.req.json<unknown>().catch(() => null);
+    const source = isRecord(body) ? body : {};
+    const kind = String(source.kind ?? '').trim().toLowerCase();
+    const songTitle = String(source.songTitle ?? '').trim();
+    if (!KIND_PATTERN.test(kind) || !songTitle) {
+      return c.json({ ok: true, candidates: [] });
+    }
+    return c.json({
+      ok: true,
+      candidates: await findResolveCandidates(c.env.FOLIA_SYNC_DB, kind, songTitle),
+    });
+  });
 
   routes.get('/:kind/:key', async (c) => {
     const kind = String(c.req.param('kind') || '').toLowerCase();

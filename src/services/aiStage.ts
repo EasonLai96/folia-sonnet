@@ -453,6 +453,11 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
          */
         platform: ctx.platform,
         lyricHash: ctx.lyricSource ? md5(ctx.lyricSource) : '',
+        /*
+         * 歌词正文只给「精确键没中」那一次兜底判定用，不跟着上传 —— 判定在本机做，
+         * 服务端只按歌名回一批高亮词。
+         */
+        lyricText: ctx.lyricSource,
         isPureMusic: ctx.isPureMusic,
     });
     return { ...value, source };

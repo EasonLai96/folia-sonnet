@@ -35,6 +35,9 @@ export const resolveAiCloudCacheUrl = (kind: AiCloudCacheKind, key: string): str
     resolveCloudApiUrl(`ai-cache/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`)
 );
 
+/** 精确键没命中时的兜底：按歌名要一批候选。 */
+const resolveAiCloudResolveUrl = (): string => resolveCloudApiUrl('ai-cache/resolve');
+
 /**
  * 歌词文件的指纹。
  *
@@ -71,9 +74,96 @@ const wasRecentMiss = (kind: AiCloudCacheKind, key: string): boolean => {
 };
 
 export type AiCloudCachePull =
-    | { status: 'hit'; payload: unknown }
+    | {
+        status: 'hit';
+        payload: unknown;
+        /**
+         * exact = 精确键命中；words = 键没对上，靠歌名捞到一条**内容合规**的
+         * （那条答案里 AI 标的高亮词都在你手上这段歌词里）。
+         */
+        matched: 'exact' | 'words';
+        /** words 命中时，答案原本存在哪个键上 —— 回填到自己这个键要用它。 */
+        sourceKey?: string;
+    }
     | { status: 'miss' }
     | { status: 'unavailable' };
+
+/** 按歌名搜到的候选：只有高亮词，没有 payload —— 判定的活在本机做。 */
+interface ResolveCandidate {
+    key: string;
+    words: string[];
+}
+
+/**
+ * 候选合不合规：**它标的高亮词，在你手上这段歌词里全都找得到**。
+ *
+ * 高亮词是模型照着歌词挑的 —— 一条照着别的歌做的答案，挑不出这首的词。所以这比
+ * 「哈希必须一模一样」宽松得多（同一首歌换个版本的 LRC 就换一个哈希），又不会把
+ * 另一首歌的答案错当成这首的。
+ *
+ * 比的时候压掉空白与大小写：LRC 里多一个空格不该判成「这不是同一个词」。
+ */
+const flattenForMatch = (value: string): string => (
+    String(value ?? '').replace(/\s+/g, '').toLowerCase()
+);
+
+export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
+    if (words.length === 0) return false;
+    const haystack = flattenForMatch(lyricText);
+    if (!haystack) return false;
+    return words.every((word) => {
+        const needle = flattenForMatch(word);
+        return needle.length > 0 && haystack.includes(needle);
+    });
+};
+
+/** 一次 GET。出错一律当没命中 —— 缓存的纪律是永不阻塞功能。 */
+const fetchEntry = async (kind: AiCloudCacheKind, key: string): Promise<unknown> => {
+    try {
+        const response = await createAiFetch()(resolveAiCloudCacheUrl(kind, key), {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+            signal: withTimeout(),
+        });
+        if (!response.ok) return null;
+        const data = await response.json().catch(() => null) as { hit?: unknown; entry?: unknown } | null;
+        const entry = data?.entry;
+        if (data?.hit !== true || !isPlainObject(entry) || !('payload' in entry)) return null;
+        return entry.payload;
+    } catch {
+        return null;
+    }
+};
+
+const fetchResolveCandidates = async (
+    kind: AiCloudCacheKind,
+    songTitle: string,
+): Promise<ResolveCandidate[]> => {
+    try {
+        const response = await createAiFetch()(resolveAiCloudResolveUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ kind, songTitle }),
+            signal: withTimeout(),
+        });
+        if (!response.ok) return [];
+        const data = await response.json().catch(() => null) as { candidates?: unknown } | null;
+        const list = Array.isArray(data?.candidates) ? data?.candidates : [];
+        const out: ResolveCandidate[] = [];
+        list.forEach((entry: unknown) => {
+            if (!isPlainObject(entry)) return;
+            const key = String(entry.key ?? '').trim().toLowerCase();
+            if (!/^[a-f0-9]{32}$/.test(key)) return;
+            const words = Array.isArray(entry.words)
+                ? entry.words.filter((word): word is string => typeof word === 'string' && word.trim().length > 0)
+                : [];
+            out.push({ key, words });
+        });
+        return out;
+    } catch {
+        return [];
+    }
+};
 
 export interface AiCloudCachePushMeta {
     songTitle?: string;
@@ -110,10 +200,20 @@ const withTimeout = (): AbortSignal => {
     return controller.signal;
 };
 
-/** 拉一次。出错一律当「没命中」，调用方照常生成。 */
+/**
+ * 拉一次：先按精确键问，没中再按**歌名**捞一条内容合规的。
+ *
+ * 键是「歌词 + policy」的 MD5，于是同一首歌换个版本的歌词就是另一个键 —— 翻唱、现场、
+ * 平台之间同一首歌的 LRC 本来就不一样。只赌精确键的话，「库里明明躺着答案却取不到」
+ * 是常态。所以第二次机会不看哈希，改看内容：候选条目标的高亮词都在你手上这段歌词里，
+ * 那条答案就是照着这首歌做的。
+ *
+ * 出错一律当「没命中」，调用方照常生成。
+ */
 export const pullAiCloudCache = async (
     kind: AiCloudCacheKind,
     key: string,
+    meta: { songTitle?: string; lyricText?: string } = {},
 ): Promise<AiCloudCachePull> => {
     if (!isFoliaCloudCacheEnabled()) return { status: 'unavailable' };
     if (!/^[a-f0-9]{32}$/.test(key)) return { status: 'unavailable' };
@@ -157,19 +257,44 @@ export const pullAiCloudCache = async (
                 headers: { Accept: 'application/json' },
                 signal: withTimeout(),
             });
-            if (!response.ok) return { status: 'miss' };
-            data = await response.json().catch(() => null) as { hit?: unknown; entry?: unknown } | null;
+            /* 没命中不再当场返回 —— 下面还有一次按歌名捞的机会。 */
+            if (response.ok) {
+                data = await response.json().catch(() => null) as { hit?: unknown; entry?: unknown } | null;
+            }
         } catch {
-            return { status: 'miss' };
+            data = null;
         }
     }
 
     const entry = data?.entry;
-    if (data?.hit !== true || !isPlainObject(entry) || !('payload' in entry)) {
+    if (data?.hit === true && isPlainObject(entry) && 'payload' in entry) {
+        return { status: 'hit', payload: entry.payload, matched: 'exact' };
+    }
+
+    /*
+     * 第二次机会：**不看哈希，看内容**。
+     *
+     * 服务端按歌名把同类条目的高亮词送回来（小得多的响应），本机拿自己这段歌词逐条判
+     * —— 那条答案标的词全都在这儿，它就是照着这首歌做的，哪怕两份 LRC 差几个字。
+     * 判定留在本机，歌词正文一次都不用上传。
+     */
+    const songTitle = String(meta.songTitle ?? '').trim();
+    const lyricText = String(meta.lyricText ?? '');
+    if (!songTitle || !lyricText) {
         rememberMiss(kind, key);
         return { status: 'miss' };
     }
-    return { status: 'hit', payload: entry.payload };
+
+    const candidates = await fetchResolveCandidates(kind, songTitle);
+    for (const candidate of candidates) {
+        if (!highlightWordsPresent(candidate.words, lyricText)) continue;
+        const payload = await fetchEntry(kind, candidate.key);
+        if (payload === null) continue;
+        return { status: 'hit', payload, matched: 'words', sourceKey: candidate.key };
+    }
+
+    rememberMiss(kind, key);
+    return { status: 'miss' };
 };
 
 /** 推一次。失败就当没发生过，绝不打断已经生成好的结果。 */
@@ -232,6 +357,8 @@ export const withAiCloudCache = async <T>(options: {
     platform?: string;
     /** 歌词正文的 MD5。算得出来就带上，服务端好拿平台上的歌词对一遍。 */
     lyricHash?: string;
+    /** 歌词正文。只用在「精确键没中」那一次兜底判定上，**不会上传**。 */
+    lyricText?: string;
     isPureMusic?: boolean;
     /**
      * 别去问云端，直接生成 —— 「重新判断」就是要一个跟缓存里不一样的答案。
@@ -241,13 +368,35 @@ export const withAiCloudCache = async <T>(options: {
      */
     skipPull?: boolean;
 }): Promise<{ value: T; source: AiCloudCacheSource }> => {
-    const { kind, fingerprint, generate, validate, combine, songTitle, platform, lyricHash, isPureMusic, skipPull } = options;
+    const { kind, fingerprint, generate, validate, combine, songTitle, platform, lyricHash, lyricText, isPureMusic, skipPull } = options;
 
     let previous: unknown = null;
     if (!skipPull && isFoliaCloudCacheEnabled()) {
-        const pulled = await pullAiCloudCache(kind, fingerprint);
+        const pulled = await pullAiCloudCache(kind, fingerprint, {
+            songTitle,
+            /* 纯音乐那半的「歌词」其实是歌名，别拿它去判高亮词。 */
+            lyricText: isPureMusic ? '' : lyricText,
+        });
         const validated = pulled.status === 'hit' ? validate(pulled.payload) : null;
-        if (validated !== null) return { value: validated, source: 'cloud' };
+        if (validated !== null) {
+            /*
+             * 按内容捞到的那条**回填**到自己这个键上。
+             *
+             * 同一份歌词下次还是同一个键 —— 不回填就得再走一遍「搜歌名 + 逐条判」，
+             * 白花两次往返。回填的是库里已有的答案（不是新生成的），落哪个键都不影响
+             * 别人，而命中率会实打实地涨。回填失败无所谓：反正这一次已经命中了。
+             */
+            if (pulled.matched === 'words') {
+                void pushAiCloudCache(kind, fingerprint, validated, {
+                    songTitle,
+                    platform,
+                    lyricHash,
+                    isPureMusic,
+                    target: describeAiTarget(),
+                }).catch(() => false);
+            }
+            return { value: validated, source: 'cloud' };
+        }
         /*
          * 没通过校验的那份也要留着 —— 它缺的正是这次要问的那一半，但它**有**这次
          * 生成不出来的那一半。丢掉就等于把已有的成果擦掉。
