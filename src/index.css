@@ -439,7 +439,10 @@ html[data-lyric-flat='1'] [data-folia-app-shell] [data-folia-lyric-surface] *:no
 html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *)),
 html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::before,
 html[data-lyric-flat='1'] [data-folia-lyric-surface='wallpaper'] *:not(:is([data-folia-lyric-sweep], [data-folia-lyric-sweep] *))::after {
-    color: color-mix(in srgb, var(--text-primary, currentColor) 42%, transparent) !important;/* 探索页：“换一批”时旧内容留在原地等新的，呼吸般地一明一暗表示正在读。
+    color: color-mix(in srgb, var(--text-primary, currentColor) 42%, transparent) !important;
+}
+
+/* 探索页：“换一批”时旧内容留在原地等新的，呼吸般地一明一暗表示正在读。
    其余的移动都在 src/components/app/home/explore/exploreMotion.ts。 */
 @keyframes explore-waiting {
     from { opacity: 1; }
