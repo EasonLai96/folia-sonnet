@@ -386,7 +386,7 @@ export const withAiCloudCache = async <T>(options: {
              * 白花两次往返。回填的是库里已有的答案（不是新生成的），落哪个键都不影响
              * 别人，而命中率会实打实地涨。回填失败无所谓：反正这一次已经命中了。
              */
-            if (pulled.matched === 'words') {
+            if (pulled.status === 'hit' && pulled.matched === 'words') {
                 void pushAiCloudCache(kind, fingerprint, validated, {
                     songTitle,
                     platform,
