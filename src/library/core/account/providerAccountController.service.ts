@@ -40,6 +40,8 @@ import {
     isLoginUnderWay,
     resolveActiveProviderId,
     resolveLocalServiceState,
+    resolveLoginBackendState,
+    resolveLoginSessionCopy,
     resolveLogoutEligibility,
     resolveProviderSelection,
     retryOpensAt,
@@ -214,6 +216,14 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             }
         }
         const service = localServiceOf(login.providerId);
+        const localService = resolveLocalServiceState(service ? askSafely(() => service.getStatus(), null) : null);
+        const passwordForm = login.password
+            ? {
+                needsServerUrl: login.password.needsServerUrl,
+                serverUrl: login.password.serverUrl,
+                error: login.password.error,
+            }
+            : null;
         const next: LibraryLoginSessionSnapshot = {
             id: login.id,
             providerId: login.providerId,
@@ -225,15 +235,18 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             canReopenLoginPage,
             failure,
             selfCheck,
-            passwordForm: login.password
-                ? {
-                    needsServerUrl: login.password.needsServerUrl,
-                    serverUrl: login.password.serverUrl,
-                    error: login.password.error,
-                }
-                : null,
-            backend,
-            localService: resolveLocalServiceState(service ? askSafely(() => service.getStatus(), null) : null),
+            passwordForm,
+            // 上游把「网易本地后端」泛化成 provider 声明的本地服务，这里沿用同一份健康状态，
+            // 好让 bravais / TUI 的后端故障卡与重启按钮照旧工作。
+            backend: resolveLoginBackendState(localService),
+            localService,
+            copy: resolveLoginSessionCopy({
+                providerId: login.providerId,
+                phase,
+                methods: login.methods,
+                selectedMethodId: login.selectedMethodId,
+                passwordForm,
+            }),
             texts: login.texts,
         };
         return previous && sameLoginSnapshot(previous, next) ? previous : next;
@@ -522,7 +535,7 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         // 与扫码确认同一条收尾：刷新账户，成功就收起登录（不是当前平台时再问要不要切过去）。
         let refreshed: boolean;
         try {
-            refreshed = await providerAccounts.refresh(providerId) !== false;
+            refreshed = await providerAccounts.refresh(providerId, 'sign-in');
         } catch (error) {
             log('warn', 'login:password-refresh-error', { providerId, ...describeLoginError(error) });
             refreshed = false;
@@ -536,8 +549,6 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             ? { status: 'ok', providerId, sessionId }
             : { status: 'failed', providerId, sessionId, reason: 'refresh' };
     };
-
-    const currentBackend = (current: LoginState) => resolveLoginBackendState(current.providerId, neteaseBackend.getHealth());
 
     const selectLoginMethod = async (methodId: string): Promise<LibraryLoginRequestResult> => {
         if (disposed || !login) return { status: 'no-session' };

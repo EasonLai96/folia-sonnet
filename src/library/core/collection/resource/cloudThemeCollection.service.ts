@@ -1,7 +1,7 @@
-import type { SongResult } from '../../../types';
-import type { CollectionResource } from '../contracts/resource';
-import { createCollectionResourceState } from './collectionResourceState';
-import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
+import type { SongResult } from '../../../../types';
+import type { CollectionResource } from '../../shared/resource.contract';
+import { createCollectionResourceState } from './collectionResourceState.service';
+import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 
 // src/library/core/services/cloudThemeCollection.ts
 // 「AI 主题」那一屏的曲目资源：云端只给得出**歌名**，曲目得由客户端拿这些名字去自己登着的

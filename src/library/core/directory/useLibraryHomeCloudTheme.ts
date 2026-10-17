@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { HomeViewTab } from '../../../types';
-import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '../contracts/collection';
+import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '../collection/collection.contract';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
 
 // src/library/core/bindings/useLibraryHomeCloudTheme.ts

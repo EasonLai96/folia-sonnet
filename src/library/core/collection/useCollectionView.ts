@@ -12,7 +12,7 @@ import {
     deriveDisplayTracks,
     derivePlayableTracks,
     resolveContextTracks,
-    type LocalTrackSortContext,
+    type SongSortContext,
 } from './collectionView';
 
 // src/library/core/collection/useCollectionView.ts
@@ -43,7 +43,7 @@ export const useCollectionView = ({
     tracks: SongResult[];
     committedQuery: string;
     hiddenKeys?: ReadonlySet<string>;
-    localSort?: LocalTrackSortContext | null;
+    localSort?: SongSortContext | null;
 }): CollectionView => {
     const displayTracks = useMemo(
         () => deriveDisplayTracks(tracks, hiddenKeys, localSort),

@@ -15,7 +15,7 @@ type UsePlaybackVisualizerBridgeParams = {
     audioRef: MutableRefObject<HTMLAudioElement | null>;
     analyserRef: MutableRefObject<AnalyserNode | null>;
     animationFrameRef: MutableRefObject<number>;
-    effectiveLoopMode: 'off' | 'all' | 'one';
+    effectiveLoopMode: 'off' | 'all' | 'one' | 'shuffle';
     isNowPlayingStageActive: boolean;
     isPlayerCapStageActive: boolean;
     stageActiveEntryKind: string | null;

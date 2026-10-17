@@ -13,6 +13,7 @@ import type {
     ProviderCapabilities,
     ProviderUser,
 } from '../../../types/onlineMusic';
+import type { LibraryHomeMessage } from '../home/homeModel.contract';
 
 // src/library/core/account/account.contract.ts
 // 在线账户的契约（Library v2 · A1）：登录会话（扫码或在浏览器里确认）、账户选择、切换确认与登出由 core 的账户
@@ -63,6 +64,27 @@ export type LibraryLoginLocalServiceState = {
     /** 服务自己的错误原话（可能为空）。 */
     error: string | null;
     restarting: boolean;
+};
+
+/**
+ * 登录后端（provider 自己的后端，目前只有网易的本地后端会报）此刻的健康，
+ * 规则见 core/account/accountRules 的 resolveLoginBackendState。
+ * failed 时码必然拿不到：界面以故障原因与重启入口替换二维码，重试与诊断都不显示。
+ */
+export type LibraryLoginBackendState = {
+    failed: boolean;
+    /** 后端报的错误详情（可能为空）。 */
+    detail: string | null;
+    restarting: boolean;
+    /** 故障且没有在重启中。 */
+    canRestart: boolean;
+};
+
+/** 登录界面的文案（i18n key，UI 自己翻译）。status 为 null 表示此刻不显示状态行。 */
+export type LibraryLoginCopy = {
+    title: LibraryHomeMessage;
+    note: LibraryHomeMessage;
+    status: LibraryHomeMessage | null;
 };
 
 // ─── 登录失败后的自检（规则在 core/account/loginSelfCheckRules） ─────────
@@ -248,7 +270,7 @@ export type LibraryPasswordLoginResult =
     /** 提交期间关了窗、换了登录或 controller 已销毁：这一轮作废。 */
     | { status: 'superseded'; providerId: OnlineProviderId };
 
-/** selectProvider 走了哪一支（core/model/accountRules 的 resolveProviderSelection），以及那一支的结局。 */
+/**
  * selectProvider 走了哪一支（core/account/accountRules 的 resolveProviderSelection）。login 不开始登录：
  * 登录只由登录窗口开始，调用的人打开它（loginWindowStore 的 openLoginWindow）。
  */

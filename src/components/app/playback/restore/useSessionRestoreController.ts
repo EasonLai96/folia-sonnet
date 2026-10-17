@@ -39,6 +39,11 @@ type UseSessionRestoreControllerParams = {
      * alone so the session comes back paused; the lab switch below is the only thing that arms it.
      */
     shouldAutoPlayRef: MutableRefObject<boolean>;
+    /**
+     * 「进入应用后自动播放」下面那一项：起播的同时把页面切到歌词页。
+     * 只在这一处按开关调；不跳的时候首页照旧。
+     */
+    jumpToPlayerOnLaunch?: () => void;
 };
 
 // Restores the main playback session without pushing more boot logic into App.tsx.
@@ -54,6 +59,7 @@ export function useSessionRestoreController({
     loadLocalPlaylists,
     canRestoreSession = true,
     shouldAutoPlayRef,
+    jumpToPlayerOnLaunch,
 }: UseSessionRestoreControllerParams) {
     const audioQuality = useAudioSettingsStore(state => state.audioQuality);
 
@@ -152,6 +158,11 @@ export function useSessionRestoreController({
                     // that gives the deck its src, and it spends this flag there; setting it after
                     // would miss that run and leave the deck buffered in silence.
                     shouldAutoPlayRef.current = true;
+                    // 「同时跳转至可视化页面」：等音源落地再切会先白一下首页，而这里要的就是
+                    // 打开应用直接是那一页。两个开关一起读：下面的开关只在上面那个开着时才有页面可看。
+                    if (useAudioSettingsStore.getState().autoJumpToVisualizerOnLaunch) {
+                        jumpToPlayerOnLaunch?.();
+                    }
                 }
 
                 let outcome: RestorePlaybackSourceOutcome = 'failed';

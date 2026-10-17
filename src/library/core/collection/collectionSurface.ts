@@ -1,7 +1,8 @@
 import type { GridSurfaceActionId, GridSurfaceState } from '../../../types/gridCommandSurface';
-import type { LocalSongFolderSortDirection, LocalSongFolderSortField } from '../../../utils/localSongSorting';
+import type { SongSortDirection, SongSortField } from '../../../utils/songSorting';
 import type { CollectionMutationController, CollectionMutationSnapshot } from './mutations/mutations.contract';
 import type { LibraryActionId, LibraryDeclaredActions } from '../suite/suite.contract';
+import { SONG_SORT_PRESETS, type SongSortPreset } from './songSortOptions';
 
 // src/library/core/collection/collectionSurface.ts
 // Turns a collection view's branch flags and handlers into the flat contract the command palette reads.
@@ -23,6 +24,11 @@ import type { LibraryActionId, LibraryDeclaredActions } from '../suite/suite.con
 export type CoreSurfaceParams = {
     /** Branch gating — mirrors the conditions the matching buttons render under. */
     supportsLocalTrackSorting: boolean;
+    /**
+     * 这个列表排得了哪些项（菜单与命令面板同一个来源）。给了就把对应的排序命令一并发布：
+     * 在线歌单也能按标题 / 歌手 / 喜欢 / 播放次数排，不只是本地文件夹那三项。
+     */
+    availableSortPresets?: readonly SongSortPreset[];
     canResyncFolder: boolean;
     canResyncAllFolders: boolean;
     canOrganizeSongInfo: boolean;
@@ -45,13 +51,16 @@ export type CoreSurfaceParams = {
 
     filteredTrackCount: number;
     isFilterActive: boolean;
-    sortField: LocalSongFolderSortField;
-    sortDirection: LocalSongFolderSortDirection;
+    /** 排序字段不只是本地那三项：在线歌单还能按标题 / 歌手 / 喜欢 / 播放次数排（见 songSortOptions）。 */
+    sortField: SongSortField;
+    sortDirection: SongSortDirection;
 
     playFiltered: () => void;
     enqueueFiltered: () => void;
-    setSortField: (field: LocalSongFolderSortField) => void;
-    setSortDirection: (direction: LocalSongFolderSortDirection) => void;
+    setSortField: (field: SongSortField) => void;
+    setSortDirection: (direction: SongSortDirection) => void;
+    /** 一次设好字段与方向（菜单里选的就是一个完整的排序方式）。 */
+    setSortPreset?: (preset: SongSortPreset) => void;
     resyncFolder: () => void;
     resyncAllFolders: () => void;
     organizeSongInfo: () => void;
@@ -89,10 +98,15 @@ export type CoreSurfaceInputs = {
     filteredTrackCount: number;
     isFilterActive: boolean;
     supportsLocalTrackSorting: boolean;
-    sortField: LocalSongFolderSortField;
-    sortDirection: LocalSongFolderSortDirection;
-    setSortField: (field: LocalSongFolderSortField) => void;
-    setSortDirection: (direction: LocalSongFolderSortDirection) => void;
+    /** 见 CoreSurfaceParams.availableSortPresets：renderer 从 useTrackSorting 拿来。 */
+    availableSortPresets?: readonly SongSortPreset[];
+    // 排序字段不只是本地那三项：在线歌单还能按标题 / 歌手 / 喜欢 / 播放次数排（见 songSortOptions）。
+    sortField: SongSortField;
+    sortDirection: SongSortDirection;
+    setSortField: (field: SongSortField) => void;
+    setSortDirection: (direction: SongSortDirection) => void;
+    /** 一次设好字段与方向（菜单里选的就是一个完整的排序方式）；不给时按 setSortField + setSortDirection 拼。 */
+    setSortPreset?: (preset: SongSortPreset) => void;
 
     /** 重新拉取此刻可用（useCollectionActions 的 capabilities.reload.enabled）。 */
     canReloadOnlineCollection: boolean;
@@ -140,6 +154,7 @@ export const buildCoreSurfaceParams = (
         declaredActions: inputs.declaredActions,
 
         supportsLocalTrackSorting: inputs.supportsLocalTrackSorting,
+        availableSortPresets: inputs.availableSortPresets,
         canReloadOnlineCollection: inputs.canReloadOnlineCollection,
         canResyncFolder: hasController && capabilities.resyncFolder.supported,
         canResyncAllFolders: hasController && capabilities.resyncAllFolders.supported,
@@ -159,6 +174,10 @@ export const buildCoreSurfaceParams = (
         enqueueFiltered: inputs.enqueueFiltered,
         setSortField: inputs.setSortField,
         setSortDirection: inputs.setSortDirection,
+        setSortPreset: inputs.setSortPreset ?? ((preset) => {
+            inputs.setSortField(preset.field);
+            inputs.setSortDirection(preset.direction);
+        }),
         reloadOnlineCollection: inputs.reloadOnlineCollection,
         // 结果不在这里处理，与面板按钮一致（失败由控制器经端口的 statusMessage 报出）。
         resyncFolder: () => void mutations?.resyncFolder(),
@@ -177,8 +196,17 @@ export const buildCoreSurfaceParams = (
 export const GRID_SURFACE_ACTION_SOURCES: Readonly<Record<GridSurfaceActionId, { action: LibraryActionId } | { extra: string }>> = {
     'play-filtered': { action: 'play-scope' },
     'enqueue-filtered': { action: 'enqueue-scope' },
+    'sort-newest': { action: 'sort' },
+    'sort-oldest': { action: 'sort' },
+    'sort-title': { action: 'sort' },
+    'sort-artist': { action: 'sort' },
+    'sort-liked-desc': { action: 'sort' },
+    'sort-liked-asc': { action: 'sort' },
+    'sort-play-count-desc': { action: 'sort' },
+    'sort-play-count-asc': { action: 'sort' },
+    'sort-default': { action: 'sort' },
     'sort-file-name': { action: 'sort' },
-    'sort-modified-date': { action: 'sort' },
+    'sort-file-modified': { action: 'sort' },
     'sort-album-track': { action: 'sort' },
     'sort-toggle-direction': { action: 'sort' },
     'toggle-info-panel': { extra: 'toggle-info-panel' },
@@ -199,11 +227,35 @@ export const isGridSurfaceActionDeclared = (action: GridSurfaceActionId, declare
     return 'action' in source ? declared.actions.includes(source.action) : declared.extraActions.includes(source.extra);
 };
 
-const SORT_FIELD_BY_ACTION: Partial<Record<GridSurfaceActionId, LocalSongFolderSortField>> = {
-    'sort-file-name': 'fileName',
-    'sort-modified-date': 'fileLastModified',
-    'sort-album-track': 'albumTrack',
+/**
+ * 排序方式 ↔ 命令面板动作。菜单里每一项自带方向，所以命令也一次设好两样，
+ * 不再有「先选字段再翻方向」两步。
+ */
+const SORT_ACTION_BY_PRESET_ID: Partial<Record<SongSortPreset['id'], GridSurfaceActionId>> = {
+    newest: 'sort-newest',
+    oldest: 'sort-oldest',
+    titleAsc: 'sort-title',
+    artistAsc: 'sort-artist',
+    likedDesc: 'sort-liked-desc',
+    likedAsc: 'sort-liked-asc',
+    playCountDesc: 'sort-play-count-desc',
+    playCountAsc: 'sort-play-count-asc',
+    default: 'sort-default',
+    fileNameAsc: 'sort-file-name',
+    fileLastModifiedDesc: 'sort-file-modified',
+    albumTrackAsc: 'sort-album-track',
 };
+
+/**
+ * 反查：一个排序命令对应哪个排序方式（字段 + 方向）。从 SONG_SORT_PRESETS 派生，
+ * 免得「命令 → 字段」和「菜单 → 字段」两处各写一份、改漏一处就对不上。
+ */
+const SORT_PRESET_BY_ACTION = new Map<GridSurfaceActionId, SongSortPreset>(
+    SONG_SORT_PRESETS.flatMap((preset): [GridSurfaceActionId, SongSortPreset][] => {
+        const action = SORT_ACTION_BY_PRESET_ID[preset.id];
+        return action ? [[action, preset]] : [];
+    }),
+);
 
 export const buildGridSurfaceState = (params: GridSurfaceParams): GridSurfaceState => {
     const hasTracks = params.filteredTrackCount > 0;
@@ -214,7 +266,17 @@ export const buildGridSurfaceState = (params: GridSurfaceParams): GridSurfaceSta
         availableActions.push('play-filtered', 'enqueue-filtered');
     }
     if (params.supportsLocalTrackSorting) {
-        availableActions.push('sort-file-name', 'sort-modified-date', 'sort-album-track', 'sort-toggle-direction');
+        availableActions.push('sort-file-name', 'sort-file-modified', 'sort-album-track', 'sort-toggle-direction');
+    }
+    // 排序命令与菜单同一个来源：这个列表排得了哪些项，命令面板就有哪几条（去重后追加）。
+    const sortPresets = params.availableSortPresets ?? [];
+    sortPresets.forEach(preset => {
+        const action = SORT_ACTION_BY_PRESET_ID[preset.id];
+        if (action && !availableActions.includes(action)) availableActions.push(action);
+    });
+    // 翻方向：能排就翻得动（本地那三项已随 supportsLocalTrackSorting 一起带上，不重复）。
+    if (sortPresets.length > 0 && !params.supportsLocalTrackSorting && !availableActions.includes('sort-toggle-direction')) {
+        availableActions.push('sort-toggle-direction');
     }
     if (params.hasInfoPanel) {
         availableActions.push('toggle-info-panel');
@@ -274,9 +336,15 @@ export const runGridSurfaceAction = (action: GridSurfaceActionId, params: GridSu
         return;
     }
 
-    const sortField = SORT_FIELD_BY_ACTION[action];
-    if (sortField) {
-        params.setSortField(sortField);
+    // 排序命令一次设好字段与方向（与菜单选中某一项完全一致）。
+    const sortPreset = SORT_PRESET_BY_ACTION.get(action);
+    if (sortPreset) {
+        // 一次设好字段与方向；直接构造参数的探针与单测没有 setSortPreset，退回两个 setter。
+        if (params.setSortPreset) params.setSortPreset(sortPreset);
+        else {
+            params.setSortField(sortPreset.field);
+            params.setSortDirection(sortPreset.direction);
+        }
         return;
     }
 

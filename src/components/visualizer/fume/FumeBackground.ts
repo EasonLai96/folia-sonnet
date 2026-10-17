@@ -1,6 +1,6 @@
 import { Theme } from '../../../types';
-import { colorWithAlpha, mixColors } from '../colorMix';
-import { rememberBounded } from '../textMeasureCache';
+import { colorWithAlpha, mixColors } from '../../../utils/visualizer/colorMix';
+import { rememberBounded } from '../../../utils/visualizer/textMeasureCache';
 
 interface ViewportSize {
     width: number;

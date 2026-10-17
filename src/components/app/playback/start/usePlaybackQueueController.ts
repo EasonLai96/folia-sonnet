@@ -38,6 +38,7 @@ import {
     queueLoopMode,
     resolvePlaybackNeighbors,
 } from '../../../../utils/playbackNeighbors';
+import { buildShuffledQueue } from '../../../../utils/playbackShuffle';
 import { freshFmSongs } from '../../../../utils/fmQueue';
 import { applyQueueAddBehavior } from '../../../../utils/queueAddBehavior';
 import { moveQueueItem } from '../../../../utils/queueReorder';
@@ -1095,6 +1096,19 @@ export function usePlaybackQueueController({
             }
         }
 
+        // 随机播放：走到队尾时**把后面的重新打乱一遍**再接着播。
+        // 当前这首会变成新队首，所以顺位就是第二首 —— 随机播放因此不会停在最后一首。
+        if (loopMode === 'shuffle' && !isFmMode && currentIndex >= 0 && currentIndex === playQueue.length - 1 && playQueue.length > 1) {
+            const nextQueue = buildShuffledQueue(playQueue, getPlaybackSongKey(heldSong ?? options?.fromSong ?? currentSong));
+            setPlayQueue(nextQueue);
+            void playSong(nextQueue[1], nextQueue, isFmMode, {
+                shouldNavigateToPlayer,
+                unavailableSkipCount: options?.unavailableSkipCount,
+                isAutomixAdvance: options?.isAutomixAdvance,
+            });
+            return;
+        }
+
         const nextIndex = nextQueueIndex(playQueue.length, currentIndex, indexLoopMode);
 
         if (nextIndex >= 0) {
@@ -1520,6 +1534,29 @@ export function usePlaybackQueueController({
             invalidateAndRefetch(currentSong, nextQueue, audioQuality, userId);
         }
     }, [audioQuality, currentSong, isFmMode, isNowPlayingStageActive, playQueue, setPlayQueue, setStatusMsg, t, userId]);
+
+    /*
+     * 切**进**随机播放时把队列打乱一遍。
+     *
+     * 随机模式不是另存一份顺序表，而是真的把队列重排（见 utils/playbackShuffle.ts），
+     * 所以这一步不做的话「随机」只是照着原来的顺序播下去 —— 看起来完全没生效。
+     *
+     * 只在**模式从别的档切过来**的那一刻洗一次：队列后面怎么变（加歌、删歌）都不再重洗，
+     * 否则每次编辑队列顺序都会跳一下。重洗的另一条路是走到队尾，见 handleNextTrack。
+     */
+    const previousLoopModeRef = useRef(loopMode);
+    useEffect(() => {
+        const previousLoopMode = previousLoopModeRef.current;
+        previousLoopModeRef.current = loopMode;
+        if (loopMode !== 'shuffle' || previousLoopMode === 'shuffle') return;
+        if (isNowPlayingStageActive || playQueue.length <= 1) return;
+
+        const nextQueue = buildShuffledQueue(playQueue, currentSong ? getPlaybackSongKey(currentSong) : null);
+        setPlayQueue(nextQueue);
+        if (currentSong && nextQueue.length > 1) {
+            invalidateAndRefetch(currentSong, nextQueue, audioQuality, userId);
+        }
+    }, [audioQuality, currentSong, isNowPlayingStageActive, loopMode, playQueue, setPlayQueue, userId]);
 
     const clearQueue = useCallback(() => {
         if (isNowPlayingStageActive) return;

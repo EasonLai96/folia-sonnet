@@ -108,8 +108,25 @@ export const QQ_API_BASE_MISSING = 'VITE_QQ_API_BASE is not configured';
 
 let electronApiBase: string | null = null;
 
+/**
+ * 后端路径怎么拼，取决于对面是哪种服务端：
+ * - `path`：路径式，如 `/api/qq/login/status`。内嵌的 qq-music-api（Electron）与
+ *   直接把 Express 应用挂在子路径下的自托管部署只认这种。
+ * - `query`：扁平式，如 `/api/qq?path=/login/status`。这是 `api-ts/qq.ts` /
+ *   `api/qq.js` 这两个 serverless 入口**原生**就认的形式，不依赖任何 rewrite。
+ *
+ * Vercel 上两种都能走通（rewrite 把路径式折算成扁平式），但自托管站点未必配了同样的
+ * rewrite，所以不能用「有没有 rewrite」当前提。这里不去猜部署形态：先按路径式发，
+ * 撞上 404 再换扁平式，并且**只有成功的那次才被记成偏好** —— 这样 `login_channels` /
+ * `user_playlist_detail` 在旧后端上必然的 404 不会被误当成「拼法错了」，不会污染后续请求。
+ */
+export type QqEndpointStyle = 'path' | 'query';
+
+let webEndpointStyle: QqEndpointStyle = 'path';
+
 export const resetQqTransportRuntimeCache = (): void => {
     electronApiBase = null;
+    webEndpointStyle = 'path';
 };
 
 // 内嵌后端没在监听时，把主进程报的状态与故障原因带进错误：时间线里直接能看到它为什么没起来。
@@ -122,16 +139,16 @@ const describeEmbeddedStatus = async (): Promise<string> => {
     }
 };
 
-const resolveApiBase = async (): Promise<string> => {
+const resolveApiBase = async (): Promise<{ base: string; embedded: boolean }> => {
     const readPort = getElectronQqPortReader();
     if (readPort) {
-        if (electronApiBase) return electronApiBase;
+        if (electronApiBase) return { base: electronApiBase, embedded: true };
         const port = await readPort();
         if (!port) {
             throw new OnlineProviderError('unavailable', `${QQ_API_NOT_RUNNING}${await describeEmbeddedStatus()}`, 'qq');
         }
         electronApiBase = `http://127.0.0.1:${port}`;
-        return electronApiBase;
+        return { base: electronApiBase, embedded: true };
     }
 
     const base = getWebApiBase();
@@ -139,7 +156,13 @@ const resolveApiBase = async (): Promise<string> => {
         // 网页版没配后端地址：这里用不了 QQ 音乐，再试也一样（qqFailure.ts 说它是「没有配置」）。
         throw new OnlineProviderError('unavailable', QQ_API_BASE_MISSING, 'qq');
     }
-    return base;
+    return { base, embedded: false };
+};
+
+/** 按拼法把一次请求的地址拼出来（路径式加在路径上，扁平式放在 `?path=` 里）。 */
+const buildRequestUrl = (base: string, style: QqEndpointStyle, endpointPath: string, query: string): string => {
+    if (style === 'path') return `${base}${endpointPath}${query ? `?${query}` : ''}`;
+    return `${base}?path=${encodeURIComponent(endpointPath)}${query ? `&${query}` : ''}`;
 };
 
 // The stored value is the backend's opaque `qqmusic_session=<token>` string, never a QQ credential.
@@ -314,10 +337,14 @@ const dropSessionSent = (sent: string): void => {
 // Routes one provider request through the embedded Electron server or the configured Web base URL.
 // It carries the session as the page keeps it when the request is made, before the first wait.
 // 写入路由（POST_OPERATIONS）的参数放在 JSON 正文 `payload` 里；会话照旧走 header 或 `?cookie=`，后端两条路由都认。
-export const requestQq = async <T = unknown>(
+const requestQqOnce = async <T = unknown>(
     operation: QqOperation,
-    params: QqParams = {},
+    params: QqParams,
+    base: string,
+    style: QqEndpointStyle,
     payload?: Record<string, unknown>,
+    /** 发起那一刻的会话（requestQq 读好传进来；见那里的说明）。 */
+    cookie = '',
 ): Promise<T> => {
     const isPost = POST_OPERATIONS.has(operation);
     if (isPost !== (payload !== undefined)) {
@@ -327,9 +354,6 @@ export const requestQq = async <T = unknown>(
             'qq',
         );
     }
-    const cookie = getWebSessionCookie();
-    const base = await resolveApiBase();
-
     const endpoint = endpointFor(operation, params);
     const query = new URLSearchParams();
     Object.entries(endpoint.query).forEach(([key, value]) => {
@@ -356,7 +380,7 @@ export const requestQq = async <T = unknown>(
         : { credentials, headers };
     // The answer and its body, read together: the time limit covers both.
     const send = async (signal?: AbortSignal) => {
-        const answer = await fetch(`${base}${endpoint.path}?${query}`, { ...init, ...(signal ? { signal } : {}) });
+        const answer = await fetch(buildRequestUrl(base, style, endpoint.path, query.toString()), { ...init, ...(signal ? { signal } : {}) });
         return { response: answer, body: await readJsonBody(answer) };
     };
     const { response, body } = await (LOGIN_REQUESTS.has(operation) ? withLoginRequestLimit(send)
@@ -390,4 +414,47 @@ export const requestQq = async <T = unknown>(
     assertUpstreamAccepted(operation, body);
     persistConfirmedSession(operation, body);
     return body as T;
+};
+
+/**
+ * fetch 在 WebView 里失败时抛的是 `TypeError: Failed to fetch` —— 混合内容被拦、
+ * CORS 没配、后端宕机、DNS 不通，四种原因长得完全一样。前两种恰恰都可能是**拼法**
+ * 造成的（路径式的 404 页往往不带 CORS 头，浏览器连 404 都不给 JS 看），
+ * 所以网络级失败同样值得换一种拼法再试一次。
+ */
+const isNetworkLevelFailure = (error: unknown): boolean => {
+    if (error instanceof TypeError) return true;
+    return error instanceof Error
+        && /failed to fetch|networkerror|network request failed|load failed/i.test(error.message);
+};
+
+export const requestQq = async <T = unknown>(
+    operation: QqOperation,
+    params: QqParams = {},
+    payload?: Record<string, unknown>,
+): Promise<T> => {
+    // 会话在**发起这一刻**读，不等任何 await：logout 先发起请求再清掉页面上的会话
+    // （"tells the backend with the session, which has left the page before the first wait"），
+    // 等到拼地址（await resolveApiBase）之后再读就已经读不到了。
+    const cookie = getWebSessionCookie();
+    const { base, embedded } = await resolveApiBase();
+    // 内嵌的 qq-music-api 就是一个 Express 应用，只有路径式一种拼法，不需要试错。
+    if (embedded) return requestQqOnce<T>(operation, params, base, 'path', payload, cookie);
+
+    const preferred = webEndpointStyle;
+    const fallback: QqEndpointStyle = preferred === 'query' ? 'path' : 'query';
+    try {
+        return await requestQqOnce<T>(operation, params, base, preferred, payload, cookie);
+    } catch (error) {
+        // 值得换拼法的只有两种：「后端根本没有这条路由」的 404，以及拼错地址时被
+        // 浏览器吞掉、只剩网络级错误的情况。其余失败（401 / 429 / 上游拒收）如实上抛。
+        const worthRetrying = error instanceof OnlineProviderError
+            ? error.httpStatus === 404 || (error.code === 'network' && isNetworkLevelFailure(error))
+            : isNetworkLevelFailure(error);
+        if (!worthRetrying) throw error;
+        const result = await requestQqOnce<T>(operation, params, base, fallback, payload, cookie);
+        // 仅在备用拼法真的成功时才改偏好：路由本身不存在的 404 两边都会失败，不会走到这里。
+        webEndpointStyle = fallback;
+        return result;
+    }
 };

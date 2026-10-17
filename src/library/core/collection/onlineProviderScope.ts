@@ -1,5 +1,5 @@
 import type { OnlineProviderId, ProviderAccountSummary, ProviderCollection } from '../../../types/onlineMusic';
-import type { LibraryHomeFeedOwner } from '../contracts/homeModel';
+import type { LibraryHomeFeedOwner } from '../home/homeModel.contract';
 
 // src/library/core/model/onlineProviderScope.ts
 // 首页在线页签「看谁的数据」的两种范围：跟着当前平台（默认），或「全部」—— 把各家已登录平台的歌单合在一起看。

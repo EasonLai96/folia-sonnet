@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ALL_PROVIDERS_ID, isAllProvidersId } from '../model/onlineProviderScope';
+import { ALL_PROVIDERS_ID, isAllProvidersId } from '../collection/onlineProviderScope';
 
 // src/library/core/state/useLibraryOnlineProviderScopeStore.ts
 // 首页在线页签在看谁的数据：
