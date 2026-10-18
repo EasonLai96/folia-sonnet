@@ -6,6 +6,7 @@ import { usePlayerOverlayObstacle } from '../../../hooks/usePlayerOverlayLayout'
 import { kitTransition, useKitReducedMotion } from '../../modal/settings/kit/motion';
 import { panelTokens } from './panelTheme';
 import { FOLDED_PX } from './SongHeader';
+import { PANEL_BOTTOM_LIFT_PX } from './panelBottomBaseline';
 import { useMeasuredSize } from './useMeasuredSize';
 
 // src/components/panelTab/shell/PanelShell.tsx
@@ -27,14 +28,6 @@ const DOCK_HEIGHT_PX = 36;
 const DOCK_GAP_PX = 12;
 /** Above the open tab: the gap, the hairline, and the gap under it. */
 const BODY_TOP_PX = { gap: 12, line: 1, under: 8 } as const;
-/**
- * 面板整体上抬多少。
- *
- * 播放条那条基线（`bottomBarBottomPx`）只保证面板底边不压到播放条下面，系统手势条 / 导航栏
- * 那一截不在它的账上 —— 面板的下半截会落进那一带，看着就是「在屏幕外面」。这里再往上抬一点，
- * 把整块拉回可见区域。
- */
-const SHELL_LIFT_PX = 16;
 
 type PanelShellProps = {
     isOpen: boolean;
@@ -155,8 +148,8 @@ const PanelSurface: React.FC<PanelSurfaceProps> = ({ hasHandle, isCover, tabKey,
 const PanelShell: React.FC<PanelShellProps> = ({ isOpen, handle, ...surface }) => {
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
     const { ref: layoutRef, invalidate: invalidateLayout } = usePlayerOverlayObstacle('player-panel', 'panel');
-    // 在播放条那条基线之上再抬一点（见 SHELL_LIFT_PX）。
-    const shellBottom = useTransform(bottomBarBottomPx, bottom => bottom + SHELL_LIFT_PX);
+    // 在播放条那条基线之上再抬一点（见 PANEL_BOTTOM_LIFT_PX）—— 手柄抬的是同一份，两者不会错开。
+    const shellBottom = useTransform(bottomBarBottomPx, bottom => bottom + PANEL_BOTTOM_LIFT_PX);
 
     return (
         <motion.div

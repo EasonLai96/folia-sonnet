@@ -1,10 +1,11 @@
 import React from 'react';
 import { PANEL_SLIDE_CLAMP_PX, PANEL_SLIDE_TRACK_BASE_PX, PANEL_SLIDE_TRACK_FULL_PX, PANEL_SLIDE_TRIGGER_PX } from '../../../utils/panelSlideGesture';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useTransform } from 'framer-motion';
 import { Settings2, X, Command } from 'lucide-react';
 import type { Theme } from '../../../types';
 import { usePlayerBottomBarBottomPx } from '../../../hooks/usePlayerBottomBarBottomPx';
 import { usePlayerOverlayObstacle } from '../../../hooks/usePlayerOverlayLayout';
+import { PANEL_BOTTOM_LIFT_PX } from './panelBottomBaseline';
 
 // src/components/panelTab/shell/PanelHandle.tsx
 // The round button at the bottom right of the playing page that opens the panel and, white, closes
@@ -41,6 +42,9 @@ const PanelHandle: React.FC<PanelHandleProps> = ({
     const [isDragging, setIsDragging] = React.useState(false);
     const guideHideTimeoutRef = React.useRef<number | null>(null);
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
+    // 与展开后的面板同一条基线：那条基线算不进系统手势条 / 导航栏那一截，
+    // 所以两者抬的是同一个常量（PanelShell 也用这一份），不会一个高一个低。
+    const handleBottom = useTransform(bottomBarBottomPx, bottom => bottom + PANEL_BOTTOM_LIFT_PX);
     // The button is in the way of a mod's player layout, as the open panel above it is.
     const { ref: layoutRef, invalidate: invalidateLayout } = usePlayerOverlayObstacle('panel-toggle', 'panel');
     const supportsHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -55,7 +59,15 @@ const PanelHandle: React.FC<PanelHandleProps> = ({
         ? 'translate-x-0 opacity-100'
         : supportsHover
             ? 'translate-x-1/2 opacity-60 group-hover:translate-x-0 group-hover:opacity-100 md:translate-x-0 md:opacity-100 md:hover:scale-105'
-            : 'translate-x-1/2 opacity-60';
+            /*
+             * 触屏必须是常亮整颗，不能沿用上面那档「先露一半、等 hover 再滑出来」。
+             *
+             * 那三个揭示条件（`isOpen` / 拖拽 / 靠近时有引导线）在手指下一次按到之前一个都不会
+             * 成立 —— 条件里唯一的指望是 `group-hover`，而触屏没有指针。于是 `translate-x-1/2`
+             * 把那 48px 的圆按钮往屏幕外推 24px、再压到 60% 透明：**右沿被切掉一块，而且看不清
+             * 那是一颗能按的按钮**。
+             */
+            : 'translate-x-0 opacity-100';
     const setCommandDestinationFeedback = (progress: number) => {
         const iconContainer = trackEndIconRef.current;
         if (!iconContainer) {
@@ -324,7 +336,7 @@ const PanelHandle: React.FC<PanelHandleProps> = ({
                     data-testid="panel-toggle"
                     ref={layoutRef}
                     onUpdate={invalidateLayout}
-                    style={{ bottom: bottomBarBottomPx }}
+                    style={{ bottom: handleBottom }}
                     className="pointer-events-auto fixed right-0 z-[60] pr-4 md:pr-8 group w-20 flex justify-end"
                     /*
                      * 边到边（targetSdk 36）之后，系统导航栏那条是**画在页面底下的**：
