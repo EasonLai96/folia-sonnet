@@ -36,7 +36,7 @@ export type MediaDiagnosticsSnapshot = {
     lastEventAt: string | null;
     /** 正在等待（waiting 已开始、还没等到 canplay/playing）时为 true。 */
     waitingNow: boolean;
-    /** AudioContext 建出来时要求的那一档缓冲（见 noteAudioContext）。 */
+    /** AudioContext 建出来时要求的缓冲：档位名（`balanced`）或秒数（`0.1s`）。见 noteAudioContext。 */
     audioContextLatencyHint: string | null;
     audioContextSampleRate: number | null;
     /** 图本身的处理延迟（秒），不含输出那一段。 */
@@ -119,13 +119,26 @@ const readAudioContextDiagnostics = (context: AudioContext): void => {
     audioContextDiagnostics.state = context.state || null;
 };
 
+/**
+ * 把请求的缓冲写成一个能直接摆在界面上的字符串。
+ *
+ * 传数字是规范里的秒数写法（见 usePlaybackAudioBridge 的 AUDIO_OUTPUT_LATENCY_HINT_SEC），
+ * 带上单位才不会跟 `balanced` 这类档位名混在一起读。
+ */
+const describeLatencyHint = (
+    hint: AudioContextLatencyCategory | number | 'unknown' | undefined,
+): string => {
+    if (typeof hint === 'number' && Number.isFinite(hint)) return `${hint}s`;
+    return hint || 'unknown';
+};
+
 /** 记住这个 AudioContext 用的哪一档缓冲，之后一路跟着它更新延迟读数。 */
 export const noteAudioContext = (
     context: AudioContext | null | undefined,
-    latencyHint?: AudioContextLatencyCategory | 'unknown',
+    latencyHint?: AudioContextLatencyCategory | number | 'unknown',
 ): void => {
     if (!context) return;
-    audioContextDiagnostics.latencyHint = latencyHint || 'unknown';
+    audioContextDiagnostics.latencyHint = describeLatencyHint(latencyHint);
     readAudioContextDiagnostics(context);
     context.addEventListener('statechange', () => {
         readAudioContextDiagnostics(context);

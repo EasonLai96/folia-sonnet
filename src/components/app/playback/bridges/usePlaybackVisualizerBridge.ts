@@ -45,6 +45,22 @@ type UsePlaybackVisualizerBridgeParams = {
     getDisplayElement?: () => HTMLAudioElement | null;
 };
 
+/**
+ * 隔多久向音频线程要一次频谱。
+ *
+ * `getByteFrequencyData()` 是**同步**的：它要等音频线程把最近一次渲染结果交出来，输出缓冲
+ * 越大等得越久 —— 而放音乐为了抗撕裂（underrun）恰恰要把缓冲开大，见 usePlaybackAudioBridge
+ * 的 AUDIO_OUTPUT_LATENCY_HINT_SEC。播放页的 rAF 每帧跑一次 updateLoop，等于每帧都要付这一
+ * 笔：缓冲开到 `playback` 那档时整页掉帧就是这么来的（且所有可视化模式一起慢，卡的是取频谱
+ * 这一步，不是某个模式的绘制）。
+ *
+ * 降到 ~30Hz：频谱本来就过了一遍 `smoothingTimeConstant`（0.6）的平滑，少一半采样看不出来，
+ * 但把大缓冲的代价砍掉了一半以上。中间那些帧不写信号，可视化自然沿用上一帧的读数。
+ *
+ * 只抬缓冲不动这里，等于把掉帧那条老路再走一遍 —— 两边是一套改动。
+ */
+const SPECTRUM_READ_INTERVAL_MS = 33;
+
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
     audioRef,
@@ -73,6 +89,8 @@ export function usePlaybackVisualizerBridge({
     const lyrics = usePlaybackStore(selectDisplayLyrics);
 
     const currentLineIndexRef = useRef(-1);
+    // 上一帧真的去问频谱是什么时候。只为那个 ~30Hz 的降频服务（见 SPECTRUM_READ_INTERVAL_MS）。
+    const spectrumReadAtMsRef = useRef(0);
 
     const updateLoop = useCallback(() => {
         // Normally the active deck; the outgoing one for as long as a blend holds the picture on
@@ -83,8 +101,25 @@ export function usePlaybackVisualizerBridge({
         // is downstream of both, so it has real signal: dropping to the idle breath here would put
         // a visible stutter at exactly the moment meant to be seamless.
         const hasAudibleSignal = isActuallyPlaying || isTransitionAudible();
+        // 频谱不必每帧都问一次 —— 见 SPECTRUM_READ_INTERVAL_MS。
+        const nowMsValue = performance.now();
+        const spectrumDue = nowMsValue - spectrumReadAtMsRef.current >= SPECTRUM_READ_INTERVAL_MS;
 
-        if (hasAudibleSignal && analyserRef.current) {
+        // 三态，不是二态：有信号但这一帧不该读频谱时**什么都不写** —— 沿用上一次的读数。
+        // 写成 if/else 会让这些帧掉进 idle breath，律动就在真频谱和呼吸之间每帧来回跳。
+        if (!hasAudibleSignal || !analyserRef.current) {
+            const time = Date.now() / 2000;
+            const breath = (Math.sin(time) + 1) * 20;
+            audioPower.set(breath);
+            audioBands.bass.set(breath);
+            audioBands.lowMid.set(breath);
+            audioBands.mid.set(breath);
+            audioBands.vocal.set(breath);
+            audioBands.treble.set(breath);
+            audioBands.spectrum?.set(new Uint8Array(0));
+        } else if (spectrumDue) {
+            // 记在真正去读之前：这次同步等待算进间隔里，缓冲大也不会把节奏挤成一帧一次。
+            spectrumReadAtMsRef.current = nowMsValue;
             const bufferLength = analyserRef.current.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
             analyserRef.current.getByteFrequencyData(dataArray);
@@ -118,16 +153,6 @@ export function usePlaybackVisualizerBridge({
             audioBands.mid.set(process(mid, 2));
             audioBands.vocal.set(process(vocal, 1.5));
             audioBands.treble.set(process(treble, 2));
-        } else {
-            const time = Date.now() / 2000;
-            const breath = (Math.sin(time) + 1) * 20;
-            audioPower.set(breath);
-            audioBands.bass.set(breath);
-            audioBands.lowMid.set(breath);
-            audioBands.mid.set(breath);
-            audioBands.vocal.set(breath);
-            audioBands.treble.set(breath);
-            audioBands.spectrum?.set(new Uint8Array(0));
         }
 
         if (isActuallyPlaying && audioElement) {

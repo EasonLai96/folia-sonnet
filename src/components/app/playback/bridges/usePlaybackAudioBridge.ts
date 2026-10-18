@@ -20,6 +20,31 @@ import { noteAnalyser, noteAudioContext } from '../../../../utils/mediaDiagnosti
 
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
+/**
+ * 输出缓冲要留多大 —— 直接给秒数，不用那三个档位名。
+ *
+ * 档位名（`interactive` / `balanced` / `playback`）落到多少毫秒全看浏览器实现，安卓 WebView
+ * 上跟桌面 Chrome 差得远；给秒数是规范里的另一种写法（"首选最大延迟"），量纲是绝对的 ——
+ * 改一个数就知道自己要求了什么，真机之间也才有可比性。
+ *
+ * 取值卡在两件事中间：
+ *
+ *  · **太小就撕裂**：CPU 一被可视化 / 封面解码 / 整墙重渲染占满，音频线程就交不上样本，
+ *    缓冲空一次就是一声撕裂/爆音（underrun）。默认的 `interactive` 只给几十毫秒，最早那版
+ *    就是一路这么响；抬到 `balanced` 后只剩高负载下偶发，所以现在再往上抬一档。
+ *  · **太大就掉帧**：播放页每帧都要向音频线程同步取一次频谱，缓冲越大那一次等得越久，整页
+ *    跟着掉帧 —— 真机二分实测过，`playback` 那档就是播放页掉帧的元凶，而且是**所有**可视化
+ *    模式一起慢（卡的是取频谱这一步，不是某个模式的绘制）。壁纸叠层同期完全不卡，正因为它
+ *    走原生的 Visualizer（WallpaperAudioTap），压根不经过这个 AudioContext。
+ *
+ * 所以停在 0.1s：比 `balanced` 宽一截，又只有 `playback` 的一半上下。取频谱那一路同时降到
+ * 了 ~30Hz（见 usePlaybackVisualizerBridge），把「缓冲越大每帧等得越久」那一份代价一起抵消
+ * 掉 —— 只抬缓冲不动可视化，等于把掉帧那条老路再走一遍。
+ *
+ * 改完在开发者选项里读 audioContextLatencyHint / baseLatency / outputLatency 能确认落到哪一档。
+ */
+const AUDIO_OUTPUT_LATENCY_HINT_SEC = 0.1;
+
 type UsePlaybackAudioBridgeParams = {
 
     audioRef: RefObject<HTMLAudioElement | null>;
@@ -133,30 +158,12 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            /*
-             * 放音乐要的是稳，不是浏览器那一小格交互缓冲 —— 但也**不能给 `playback`**。
-             *
-             * 默认的 `interactive` 只给几十毫秒，安卓 WebView 上 CPU 一被别的东西占满（可视化、
-             * 封面解码、整墙重渲染）音频线程就交不上样本 —— 缓冲空了一次就是一声撕裂/爆音。
-             *
-             * 但 `playback` 那条路是走反了的（真机二分实测，它是播放页掉帧的元凶）：它把输出
-             * 缓冲放得很大，而播放页的 rAF **每帧都要同步调一次**
-             * `analyser.getByteFrequencyData()` 取频谱（usePlaybackVisualizerBridge 的 updateLoop），
-             * 这个调用要等音频线程那一侧把最近一次渲染结果交出来，缓冲越大每帧等得越久 ——
-             * 于是整页掉帧，而且是**所有**可视化模式一起慢（与模式无关，卡的是取频谱这一步）。
-             * 壁纸叠层同期完全不卡，正因为它走原生的 Visualizer（WallpaperAudioTap），
-             * 压根不经过这个 AudioContext。
-             *
-             * `balanced` 是规范里的中间档：比 `interactive` 多一点余量抗欠载，又不至于把每帧
-             * 那次取频谱拖住。改完在开发者选项里读 audioContextLatencyHint / baseLatency /
-             * outputLatency 能确认到底落到哪一档。
-             *
-             * 上游重写播放桥时把这一档弄丢了（退化成 `new AudioContextClass()`，即回落默认的
-             * interactive），听感就是连续的撕裂/爆音 —— 见 services 侧的 mediaDiagnostics 注释。
-             */
-            const ctx = new AudioContextClass({ latencyHint: 'balanced' });
+            // 放音乐要的是稳，不是浏览器那一小格交互缓冲 —— 用哪个数、为什么是这个数，
+            // 见上面的 AUDIO_OUTPUT_LATENCY_HINT_SEC。别改回 'playback'：那一档会把播放页
+            // 的每帧取频谱拖垮（实测它是掉帧元凶），真要再大就把可视化那一侧一起降频。
+            const ctx = new AudioContextClass({ latencyHint: AUDIO_OUTPUT_LATENCY_HINT_SEC });
             audioContextRef.current = ctx;
-            noteAudioContext(ctx, 'balanced');
+            noteAudioContext(ctx, AUDIO_OUTPUT_LATENCY_HINT_SEC);
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;
