@@ -47,12 +47,32 @@ export const HomeCardStylePicture: React.FC<{ style: 'image' | 'card' }> = ({ st
 /** Twelve posters on a five by three wall; the second one is the large poster in focus. */
 const WALL_TILES = Array.from({ length: 12 }, (_, index) => SAMPLE_COVERS[(index * 3 + 1) % SAMPLE_COVERS.length]);
 
+/** Eight library cards in four by two; the third one is the song that was pressed. */
+const STAY_CARDS = 8;
+const STAY_PLAYING_INDEX = 2;
+
 /**
- * One of the two views play can open: 'player' is the lyric lines with the line being sung bright
- * and the progress bar under them; 'lattice' is the queue collage, a wall of covers.
+ * Where play lands: 'player' is the lyric lines with the line being sung bright and the progress
+ * bar under them; 'lattice' is the queue collage, a wall of covers; 'stay' is the library left as
+ * it was, the pressed card in colour with a pause sign on it.
  */
-export const EntryViewPicture: React.FC<{ view: 'player' | 'lattice' }> = ({ view }) => (
-    view === 'player' ? (
+export const EntryViewPicture: React.FC<{ view: 'player' | 'lattice' | 'stay' }> = ({ view }) => (
+    view === 'stay' ? (
+        <span className="grid h-full grid-cols-4 grid-rows-2 gap-1 p-2">
+            {Array.from({ length: STAY_CARDS }, (_, index) => (
+                index === STAY_PLAYING_INDEX ? (
+                    <span key={index} className="relative rounded-[3px]" style={{ background: SAMPLE_COVERS[2] }}>
+                        <span className="absolute bottom-1 right-1 flex gap-px">
+                            <span className="h-1.5 w-0.5 rounded-full bg-white" />
+                            <span className="h-1.5 w-0.5 rounded-full bg-white" />
+                        </span>
+                    </span>
+                ) : (
+                    <span key={index} className="rounded-[3px] bg-[var(--st-t1)] opacity-15" />
+                )
+            ))}
+        </span>
+    ) : view === 'player' ? (
         <span className="flex h-full flex-col justify-center gap-[5px] px-3.5 pb-2">
             <span className="h-[3px] w-2/5 rounded-full bg-[var(--st-t1)] opacity-30" />
             <span className="h-1 w-3/4 rounded-full bg-[var(--st-t1)]" />

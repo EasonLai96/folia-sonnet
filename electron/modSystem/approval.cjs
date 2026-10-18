@@ -1,7 +1,7 @@
 // electron/modSystem/approval.cjs
 // Whether a mod may run. The user's approval of a mod is stored together with
 // the digest of the files it was given for, and holds only while the files are
-// those; the native dialog that asks for it, with its text in the three
+// those; the native dialog that asks for it, with its text in the four
 // languages, is here too. Cut out of modSystem.cjs. How a digest and a
 // signature are computed stays in modDigest.cjs and modSignature.cjs.
 
@@ -13,7 +13,7 @@ const { dialog } = require('electron');
 const { shortDigest } = require('./modDigest.cjs');
 
 // Native confirmation dialog copy. The main process cannot reach the renderer's
-// i18n bundle, so the three shipped locales are mirrored here like main.cjs's
+// i18n bundle, so the four shipped locales are mirrored here like main.cjs's
 // own dialog strings.
 const TRUST_DIALOG_LOCALE = {
     'zh-CN': {
@@ -38,6 +38,30 @@ const TRUST_DIALOG_LOCALE = {
         rebind: '本次确认仅对当前文件内容生效；模组文件发生变化后需要重新确认。',
         devSource: '开发模式：这个模组位于源码目录的 mods/ 中，确认后修改它的文件不会撤销本次确认。安装版和用户模组目录中的模组没有这项豁免。',
         enable: '仍要启用',
+        cancel: '取消',
+    },
+    'zh-TW': {
+        title: '啟用模組',
+        message: (name, id) => `確定要啟用模組“${name}”（${id}）嗎？`,
+        risk: '模組是第三方程式碼，未經官方安全審計。一旦啟用，它將以應用的完整權限執行：可讀寫本地檔案、存取網路、讀取或修改任意應用設定（包括 AI 服務位址與金鑰），並可在介面中執行程式碼。請僅啟用你信任來源的模組。',
+        permissions: '宣告的權限：',
+        noPermissions: '宣告的權限：無',
+        location: '安裝位置：',
+        fingerprint: '內容指紋：',
+        client: '介面程式碼：',
+        noClient: '介面程式碼：無',
+        experimental: '選用的實驗介面：',
+        embedOrigins: '可嵌入的外部網頁：',
+        folia: '需要的 Folia 版本：',
+        verifiedRisk: '此模組帶有有效的 Folium 官方簽名，來源與內容已經過官方審查，且簽名後未被修改。啟用後它仍以應用的完整權限執行：可讀寫本地檔案、存取網路、讀取或修改任意應用設定（包括 AI 服務位址與金鑰），並可在介面中執行程式碼。',
+        signatureVerified: (key) => `簽名：官方認證（${key}）`,
+        betaRisk: '此模組是 Folium 先行測試版本：僅通過了安全審查，不保證功能實現的整潔，甚至功能可能完全無法工作，主要供社群開發者做創意實驗，普通使用者請勿輕易啟用。啟用後它仍以應用的完整權限執行：可讀寫本地檔案、存取網路、讀取或修改任意應用設定（包括 AI 服務位址與金鑰），並可在介面中執行程式碼。',
+        signatureBeta: (key) => `簽名：先行測試（${key}）`,
+        signatureUnsigned: '簽名：無（未經官方審查的第三方模組）',
+        signatureInvalid: (reason) => `簽名：不匹配（${reason}）。模組內容在簽名後被修改，或簽名無效，這份簽名不能作為審查依據。`,
+        rebind: '本次確認僅對當前檔案內容生效；模組檔案發生變化後需要重新確認。',
+        devSource: '開發模式：這個模組位於原始碼目錄的 mods/ 中，確認後修改它的檔案不會撤銷本次確認。安裝版和使用者模組目錄中的模組沒有這項豁免。',
+        enable: '仍要啟用',
         cancel: '取消',
     },
     en: {

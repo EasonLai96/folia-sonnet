@@ -100,7 +100,6 @@
       "build/thumbar/*.png"
     ],
     "asarUnpack": [
-      "electron/analysis/htdemucs_runner.py",
       "node_modules/@koromix/koffi-*/**/*.node",
       "electron/qishui/qishui-auth-v6/bdms.node",
       "electron/qishui/qishui-auth-v6/metasecml.dll",
@@ -110,6 +109,21 @@
       {
         "from": "build/ffmpeg/${os}-${arch}",
         "to": "ffmpeg-audio"
+      },
+      {
+        "from": "build/mnn/${os}-${arch}",
+        "to": "mnn",
+        "filter": [
+          "*folia_mnn.*"
+        ]
+      },
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "beat_this-wgsl.bin",
+          "htdemucs-wgsl.bin"
+        ]
       },
       {
         "from": "build/icon.png",
@@ -227,7 +241,7 @@
     "@google/genai": "^2.24.0",
     "@neteasecloudmusicapienhanced/api": "4.41.1",
     "@xhayper/discord-rpc": "^1.5.1",
-    "@yakult-green-tea/qq-music-api": "3.3.1",
+    "@yakult-green-tea/qq-music-api": "3.3.3",
     "axios": "^1.20.0",
     "bgutils-js": "4.0.3",
     "bodian-music-api": "0.1.2",
@@ -240,7 +254,6 @@
     "koffi": "^3.3.1",
     "kugoumusicapi": "https://github.com/MakcRe/KuGouMusicApi/archive/refs/tags/v1.6.0.tar.gz",
     "music-metadata": "^11.16.1",
-    "onnxruntime-node": "^1.30.0",
     "qrcode": "^1.5.4",
     "ws": "^8.21.3",
     "youtubei.js": "18.1.0"
@@ -265,6 +278,7 @@
     "@types/three": "^0.185.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.1",
+    "@webgpu/types": "0.1.74",
     "@xmldom/xmldom": "^0.9.12",
     "animejs": "^4.5.0",
     "autoprefixer": "^10.6.1",

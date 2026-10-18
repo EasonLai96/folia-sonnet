@@ -1,4 +1,5 @@
 import React from 'react';
+import type { BeatEffectDef } from '../../services/beatFx/beatEffects';
 import { type MotionValue } from 'framer-motion';
 import {
     type AudioBands,
@@ -35,6 +36,29 @@ export interface VisualizerModeCommand {
     title: string;
     description: string;
     keywords: string[];
+}
+
+/**
+ * An automix/crossfade blend handing the picture from the song on screen to the next one. The main
+ * window only, and only for a style that says it draws one (`followsSongHandoff`): everywhere else
+ * the song changes when the blend has settled, as it did.
+ */
+export interface VisualizerSongHandoff {
+    /** How far the hand-off has come, 0..1: 0 until the blend is announced. */
+    progress: MotionValue<number>;
+    /** The incoming song as the props will name it once the blend settles. */
+    seed: string | number;
+    songTitle?: string | null;
+    songArtist?: string | null;
+    songAlbum?: string | null;
+    coverUrl?: string | null;
+    /** The incoming song's theme, once it has come: the props keep the song on screen's until the blend settles. */
+    theme: Theme;
+    subtitleTheme?: Theme;
+    /** The incoming song's lyrics (none until they load), its own lyric clock and line. */
+    lines: Line[];
+    currentTime: MotionValue<number>;
+    currentLineIndex: number;
 }
 
 export interface VisualizerSharedProps {
@@ -79,6 +103,8 @@ export interface VisualizerSharedProps {
      */
     temperaLayerImageAssets?: { id: string; name: string; url: string }[];
     seed?: string | number;
+    /** A blend handing over to the next song, while it runs (see VisualizerSongHandoff). */
+    songHandoff?: VisualizerSongHandoff | null;
     staticMode?: boolean;
     backgroundStaticMode?: boolean;
     visualizerOpacity?: number;
@@ -147,6 +173,21 @@ export interface VisualizerSettingsPanelProps<T = any> {
     onSliderCommit?: () => void;
 }
 
+/**
+ * What a lyric style's quick controls in the player panel get: the saved tuning and a change that
+ * is saved at once (the panel has no sliders and no draft), with the store's fields for a style's
+ * further actions, as its settings panel has them.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface VisualizerQuickControlsProps<T = any> {
+    t: (key: string) => string;
+    isDaylight: boolean;
+    theme: Theme;
+    tuning: T;
+    onTuningChange: (patch: Partial<T>) => void;
+    settings: VisualizerTuningSettings;
+}
+
 export interface VisualizerRegistryEntry {
     mode: VisualizerMode;
     order: number;
@@ -163,6 +204,8 @@ export interface VisualizerRegistryEntry {
     command?: VisualizerModeCommand;
     /** True when the renderer reads a click on a lyric line and the song should jump there. */
     seeksOnLineClick?: boolean;
+    /** True when the renderer draws a blend's song hand-off (`songHandoff`); the rest are not fed one. */
+    followsSongHandoff?: boolean;
     /*
      * The background this style is drawn over. VisualizerRenderer draws one background for every
      * style and keeps it through a style switch, so a style that changes it says so here, not only
@@ -179,6 +222,11 @@ export interface VisualizerRegistryEntry {
     render: (props: VisualizerSharedProps) => React.ReactElement;
     /** The style's own options in the settings window. A style that has them and a stored tuning can be put back to its defaults there. */
     renderSettingsPanel?: (props: VisualizerSettingsPanelProps) => React.ReactNode;
+    /*
+     * 播放面板歌词样式那一行下面的快捷参数：开关（QuickControlToggle）和在几项里轮换的胶囊
+     * （QuickControlChip），只放常调的几项，其余留给设置窗口。没有就不出这一行。
+     */
+    renderQuickControls?: (props: VisualizerQuickControlsProps) => React.ReactNode;
     /** For a style that sizes its own lyrics: the notice (an i18n key) the settings window shows where it switches the font size off. */
     ownFontSizeNoticeKey?: string;
     /*
@@ -197,6 +245,16 @@ export interface VisualizerRegistryEntry {
      * Modes without this field cannot be targeted by `registries.tunings`.
      */
     foliumTunables?: Readonly<Record<string, FoliumTunable>>;
+    /*
+     * The beat effects this mode draws under 智能动感模式 (services/beatFx/beatEffects.ts), each named,
+     * switched and scaled on its own in the mode's settings. An effect reading 'beats' turns the
+     * shared `beatImpact` / `downbeatImpact` signals (services/beatFx) into its picture - Sonnet:
+     * sonnet/sonnetBeatFx.ts, Diorama: diorama/dioramaBeatRipples.ts; one reading 'drums' plays the
+     * track's drum hits off htdemucs' drum stem (services/analysis/drumHits.ts; 时计:
+     * pendolo/usePendoloBeatFx.ts). Each model runs for the playing track only while a live effect on
+     * screen reads it (beatClockTargets.ts).
+     */
+    beatEffects?: readonly BeatEffectDef[];
 }
 
 export interface FoliumTunable {

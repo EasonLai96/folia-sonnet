@@ -32,6 +32,7 @@ const SCOPES = [
 // The page the browser is left on. It is the only text of the app shown outside its window.
 const PAGE_TEXT = Object.freeze({
   'zh-CN': { done: '已登录 Spotify，可以回到 Folia 了。', refused: '未授权。请回到 Folia 重试。', failed: '登录未完成。请回到 Folia 重试。' },
+  'zh-TW': { done: '已登入 Spotify，可以回到 Folia 了。', refused: '未授權。請回到 Folia 重試。', failed: '登入未完成。請回到 Folia 重試。' },
   en: { done: 'Signed in to Spotify. You can go back to Folia.', refused: 'Not authorized. Try again in Folia.', failed: 'Sign-in not completed. Try again in Folia.' },
   in: { done: 'Sudah masuk ke Spotify. Anda bisa kembali ke Folia.', refused: 'Tidak diizinkan. Coba lagi di Folia.', failed: 'Proses masuk belum selesai. Coba lagi di Folia.' },
 });

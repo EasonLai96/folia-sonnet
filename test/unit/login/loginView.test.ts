@@ -48,9 +48,11 @@ describe('the platform column', () => {
         expect(orderRows(rows, 'e').map(entry => entry.providerId)).toEqual(['e', 'c', 'b', 'a', 'd', 'f', 'g']);
     });
 
-    it('leaves out a platform this runtime cannot use at all, and keeps one that is only not configured', () => {
+    // 这个运行环境够不着的平台（runtime-unavailable：安卓上的 YouTube Music / Spotify，要走桌面端那座桥）
+    // 照样列出来，只是置灰、不能选 —— 整行过滤掉的话那一列里从头到尾没有这两家，看着像这个版本压根没接。
+    it('keeps a platform this runtime cannot use at all, and one that is only not configured', () => {
         const rows = [row('a'), row('b', { availability: { configured: false, reason: 'runtime-unavailable' } }), row('c', off)];
-        expect(orderRows(rows, 'b').map(entry => entry.providerId)).toEqual(['a', 'c']);
+        expect(orderRows(rows, 'b').map(entry => entry.providerId)).toEqual(['b', 'a', 'c']);
     });
 
     it('filters by a piece of the short or the long name, whatever the case', () => {
@@ -69,7 +71,8 @@ describe('the switcher pill and an account\'s picture', () => {
         const rows = [row('a', unusable), row('b'), row('c', off)];
         expect(pillProvider(rows, 'b')?.providerId).toBe('b');
         expect(pillProvider(rows, 'a')?.providerId).toBe('b');
-        expect(pillProvider([row('a', unusable)], 'a')).toBeNull();
+        // 一个能选的都没有时才画够不着的那个：它照样列在那一列里，只是置灰。
+        expect(pillProvider([row('a', unusable)], 'a')?.providerId).toBe('a');
     });
 
     // A click on the pill opens the window on the platform it shows, and a row that is out of
@@ -352,7 +355,8 @@ describe('the texts the window can ask for', () => {
         const notes = Object.fromEntries(listOnlineMusicProviders().map(provider => [provider.id, omni.getLoginTexts(provider.id)?.caseNotes ?? null]));
         expect(notes).toEqual({
             netease: null, kugou: null, bodian: null, qishui: null, feiniu: null,
-            qq: { 'local-service-unavailable': 'home.loginCaseQqRestart' },
+            // 扫错 App 的那一句按后端有没有 QQ 音乐 App 扫码说（这里还没问到后端）。
+            qq: { 'local-service-unavailable': 'home.loginCaseQqRestart', 'wrong-scan-app': 'home.loginCaseQqWrongScanAppMobileOnly', 'device-limit': 'home.loginCaseQqDeviceLimit' },
             ytm: { 'browser-unfinished': 'home.loginCaseYtmUnfinished', 'no-browser': 'home.loginNoBrowserYtm' },
             spotify: { 'browser-unfinished': 'home.loginCaseSpotifyUnfinished', 'not-authorized': 'home.loginCaseSpotifyDenied', 'cannot-listen': 'home.loginCaseSpotifyPort' },
         });

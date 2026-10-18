@@ -19,6 +19,8 @@ const zhT = (key: string, values?: Record<string, string | number>) => (
     (textOf(zh, key) ?? key).replace(/\{\{(\w+)\}\}/g, (_, name: string) => (values?.[name] === undefined ? `{{${name}}}` : String(values[name])))
 );
 const keys = (key: string) => key;
+// Every likely cause a platform can pass on: a new one fails the type check here until it is listed.
+const LIKELY_CAUSES: Record<NonNullable<OnlineFailureDetail['likelyCause']>, true> = { 'sign-in': true, subscription: true, region: true };
 // `null`: a song that names no platform.
 const failure = (detail: OnlineFailureDetail, operation: OnlineFailureOperation = 'audio', providerId: OnlineProviderId | null = 'netease') => (
     onlineFailureOf({ operation, providerId: providerId ?? undefined }, { detail })
@@ -34,6 +36,12 @@ describe('the texts of the cases', () => {
             })),
             onlineFailureMessage(mediaFailureOf({ code: 3 }, 'netease'), keys).title,
             'failure.skipCountdown', 'failure.signIn',
+            // The line a likely cause puts in place of the case's own note (these three had no text at all).
+            ...(Object.keys(LIKELY_CAUSES) as (keyof typeof LIKELY_CAUSES)[]).map(likelyCause => {
+                const { note } = onlineFailureMessage(failure({ case: 'no-audio', likelyCause }), keys);
+                expect(note, likelyCause).toBeDefined();
+                return note!;
+            }),
         ];
         const missing = [...new Set(used)].flatMap(key => [['zh-CN', zh], ['en', en], ['in', id]].filter(([, texts]) => !textOf(texts, key)).map(([name]) => `${key} in ${name}`));
         expect(missing).toEqual([]);

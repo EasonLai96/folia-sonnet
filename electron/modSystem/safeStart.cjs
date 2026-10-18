@@ -43,7 +43,7 @@ const WRITTEN_OFF_FILE = 'mod-start-note-written-off.json';
 const PAGE_QUIET_LIMIT_MS = 3000;
 
 // Native dialog copy. The main process cannot reach the renderer's i18n bundle,
-// so the three shipped locales are mirrored here, as for the trust dialog.
+// so the four shipped locales are mirrored here, as for the trust dialog.
 const SAFE_START_LOCALE = {
     'zh-CN': {
         startMessage: 'Folia 上次没有启动完。',
@@ -54,6 +54,16 @@ const SAFE_START_LOCALE = {
         stuckDetail: '可能是某个模组卡住了。可以继续等，也可以不带模组重新打开窗口。重新打开只管这一次：设置不会变，下次打开 Folia 时模组照常启动。',
         stuckWait: '继续等',
         stuckReopen: '不带模组重新打开',
+    },
+    'zh-TW': {
+        startMessage: 'Folia 上次沒有啟動完。',
+        startDetail: '可能是某個模組造成的。這次要不要不帶模組啟動？只管這一次：設定不會變，下次開啟 Folia 時模組照常啟動。',
+        startWithout: '這次不帶模組啟動',
+        startAsUsual: '照常啟動',
+        stuckMessage: 'Folia 的視窗沒有反應了。',
+        stuckDetail: '可能是某個模組卡住了。可以繼續等，也可以不帶模組重新開啟視窗。重新開啟只管這一次：設定不會變，下次開啟 Folia 時模組照常啟動。',
+        stuckWait: '繼續等',
+        stuckReopen: '不帶模組重新開啟',
     },
     en: {
         startMessage: 'Folia did not finish starting last time.',

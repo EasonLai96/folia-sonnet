@@ -14,7 +14,7 @@ import { resolveFoliumLabel } from '../params/params';
 // (just the frame). The host's own default is the command palette's skeleton, which would put a
 // search bar and command rows inside every panel a mod sketches.
 
-/** A mod's text: literal, or per language (`{ 'zh-CN': '…', en: '…' }`). */
+/** A mod's text: literal, or per language (`{ 'zh-CN': '…', 'zh-TW': '…', en: '…' }`). */
 export type FoliumPonderText = string | FoliumLabel;
 
 type Resources = Record<string, string>;

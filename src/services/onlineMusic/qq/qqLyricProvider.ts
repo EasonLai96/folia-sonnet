@@ -104,7 +104,9 @@ export async function searchQQSongs(keyword: string, page = 1, pageSize = 20): P
     ),
     remoteplace: "search.android.keyboard",
     query: safeKeyword.length > 60 ? safeKeyword.slice(0, 60) : safeKeyword,
-    search_type: 0, // 0 = SONG
+    // 7 = songs. 0 used to mean songs too, but QQ now answers 2001 with no items to every 0 search
+    // while the same request with 7 is answered (checked 2026-10-17, #695): do not change it back.
+    search_type: 7,
     num_per_page: pagesize,
     page_num: page,
     highlight: 0,

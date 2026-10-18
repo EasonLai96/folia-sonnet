@@ -18,9 +18,11 @@ type ToggleProps = {
     disabled?: boolean;
     /** 名字。不在 kit 的 Row 里（自己拿 div 画的一行）时没有 label 可借，用它当 aria-label。 */
     label?: string;
+    /** The id of what names it, where it sits outside a settings row. */
+    labelledBy?: string;
 };
 
-export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, disabled, label }) => {
+export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, disabled, label, labelledBy }) => {
     const { isDaylight } = useSettingsKitTheme();
 
     return (
@@ -30,6 +32,7 @@ export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, disabled, lab
             aria-checked={checked}
             aria-label={label}
             {...useRowAria()}
+            {...(labelledBy ? { 'aria-labelledby': labelledBy } : {})}
             disabled={disabled}
             onClick={() => onChange(!checked)}
             className={`st-t-move shrink-0 w-12 h-6 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${checked

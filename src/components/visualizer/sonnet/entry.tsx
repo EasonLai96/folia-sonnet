@@ -1,5 +1,9 @@
 import React from 'react';
-import { defineVisualizer } from '../definition';
+import { WandSparkles } from 'lucide-react';
+import type { SonnetOuterFrameMode, SonnetTuning } from '../../../types';
+import { cycleValue, QuickControlChip, QuickControlToggle } from '../../shared/QuickControlChip';
+import { defineVisualizer, type VisualizerQuickControlsProps } from '../definition';
+import { BEAT_EFFECT_IDS } from '../../../services/beatFx/beatEffects';
 import SonnetSettingsPanel from './SonnetSettingsPanel';
 
 const VisualizerSonnet = React.lazy(() => import('./VisualizerSonnet'));
@@ -9,6 +13,13 @@ const SONNET_TUNABLE = { min: 0, max: 3, identity: 1 } as const;
 
 // src/components/visualizer/sonnet/entry.tsx
 // Registers 商籁, the deterministic Japanese MG lyric-PV director.
+const OUTER_FRAME_MODES: SonnetOuterFrameMode[] = ['none', 'frame', 'full'];
+const OUTER_FRAME_LABEL_KEYS: Record<SonnetOuterFrameMode, string> = {
+    none: 'options.sonnetOuterFrameNone',
+    frame: 'options.sonnetOuterFrameFrame',
+    full: 'options.sonnetOuterFrameFull',
+};
+
 export default defineVisualizer({
     mode: 'sonnet',
     order: 10,
@@ -29,6 +40,13 @@ export default defineVisualizer({
         keywords: ['sonnet', '商籁', '文字 pv', 'mg pv', 'vocaloid'],
     },
     usesWordSegmentation: true,
+    // 智能动感模式: beat_this' beats drive the camera, tear and glow (sonnetBeatFx.ts).
+    beatEffects: [{
+        id: BEAT_EFFECT_IDS.sonnetLensTear,
+        nameKey: 'options.beatEffect_sonnetLensTear',
+        descKey: 'options.beatEffect_sonnetLensTearDesc',
+        source: 'beats',
+    }],
     // Folium tunables read by createSonnetPixiRuntime's mod(key). Names are public API.
     foliumTunables: {
         cameraScale: SONNET_TUNABLE,
@@ -48,5 +66,24 @@ export default defineVisualizer({
     // context away mid-transition and leave the frame empty for the whole rebuild.
     render: props => <VisualizerSonnet {...props} />,
     renderSettingsPanel: props => <SonnetSettingsPanel {...props} />,
+    renderQuickControls: ({ tuning, onTuningChange, t }: VisualizerQuickControlsProps<SonnetTuning>) => {
+        const frameLabel = t(OUTER_FRAME_LABEL_KEYS[tuning.outerFrameMode]);
+        return (
+            <>
+                <QuickControlChip
+                    label={frameLabel}
+                    title={`${t('options.sonnetOuterFrameMode')}: ${frameLabel}`}
+                    onClick={() => onTuningChange({ outerFrameMode: cycleValue(OUTER_FRAME_MODES, tuning.outerFrameMode) })}
+                />
+                <QuickControlToggle
+                    active={tuning.postProcessEnabled}
+                    label={t('options.sonnetPostProcessEnabled')}
+                    onToggle={() => onTuningChange({ postProcessEnabled: !tuning.postProcessEnabled })}
+                >
+                    <WandSparkles size={14} />
+                </QuickControlToggle>
+            </>
+        );
+    },
     ownFontSizeNoticeKey: 'options.sonnetFontSizeAutoNotice',
 });

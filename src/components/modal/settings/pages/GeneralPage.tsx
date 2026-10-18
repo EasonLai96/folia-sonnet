@@ -62,9 +62,11 @@ const GeneralPage: React.FC = () => {
     const ponder = usePonderStore(useShallow(selectPonderSettingsSnapshot));
 
     const resolvedLanguage = i18n.resolvedLanguage;
-    const resolvedLanguageLabel = resolvedLanguage?.startsWith('zh')
-        ? t('options.appLanguageZhCN')
-        : resolvedLanguage === 'in' || resolvedLanguage?.startsWith('id') ? t('options.appLanguageInID') : t('options.appLanguageEnUS');
+    const resolvedLanguageLabel = resolvedLanguage === 'zh-TW'
+        ? t('options.appLanguageZhTW')
+        : resolvedLanguage?.startsWith('zh')
+            ? t('options.appLanguageZhCN')
+            : resolvedLanguage === 'in' || resolvedLanguage?.startsWith('id') ? t('options.appLanguageInID') : t('options.appLanguageEnUS');
 
     const isInternalBuild = electronSettings.UPDATE_CHANNEL === 'internal';
     const autoUpdateSupported = Boolean(updateStatus?.autoUpdateSupported);
@@ -81,6 +83,7 @@ const GeneralPage: React.FC = () => {
                         options={[
                             { value: 'system', label: t('options.appLanguageSystem') },
                             { value: 'zh-CN', label: t('options.appLanguageZhCN') },
+                            { value: 'zh-TW', label: t('options.appLanguageZhTW') },
                             { value: 'en', label: t('options.appLanguageEnUS') },
                             { value: 'in', label: t('options.appLanguageInID') },
                         ]}

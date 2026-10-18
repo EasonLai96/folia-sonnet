@@ -72,6 +72,7 @@ export type PlayerChromeSettingsState = {
      * On by default：点空白求的就是一片干净，字幕留着反而像没藏干净。
      */
     hideSubtitleWhenChromeHidden: boolean;
+    hideCursorWhenIdle: boolean;
     showOpenPanelCloseButton: boolean;
     setTransparentPlayerBackgroundFromSystem: (enabled: boolean) => void;
     handleTogglePlayerPageNativeBlur: (enable: boolean) => void;
@@ -90,6 +91,7 @@ export type PlayerChromeSettingsState = {
     handleToggleAutoHideCursorWithPlayerChrome: (enable: boolean) => void;
     handleToggleHidePlayerChromeOnTap: (enable: boolean) => void;
     handleToggleHideSubtitleWhenChromeHidden: (enable: boolean) => void;
+    handleToggleHideCursorWhenIdle: (enable: boolean) => void;
     handleToggleOpenPanelCloseButton: (enable: boolean) => void;
 };
 
@@ -120,6 +122,7 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
     autoHideCursorWithPlayerChrome: getStoredBoolean('auto_hide_cursor_with_player_chrome', true),
     hidePlayerChromeOnTap: getStoredBoolean('hide_player_chrome_on_tap', true),
     hideSubtitleWhenChromeHidden: getStoredBoolean('hide_subtitle_when_chrome_hidden', true),
+    hideCursorWhenIdle: getStoredBoolean('hide_cursor_when_idle', false),
     showOpenPanelCloseButton: getStoredBoolean('show_open_panel_close_button', true),
     setTransparentPlayerBackgroundFromSystem: (enabled) => {
         setStoredBoolean('transparent_player_background', enabled);
@@ -158,6 +161,14 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
         setStatusMessage({
             type: 'info',
             text: i18n.t('notifications.' + (enable ? 'cursorAutoHideOn' : 'cursorAutoHideOff')),
+        });
+    },
+    handleToggleHideCursorWhenIdle: (enable) => {
+        setStoredBoolean('hide_cursor_when_idle', enable);
+        set({ hideCursorWhenIdle: enable });
+        setStatusMessage({
+            type: 'info',
+            text: i18n.t('notifications.' + (enable ? 'cursorIdleHideOn' : 'cursorIdleHideOff')),
         });
     },
     handleToggleHidePlayerProgressBar: (enable) => {
@@ -278,6 +289,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     autoHideCursorWithPlayerChrome: state.autoHideCursorWithPlayerChrome,
     hidePlayerChromeOnTap: state.hidePlayerChromeOnTap,
     hideSubtitleWhenChromeHidden: state.hideSubtitleWhenChromeHidden,
+    hideCursorWhenIdle: state.hideCursorWhenIdle,
     showOpenPanelCloseButton: state.showOpenPanelCloseButton,
     handleToggleHidePlayerProgressBar: state.handleToggleHidePlayerProgressBar,
     handleSetPlayerBottomBarOffset: state.handleSetPlayerBottomBarOffset,
@@ -295,6 +307,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     handleToggleAutoHideCursorWithPlayerChrome: state.handleToggleAutoHideCursorWithPlayerChrome,
     handleToggleHidePlayerChromeOnTap: state.handleToggleHidePlayerChromeOnTap,
     handleToggleHideSubtitleWhenChromeHidden: state.handleToggleHideSubtitleWhenChromeHidden,
+    handleToggleHideCursorWhenIdle: state.handleToggleHideCursorWhenIdle,
     handleToggleOpenPanelCloseButton: state.handleToggleOpenPanelCloseButton,
     handleWallpaperTransparentRefused: state.handleWallpaperTransparentRefused,
 });

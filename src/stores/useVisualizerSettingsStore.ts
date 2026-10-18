@@ -14,12 +14,12 @@ import { create } from 'zustand';
 import { getVisualizerModeLabel } from '../components/visualizer/registry';
 import type { StoredTuning, VisualizerTuningSettings } from '../components/visualizer/tuningDefinition';
 import { getBackgroundSettingsSlices, getStoredVisualizerTunings } from '../components/visualizer/tuningRegistry';
-import { type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
+import { type SmartBeatSettings, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
 import { VISUALIZER_FRAME_RATE_STORAGE_KEY, setGlobalVisualizerFrameRate } from '../utils/frameRateLimiter';
 import { GLOW_BLUR_QUANTIZE_STORAGE_KEY, readStoredGlowBlurQuantize, setGlowBlurQuantized } from '../utils/glowBlurQuantize';
 import i18n from '../i18n/config';
 import { setStatusMessage } from './useStatusMessageStore';
-import { VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY, WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY, readStoredBackgroundOpacity, readStoredTuning, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperFloatingAvoidOffsetX, readStoredWallpaperFloatingAvoidWidth, readStoredWallpaperFloatingFillSafeArea, readStoredWallpaperFloatingFontSize, readStoredWallpaperFloatingFontSizeMode, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperFloatingWidth, readStoredWallpaperLyricsFontMode, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, writeStoredTuning } from './visualizerSettingsPersistence';
+import { SMART_BEAT_STORAGE_KEY, type SmartBeatPatch, VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY, WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY, readStoredBackgroundOpacity, readStoredSmartBeatSettings, resolveSmartBeatSettings, readStoredTuning, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperFloatingAvoidOffsetX, readStoredWallpaperFloatingAvoidWidth, readStoredWallpaperFloatingFillSafeArea, readStoredWallpaperFloatingFontSize, readStoredWallpaperFloatingFontSizeMode, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperFloatingWidth, readStoredWallpaperLyricsFontMode, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, writeStoredTuning } from './visualizerSettingsPersistence';
 import { getStoredBoolean, getStoredString, setStoredBoolean, setStoredString } from './storagePrimitives';
 
 /** 是否把播放中的歌词喂给系统动态壁纸。关掉后壁纸保留最后一帧，不再更新。 */
@@ -174,6 +174,8 @@ type OwnSettingsState = {
      * 而叠层存在的意义恰恰是透出壁纸，所以默认隐藏，想要完整构图的再打开。
      */
     wallpaperOverlayHideCoverArt: boolean;
+    /** 智能动感模式, shared by every visualizer and background that draws beat FX: no one style's tuning. */
+    smartBeat: SmartBeatSettings;
     handleToggleDisableVisualizerVignette: (disable: boolean) => void;
     handleToggleDisableVisualizerGeometricBackground: (disable: boolean) => void;
     handleSetBackgroundOpacity: (opacity: number) => void;
@@ -227,6 +229,7 @@ type OwnSettingsState = {
     handleToggleWallpaperOverlayHideWhenPaused: (enable: boolean) => void;
     handleToggleWallpaperOverlayHideAfterLyricsEnd: (enable: boolean) => void;
     handleToggleWallpaperOverlayHideCoverArt: (enable: boolean) => void;
+    handleSetSmartBeat: (patch: SmartBeatPatch) => void;
 };
 
 export type VisualizerSettingsState = OwnSettingsState & VisualizerTuningSettings;
@@ -322,6 +325,12 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     wallpaperOverlayHideWhenPaused: readStoredWallpaperOverlayHideWhenPaused(),
     wallpaperOverlayHideAfterLyricsEnd: readStoredWallpaperOverlayHideAfterLyricsEnd(),
     wallpaperOverlayHideCoverArt: readStoredWallpaperOverlayHideCoverArt(),
+    smartBeat: readStoredSmartBeatSettings(),
+    handleSetSmartBeat: (patch) => {
+        const next = resolveSmartBeatSettings(patch, get().smartBeat);
+        if (typeof window !== 'undefined') localStorage.setItem(SMART_BEAT_STORAGE_KEY, JSON.stringify(next));
+        set({ smartBeat: next });
+    },
     handleToggleDisableVisualizerVignette: (disable) => {
         setStoredBoolean('disable_visualizer_vignette', disable);
         set({ disableVisualizerVignette: disable });
@@ -560,10 +569,12 @@ export const selectVisualizerSettingsSnapshot = (state: VisualizerSettingsState)
     handleSetVisualizerFrameRate: state.handleSetVisualizerFrameRate,
     handleSetVisualizerMode: state.handleSetVisualizerMode,
     handleSetVisualizerOpacity: state.handleSetVisualizerOpacity,
+    handleSetSmartBeat: state.handleSetSmartBeat,
     handleToggleDisableVisualizerGeometricBackground: state.handleToggleDisableVisualizerGeometricBackground,
     handleToggleDisableVisualizerVignette: state.handleToggleDisableVisualizerVignette,
     handleToggleRandomVisualizerModePerSong: state.handleToggleRandomVisualizerModePerSong,
     randomVisualizerModePerSong: state.randomVisualizerModePerSong,
+    smartBeat: state.smartBeat,
     visualizerBackgroundMode: state.visualizerBackgroundMode,
     visualizerFrameRate: state.visualizerFrameRate,
     visualizerMode: state.visualizerMode,

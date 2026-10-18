@@ -28,6 +28,7 @@ export interface ModMainCallStats {
 export interface ModLabelMap {
     [key: string]: string | undefined;
     'zh-CN'?: string;
+    'zh-TW'?: string;
     'en'?: string;
     'in'?: string;
 }

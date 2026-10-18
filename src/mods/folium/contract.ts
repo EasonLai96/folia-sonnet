@@ -14,7 +14,7 @@ export const FOLIUM_VERSION = Object.freeze({ major: 1, minor: 6 });
 /** `modid:name`, like a Forge ResourceLocation. The mod id part is added by the host. */
 export type FoliumId = string;
 
-/** Localized text keyed by locale (`zh-CN`, `en`, `in`); the host falls back to `en`, then to any entry. */
+/** Localized text keyed by locale (`zh-CN`, `zh-TW`, `en`, `in`); the host falls back to `en`, then to any entry. */
 export type FoliumLabel = Record<string, string | undefined>;
 
 /** Undoes a registration, subscription or mount. Safe to call more than once. */

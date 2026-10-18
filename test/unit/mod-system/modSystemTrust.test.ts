@@ -116,9 +116,9 @@ describe('enable approval and content changes', () => {
 
 describe('the enable dialog text', () => {
     // A line one language lacks would read "undefined" in the dialog there.
-    it('has the same lines in the three languages', () => {
+    it('has the same lines in the four languages', () => {
         const english = Object.keys(TRUST_DIALOG_LOCALE.en).sort();
-        for (const language of ['zh-CN', 'in']) {
+        for (const language of ['zh-CN', 'zh-TW', 'in']) {
             expect(Object.keys(TRUST_DIALOG_LOCALE[language]).sort(), language).toEqual(english);
         }
     });
