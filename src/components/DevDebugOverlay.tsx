@@ -130,6 +130,15 @@ const formatSeconds = (value: number | null | undefined) => {
     return `${value.toFixed(3)}s`;
 };
 
+/**
+ * 音频延迟用毫秒读 —— baseLatency 常常只有几毫秒（一个渲染量子），写成 `0.003s` 里那两个
+ * 零只会挡住真正要看的那一位。
+ */
+const formatMs = (value: number | null | undefined) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
+    return `${(value * 1000).toFixed(1)}ms`;
+};
+
 const formatClock = (value: number) => {
     if (!Number.isFinite(value) || value < 0) {
         return '00:00';
@@ -696,6 +705,25 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
                         />
                         <DebugRow label="ready/network" value={`${media.readyState ?? 'n/a'} / ${media.networkState ?? 'n/a'}`} />
                         <DebugRow label="last event" value={media.lastEvent ? `${media.lastEvent}${media.lastEventAt ? ` @${media.lastEventAt.slice(11, 19)}` : ''}` : 'n/a'} />
+                        {/*
+                         * 频谱走哪条路：worklet = 音频线程算完 post 出来，主线程一次都不等；
+                         * analyser = 每帧在主线程上现算一遍 FFT（`getByteFrequencyData`），
+                         * 正是整页掉帧且所有可视化模式一起慢的成因。卡的时候先看这一行。
+                         */}
+                        <DebugRow
+                            label="spectrum via"
+                            value={media.spectrumSource === 'analyser'
+                                ? `analyser (兜底)${media.spectrumSourceReason ? ` · ${media.spectrumSourceReason}` : ''}`
+                                : media.spectrumSource}
+                        />
+                        {/*
+                         * hint 只是「请求」，落地成多少看 base / out —— 判「调缓冲有没有用」
+                         * 要看这两个数动没动，两个数不动就说明这一档调了等于没调。
+                         */}
+                        <DebugRow
+                            label="ctx latency"
+                            value={`hint ${media.audioContextLatencyHint} · base ${formatMs(media.audioContextBaseLatencySec)} · out ${formatMs(media.audioContextOutputLatencySec)} · ${media.audioContextState ?? 'n/a'}`}
+                        />
                     </dl>
                 </div>
             </section>

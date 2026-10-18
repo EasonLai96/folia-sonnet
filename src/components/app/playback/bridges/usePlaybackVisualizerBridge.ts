@@ -64,18 +64,18 @@ type UsePlaybackVisualizerBridgeParams = {
 };
 
 /**
- * 隔多久向音频线程要一次频谱。
+ * 兜底那条路（AnalyserNode）隔多久取一次频谱。
  *
- * `getByteFrequencyData()` 是**同步**的：它要等音频线程把最近一次渲染结果交出来，输出缓冲
- * 越大等得越久 —— 而放音乐为了抗撕裂（underrun）恰恰要把缓冲开大，见 usePlaybackAudioBridge
- * 的 AUDIO_OUTPUT_LATENCY_HINT_SEC。播放页的 rAF 每帧跑一次 updateLoop，等于每帧都要付这一
- * 笔：缓冲开到 `playback` 那档时整页掉帧就是这么来的（且所有可视化模式一起慢，卡的是取频谱
- * 这一步，不是某个模式的绘制）。
+ * ⚠️ 只有**兜底**才用得上它：音频线程抽的那条（services/spectrumTap）拿的是人家已经算好的
+ * 一份，读它一次都不等，每一帧都能取，间隔对它不起作用。
+ *
+ * 兜底为什么不能每帧取：`getByteFrequencyData()` 的开销是**在主线程上现算一遍 FFT**（外加
+ * 一次与音频线程互踢的锁），而播放页的 rAF 每帧跑一次 updateLoop —— 等于每秒在主线程上做
+ * 六十次 2048 点 FFT，整页掉帧就是这么来的，且**所有**可视化模式一起慢（卡的是取频谱这一步，
+ * 不是某个模式的绘制）。
  *
  * 降到 ~30Hz：频谱本来就过了一遍 `smoothingTimeConstant`（0.6）的平滑，少一半采样看不出来，
- * 但把大缓冲的代价砍掉了一半以上。中间那些帧不写信号，可视化自然沿用上一帧的读数。
- *
- * 只抬缓冲不动这里，等于把掉帧那条老路再走一遍 —— 两边是一套改动。
+ * 但把这笔开销砍掉了一半以上。中间那些帧不写信号，可视化自然沿用上一帧的读数。
  */
 const SPECTRUM_READ_INTERVAL_MS = 33;
 
@@ -173,8 +173,9 @@ export function usePlaybackVisualizerBridge({
          *
          *  · **音频线程抽的那条**（services/spectrumTap）—— 拿到的是人家已经算好的一份，读它
          *    **一次都不等音频线程**，所以每一帧都能用，不必降频；
-         *  · **AnalyserNode 那条** —— `getByteFrequencyData` 是同步的，要等音频线程把最近一次
-         *    渲染结果交出来，缓冲越大等得越久，所以降到 ~30Hz（SPECTRUM_READ_INTERVAL_MS）。
+         *  · **AnalyserNode 那条**（兜底）—— `getByteFrequencyData` 的开销是**在主线程上现算
+         *    一遍 FFT**，一帧一次太贵，所以降到 ~30Hz（SPECTRUM_READ_INTERVAL_MS）。它跟输出
+         *    缓冲多大**没有关系**，别照着「缓冲越大等得越久」那条旧结论去调 latencyHint。
          *
          * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
          */

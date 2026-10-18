@@ -122,7 +122,7 @@ const readAudioContextDiagnostics = (context: AudioContext): void => {
 /**
  * 把请求的缓冲写成一个能直接摆在界面上的字符串。
  *
- * 传数字是规范里的秒数写法（见 usePlaybackAudioBridge 的 AUDIO_OUTPUT_LATENCY_HINT_SEC），
+ * 传数字是规范里的秒数写法（见 usePlaybackAudioBridge 的 AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC），
  * 带上单位才不会跟 `balanced` 这类档位名混在一起读。
  */
 const describeLatencyHint = (
@@ -235,6 +235,18 @@ export const readMediaDiagnostics = (): MediaDiagnosticsSnapshot => {
         audioContextBaseLatencySec: audioContextDiagnostics.baseLatencySec,
         audioContextOutputLatencySec: audioContextDiagnostics.outputLatencySec,
         audioContextState: audioContextDiagnostics.state,
+        /*
+         * 频谱走哪条路 —— 这一项是「播放页掉帧」那类问题的分水岭：
+         *
+         *  · `worklet` —— 音频线程算完 post 出来，主线程只读最新一份，一次都不等音频线程；
+         *  · `analyser` —— 每帧在主线程上现算一遍 FFT（`getByteFrequencyData` 的开销就在
+         *    这里，跟输出缓冲多大没关系），表现为整页掉帧且**所有**可视化模式一起慢（卡的
+         *    是取频谱这一步，不是某个模式的绘制）。
+         *
+         * 出现后者而 `audioContext*` 那几项都正常，去看 `spectrumSourceReason`。
+         */
+        spectrumSource,
+        spectrumSourceReason,
     };
 };
 
@@ -273,6 +285,22 @@ export const noteAnalyser = (analyser: AnalyserNode | null | undefined): void =>
     if (analyser) {
         analyserBuilt = true;
     }
+};
+
+/** 取频谱的两条路：音频线程算（worklet），还是每帧同步等（analyser）。'unknown' 是还没试过。 */
+export type SpectrumSource = 'unknown' | 'worklet' | 'analyser';
+
+let spectrumSource: SpectrumSource = 'unknown';
+let spectrumSourceReason: string | null = null;
+
+/**
+ * 频谱那条路接上（或确认没接上）时调一次。
+ *
+ * 这个判断以前只能靠抓日志，而掉帧的两种成因在界面上一模一样 —— 摆出来一眼就能分开。
+ */
+export const noteSpectrumSource = (source: SpectrumSource, reason?: unknown): void => {
+    spectrumSource = source;
+    spectrumSourceReason = reason === undefined ? null : String(reason);
 };
 
 /** 频谱那一路的信号，就是 motionSignals 的 audioBands 再加整体能量 audioPower。 */
