@@ -19,6 +19,11 @@ export const FOLDED_PX = 48;
 const COVER_GAP_PX = 14;
 /** The large cover is never lower than this, however short the window. */
 const MIN_COVER_PX = 96;
+/**
+ * 大封面的上限。以前是 `100cqw`（整个面板内宽）—— 面板一宽，封面就顶到两边，
+ * 一屏里几乎只剩封面。现在取内宽的 70%，再封顶 260px：还是那块方的，只是小一圈。
+ */
+const COVER_MAX = 'min(70cqw, 260px)';
 
 type SongHeaderProps = {
     /** The cover tab is open: the large form. */
@@ -37,10 +42,8 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
     const underRef = useRef<HTMLDivElement>(null);
     const under = useMeasuredSize(underRef);
     const artists = (currentSong ? getProviderSongMetadata(currentSong).artists : []).map(artist => artist.name).join(' / ');
-    // The large cover is a square as wide as the panel's inside (100cqw), and lower where the
-    // window leaves less: --pn-room is the height PanelShell can give this header.
     const underPx = COVER_GAP_PX + under.height;
-    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(var(--pn-room) - ${underPx}px), 100cqw)`;
+    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(var(--pn-room) - ${underPx}px), ${COVER_MAX})`;
 
     return (
         <header
@@ -51,8 +54,10 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
             <div
                 data-ponder-panel-artwork
                 onClick={isBig ? undefined : onShowCover}
-                className={`st-t-unfold absolute left-0 top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig ? 'rounded-[10px]' : 'cursor-pointer rounded-lg'}`}
-                style={isBig ? { width: '100%', height: coverHeight } : { width: FOLDED_PX, height: FOLDED_PX }}
+                // 大封面不再铺满内宽：宽高都取 coverHeight（那块方的边长），左右 auto 居中。
+                // 折叠成一行时仍旧靠左。
+                className={`st-t-unfold absolute top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig ? 'left-0 right-0 mx-auto rounded-[10px]' : 'left-0 cursor-pointer rounded-lg'}`}
+                style={isBig ? { width: coverHeight, height: coverHeight } : { width: FOLDED_PX, height: FOLDED_PX }}
             >
                 {coverUrl ? (
                     <img src={getSizedCoverUrl(coverUrl, 512)} alt="Art" decoding="async" className="h-full w-full object-cover" />

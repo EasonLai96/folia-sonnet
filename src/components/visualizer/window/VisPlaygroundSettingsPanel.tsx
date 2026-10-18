@@ -268,7 +268,9 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                 )}
             />
             <StudioColumnBody>
-                <div key={activeSection} className="st-page-in">
+                {/* 这一栏比设置窗口窄，kit 那套 py-2.5 的行距在这儿挤成一团 —— 打上标记，
+                    由 kit.css 把行与行的上下留白拉大一点（只管这一栏，不动设置窗口）。 */}
+                <div key={activeSection} className="st-page-in" data-folia-vis-settings="true">
                     {activeSection === 'visualizer' && (
                         <>
                             {missingStyleNotice && (

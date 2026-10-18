@@ -73,6 +73,13 @@
     left: 40px;
 }
 
+/* ---- 歌词样式窗口右栏：那一栏只有 420px 宽，行挤在一起，所以把行的上下留白从 py-2.5
+   拉到 0.9rem。只认打了 data-folia-vis-settings 的那一栏，设置窗口里照旧。 */
+[data-folia-vis-settings] .st-row {
+    padding-top: 0.9rem;
+    padding-bottom: 0.9rem;
+}
+
 .st-card > .st-row:first-child::before,
 .st-card > .st-unfold:first-child > div > .st-row:first-child::before {
     display: none;
