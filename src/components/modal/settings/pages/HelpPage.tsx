@@ -175,7 +175,16 @@ const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, o
                         <button type="button" onClick={onProjectLabelClick} className="cursor-default">{t('help.madeBy')}</button>
                     )}
                 >
-                    <Button variant="quiet" onClick={() => openOutsideLink(REPOSITORY_URL)}>
+                    {/*
+                     * 这颗就是「跳仓库」的那颗按钮 —— 它没被删过，但以前用的是 quiet 那一档
+                     * （24px 高、次级文字色、没有底），手机上再乘一遍界面缩放就只剩指甲盖那么
+                     * 一点，而它的行标题写的是「项目：」—— 一行没有任何链接暗示的字里藏着一粒
+                     * 灰字，看上去就跟「仓库链接被删了」一模一样。
+                     *
+                     * 所以改成常规那一档：有底色和自身高度，看得出来能按；外链图标保留。
+                     * 行标题（含那个数到第七下出猫的点击）一个字都不动。
+                     */}
+                    <Button variant="fill" onClick={() => openOutsideLink(REPOSITORY_URL)}>
                         {REPOSITORY_NAME}
                         <ExternalLink size={12} />
                     </Button>
