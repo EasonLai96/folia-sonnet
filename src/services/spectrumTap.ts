@@ -57,13 +57,14 @@ const addModuleWithTimeout = async (context: AudioContext, url: string): Promise
  * 读法：`off` 不卡而 `synthetic` 卡 → 采集那一步贵；两档都不卡 → 频谱无辜，往渲染以外找；
  * `off` 还卡 → 频谱这条链路整体无份。
  *
- * ⚠️ 默认是 `off`，是排查期间的临时值。确认完要么 `__foliaSetSpectrumFeed('on')` 改回来，
- * 要么连同这个开关一起删掉 —— 别让它以 `off` 的状态留在仓库里。
+ * 2026-10-18 用它实测过：`off` 之下播放页照旧卡 → **取频谱不是掉帧的成因**，这一档的活
+ * 干完了。默认值已改回 `on`。开关留着是因为下次还要二分（比如怀疑歌词的那一侧时，
+ * 关掉频谱能立刻把变量摘干净）；真不需要了就直接删掉，别留一个默认 `off` 的开关在仓库里。
  */
 export type SpectrumFeedMode = 'on' | 'synthetic' | 'off';
 
 const SPECTRUM_FEED_STORAGE_KEY = 'folia_spectrum_feed';
-const SPECTRUM_FEED_DEFAULT: SpectrumFeedMode = 'off';
+const SPECTRUM_FEED_DEFAULT: SpectrumFeedMode = 'on';
 
 const readSpectrumFeedMode = (): SpectrumFeedMode => {
     if (typeof window === 'undefined') return SPECTRUM_FEED_DEFAULT;

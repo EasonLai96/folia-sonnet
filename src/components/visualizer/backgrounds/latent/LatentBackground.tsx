@@ -42,6 +42,23 @@ interface LatentBackgroundProps {
 }
 
 const MAX_SHADER_PIXELS = 1280 * 720;
+/**
+ * 这条循环隔多久真正处理一帧。
+ *
+ * 它驱动的是**全屏**的东西：mesh 与抖动各是一个 1280×720 的 WebGL canvas，每往那两个
+ * `absolute inset-0` 的层上写一次 filter / opacity，整屏就要重新合成一遍 —— 手机上这是最贵
+ * 的一类开销，而它换来的只是「颜色随音乐微微变浓 / 变亮」。
+ *
+ * 但那是个**慢变量**：值先被 0.12~0.16 的 ease 平滑过，60Hz 里相邻两帧的差异远在人眼可辨
+ * 之下 —— 一半的帧是白干的。降到 ~30Hz，JS 与合成各砍一半，观感不变。
+ *
+ * ⚠️ 别把它当成还能往上加的档位：30Hz 是「不再白干」，不是「还嫌多」。真要再省，动的是
+ * **每帧写了什么**（见下面那两笔被删掉的 transform），不是这个间隔。
+ *
+ * 平滑系数（0.12 那几个）是按**帧**算的，降频后响应会慢一倍 —— 背景渐变慢一点更柔和，
+ * 这里不补偿。下面 `pauseStep` 那条是按 dt 算的，降频不会让它失真。
+ */
+const AUDIO_RESPONSE_INTERVAL_MS = 33;
 const PAUSED_SPEED_SCALE = 0.12;
 // How fast the speed goes from playing to paused or back, as a time constant: settled in about a second.
 const PAUSE_EASE_MS = 300;
@@ -51,6 +68,16 @@ const clampAudioAmount = (value: number) => Math.min(1, Math.max(0, value));
 const easeTowards = (current: number, target: number, amount: number) => (
     current + (target - current) * amount
 );
+/**
+ * 把连续值压成台阶，好让 `writeLayerStyle` 的去重真的挡得住。
+ *
+ * 平滑后的音频值**每帧都在动**，哪怕只动 0.001 —— 写进 style 就是一次全屏重合成，而那两个
+ * 层是全屏的。量化到 0.02 之后，大多数帧算出来的值和上一帧落在同一档，去重生效，真正的
+ * 写入从「每帧」变成「偶尔」。
+ *
+ * 0.02 是观感的下限：再粗，颜色/颗粒度就会一格一格地跳。
+ */
+const quantize = (value: number, step: number) => (Math.round(value / step) * step).toFixed(2);
 export const resolveLatentBroadbandEnergy = (
     bass: number,
     lowMid: number,
@@ -244,6 +271,9 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
             // frame callbacks: the uniforms written below (updatePaperShaderUniforms, which leaves the
             // drawing to a running shader's own loop) are then in the frame that loop draws.
             animationFrame = requestAnimationFrame(updateAudioResponse);
+            // 60Hz 里只处理一半的帧：见 AUDIO_RESPONSE_INTERVAL_MS。shader 自己那条动画循环
+            // 照旧 60Hz 在跑（它只是被喂 uniform），所以画面不会因为这里降频而变卡。
+            if (lastFrameAt !== null && frameAt - lastFrameAt < AUDIO_RESPONSE_INTERVAL_MS) return;
 
             const isPaused = pausedRef.current;
             // By the time since the last frame: as fast at any frame rate.
@@ -322,13 +352,23 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
 
             if (ditheringLayerRef.current) {
                 writeLayerStyle(ditheringLayerRef.current, 'opacity', showMesh
-                    ? `${Math.min(1, tuning.ditheringOpacity + smoothedBass * 0.25)}`
+                    ? quantize(Math.min(1, tuning.ditheringOpacity + smoothedBass * 0.25), 0.02)
                     : '1');
-                writeLayerStyle(ditheringLayerRef.current, 'transform', `scale(${1.015 + smoothedBass * 0.025})`);
+                /*
+                 * 这里原来还有一笔 `transform: scale(1.015→1.04)`。2.5% 的缩放压在一层抖动
+                 * 颗粒上根本看不出来，而这一层的 `mix-blend-mode: soft-light` 要读身后的 mesh
+                 * 才能混合 —— 于是它每动一次，就是一整屏的 soft-light 重算。删掉；静态初始值
+                 * `scale(1.015)` 留在下面 CSS 里，观感不变。
+                 */
             }
             if (meshLayerRef.current) {
-                writeLayerStyle(meshLayerRef.current, 'filter', `saturate(${1.04 + smoothedMid * 0.34}) brightness(${0.94 + smoothedPower * 0.16})`);
-                writeLayerStyle(meshLayerRef.current, 'transform', `scale(${1.025 + smoothedPower * 0.018})`);
+                writeLayerStyle(meshLayerRef.current, 'filter', `saturate(${quantize(1.04 + smoothedMid * 0.34, 0.02)}) brightness(${quantize(0.94 + smoothedPower * 0.16, 0.02)})`);
+                /*
+                 * 同样删掉 `transform: scale(1.025→1.043)`。1.8% 的缩放压在一团大色块渐变上
+                 * 没有可辨识的位移，它实际起作用的只是「把边缘推出画外一点、别露白」—— 那一
+                 * 部分是**静态**的，下面 CSS 里已经写死 `scale(1.025)`。动的那一半纯是每帧白
+                 * 交的合成费，而且和上面的 filter 挤在同一个元素上，两个一起更贵。
+                 */
             }
         };
 
