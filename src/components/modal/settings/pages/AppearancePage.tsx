@@ -37,11 +37,17 @@ const AI: SettingsGroupDef = { id: 'electronSettings', titleKey: 'options.electr
  * 启动、更新这类「行为」，这几项讲的是「长什么样」，所以搬到这里，排在歌词那组之后。
  */
 const VIEW: SettingsGroupDef = { id: 'surfaceView', titleKey: 'options.settingsHeadingView' };
+/**
+ * 歌词动态壁纸（fork 独有，只有安卓画）：原来整节塞在「歌词动画」那张卡里，
+ * 「歌词动画样式」和「设为壁纸 / 样式 / 字体……」两件事混在一张卡上。现在独立成组 ——
+ * 自己一张卡、自己一个页签（anchor id 沿用 lyricsWallpaper，深链不受影响）。
+ */
+const LYRICS_WALLPAPER: SettingsGroupDef = { id: 'lyricsWallpaper', titleKey: 'options.lyricsWallpaperSection' };
 
 const O = {
     lyricsAnimation: option(LYRICS, 'lyricsAnimationAdjust', 'options.lyricsAnimationAdjust'),
     // 歌词动态壁纸（fork 独有）：整节只有安卓画，搜索里跟着一起退场（available）。
-    lyricsWallpaper: option(LYRICS, 'lyricsWallpaper', 'options.lyricsWallpaperSection', {
+    lyricsWallpaper: option(LYRICS_WALLPAPER, 'lyricsWallpaper', 'options.lyricsWallpaperSection', {
         available: () => isCapacitorAndroid(),
     }),
     daylight: option(THEME, 'daylightMode', 'options.daylightMode'),
@@ -160,8 +166,15 @@ const AppearancePage: React.FC = () => {
                 <Row option={O.lyricsAnimation} hint={t('options.lyricsRendererDesc')} onClick={onOpenVisPlayground}>
                     <Value>{getVisualizerModeLabel(visualizerMode, t)}</Value>
                 </Row>
-                <LyricsWallpaperSection isDaylight={isDaylight} />
             </Group>
+
+            {/* 歌词动态壁纸单独一张卡：不再和上面「歌词动画样式」挤在同一张里。
+                整节只有安卓画（组件内部也判了一次），非安卓连空卡都别留。 */}
+            {isCapacitorAndroid() && (
+                <Group def={LYRICS_WALLPAPER}>
+                    <LyricsWallpaperSection isDaylight={isDaylight} />
+                </Group>
+            )}
 
             {/* 显示那四项：排在歌词那组之后、主题之前；每行自带左右两栏的行式排布。 */}
             <Group def={VIEW}>

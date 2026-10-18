@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Store, Video, Wallpaper } from 'lucide-react';
+import { Store, Video } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { SettingsAnchor } from './navigation/SettingsAnchorContext';
 import SettingsRow from './SettingsRow';
 import { settingsDividerClassFor } from './settingsCardClasses';
 import { Button, Reveal, Segmented, Toggle } from './kit';
@@ -364,22 +363,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
     /* 非安卓平台整节不渲染 —— 放在 hooks 之后，订阅顺序才稳定。 */
     if (!isAndroid) return null;
 
+    /*
+     * 自己不再画标题、也不画卡：外观页用 kit 的 Group 把整节包成**独立的一张卡**
+     * （跟上面「歌词动画样式」那张分开），标题由 Group 画。原来这里自己照着
+     * Group 的标题画了一个 h3 还带一颗 Wallpaper 图标 —— 别的组标题都没有图标，
+     * 这颗也就一并去了。
+     */
     return (
-        <SettingsAnchor anchorId="lyricsWallpaper" label={t('options.lyricsWallpaperSection')} className="mt-3">
-            {/*
-                整节挂在外观页「歌词动画」那张 kit 卡片里，所以自己不再画一张卡 ——
-                再套边框就成了卡里套卡。标题照 kit Group 的标题画，让这块的层级和
-                下面「主题」「歌曲主题」两组一致。
-            */}
-            <div className="mb-2 flex min-h-6 items-center gap-1.5 px-1">
-                <Wallpaper size={14} className="shrink-0 text-[color:var(--st-t2)]" />
-                <h3 className="text-[13px] font-semibold leading-5 text-[color:var(--st-t2)]">
-                    {t('options.lyricsWallpaperSection')}
-                </h3>
-            </div>
-            <div>
-                <SettingsRow
-                    title={t('options.lyricsWallpaperApply')}
+        <div>
+            <SettingsRow
+                title={t('options.lyricsWallpaperApply')}
                     description={t('options.lyricsWallpaperApplyDesc')}
                     control={(
                         <Button onClick={handleOpenWallpaperPicker}>
@@ -972,8 +965,6 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     dividerClass={dividerClass}
                     isLast
                 />
-            </div>
-
             <FontMarketDialog
                 isOpen={isFontMarketOpen}
                 onClose={() => setIsFontMarketOpen(false)}
@@ -985,7 +976,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     void handlePickWallpaperFont();
                 }}
             />
-        </SettingsAnchor>
+        </div>
     );
 };
 
