@@ -7,6 +7,13 @@ import { option, type SettingsGroupDef } from '../../kit';
 
 export const SERVICES: SettingsGroupDef = { id: 'services', titleKey: 'options.settingsHeadingServices' };
 export const STREAMING: SettingsGroupDef = { id: 'streaming', titleKey: 'options.settingsHeadingStreaming' };
+/**
+ * 系统歌词（fork 独有，安卓）：状态栏歌词（Lyricon）与 ColorOS 原生锁屏歌词。
+ *
+ * 两者都是「连到系统 / 另一个 App」，所以放在连接与集成页，而不是外观页。
+ * 桌面端这两项自己判运行时返回 null，整组空着不好看 —— 由页面按平台决定是否渲染。
+ */
+export const SYSTEM_LYRICS: SettingsGroupDef = { id: 'systemLyrics', titleKey: 'options.settingsHeadingSystemLyrics' };
 
 
 export const O = {

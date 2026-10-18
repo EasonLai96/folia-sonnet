@@ -1878,6 +1878,7 @@ export default {
     "settingsHeadingHome": "主页",
     "settingsHeadingServices": "服务",
     "settingsHeadingStreaming": "直播与舞台",
+    "settingsHeadingSystemLyrics": "系统歌词",
     "settingsHeadingCommandPalette": "命令窗口",
     "settingsHeadingGrids": "海报墙",
     "settingsSearchTitle": "搜索",

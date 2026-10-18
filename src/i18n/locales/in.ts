@@ -1872,6 +1872,7 @@ export default {
     "settingsHeadingHome": "Beranda",
     "settingsHeadingServices": "Layanan",
     "settingsHeadingStreaming": "Siaran & panggung",
+    "settingsHeadingSystemLyrics": "Lirik sistem",
     "settingsHeadingCommandPalette": "Panel perintah",
     "settingsHeadingGrids": "Kisi",
     "settingsSearchTitle": "Cari",

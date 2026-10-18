@@ -150,13 +150,11 @@ const AndroidUpdatePanel: React.FC<AndroidUpdatePanelProps> = ({
 
     const isHighlight = action === 'install' || (isAvailable && phase.kind !== 'failed');
 
+    // 这一块画在设置 → 帮助页「关于」那张 kit 卡片里（以及启动时的更新弹窗），
+    // 所以自己不再画一张卡：没有边框、没有圆角、也不限宽度 —— 之前它是
+    // `w-full max-w-sm` 的一张带边框的卡，嵌在卡片里右边一大条空白。
+    // 左右内边距照 kit 那一行的 pl-4 / pr-4，字和上面的「版本」那行对齐。
     return (
-        {/*
-            这一块画在设置 → 帮助页「关于」那张 kit 卡片里（以及启动时的更新弹窗），
-            所以自己不再画一张卡：没有边框、没有圆角、也不限宽度 —— 之前它是
-            `w-full max-w-sm` 的一张带边框的卡，嵌在卡片里右边一大条空白。
-            左右内边距照 kit 那一行的 pl-4 / pr-4，字和上面的「版本」那行对齐。
-        */}
         <div
             data-folia-update-panel="true"
             data-folia-update-action={action}

@@ -1879,6 +1879,7 @@ export default {
     "settingsHeadingHome": "Home",
     "settingsHeadingServices": "Services",
     "settingsHeadingStreaming": "Streaming & stage",
+    "settingsHeadingSystemLyrics": "System lyrics",
     "settingsHeadingCommandPalette": "Command palette",
     "settingsHeadingGrids": "Grids",
     "settingsSearchTitle": "Search",
