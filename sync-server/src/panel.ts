@@ -343,9 +343,9 @@ const renderFonts = () => {
 };
 
 /*
- * 搜索与类型筛选都交给服务端（`/admin/api/ai-cache?q=&kind=`）：库里有几百条以上时，
+ * 搜索与类型筛选都交给服务端（/admin/api/ai-cache?q=&kind=）：库里有几百条以上时，
  * 只取回前 500 条再在内存里筛，第 501 条往后就永远搜不到。
- * 顶上那个计数用服务端给的 `total`（整个库 / 筛完之后的条数），不是这一页取回多少条。
+ * 顶上那个计数用服务端给的 total（整个库 / 筛完之后的条数），不是这一页取回多少条。
  */
 const renderCache = () => {
   const visible = state.entries;
