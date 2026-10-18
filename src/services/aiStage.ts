@@ -322,7 +322,14 @@ const buildStageContext = (request: StageRequest): StageContext => {
             blockedModes,
         }),
         blockedModes,
-        songTitle: song?.title ?? '',
+        /*
+         * 歌名跟着「请求里给了就用请求里的」这条规矩走：有的调用方（比如从搜索结果里
+         * 直接播一首）只给 songTitle、不给整首 song。以前这里只读 `song?.title`，
+         * 于是那条链路的 songTitle 是空串 —— 云缓存按歌名找候选直接短路（见
+         * aiCloudCache 的「第二次机会」），表现为「明明库里有答案，就是拉不到」，
+         * 推上去的条目也带着空歌名，之后再也没人找得到它。
+         */
+        songTitle: request.songTitle ?? song?.title ?? '',
         lyricSource,
         isPureMusic,
         platform: String(request.platform ?? '').trim(),

@@ -205,14 +205,39 @@ const flattenForMatch = (value: string): string => (
     String(value ?? '').replace(/\s+/g, '').toLowerCase()
 );
 
-export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
-    if (words.length === 0) return false;
+/**
+ * 高亮词的**覆盖率**：AI 标的那几个词，你手上这段歌词里找得到几个（0~1）。
+ */
+export const highlightWordsCoverage = (words: readonly string[], lyricText: string): number => {
+    if (words.length === 0) return 0;
     const haystack = flattenForMatch(lyricText);
-    if (!haystack) return false;
-    return words.every((word) => {
+    if (!haystack) return 0;
+    let present = 0;
+    words.forEach((word) => {
         const needle = flattenForMatch(word);
-        return needle.length > 0 && haystack.includes(needle);
+        if (needle.length > 0 && haystack.includes(needle)) present += 1;
     });
+    return present / words.length;
+};
+
+/**
+ * 差几个词也放行：低于这个覆盖率就当「这条答案不是照着这首歌做的」。
+ *
+ * 以前是**全有或全无**（every），于是歌词「几乎一模一样」的两份 LRC —— 差一句口白、
+ * 翻译行不同、某个词多一个空格之外的差别 —— 一个词缺了就整条判死，用户看到的正是
+ * 「歌词明明一样，云缓存就是拉不到」。现在允许差一点点；真正是另一首歌（近亲）时
+ * 覆盖率会掉得很低，这一层照样拦得住。
+ */
+const HIGHLIGHT_WORD_COVERAGE_MIN = 0.8;
+/** 词太少时不按比例放行：两个词里少一个就是 50%，那已经不是「差一点」。 */
+const HIGHLIGHT_WORD_COVERAGE_MIN_WORDS = 3;
+
+export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
+    const coverage = highlightWordsCoverage(words, lyricText);
+    if (coverage >= 1) return true;
+    if (coverage <= 0) return false;   // 一个都没有：没有任何证据说明它属于这首歌。
+    return words.length >= HIGHLIGHT_WORD_COVERAGE_MIN_WORDS
+        && coverage >= HIGHLIGHT_WORD_COVERAGE_MIN;
 };
 
 /** 一次 GET。出错一律当没命中 —— 缓存的纪律是永不阻塞功能。 */

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { requireAdmin } from './admin.js';
 import type { D1Database, Env } from './app.js';
-import { looseSongTitle, rankSongTitleMatch } from './songTitleMatch.js';
+import { looseSongTitle, rankSongTitleMatch, songTitleLike, songTitleSeed, songTitleSegments, songTitleKey } from './songTitleMatch.js';
 import { readHighlightWords, verifyStageUpload } from './stageVerifier.js';
 
 // src/aiCache.ts
@@ -339,6 +339,57 @@ const MAX_RESOLVE_CANDIDATES = 12;
  * SQL 做不了，只好先多捞一点、在本机排完再截断。payload 只给最后那几条 parse。
  */
 const MAX_RESOLVE_SCAN_ROWS = 200;
+/** 一次查询里最多并列几条 LIKE 模式（拆段那一路用）。 */
+const MAX_RESOLVE_PATTERNS = 4;
+
+/** 捞回来的一行，还没打分。 */
+type ResolveRow = {
+  cache_key: string;
+  song_title: string | null;
+  provider: string | null;
+  model: string | null;
+  platform: string | null;
+  updated_at: string | null;
+  payload_json: string | null;
+};
+
+/**
+ * 按一组 LIKE 模式捞行：一条 SQL 用 OR 把它们并在一起。
+ *
+ * 只捞这几列 —— payload 是留给最后那几条才 parse 的。
+ */
+const scanResolveRows = async (
+  db: D1Database,
+  kind: string,
+  patterns: string[],
+): Promise<ResolveRow[]> => {
+  const terms = [...new Set(patterns.map((entry) => String(entry ?? '').trim()).filter(Boolean))]
+    .slice(0, MAX_RESOLVE_PATTERNS);
+  if (terms.length === 0) return [];
+  const where = terms.map(() => "song_title LIKE ? ESCAPE '\\'").join(' OR ');
+  const rows = await db
+    .prepare(
+      `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
+       FROM ai_cache
+       WHERE kind = ? AND song_title <> '' AND (${where})
+       ORDER BY updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(kind, ...terms.map((term) => `%${escapeLike(term)}%`), MAX_RESOLVE_SCAN_ROWS)
+    .all<ResolveRow>();
+  return rows.results ?? [];
+};
+
+/** 打分 + 排序 + 截断：归一后对不上的不算候选。 */
+const rankResolveRows = (rows: ResolveRow[], title: string) => rows
+  .map((row) => ({ row, rank: rankSongTitleMatch(String(row.song_title ?? ''), title) }))
+  /* 归一后对不上的不算候选 —— 光靠原样包含捞回来的，高亮词那关也过不去。 */
+  .filter((entry) => entry.rank < 3)
+  .sort((left, right) => (
+    left.rank - right.rank
+    || String(right.row.updated_at ?? '').localeCompare(String(left.row.updated_at ?? ''))
+  ))
+  .slice(0, MAX_RESOLVE_CANDIDATES);
 
 export interface ResolveCandidate {
   key: string;
@@ -373,15 +424,20 @@ export const findResolveCandidates = async (
    * 于是反过来能配上库里的短名 —— 这正是括号/后缀那批歌以前配不上的方向。
    */
   const loose = looseSongTitle(title) || title;
+  /*
+   * 第三条：`smooth` 连标点也去了。「花海 - 现场」削掉后缀后那个连字符还在，
+   * `LIKE '%花海 -%'` 一条都配不上库里的「花海」，而 `songTitleKey` 是认的。
+   */
+  const smooth = songTitleLike(title) || loose;
   const rows = await db
     .prepare(
       `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
        FROM ai_cache
-       WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\')
+       WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\')
        ORDER BY (song_title = ?) DESC, updated_at DESC
        LIMIT ?`,
     )
-    .bind(kind, title, `%${escapeLike(loose)}%`, `%${escapeLike(title)}%`, title, MAX_RESOLVE_SCAN_ROWS)
+    .bind(kind, title, `%${escapeLike(loose)}%`, `%${escapeLike(smooth)}%`, `%${escapeLike(title)}%`, title, MAX_RESOLVE_SCAN_ROWS)
     .all<{
       cache_key: string;
       song_title: string | null;
@@ -392,15 +448,36 @@ export const findResolveCandidates = async (
       payload_json: string | null;
     }>();
 
-  const ranked = (rows.results ?? [])
-    .map((row) => ({ row, rank: rankSongTitleMatch(String(row.song_title ?? ''), title) }))
-    /* 归一后对不上的不算候选 —— 光靠原样包含捞回来的，高亮词那关也过不去。 */
-    .filter((entry) => entry.rank < 3)
-    .sort((left, right) => (
-      left.rank - right.rank
-      || String(right.row.updated_at ?? '').localeCompare(String(left.row.updated_at ?? ''))
-    ))
-    .slice(0, MAX_RESOLVE_CANDIDATES);
+  let ranked = rankResolveRows(rows.results ?? [], title);
+
+  /*
+   * 退路一：**拆开各段**分别去捞。
+   *
+   * 「歌手 - 歌名」那批名字：整串压完是「周杰伦晴天」，怎么 LIKE 都配不上库里的
+   * 「晴天」。这里按分隔符切开，「周杰伦」「晴天」两段各问一次、命中并在一起 ——
+   * 这是那种名字唯一能走通的路。放宽的只是入口，判定仍旧在客户端（高亮词）。
+   */
+  if (ranked.length === 0) {
+    const segments = songTitleSegments(title);
+    if (segments.length > 0) ranked = rankResolveRows(await scanResolveRows(db, kind, segments), title);
+  }
+
+  /*
+   * 退路二：**只按歌名开头那一个字**（拉丁则头一个词）去捞。
+   *
+   * 各平台给同一首歌起的名字能差到怎么压都压不到一起（换了一种写法、多了段前缀），
+   * 这时前面几条 LIKE 全部落空。同样只放宽入口，判定不变。
+   */
+  if (ranked.length === 0) {
+    const seed = songTitleSeed(title);
+    if (seed) {
+      ranked = (await scanResolveRows(db, kind, [seed]))
+        // 同一个开头才算：不然「晴天」会把「晴天的云」「晴天雨」之外的一堆也捞回来。
+        .filter((row) => songTitleKey(String(row.song_title ?? '')).startsWith(seed))
+        .map((row) => ({ row, rank: 2 }))
+        .slice(0, MAX_RESOLVE_CANDIDATES);
+    }
+  }
 
   return ranked.map(({ row }) => {
     let payload: unknown = null;

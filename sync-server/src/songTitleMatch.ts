@@ -61,6 +61,54 @@ export const songTitleKey = (value: string): string =>
   ((looseSongTitle(value).match(KEEP) ?? []).join('') || '').toLowerCase();
 
 /**
+ * 拿去**问数据库**的另一个写法：在 `loose` 之上把标点也去了，只留字、数和空格。
+ *
+ * 「花海 - 现场」被 `loose` 削掉「现场」之后剩下「花海 -」，多出来那个连字符会让
+ * `LIKE '%花海 -%'` 一条都配不上（库里叫「花海」）—— 但 `songTitleKey` 那一步是
+ * 认的（它连标点一起压）。所以 LIKE 这一层也要有一个「去了标点」的版本兜住它。
+ */
+export const songTitleLike = (value: string): string =>
+  looseSongTitle(value)
+    .replace(/[^0-9a-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * 「第一个字」那个钩子。
+ *
+ * 主查询（全等 + 两端互相 LIKE）碰上平台各写一套歌名时会一条都捞不回来：库里叫
+ * 「起风了」，手上这首叫别的名字，怎么压都压不到一起。这时候就按用户说的来 ——
+ * 只拿歌名开头那一个字（中日韩）或头一个词（拉丁，至少三个字符，一个字母会把半个库
+ * 都捞回来）去捞一堆候选，剩下的交给客户端拿高亮词判。**放宽的是入口，不是判定。**
+ */
+export const songTitleSeed = (value: string): string => {
+  const first = Array.from(songTitleKey(value))[0] ?? '';
+  if (!first) return '';
+  if (/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(first)) return first;
+  const word = (looseSongTitle(value).split(/\s+/)[0] ?? '').replace(/[^0-9a-z]/gi, '');
+  return word.length >= 3 ? word.slice(0, 12) : '';
+};
+
+/**
+ * 「歌手 - 歌名」这种写法拆开来的各段。
+ *
+ * 平台（以及不少本地曲库）爱把歌手写在前面：「周杰伦 - 晴天」「晴天 - 周杰伦」。
+ * 整串压完是「周杰伦晴天」，跟库里的「晴天」怎么 LIKE 都配不上 —— 所以按分隔符切开，
+ * 每一段单独拿去问，命中并在一起。这是那种名字唯一能走通的路。
+ */
+const SEPARATORS = /[\-–—~|/／·、,，:：]+/;
+
+export const songTitleSegments = (value: string): string[] => {
+  const loose = looseSongTitle(value);
+  if (!loose) return [];
+  const parts = loose
+    .split(SEPARATORS)
+    .map((part) => songTitleLike(part))
+    .filter(Boolean);
+  return [...new Set(parts)];
+};
+
+/**
  * 候选打分：数字越小越该排前面。
  *
  *   0 —— 归一后完全相同（「晴天」/「晴天 (Live)」）
