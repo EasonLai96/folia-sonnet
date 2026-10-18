@@ -1541,6 +1541,7 @@ export default {
     "confirmOnlineProviderSwitch": "Ganti ke {{provider}}? Pemutaran online dan antrean saat ini akan dihapus.",
     "onlineProvider": "Penyedia musik online",
     "providerNotConfigured": "API tidak dikonfigurasi untuk Web",
+    "providerDesktopOnly": "Hanya aplikasi desktop",
     "providerNoAccount": "Tanpa login",
     "allProviders": "Semua",
     "allProvidersDetail": "{{count}} penyedia",

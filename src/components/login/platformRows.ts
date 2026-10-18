@@ -18,11 +18,13 @@ const RANK: Record<RowStatus, number> = { 'signed-in': 1, 'ran-out': 2, 'signed-
 
 /**
  * 那一列的顺序：正在用的（也就是上次用的）平台在最前，然后是已登录的、登录失效的，其余按注册的顺序。
- * 这个运行环境根本用不了的平台（runtime-unavailable）不列出来。
+ *
+ * 这个运行环境够不着的平台（`runtime-unavailable`：要走桌面端那座桥的 YouTube Music / Spotify）
+ * **照样列出来**，只是置灰、不能选、悬停说原因。原来把它们整行过滤掉，于是在安卓上那一列里
+ * 从头到尾没有这两家 —— 看着像这个版本压根没接，而不是「它们在这台机器上用不了」。
  */
 export const orderRows = (providers: readonly ProviderAccountSummary[], firstId: OnlineProviderId | null): ProviderAccountSummary[] => (
     providers
-        .filter(provider => provider.availability.reason !== 'runtime-unavailable')
         .map((provider, index) => ({ provider, index, rank: provider.providerId === firstId ? 0 : RANK[rowStatus(provider)] }))
         .sort((a, b) => a.rank - b.rank || a.index - b.index)
         .map(entry => entry.provider)

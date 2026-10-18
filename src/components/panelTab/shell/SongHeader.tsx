@@ -20,6 +20,13 @@ const COVER_GAP_PX = 14;
 /** The large cover is never lower than this, however short the window. */
 const MIN_COVER_PX = 96;
 /**
+ * 整个封面页签（大封面 + 下面歌名/歌手/专辑和那一排按钮）的高度上限。
+ *
+ * 光夹封面自己是不够的：窗口够高时 `calc(var(--pn-room) - underPx)` 一路把封面顶到 `COVER_MAX`，
+ * 封面是小了，可整块还是快占满一屏。这里连页签一起封顶 —— 封面在剩下的空间里自适应。
+ */
+const COVER_TAB_MAX_PX = 330;
+/**
  * 大封面的上限。以前是 `100cqw`（整个面板内宽）—— 面板一宽，封面就顶到两边，
  * 一屏里几乎只剩封面。现在取内宽的 70%，再封顶 260px：还是那块方的，只是小一圈。
  */
@@ -43,7 +50,8 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
     const under = useMeasuredSize(underRef);
     const artists = (currentSong ? getProviderSongMetadata(currentSong).artists : []).map(artist => artist.name).join(' / ');
     const underPx = COVER_GAP_PX + under.height;
-    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(var(--pn-room) - ${underPx}px), ${COVER_MAX})`;
+    // 先看整个页签能有多高（窗口留出的房间，和上面那条封顶取小的那个），减掉下面那一块才是封面。
+    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(min(var(--pn-room), ${COVER_TAB_MAX_PX}px) - ${underPx}px), ${COVER_MAX})`;
 
     return (
         <header

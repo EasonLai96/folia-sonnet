@@ -108,8 +108,23 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
     };
 
     const fade = (more.before || more.after) ? `linear-gradient(${lie === 'column' ? 'to bottom' : 'to right'}, ${more.before ? 'transparent, #000 30px' : '#000'}, ${more.after ? '#000 calc(100% - 30px), transparent' : '#000'})` : undefined;
-    const stateText = (status: ReturnType<typeof rowStatus>): string | null => (
-        status === 'signed-in' ? t('login.rowSignedIn') : status === 'ran-out' ? t('login.rowRanOut') : status === 'off' ? t('home.providerNotConfigured') : null
+    /**
+     * 置灰那一行说的原因。
+     *
+     * 「没配置 API」和「这台机器上跑不起来」是两回事：后者（runtime-unavailable）是 YouTube Music
+     * / Spotify 这类要走桌面端那座桥的平台，在安卓上就是这个状态 —— 说成「未配置」会让人以为是
+     * 这个构建漏了它们。
+     */
+    const offText = (row: ProviderAccountSummary): string => (
+        row.availability.reason === 'runtime-unavailable'
+            ? t('home.providerDesktopOnly')
+            : t('home.providerNotConfigured')
+    );
+    const stateText = (row: ProviderAccountSummary, status: ReturnType<typeof rowStatus>): string | null => (
+        status === 'signed-in' ? t('login.rowSignedIn')
+            : status === 'ran-out' ? t('login.rowRanOut')
+                : status === 'off' ? offText(row)
+                    : null
     );
 
     return (
@@ -146,7 +161,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                 />
                 {shown.map(row => {
                     const status = rowStatus(row);
-                    const state = stateText(status);
+                    const state = stateText(row, status);
                     const item = (
                         <div
                             id={`login-row-${row.providerId}`}
@@ -166,7 +181,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                         </div>
                     );
                     return status === 'off'
-                        ? <Tooltip key={row.providerId} text={t('home.providerNotConfigured')} className={lie === 'row' ? 'shrink-0' : 'block'}>{item}</Tooltip>
+                        ? <Tooltip key={row.providerId} text={offText(row)} className={lie === 'row' ? 'shrink-0' : 'block'}>{item}</Tooltip>
                         : <React.Fragment key={row.providerId}>{item}</React.Fragment>;
                 })}
                 {shown.length === 0 && (
