@@ -1,4 +1,4 @@
-import { noteSpectrumSource } from '../utils/mediaDiagnostics';
+import { noteSpectrumFeedMode, noteSpectrumSource } from '../utils/mediaDiagnostics';
 import { SPECTRUM_WORKLET_NAME, SPECTRUM_WORKLET_SOURCE } from './spectrumWorkletSource';
 
 // src/services/spectrumTap.ts
@@ -41,6 +41,84 @@ const addModuleWithTimeout = async (context: AudioContext, url: string): Promise
         if (timer !== undefined) window.clearTimeout(timer);
     }
 };
+
+/**
+ * 播放页每帧要不要取频谱 —— 排查开关（2026-10-18 加）。
+ *
+ * 三档不是三选一的配置，是一次二分排查的三步：
+ *
+ *  · `off` —— 一个字都不写。MotionValue 不更新 → 订阅它的可视化这一帧**连重画都不会发生**。
+ *    这一档减掉的是「采集 + 渲染」一整条。
+ *  · `synthetic` —— 每帧写一个与声音无关的呼吸。**渲染负载照旧，只抽掉采集**：MotionValue
+ *    的 `set()` 是**无条件**通知订阅者的（framer-motion 的 `updateAndNotify` 不看值变没变），
+ *    所以写假值照样驱动可视化每帧重画。这一档专门用来回答「贵的是取频谱，还是画」。
+ *  · `on` —— 真频谱。
+ *
+ * 读法：`off` 不卡而 `synthetic` 卡 → 采集那一步贵；两档都不卡 → 频谱无辜，往渲染以外找；
+ * `off` 还卡 → 频谱这条链路整体无份。
+ *
+ * ⚠️ 默认是 `off`，是排查期间的临时值。确认完要么 `__foliaSetSpectrumFeed('on')` 改回来，
+ * 要么连同这个开关一起删掉 —— 别让它以 `off` 的状态留在仓库里。
+ */
+export type SpectrumFeedMode = 'on' | 'synthetic' | 'off';
+
+const SPECTRUM_FEED_STORAGE_KEY = 'folia_spectrum_feed';
+const SPECTRUM_FEED_DEFAULT: SpectrumFeedMode = 'off';
+
+const readSpectrumFeedMode = (): SpectrumFeedMode => {
+    if (typeof window === 'undefined') return SPECTRUM_FEED_DEFAULT;
+    const raw = window.localStorage.getItem(SPECTRUM_FEED_STORAGE_KEY);
+    if (raw === 'on' || raw === 'synthetic' || raw === 'off') return raw;
+    return SPECTRUM_FEED_DEFAULT;
+};
+
+/**
+ * 每帧都要问，别每帧去读 localStorage：模块加载时定一次。
+ *
+ * `latencyHint` 那个 knoh 也一样 —— 改完**重启 App** 才生效。
+ */
+let spectrumFeedMode: SpectrumFeedMode = readSpectrumFeedMode();
+
+export const getSpectrumFeedMode = (): SpectrumFeedMode => spectrumFeedMode;
+
+/**
+ * `synthetic` 写给 `spectrum` 的那一份。模块级、原地改写：每帧 `new Uint8Array(1024)` 本身
+ * 就是分配开销，而这一档要模拟的恰恰是「渲染照旧、只抽掉采集」—— 别把要测的东西一起减掉。
+ */
+const SYNTHETIC_SPECTRUM = new Uint8Array(1024);
+
+/** `synthetic` 那档每帧写进去的频谱。返回的是同一个数组，调用方别持有。 */
+export const fillSyntheticSpectrum = (level: number): Uint8Array => {
+    SYNTHETIC_SPECTRUM.fill(level);
+    return SYNTHETIC_SPECTRUM;
+};
+
+const installSpectrumFeedKnob = (): void => {
+    if (typeof window === 'undefined') return;
+    (window as Window & typeof globalThis & {
+        __foliaSetSpectrumFeed?: (mode: SpectrumFeedMode) => SpectrumFeedMode;
+    }).__foliaSetSpectrumFeed = (mode: SpectrumFeedMode) => {
+        if (mode !== 'on' && mode !== 'synthetic' && mode !== 'off') {
+            console.warn(`[SpectrumFeed] 不认的档位：${String(mode)}（只认 on / synthetic / off）`);
+            return spectrumFeedMode;
+        }
+        spectrumFeedMode = mode;
+        window.localStorage.setItem(SPECTRUM_FEED_STORAGE_KEY, mode);
+        noteSpectrumFeedMode(mode);
+        console.warn(
+            `[SpectrumFeed] 频谱读取改成 ${mode}${mode === 'off' ? '（可视化会静止，这是预期）' : ''}；下次启动沿用这个值`,
+        );
+        return mode;
+    };
+};
+installSpectrumFeedKnob();
+noteSpectrumFeedMode(spectrumFeedMode);
+if (spectrumFeedMode !== 'on') {
+    console.warn(
+        `[SpectrumFeed] 频谱读取当前是 ${spectrumFeedMode}（排查用），可视化不会跟随声音。`
+        + '恢复：__foliaSetSpectrumFeed(\'on\')',
+    );
+}
 
 /** 音频线程交出来的一份频谱。读它不需要等任何东西。 */
 export type SpectrumSnapshot = {
