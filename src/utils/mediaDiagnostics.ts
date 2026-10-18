@@ -247,7 +247,6 @@ export const readMediaDiagnostics = (): MediaDiagnosticsSnapshot => {
          */
         spectrumSource,
         spectrumSourceReason,
-        spectrumFeedMode,
     };
 };
 
@@ -302,18 +301,6 @@ let spectrumSourceReason: string | null = null;
 export const noteSpectrumSource = (source: SpectrumSource, reason?: unknown): void => {
     spectrumSource = source;
     spectrumSourceReason = reason === undefined ? null : String(reason);
-};
-
-/**
- * 播放页每帧到底取没取频谱 —— 三档见 `services/spectrumTap` 的 `SpectrumFeedMode`。
- *
- * 查掉帧时**先看这一项**：`off` / `synthetic` 下哪怕卡，卡的也不是取频谱那一步，别照着
- * 频谱去优化。它跟 `spectrumSource` 是两个问题 —— 前者是「要不要取」，后者是「走哪条路取」。
- */
-let spectrumFeedMode = 'unknown';
-
-export const noteSpectrumFeedMode = (mode: string): void => {
-    spectrumFeedMode = mode;
 };
 
 /** 频谱那一路的信号，就是 motionSignals 的 audioBands 再加整体能量 audioPower。 */

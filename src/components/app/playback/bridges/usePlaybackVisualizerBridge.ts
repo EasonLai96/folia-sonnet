@@ -6,7 +6,7 @@ import { PlayerState } from '../../../../types';
 import type { AudioBands, LyricData } from '../../../../types';
 import { setCurrentLineIndex, setHandoffLineIndex, setPlayerState } from '../../../../stores/usePlaybackStore';
 import { selectDisplayLyrics, usePlaybackStore } from '../../../../stores/usePlaybackStore';
-import { fillSyntheticSpectrum, getSpectrumFeedMode, readLatestSpectrum } from '../../../../services/spectrumTap';
+import { readLatestSpectrum } from '../../../../services/spectrumTap';
 import {
     audioBands,
     audioPower,
@@ -179,14 +179,9 @@ export function usePlaybackVisualizerBridge({
          *
          * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
          */
-        /*
-         * 频谱三档，见 spectrumTap 的 SpectrumFeedMode。不是 'on' 时下面两个都是 null，真频谱
-         * 那两条分支自然落空 —— 门控只在这一处，不用到每个分支里再判一遍。
-         */
-        const feedMode = getSpectrumFeedMode();
-        const tapped = feedMode === 'on' ? readLatestSpectrum() : null;
+        const tapped = readLatestSpectrum();
         // 取成局部变量：ref 上的 .current 进不了分支条件的窄化，后面要直接用它。
-        const analyser = feedMode === 'on' ? analyserRef.current : null;
+        const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
         const nowMsValue = performance.now();
         const spectrumDue = nowMsValue - spectrumReadAtMsRef.current >= SPECTRUM_READ_INTERVAL_MS;
@@ -197,23 +192,7 @@ export function usePlaybackVisualizerBridge({
 
         // 三态，不是二态：有信号但这一帧不该读频谱时**什么都不写** —— 沿用上一次的读数。
         // 写成 if/else 会让这些帧掉进 idle breath，律动就在真频谱和呼吸之间每帧来回跳。
-        if (feedMode === 'off') {
-            /*
-             * 一个字都不写。⚠️ 别「顺手」改成写 0：MotionValue 的 `set()` 是**无条件**通知订阅
-             * 者的（framer-motion 的 `updateAndNotify` 不看值变没变），写 0 照样让可视化每帧
-             * 重画一帧，这一档就白关了 —— 它要减掉的是采集 + 渲染**一整条**。
-             */
-        } else if (feedMode === 'synthetic') {
-            // 渲染照旧、只抽掉采集：写与声音无关的呼吸，可视化照样被每帧驱动（见上）。
-            const breath = (Math.sin(Date.now() / 2000) + 1) * 20;
-            audioPower.set(breath);
-            audioBands.bass.set(breath);
-            audioBands.lowMid.set(breath);
-            audioBands.mid.set(breath);
-            audioBands.vocal.set(breath);
-            audioBands.treble.set(breath);
-            audioBands.spectrum?.set(fillSyntheticSpectrum(breath));
-        } else if (!hasAudibleSignal || (!tapped && !analyser)) {
+        if (!hasAudibleSignal || (!tapped && !analyser)) {
             const time = Date.now() / 2000;
             const breath = (Math.sin(time) + 1) * 20;
             audioPower.set(breath);

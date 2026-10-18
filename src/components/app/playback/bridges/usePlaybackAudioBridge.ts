@@ -28,73 +28,24 @@ import { noteAnalyser, noteAudioContext } from '../../../../utils/mediaDiagnosti
  * 上跟桌面 Chrome 差得远；给秒数是规范里的另一种写法（"首选最大延迟"），量纲是绝对的 ——
  * 改一个数就知道自己要求了什么，真机之间也才有可比性。
  *
- * 取值卡在两件事中间：
+ * ⚠️ 这个数**确实**影响掉帧 —— 真机二分实测过：`6116eb11` 把它抬到 0.1s 之后播放页开始卡，
+ * 而之前 `f8bed216` 用 `balanced` 时是流畅的。
  *
- *  · **太小就撕裂**：CPU 一被可视化 / 封面解码 / 整墙重渲染占满，音频线程就交不上样本，
- *    缓冲空一次就是一声撕裂/爆音（underrun）。默认的 `interactive` 只给几十毫秒，最早那版
- *    就是一路这么响；抬到 `balanced` 后只剩高负载下偶发，所以现在再往上抬一档。
- *  · **太大则音频延迟变长**：点了暂停之后声音还会多响这么久。这是抬缓冲唯一的代价。
+ * 但**机制不是当年写在这段注释里的那一条**，两件事必须分开记：
  *
- * ⚠️ 下面这条**已经不成立**，留着是因为它解释了这个数为什么一度卡在 0.1：
+ *  · ~~「缓冲越大，`getByteFrequencyData` 每帧等音频线程等得越久」~~ —— 这条是错的。那个调用的开销
+ *    是**在主线程上现算一遍 FFT**（外加一次与音频线程互踢的锁），跟缓冲多大没关系。
+ *  · **真机制是音频线程抢占**：缓冲越大，音频线程一次被唤醒要处理的数据块越大、占住实时优先级的
+ *    时间越长 → 主线程（含 rAF）被顶掉的机会越多。这条跟频谱怎么取**无关**。
  *
- *  · ~~太大就掉帧~~：那时取频谱是每帧同步调 `getByteFrequencyData()`，一度以为是「缓冲越大
- *    那一次等得越久」。其实那条因果链本身就是错的：`getByteFrequencyData()` 的开销是**在主
- *    线程上现算一遍 FFT**，跟输出缓冲多大没关系。真正把它拿掉的是 `b55a8305` —— 频谱改由
- *    音频线程抽（AudioWorklet），主线程只读最新一份、一次都不等，两个方向就此解耦。
- *    （那条路还一直没真正接上，挂在 suspended 的 context 上 `addModule` 不推进；
- *    2026-10-18 修掉，日志里出现「[SpectrumTap] 频谱由音频线程抽」即为生效。）
+ * 教训：我上一轮（`44c34ef4`）拿一段 Blink 源码断言「缓冲与掉帧无关」，据此把 0.1 抬到
+ * 0.2，还写下「别指望它治卡顿」。**源码推理推翻不了实测。** 源码只能解释机制，不能否定现象。
  *
- * 所以现在这个数只在「抗撕裂」和「音频延迟」之间取舍，**与掉帧无关**。默认抬到 0.2s 只是想
- * 让音频线程每秒被唤醒的次数再少一点（0.1s 已经是每秒十来次，再往上收益很有限）—— 别指
- * 望它治卡顿，它治的是高负载下的撕裂。
- *
- * 运行时可调，见下面的 installLatencyHintKnob：
- *   `__foliaSetAudioLatencyHint(0.3)`  →  **重启 App** 才生效
- * 生效没有不看 hint，看开发者选项里 "ctx latency" 那行的 baseLatency / outputLatency。
+ * 现在频谱已经在音频线程上抽（`services/spectrumTap`），主线程每帧那笔 FFT 已经没了 ——
+ * 但**抢占那一笔是否随之消失，没有实测过**。所以这个数**就停在 0.2s 不动**：它是当前真机
+ * 实测流畅的值，别再拿源码推断去动它。
  */
-const AUDIO_LATENCY_HINT_STORAGE_KEY = 'folia_audio_output_latency_hint_sec';
-const AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC = 0.2;
-const AUDIO_OUTPUT_LATENCY_HINT_MIN_SEC = 0.005;
-const AUDIO_OUTPUT_LATENCY_HINT_MAX_SEC = 0.5;
-
-const clampLatencyHint = (value: number): number =>
-    Math.min(AUDIO_OUTPUT_LATENCY_HINT_MAX_SEC, Math.max(AUDIO_OUTPUT_LATENCY_HINT_MIN_SEC, value));
-
-const readLatencyHint = (): number => {
-    if (typeof window === 'undefined') return AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC;
-    const raw = window.localStorage.getItem(AUDIO_LATENCY_HINT_STORAGE_KEY);
-    if (raw === null) return AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC;
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC;
-    return clampLatencyHint(parsed);
-};
-
-/**
- * 运行时改缓冲，省得每试一个值就重新打一次包。
- *
- * ⚠️ `latencyHint` 只在 **new AudioContext 的那一刻** 被读走，而这个 ctx 建好之后一直活到
- * App 退出（它挂在一个 ref 上，离开播放页不拆）。所以**改完必须重启 App** 才生效 —— 光退到
- * 首页再进来没用。
- *
- * 怎么知道落到了哪一档：hint 只是「请求」，安卓 WebView 完全可以无视它、或者给你夹到硬件
- * 支持的那一档；0.2 和 0.3 很可能落到同一个缓冲区上。判据不看 hint，看 **baseLatency /
- * outputLatency**（开发者选项里的 "ctx latency" 一行）—— 两个数没动，就说明这个改动在这一
- * 台机器上是空转，别再往上试了。
- */
-const installLatencyHintKnob = (): void => {
-    if (typeof window === 'undefined') return;
-    (window as Window & typeof globalThis & {
-        __foliaSetAudioLatencyHint?: (seconds: number) => number;
-    }).__foliaSetAudioLatencyHint = (seconds: number) => {
-        const next = clampLatencyHint(Number(seconds));
-        window.localStorage.setItem(AUDIO_LATENCY_HINT_STORAGE_KEY, String(next));
-        console.info(
-            `[AudioContext] 输出缓冲请求改成 ${next}s（有效区间 ${AUDIO_OUTPUT_LATENCY_HINT_MIN_SEC}~${AUDIO_OUTPUT_LATENCY_HINT_MAX_SEC}s），重启 App 生效`,
-        );
-        return next;
-    };
-};
-installLatencyHintKnob();
+const AUDIO_OUTPUT_LATENCY_HINT_SEC = 0.2;
 
 type UsePlaybackAudioBridgeParams = {
 
@@ -210,12 +161,11 @@ export function usePlaybackAudioBridge({
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
             // 放音乐要的是稳，不是浏览器那一小格交互缓冲 —— 用哪个数、为什么是这个数，
-            // 见上面的 AUDIO_OUTPUT_LATENCY_HINT_DEFAULT_SEC。别改回 'playback'：那一档会把
-            // 播放页的每帧取频谱拖垮（实测它是掉帧元凶），真要再大就把可视化那一侧一起降频。
-            const latencyHint = readLatencyHint();
-            const ctx = new AudioContextClass({ latencyHint });
+            // 见上面的 AUDIO_OUTPUT_LATENCY_HINT_SEC。别改回 'playback'：那一档会让播放页
+            // 掉帧（真机二分实测），这个值才是当前流畅的那一档。
+            const ctx = new AudioContextClass({ latencyHint: AUDIO_OUTPUT_LATENCY_HINT_SEC });
             audioContextRef.current = ctx;
-            noteAudioContext(ctx, latencyHint);
+            noteAudioContext(ctx, AUDIO_OUTPUT_LATENCY_HINT_SEC);
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;

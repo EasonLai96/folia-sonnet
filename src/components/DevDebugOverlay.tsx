@@ -717,17 +717,6 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
                                 : media.spectrumSource}
                         />
                         {/*
-                         * 每帧到底取没取频谱（三档见 spectrumTap 的 SpectrumFeedMode）。
-                         * 查掉帧**先看这一行**：off / synthetic 下哪怕还卡，卡的也不是取频谱
-                         * 那一步，别照着频谱去优化。
-                         */}
-                        <DebugRow
-                            label="spectrum feed"
-                            value={media.spectrumFeedMode === 'on'
-                                ? 'on'
-                                : `${media.spectrumFeedMode} (排查中，不是真频谱)`}
-                        />
-                        {/*
                          * hint 只是「请求」，落地成多少看 base / out —— 判「调缓冲有没有用」
                          * 要看这两个数动没动，两个数不动就说明这一档调了等于没调。
                          */}
