@@ -890,6 +890,7 @@ export default {
     "hdrProjectionCountdown": "{{count}} detik lagi",
     "hdrProjectionCancel": "Batal",
     "hdrProjectionNote": "Letakkan ponsel menghadap atas: kaca depan memantulkannya kembali dengan benar. Matikan untuk mengembalikan semuanya.",
+    "hdrProjectionExitHint": "Ketuk lagi untuk keluar",
     "libraryConfig": "Perpustakaan & Konfigurasi",
     "synced": "Tersinkronisasi",
     "aiThemeCloudOff": "Layanan awan mati — nyalakan dulu di pengaturan.",

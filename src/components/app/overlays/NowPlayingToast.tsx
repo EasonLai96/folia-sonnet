@@ -14,6 +14,7 @@ import {
     PLAYER_BOTTOM_BAR_TOAST_BOTTOM_PX,
 } from '../../../utils/playerBottomBarLayout';
 import { usePlayerOverlayObstacle } from '../../../hooks/usePlayerOverlayLayout';
+import { useHdrProjectionActive } from '../../../hooks/useHdrProjection';
 
 // src/components/app/overlays/NowPlayingToast.tsx
 // 播放器与 Lattice 左下角的 now playing 卡片（playing-toast 样式：圆角 2xl、44px 封面、底部滑入）。
@@ -133,10 +134,13 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
     // 详见 nowPlayingToastVisibility.ts。
     const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
     const autoHidePlayerChrome = usePlayerChromeSettingsStore(state => state.autoHidePlayerChrome);
+    // HDR 投影（投到挡风玻璃上）：整屏只留画面，这张卡片也一起收掉。
+    const hdrProjectionActive = useHdrProjectionActive();
     const isChromeHiddenHere = isNowPlayingToastHiddenWithChrome({
         view,
         isPlayerChromeHidden,
         autoHidePlayerChrome,
+        hdrProjectionActive,
     });
     const [dismissedWithChrome, setDismissedWithChrome] = useState(false);
     useEffect(() => {

@@ -22,6 +22,14 @@ export const HDR_PROJECTION_STORAGE_KEY = 'folia_hdr_projection';
 /** 打开之后留给用户的准备时间：把手机放稳，别在翻屏那一刻正拿着它。 */
 export const HDR_PROJECTION_COUNTDOWN_SECONDS = 5;
 
+/**
+ * 「点空白退出」那句提示的有效期。
+ *
+ * 投到挡风玻璃上时屏幕是反的，误触的概率比平时高得多 —— 点一下只弹提示，多久之内再点
+ * 一次才算数。过了这个窗口就当那一下是误触，回到「第一次点」的状态。
+ */
+export const HDR_EXIT_CONFIRM_WINDOW_MS = 3000;
+
 export const readStoredHdrProjection = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
@@ -58,6 +66,29 @@ export const applyHdrProjection = (enabled: boolean): void => {
     }
 
     void setDisplayBoost(enabled);
+    notifyEnabled();
+};
+
+/* ---------------------------------------------------------------------------
+ * 「现在是不是 HDR 投影」
+ * -------------------------------------------------------------------------
+ *
+ * App 那一层（点空白要不要二次确认）要知道，但它离这个开关很远：面板那颗开关在
+ * 控制面板里，App 拿不到它的 props。所以这里留一份订阅 —— 谁都能问，改了也会通知。
+ */
+
+const enabledListeners = new Set<(enabled: boolean) => void>();
+
+export const subscribeHdrProjection = (listener: (enabled: boolean) => void): (() => void) => {
+    enabledListeners.add(listener);
+    return () => {
+        enabledListeners.delete(listener);
+    };
+};
+
+const notifyEnabled = (): void => {
+    const enabled = readStoredHdrProjection();
+    enabledListeners.forEach((listener) => listener(enabled));
 };
 
 /* ---------------------------------------------------------------------------

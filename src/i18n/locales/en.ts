@@ -890,6 +890,7 @@ export default {
     "hdrProjectionCountdown": "In {{count}}s",
     "hdrProjectionCancel": "Cancel",
     "hdrProjectionNote": "Lay the phone face up: the windshield reflects it back the right way round. Turning it off restores everything.",
+    "hdrProjectionExitHint": "Tap again to exit",
     "libraryConfig": "Library & Config",
     "synced": "Synced",
     "aiThemeCloudOff": "The cloud service is off — turn it on in the settings first.",

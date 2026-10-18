@@ -109,6 +109,7 @@ import { useColorOsLyricFeed } from './hooks/useColorOsLyricFeed';
 import { useImmersiveLyricsBars } from './hooks/useImmersiveLyricsBars';
 import { useScreenAwake } from './hooks/useScreenAwake';
 import { usePlayerChromeAutoHide } from './hooks/usePlayerChromeAutoHide';
+import { useHdrExitConfirm, useHdrProjectionActive } from './hooks/useHdrProjection';
 import { useIdleCursorHide } from './hooks/useIdleCursorHide';
 import { usePlaybackAudioBridge } from './components/app/playback/bridges/usePlaybackAudioBridge';
 import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
@@ -1703,6 +1704,41 @@ export default function App() {
     });
 
     /*
+     * HDR 投影的二次确认：投到挡风玻璃上时屏幕是反着看的，误触概率比平时高得多，
+     * 而界面一收反射里就只剩一块黑。所以那档里「点空白收起界面」要连点两次。
+     * 开关状态从服务那边订阅 —— 这颗开关在控制面板里，App 拿不到它的 props。
+     */
+    const hdrProjectionActive = useHdrProjectionActive();
+    const confirmHdrExit = useHdrExitConfirm({
+        enabled: hdrProjectionActive,
+        hint: t('ui.hdrProjectionExitHint', '再点一次退出'),
+    });
+
+    /*
+     * HDR 投影下界面**整个收掉**：投到玻璃上时进度条、按钮、标题栏全是多余的，
+     * 反射里多一块控件就多一块晃眼的东西。
+     *
+     * 走「常驻隐藏」那一档而不是直接把 isPlayerChromeHidden 按下去 —— 后者在
+     * auto-hide 那一档里指针一有动静就被唤回来，而这里要的是一直藏到关掉为止。
+     * 关掉时把进 HDR 之前那一档还回去（原来是自动隐藏就还是自动隐藏），
+     * 不替用户改掉他的设置。
+     */
+    const chromeModeBeforeHdrRef = useRef<PlayerChromeVisibilityMode | null>(null);
+    useEffect(() => {
+        if (hdrProjectionActive) {
+            if (chromeModeBeforeHdrRef.current === null) {
+                chromeModeBeforeHdrRef.current = playerChromeVisibilityMode;
+            }
+            setPlayerChromeVisibilityModeTo('always-hidden', { silent: true });
+            return;
+        }
+        if (chromeModeBeforeHdrRef.current !== null) {
+            setPlayerChromeVisibilityModeTo(chromeModeBeforeHdrRef.current, { silent: true });
+            chromeModeBeforeHdrRef.current = null;
+        }
+    }, [hdrProjectionActive, playerChromeVisibilityMode, setPlayerChromeVisibilityModeTo]);
+
+    /*
      * 点击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
      *
      * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，
@@ -1717,6 +1753,10 @@ export default function App() {
      * auto-hide 模式下不动手：那边 pointerdown / pointerup 会在每次点击时先把控件显出来
      * （见 usePlayerChromeAutoHide），因此这里的 toggle 永远读到「显」、只会一路藏下去，
      * 「再点一下恢复」当场失效。那一档的显隐本来归空闲时钟管，点一下让它显出来正是它的语义。
+     *
+     * HDR 投影下多一道确认（useHdrProjectionExit）：投到挡风玻璃上时屏幕是反着看的，
+     * 误触概率高得多，而界面一收反射里只剩一块黑 —— 连该点哪儿叫回来都看不出来。
+     * 所以那档里第一次点只弹一句提示，再点一次才收。**不铺遮罩**，滑动切歌照旧。
      */
     const handleVisualSurfaceClick = useCallback(() => {
         // 滑动切完歌浏览器照旧补一个 click，那不是「点了一下空白」，别翻控件显隐。
@@ -1726,9 +1766,9 @@ export default function App() {
             return;
         }
         if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
-            setIsPlayerChromeHidden(prev => !prev);
+            confirmHdrExit(() => setIsPlayerChromeHidden(prev => !prev));
         }
-    }, [consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
+    }, [confirmHdrExit, consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
 
     const { personalFmSelection, personalFmSelectionLabel, isPersonalFmModeSupported, setPersonalFmSelection } = usePersonalFmModeController({
         isFmMode,

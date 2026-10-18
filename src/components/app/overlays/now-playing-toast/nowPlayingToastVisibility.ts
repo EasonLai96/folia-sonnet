@@ -37,8 +37,14 @@ export const isNowPlayingToastHiddenWithChrome = ({
     view,
     isPlayerChromeHidden,
     autoHidePlayerChrome,
+    hdrProjectionActive = false,
 }: {
     view: AppView;
     isPlayerChromeHidden: boolean;
     autoHidePlayerChrome: boolean;
-}) => view === 'player' && isPlayerChromeHidden && !autoHidePlayerChrome;
+    /**
+     * HDR 投影开着：整屏只留画面，这张卡片也跟着收 —— 它比上面那一族判据更硬，
+     * 连「自动隐藏控制栏」那一档（那一档里它本来不跟着收）也一起收掉。
+     */
+    hdrProjectionActive?: boolean;
+}) => hdrProjectionActive || (view === 'player' && isPlayerChromeHidden && !autoHidePlayerChrome);

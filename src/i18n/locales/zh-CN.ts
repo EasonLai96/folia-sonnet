@@ -891,6 +891,7 @@ export default {
     "hdrProjectionCountdown": "{{count}} 秒后生效",
     "hdrProjectionCancel": "取消",
     "hdrProjectionNote": "屏幕朝上放着，画面经挡风玻璃反射回来才是正的 —— 关掉即还原。",
+    "hdrProjectionExitHint": "再点一次退出",
     "libraryConfig": "配置",
     "synced": "已同步",
     "aiThemeCloudOff": "云服务没开，先到设置里打开。",

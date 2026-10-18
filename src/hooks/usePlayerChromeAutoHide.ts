@@ -51,14 +51,25 @@ export const usePlayerChromeAutoHide = ({
     const isSynchronizingPreferenceRef = useRef(false);
     const hasInitializedPreferenceSyncRef = useRef(false);
 
-    // One path for the cycle button and for a mode picked directly (the remote window's three-way choice).
-    const setPlayerChromeVisibilityModeTo = useCallback((nextMode: PlayerChromeVisibilityMode) => {
+    /*
+     * One path for the cycle button and for a mode picked directly (the remote window's three-way choice).
+     *
+     * `silent` 是给「临时接管」用的（HDR 投影把界面整屏收掉）：那一档的切换不是用户自己
+     * 选的，不该顺手改写他的「自动隐藏控制栏」开关、也不该弹一条「控制栏常驻隐藏」的
+     * 提示 —— 后者更糟：刚把界面全收掉，紧接着弹一条出来。关掉时原档还回去，中间这段
+     * 里那个设置一直没被动过，所以两边都不需要同步。
+     */
+    const setPlayerChromeVisibilityModeTo = useCallback((
+        nextMode: PlayerChromeVisibilityMode,
+        options: { silent?: boolean } = {},
+    ) => {
         if (!isPlayerChromeVisibilityMode(nextMode) || nextMode === playerChromeVisibilityModeRef.current) {
             return;
         }
-        const shouldAutoHide = nextMode === 'auto-hide';
         playerChromeVisibilityModeRef.current = nextMode;
         setPlayerChromeVisibilityMode(nextMode);
+        if (options.silent === true) return;
+        const shouldAutoHide = nextMode === 'auto-hide';
         if (autoHidePlayerChrome !== shouldAutoHide) {
             isSynchronizingPreferenceRef.current = true;
             setAutoHidePlayerChromePreference(shouldAutoHide);
