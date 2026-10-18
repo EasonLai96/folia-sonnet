@@ -5,6 +5,8 @@ import { isPureMusicLyricText } from '../utils/lyrics/pureMusic';
 import { THEME_GENERATION_STAGE_PREFIX, buildThemeSourcePrompt } from '../utils/aiThemePrompts';
 import {
     fingerprintLyricSource,
+    pullAiCloudCache,
+    pushAiCloudCache,
     withAiCloudCache,
     type AiCloudCacheSource,
 } from './aiCloudCache';
@@ -27,6 +29,7 @@ import {
     type DirectorSongInfo,
 } from './lyricDirector/prompt';
 import { readDirectorSettings, readRecentModes } from './lyricDirector/state';
+import { isFoliaCloudCacheEnabled } from './foliaCloud';
 import { setStatusMessage } from '../stores/useStatusMessageStore';
 import { md5 } from '../utils/md5';
 
@@ -479,6 +482,52 @@ const resolveStage = async (ctx: StageContext): Promise<StageResult> => {
         isPureMusic: ctx.isPureMusic,
     });
     return { ...value, source };
+};
+
+/**
+ * **只匹配一次**：问云端，命中就把答案交回来，**绝不生成**。
+ *
+ * 面板那颗同步按钮要的正是这个（见 hooks/useAiThemeCloudSync.ts）。它和主题生成走
+ * **同一个键**（`buildStageContext` 算出来的那一个），于是「切歌时刚从云端匹配上主题」
+ * 之后按下同步就一定还能匹配上 —— 以前那颗按钮查的是 `kind='theme'`（按歌名 + 歌手
+ * 算键），跟主题真正存的地方根本不是一个键，于是明明刚匹配上却报「云端还没有这首的
+ * 主题」，看上去像缓存坏了。
+ *
+ * 跳过生成是硬要求：没配 Key 的人按下同步只该是「没命中」，不该平白撞一次「AI 不可用」。
+ *
+ * 返回 `null` = 云端没有（或者那条缺了这次要的那一半）。
+ */
+export const matchStage = async (request: StageRequest): Promise<StageResult | null> => {
+    if (!isFoliaCloudCacheEnabled()) return null;
+    /* 「重新判断」就是要一份跟缓存里不一样的答案 —— 只问缓存的这条路无话可说。 */
+    if (request.force === true) return null;
+
+    const ctx = buildStageContext(request);
+    const pulled = await pullAiCloudCache(STAGE_CACHE_KIND, ctx.fingerprint, {
+        songTitle: ctx.songTitle,
+        /* 纯音乐那半的「歌词」其实是歌名，别拿它去判高亮词。 */
+        lyricText: ctx.isPureMusic ? '' : ctx.lyricSource,
+    });
+    if (pulled.status !== 'hit') return null;
+
+    /* 缓存里的东西照样当不可信输入：形状不对、缺了要的那一半，都跟没命中一样。 */
+    const parts = normalizeStagePayload(pulled.payload, ctx.blockedModes);
+    if (!parts || !hasRequired(parts, ctx.requirement)) return null;
+
+    /*
+     * 按内容捞到的那条**回填**到自己这个键上 —— 与 `withAiCloudCache` 里同一条纪律：
+     * 同一份歌词下次还是同一个键，不回填就得再走一遍「搜歌名 + 逐条判」。
+     */
+    if (pulled.matched === 'words') {
+        void pushAiCloudCache(STAGE_CACHE_KIND, ctx.fingerprint, parts, {
+            songTitle: ctx.songTitle,
+            platform: ctx.platform,
+            lyricHash: ctx.lyricSource ? md5(ctx.lyricSource) : '',
+            isPureMusic: ctx.isPureMusic,
+        }).catch(() => false);
+    }
+
+    return { ...parts, source: 'cloud' };
 };
 
 /**

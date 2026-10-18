@@ -1,5 +1,5 @@
 import { fetchEntry, fingerprintLyricSource, pullAiCloudCache, pushAiCloudCache } from './aiCloudCache';
-import { getFromCache, removeFromCache, saveToCache } from './db';
+import { getFromCache, saveToCache } from './db';
 import { sanitizeDualTheme } from './themeSanitizer';
 import type { DualTheme } from '../types';
 
@@ -53,11 +53,6 @@ export const readLocalAiThemeOverride = async (song: AiThemeSongRef): Promise<Du
 /** 快速编辑保存之后落一份：之后这首歌一律以本机这一版为准。 */
 export const writeLocalAiThemeOverride = async (song: AiThemeSongRef, dualTheme: DualTheme): Promise<void> => {
     await saveToCache(localAiThemeOverrideKey(song), dualTheme);
-};
-
-/** 「恢复云端版本」：丢掉本机这一版。 */
-export const clearLocalAiThemeOverride = async (song: AiThemeSongRef): Promise<void> => {
-    await removeFromCache(localAiThemeOverrideKey(song));
 };
 
 /**
