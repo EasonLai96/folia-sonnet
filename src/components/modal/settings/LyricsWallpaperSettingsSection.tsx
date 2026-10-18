@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { SettingsAnchor } from './navigation/SettingsAnchorContext';
 import SettingsRow from './SettingsRow';
 import { settingsDividerClassFor } from './settingsCardClasses';
-import { Button, Segmented, Toggle } from './kit';
+import { Button, Reveal, Segmented, Toggle } from './kit';
 import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { encodeWallpaperImage } from '../../../utils/wallpaperImage';
 import { isCapacitorAndroid } from '../../../platform/runtime';
@@ -409,7 +409,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 精简模式下歌词是那颗可以拖的小窗，拖到角落 / 缩到最小又上了锁之后
                     光靠手势弄不回来，所以这里给一颗「重置」当出口。 */}
-                {lyricsWallpaperStyle === 'minimal' && (
+                <Reveal when={lyricsWallpaperStyle === 'minimal'}>
                     <>
                         {/* 小窗的底色浓度。单独一根：它是另一层系统窗口，
                             跟壁纸背景那根、叠层那根都无关。 */}
@@ -571,9 +571,9 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 />
                             )}
                         />
-                        {wallpaperFloatingFontSizeMode === 'custom' && (
-                            <SettingsRow
-                                title={t('options.floatingLyricsFontSizeCustom')}
+                <Reveal when={wallpaperFloatingFontSizeMode === 'custom'}>
+                    <SettingsRow
+                        title={t('options.floatingLyricsFontSizeCustom')}
                                 description={t('options.floatingLyricsFontSizeCustomDesc')}
                                 dividerClass={dividerClass}
                                 control={(
@@ -590,11 +590,11 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                         <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
                                             {Math.round(wallpaperFloatingFontSize)}
                                         </span>
-                                    </div>
-                                )}
-                            />
-                        )}
-                        {/* 拖到角落 / 缩到最小又上了锁之后光靠手势弄不回来，
+                        </div>
+                    )}
+                />
+                </Reveal>
+                {/* 拖到角落 / 缩到最小又上了锁之后光靠手势弄不回来，
                             所以这里给一颗「重置」当出口。 */}
                         <SettingsRow
                             title={t('options.floatingLyricsWindow')}
@@ -609,7 +609,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             )}
                         />
                     </>
-                )}
+                </Reveal>
                 {/* 可视化叠层要 SYSTEM_ALERT_WINDOW；没授权时它静默不工作，
                     用户只会看到「壁纸跟以前一样」，所以这里必须给明确入口。 */}
                 <SettingsRow
@@ -797,7 +797,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         />
                     )}
                 >
-                    {lyricsWallpaperBackground === 'image' && (
+                    <Reveal when={lyricsWallpaperBackground === 'image'}>
                         <div className="mt-3 flex items-center gap-3">
                             {lyricsWallpaperImage ? (
                                 <img
@@ -837,8 +837,8 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 />
                             </div>
                         </div>
-                    )}
-                    {lyricsWallpaperBackground === 'video' && (
+                    </Reveal>
+                    <Reveal when={lyricsWallpaperBackground === 'video'}>
                         <div className="mt-3 flex items-center gap-3">
                             <div
                                 className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border"
@@ -867,7 +867,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 </p>
                             </div>
                         </div>
-                    )}
+                    </Reveal>
                 </SettingsRow>
                 <SettingsRow
                     title={t('options.lyricsWallpaperBlur')}
@@ -919,7 +919,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         />
                     )}
                 />
-                {wallpaperLyricsFontMode === 'custom' && (
+                <Reveal when={wallpaperLyricsFontMode === 'custom'}>
                     <SettingsRow
                         title={t('options.lyricsWallpaperFont')}
                         description={t('options.lyricsWallpaperFontDesc')}
@@ -964,7 +964,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             )}
                         </div>
                     </SettingsRow>
-                )}
+                </Reveal>
                 <SettingsRow
                     title={t('options.lyricsWallpaperFeed')}
                     description={t('options.lyricsWallpaperFeedDesc')}

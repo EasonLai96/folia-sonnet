@@ -44,7 +44,7 @@ const SettingsRow: React.FC<SettingsRowProps> = ({
                     </div>
                 )}
             </div>
-            {control}
+            {control && <div className="shrink-0">{control}</div>}
         </div>
         {children}
     </div>
