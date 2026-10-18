@@ -157,8 +157,8 @@ export const useWallPointerPan = ({
     };
 
     const beginPinch = useCallback(() => {
-        if (!zoomRef.current) return false;
-        // 取最早按下的两根：第三根手指参与时不再换锚点，免得中心跳一下。
+        if (!zoomRef.current || pinchRef.current) return false;
+        // 取最早按下的两根（控件上的也算）：第三根手指参与时不再换锚点，免得中心跳一下。
         const ids = [...pointersRef.current.keys()].slice(0, 2) as [number, number];
         const first = pointersRef.current.get(ids[0]);
         const second = pointersRef.current.get(ids[1]);
@@ -176,7 +176,12 @@ export const useWallPointerPan = ({
         // Panning stays available while a card is open, but a drag that starts on the open card
         // belongs to its own controls - the progress bar seeks by dragging.
         // Only actual controls are excluded; the cover, title and surrounding space can pan.
-        if (event.target instanceof Element && event.target.closest('button, input, select, textarea, a, [contenteditable="true"], [role="slider"]')) return;
+        const target = event.target instanceof Element ? event.target : null;
+        // 拖着走的控件（进度条）整段手势都归它，完全不认。
+        if (target?.closest('[role="slider"]')) return;
+        // 点一下就走的控件（按钮、链接、输入位）不拿它起拖，但**要记进手指表**：捏合要两根都在表里，
+        // 有一根按在按钮上就永远捏不动 —— 用户报的「有概率无法缩放」就是这一类。
+        const onControl = Boolean(target?.closest('button, input, select, textarea, a, [contenteditable="true"]'));
         const pointers = pointersRef.current;
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         // 第二根手指按下：改成捏合（单指拖动让位）。捏不动（没接缩放、距离太近）就当没这根手指。
@@ -184,7 +189,7 @@ export const useWallPointerPan = ({
             interrupt();
             if (beginPinch()) return;
         }
-        if (!event.isPrimary || pointerRef.current) return;
+        if (onControl || !event.isPrimary || pointerRef.current) return;
         interrupt();
         didDragRef.current = false;
         pointerRef.current = {
@@ -202,6 +207,10 @@ export const useWallPointerPan = ({
             known.x = event.clientX;
             known.y = event.clientY;
         }
+        // 捏合只在第二根手指按下那一刻试是不够的：放大本来就是从「两指捏在一起」起手的，
+        // 那一刻的距离小于 minPinchDistancePx，老逻辑试一次不中就不再试 —— 之后张得再开也不缩放。
+        // 所以只要有两根手指按着、又还没在捏，就每次移动再试一次（试中的这一下把当时的距离记成基准，不会跳）。
+        if (!pinchRef.current && pointersRef.current.size >= 2) beginPinch();
         // 捏合：按距离的变化改倍率，中心那个世界点跟着手指走。
         const pinch = pinchRef.current;
         if (pinch && (pinch.ids[0] === event.pointerId || pinch.ids[1] === event.pointerId)) {
@@ -211,6 +220,8 @@ export const useWallPointerPan = ({
             pinch.distance = metrics.distance;
             return;
         }
+        // 捏不动（距离还不够）时不让单指拖动接手：两根手指按着却还在平移，手指再张开也不会变成捏合。
+        if (pointersRef.current.size >= 2) return;
         const pointer = pointerRef.current;
         if (!pointer || pointer.id !== event.pointerId) return;
         const dx = event.clientX - pointer.start.x;
@@ -227,7 +238,7 @@ export const useWallPointerPan = ({
         }
         pointer.last = { x: event.clientX, y: event.clientY, time: event.timeStamp };
         if (pointer.dragged) updateCamera(pointer.camera.x + dx, pointer.camera.y + dy);
-    }, [updateCamera, zoomAt]);
+    }, [beginPinch, updateCamera, zoomAt]);
 
     // Continue along the release velocity; stale samples and cancelled gestures never coast.
     const onPointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
