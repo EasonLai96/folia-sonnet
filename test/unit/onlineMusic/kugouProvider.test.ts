@@ -1077,6 +1077,28 @@ describe('kugouProvider', () => {
         });
     });
 
+    it('reads the artist off the flat row the Android KuGou bridge hands back', async () => {
+        // 安卓端走 src/nativeBridge/api/kugou.js：mapKGSong 已经把歌手算好放进 `artist` 这一个
+        // 字符串里，Singers / singerinfo 那些字段一律没有。这里漏掉 `artist` 的表现就是
+        // 「酷狗的歌单全是未知歌手」（2026-10-12 修过一次，大版本合并时又丢掉了）。
+        const song = normalizeKugouSong({
+            provider: 'kg',
+            source: 'kg',
+            type: 'kg',
+            id: 'ABC123',
+            hash: 'abc123',
+            albumId: '58271602',
+            singerId: '8893172',
+            name: '先说谎的人 (0.8X)',
+            artist: '涵の心事.',
+            album: '涵の心事.',
+            duration: 184,
+        });
+
+        expect(song.name).toBe('先说谎的人 (0.8X)');
+        expect(song.artists.map(artist => artist.name)).toEqual(['涵の心事.']);
+    });
+
     it('normalizes the nested song shape returned by album catalog endpoints', async () => {
         requestMock.mockResolvedValue({
             total: 1,
@@ -1301,7 +1323,8 @@ describe('kugouProvider', () => {
 
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
-        expect(liked).toEqual({ ids: ['ABC123', 'DEF456'], whole: true });
+        // 接口给的是倒着的，翻回官方客户端里从上往下的顺序。
+        expect(liked).toEqual({ ids: ['DEF456', 'ABC123'], whole: true });
         expect(requestMock).toHaveBeenNthCalledWith(1, 'user_playlist', {
             userid: 'user', page: 1, pagesize: 100,
         });
@@ -1337,7 +1360,7 @@ describe('kugouProvider', () => {
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
         expect(liked?.ids).toHaveLength(101);
-        expect(liked?.ids.at(-1)).toBe('PAGED-LAST');
+        expect(liked?.ids.at(0)).toBe('PAGED-LAST');
         expect(liked?.whole).toBe(true);
         expect(requestMock).toHaveBeenNthCalledWith(2, 'playlist_track_all', {
             id: 'collection_3_liked_test_paged', page: 1, pagesize: 100,
@@ -1428,7 +1451,7 @@ describe('kugouProvider', () => {
         await kugouProvider.library?.getLikedSongIds?.('user');
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
-        expect(liked?.ids).toEqual(['ABC123', 'DEF456']);
+        expect(liked?.ids).toEqual(['DEF456', 'ABC123']);
     });
 
     it('counts the liked songs by the count the list of playlists gives for the liked list, and gives none where it names none', async () => {
