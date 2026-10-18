@@ -9,6 +9,7 @@ import { installPerfDiagnosticsSwitch } from './utils/frameTimingDiagnostics';
 import { setMediaDiagnosticsEnabledReader } from './utils/mediaDiagnostics';
 import { usePerfDiagnosticsStore } from './stores/usePerfDiagnosticsStore';
 import { installAndroidPhoneFitPreference, installDeviceProfilePreference } from './services/androidPhoneLayout';
+import { installHdrProjectionPreference } from './services/hdrProjection';
 // import { installCoverSizeAudit } from './services/debug/coverSizeSamples';
 // @ts-ignore
 globalThis.Buffer = Buffer;
@@ -66,5 +67,8 @@ installAndroidPhoneFitPreference();
 // 设备类型（手机 / 平板）：选了手机的话横屏整屏缩一档，同样要在首帧之前落到 <html> 上，
 // 否则第一帧按原始尺寸铺完再缩，开屏那一下看得见跳变。
 installDeviceProfilePreference();
+// HDR 投影：上次开着的话，镜像要在首帧之前落到 <html> 上（理由同上），剩下的横屏与
+// 亮度由它自己那 5 秒倒计时带过去 —— 那时 React 还没挂载，界面上没人看着。
+installHdrProjectionPreference();
 
 void import('./bootstrap');

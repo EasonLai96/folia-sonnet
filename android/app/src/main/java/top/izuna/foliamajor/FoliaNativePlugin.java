@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -1927,6 +1928,60 @@ public class FoliaNativePlugin extends Plugin {
         result.put("enabled", enabled);
         result.put("orientation", PhoneLayoutOrientation.getOrientation(getContext()));
         call.resolve(result);
+    }
+
+    /*
+     * 「HDR 投影」的显示那一半：把亮度顶到最亮，并尽量切到 HDR 色彩模式。
+     *
+     * 屏幕亮度在 WebView 里改不动 —— 那是 Activity 窗口的属性（`lp.screenBrightness`），
+     * 网页拿不到自己的窗口。所以要走这里。
+     *
+     * 用的是**窗口覆盖**（BRIGHTNESS_OVERRIDE_*）而不是去改系统设置：
+     * 只有我们的窗口在前台时它才生效，退到后台由系统照常接管 —— 既不用申请
+     * WRITE_SETTINGS 权限，也不存在「忘了还原就把用户亮度改掉了」这回事。
+     *
+     * 色彩模式同理：设备不支持 HDR 会直接抛，那就退回广色域，再不行保持默认 ——
+     * 亮度那一半已经生效了，色彩只是锦上添花，不该让整个开关看起来是坏的。
+     */
+    @PluginMethod
+    public void setDisplayBoost(PluginCall call) {
+        boolean boost = Boolean.TRUE.equals(call.getBoolean("boost", false));
+        Activity activity = getActivity();
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
+                try {
+                    android.view.Window window = activity.getWindow();
+                    android.view.WindowManager.LayoutParams params = window.getAttributes();
+                    params.screenBrightness = boost
+                        ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+                        : android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                    window.setAttributes(params);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        /*
+                         * COLOR_MODE_HDR 需要屏幕真的支持（很多机器不支持，会直接抛
+                         * IllegalArgumentException）；广色域那一档覆盖面广得多。
+                         * 两档都失败就什么都不做 —— 亮度那半已经生效了。
+                         */
+                        try {
+                            window.setColorMode(boost
+                                ? ActivityInfo.COLOR_MODE_HDR
+                                : ActivityInfo.COLOR_MODE_DEFAULT);
+                        } catch (Throwable unsupportedHdr) {
+                            try {
+                                window.setColorMode(boost
+                                    ? ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+                                    : ActivityInfo.COLOR_MODE_DEFAULT);
+                            } catch (Throwable ignored) {
+                                // 这块屏两种都不认：保持默认。
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // Activity 正在 finishing：窗口已经没了。
+                }
+            });
+        }
+        call.resolve();
     }
 
     private List<JSObject> parseCookieHeader(String header, String domain) {

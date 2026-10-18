@@ -3,6 +3,7 @@ import { Theme, ThemeMode, VisualizerMode } from '../../types';
 import type { ThemeSourceModel } from '../../hooks/themeControllerState';
 import AudioEqualizerDialog from './AudioEqualizerDialog';
 import AppearanceSection from './controls/AppearanceSection';
+import HdrProjectionRow from './controls/HdrProjectionRow';
 import SoundTiles from './controls/SoundTiles';
 import SleepTimerRow from './controls/SleepTimerRow';
 import ThemeNameRow from './controls/ThemeNameRow';
@@ -127,6 +128,11 @@ const ControlsTab: React.FC<ControlsTabProps> = ({
             isDaylight={isDaylight}
             onToggleDaylight={onToggleDaylight}
         />
+
+        <GroupLine />
+
+        {/* HDR 投影：三件事都跟「怎么显示」有关，与上面的外观分开摆；非安卓自己不渲染。 */}
+        <HdrProjectionRow theme={theme} />
 
         <AudioEqualizerDialog isDaylight={isDaylight} />
     </div>

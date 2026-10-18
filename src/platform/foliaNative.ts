@@ -66,6 +66,15 @@ interface FoliaNativePlugin {
      */
     setScreenAwake(options: { awake: boolean }): Promise<void>;
     /**
+     * 「HDR 投影」的显示那一半：亮度顶到最亮，并尽量切到 HDR 色彩模式。
+     *
+     * 亮度是 **Activity 窗口** 的属性，WebView 里改不动（也不去改系统设置：那是
+     * 窗口级覆盖，只有我们的窗口在前台才生效，退到后台由系统照常接管）。
+     * 色彩模式那半是尽力而为 —— 屏幕不支持就退回广色域、再不行保持默认，
+     * 亮度那一半照样生效。
+     */
+    setDisplayBoost(options: { boost: boolean }): Promise<void>;
+    /**
      * 音频焦点策略：是否允许后台与其他音源同时播放。
      *
      * 值要**落盘**（见原生 FoliaAudioFocus）：WebView 是在下一次请求音频焦点时才来
@@ -184,6 +193,20 @@ export const setScreenAwake = async (awake: boolean): Promise<void> => {
         await FoliaNative.setScreenAwake({ awake });
     } catch {
         // 桌面端 / 插件不可用：静默，屏幕常亮不该影响播放本身。
+    }
+};
+
+/**
+ * 「HDR 投影」的显示那一半：最高亮度 + HDR 色彩模式（见 FoliaNativePlugin.setDisplayBoost）。
+ *
+ * 失败一律静默 —— 桌面端 / 老版本 App 没有这个方法，而**横屏与镜像那两半照旧生效**，
+ * 整个开关不该因为亮度够不着就看起来是坏的。
+ */
+export const setDisplayBoost = async (boost: boolean): Promise<void> => {
+    try {
+        await FoliaNative.setDisplayBoost({ boost });
+    } catch {
+        // 同上：亮度与色彩模式不该影响界面本身能不能用。
     }
 };
 
