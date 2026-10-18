@@ -7,8 +7,9 @@
 
 import { create } from 'zustand';
 import { getVisualizerModeLabel } from '../utils/visualizerModeLabel';
-import { DEFAULT_CADENZA_TUNING, DEFAULT_CAPPELLA_TUNING, DEFAULT_CLADDAGH_TUNING, DEFAULT_CLASSIC_TUNING, DEFAULT_DIORAMA_TUNING, DEFAULT_FUME_TUNING, DEFAULT_LATENT_BACKGROUND_TUNING, DEFAULT_LUMIERE_TUNING, DEFAULT_MONET_BACKGROUND_TUNING, DEFAULT_MONET_TUNING, DEFAULT_NOMAND_BACKGROUND_TUNING, DEFAULT_PARTITA_TUNING, DEFAULT_PENDOLO_TUNING, DEFAULT_SONNET_TUNING, DEFAULT_SORA_BACKGROUND_TUNING, DEFAULT_TEMPERA_TUNING, DEFAULT_TILT_TUNING, SONNET_CAMERA_INTENSITY_MAX, type CadenzaTuning, type CappellaTuning, type CladdaghTuning, type ClassicTuning, type DioramaTuning, type FumeTuning, type LatentBackgroundTuning, type LumiereTuning, type MonetBackgroundTuning, type MonetTuning, type NomandBackgroundTuning, type PartitaTuning, type PendoloTuning, type SonnetTuning, type SoraBackgroundTuning, type TemperaTuning, type TiltTuning, type UrlBackgroundItem, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
+import { DEFAULT_CADENZA_TUNING, DEFAULT_CAPPELLA_TUNING, DEFAULT_CLADDAGH_TUNING, DEFAULT_CLASSIC_TUNING, DEFAULT_DIORAMA_TUNING, DEFAULT_FUME_TUNING, DEFAULT_LATENT_BACKGROUND_TUNING, DEFAULT_LUMIERE_TUNING, DEFAULT_MONET_BACKGROUND_TUNING, DEFAULT_MONET_TUNING, DEFAULT_NOMAND_BACKGROUND_TUNING, DEFAULT_PARTITA_TUNING, DEFAULT_PENDOLO_TUNING, DEFAULT_SONNET_TUNING, DEFAULT_SORA_BACKGROUND_TUNING, DEFAULT_TEMPERA_TUNING, DEFAULT_TILT_TUNING, SONNET_CAMERA_INTENSITY_MAX, type CadenzaTuning, type CappellaTuning, type CladdaghTuning, type ClassicTuning, type DioramaTuning, type FumeTuning, type LatentBackgroundTuning, type LumiereTuning, type MonetBackgroundTuning, type MonetTuning, type NomandBackgroundTuning, type PartitaTuning, type PendoloTuning, type RenderPixelRatio, type SonnetTuning, type SoraBackgroundTuning, type TemperaTuning, type TiltTuning, type UrlBackgroundItem, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
 import { VISUALIZER_FRAME_RATE_STORAGE_KEY, setGlobalVisualizerFrameRate } from '../utils/frameRateLimiter';
+import { RENDER_PIXEL_RATIO_STORAGE_KEY, readStoredRenderPixelRatio, setGlobalRenderPixelRatio } from '../utils/renderPixelRatio';
 import { GLOW_BLUR_QUANTIZE_STORAGE_KEY, readStoredGlowBlurQuantize, setGlowBlurQuantized } from '../utils/glowBlurQuantize';
 import { sanitizeUrlBackgroundItem, sanitizeUrlBackgroundList } from '../utils/urlBackground';
 import i18n from '../i18n/config';
@@ -71,6 +72,13 @@ export type VisualizerSettingsState = {
     urlBackgroundList: UrlBackgroundItem[];
     urlBackgroundSelectedId: string | null;
     visualizerFrameRate: VisualizerFrameRate;
+    /**
+     * 画布渲染分辨率的上限，null = 跟随屏幕。
+     *
+     * 存的是用户「想要的上限」，不是生效值：屏幕只有 1× 时选 2× 什么都不会变，库里的值仍然是 2×，
+     * 换到高分屏上才生效。见 utils/renderPixelRatio.ts。
+     */
+    renderPixelRatio: RenderPixelRatio | null;
     visualizerMode: VisualizerMode;
     randomVisualizerModePerSong: boolean;
     /** Snap animated glow blur radii to a bounded set. See components/visualizer/wordGlow.ts. */
@@ -213,6 +221,7 @@ export type VisualizerSettingsState = {
     handleSetUrlBackgroundSelectedId: (id: string | null) => void;
     handleSetUrlBackgroundList: (items: UrlBackgroundItem[]) => void;
     handleSetVisualizerFrameRate: (frameRate: VisualizerFrameRate) => void;
+    handleSetRenderPixelRatio: (limit: RenderPixelRatio | null) => void;
     handleSetVisualizerMode: (mode: VisualizerMode, options?: { notify?: boolean }) => void;
     handleToggleRandomVisualizerModePerSong: (enable: boolean) => void;
     handleToggleGlowBlurQuantize: (enable: boolean) => void;
@@ -312,6 +321,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     urlBackgroundList: readStoredUrlBackgroundList(),
     urlBackgroundSelectedId: readStoredUrlBackgroundSelectedId(),
     visualizerFrameRate: readStoredVisualizerFrameRate(),
+    renderPixelRatio: readStoredRenderPixelRatio(),
     visualizerMode: readStoredVisualizerMode(),
     randomVisualizerModePerSong: getStoredBoolean('random_visualizer_mode_per_song', false),
     glowBlurQuantize: readStoredGlowBlurQuantize(),
@@ -474,6 +484,17 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         }
         setGlobalVisualizerFrameRate(frameRate);
         set({ visualizerFrameRate: frameRate });
+    },
+    handleSetRenderPixelRatio: (limit) => {
+        if (typeof window !== 'undefined') {
+            if (limit === null) {
+                localStorage.removeItem(RENDER_PIXEL_RATIO_STORAGE_KEY);
+            } else {
+                localStorage.setItem(RENDER_PIXEL_RATIO_STORAGE_KEY, String(limit));
+            }
+        }
+        setGlobalRenderPixelRatio(limit);
+        set({ renderPixelRatio: limit });
     },
     handleSetVisualizerMode: (mode, options) => {
         if (typeof window !== 'undefined') {

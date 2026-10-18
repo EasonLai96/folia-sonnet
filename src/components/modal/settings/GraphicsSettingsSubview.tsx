@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import type { Theme, VisualizerFrameRate } from '../../../types';
 import { VISUALIZER_FRAME_RATE_OPTIONS } from '../../../utils/frameRateLimiter';
+import { DEFAULT_RENDER_PIXEL_RATIO, RENDER_PIXEL_RATIO_OPTIONS } from '../../../utils/renderPixelRatio';
+import { useDevicePixelRatio } from '../../../hooks/useMediaQuery';
 import ThemedDialog from '../../shared/ThemedDialog';
 import { SettingsAnchor } from './navigation/SettingsAnchorContext';
 import SettingsSectionHeading from './navigation/SettingsSectionHeading';
@@ -16,8 +18,9 @@ import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSetting
 
 // src/components/modal/settings/GraphicsSettingsSubview.tsx
 // Everything that trades picture for smoothness or works around a renderer problem: static mode,
-// the home background, native blur, the frame-rate cap, the Linux glow fix and reduced motion.
-// Moved out of the lab page, where these sat among unrelated player-chrome switches.
+// the home background, native blur, the render-resolution cap, the frame-rate cap, the Linux glow
+// fix and reduced motion. Moved out of the lab page, where these sat among unrelated
+// player-chrome switches.
 //
 // 歌词动态壁纸那一节以前也在这里 —— 它是 Android 专有的，最早跟着「省电 / 掉帧」这类
 // 开关一起进来的。但它管的是**歌词长什么样**（小窗位置、字号、叠层让不让位），跟帧率、
@@ -34,6 +37,9 @@ const openDocsLinkExternally = (event: React.MouseEvent<HTMLAnchorElement>) => {
 };
 
 const getFrameRateLabel = (frameRate: VisualizerFrameRate) => `${frameRate} FPS`;
+
+/** 画到几位小数：0.75 / 1 / 1.5 / 1.33 这些档位都要能一眼认出来，尾随零不要。 */
+const getRenderPixelRatioLabel = (pixelRatio: number) => `×${Number(pixelRatio.toFixed(2))}`;
 
 /**
  * 打开开关时落在哪一档。
@@ -78,6 +84,9 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     const onTogglePlayerPageNativeBlur = usePlayerChromeSettingsStore(state => state.handleTogglePlayerPageNativeBlur);
     const visualizerFrameRate = useVisualizerSettingsStore(state => state.visualizerFrameRate);
     const onVisualizerFrameRateChange = useVisualizerSettingsStore(state => state.handleSetVisualizerFrameRate);
+    const renderPixelRatio = useVisualizerSettingsStore(state => state.renderPixelRatio);
+    const onRenderPixelRatioChange = useVisualizerSettingsStore(state => state.handleSetRenderPixelRatio);
+    const devicePixelRatio = useDevicePixelRatio();
     const glowBlurQuantize = useVisualizerSettingsStore(state => state.glowBlurQuantize);
     const onToggleGlowBlurQuantize = useVisualizerSettingsStore(state => state.handleToggleGlowBlurQuantize);
 
@@ -87,6 +96,15 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     // 关着的时候档位显示 120：那正是「不限」的意思 —— 画到屏幕刷新率为止。
     const selectedVisualizerFrameRate = isVisualizerFrameRateLimiterEnabled ? visualizerFrameRate : 120;
     const selectedVisualizerFrameRateIndex = VISUALIZER_FRAME_RATE_OPTIONS.indexOf(selectedVisualizerFrameRate);
+
+    const isRenderPixelRatioLimited = renderPixelRatio !== null;
+    // 关着的时候滑块停在默认档，打开的瞬间就落在这一档；右边的数值显示的却是**当前生效**的
+    // 像素比（跟随屏幕时就是屏幕自己的值），所以关/开两边都不会出现「显示的数和画面对不上」。
+    const selectedRenderPixelRatio = isRenderPixelRatioLimited ? renderPixelRatio : DEFAULT_RENDER_PIXEL_RATIO;
+    const selectedRenderPixelRatioIndex = RENDER_PIXEL_RATIO_OPTIONS.indexOf(selectedRenderPixelRatio);
+    const renderPixelRatioLabel = getRenderPixelRatioLabel(
+        isRenderPixelRatioLimited ? selectedRenderPixelRatio : devicePixelRatio,
+    );
 
     const renderToggle = (checked: boolean, onChange: () => void) => (
         <SettingsToggle checked={checked} onChange={onChange} offClass={toggleOffBackgroundClass} onColor={theme?.secondaryColor} />
@@ -109,6 +127,11 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
     const handleFrameRateSliderChange = (value: string) => {
         const nextIndex = Math.min(VISUALIZER_FRAME_RATE_OPTIONS.length - 1, Math.max(0, Number(value)));
         onVisualizerFrameRateChange(VISUALIZER_FRAME_RATE_OPTIONS[nextIndex]);
+    };
+
+    const handleRenderPixelRatioSliderChange = (value: string) => {
+        const nextIndex = Math.min(RENDER_PIXEL_RATIO_OPTIONS.length - 1, Math.max(0, Number(value)));
+        onRenderPixelRatioChange(RENDER_PIXEL_RATIO_OPTIONS[nextIndex]);
     };
 
     return (
@@ -138,6 +161,39 @@ const GraphicsSettingsSubview: React.FC<GraphicsSettingsSubviewProps> = ({
                             dividerClass={dividerClass}
                         />
                     )}
+                    <SettingsRow
+                        title={t('options.renderPixelRatio')}
+                        description={t('options.renderPixelRatioDesc')}
+                        control={renderToggle(
+                            isRenderPixelRatioLimited,
+                            () => onRenderPixelRatioChange(isRenderPixelRatioLimited ? null : DEFAULT_RENDER_PIXEL_RATIO),
+                        )}
+                        dividerClass={dividerClass}
+                    >
+                        <div className={`space-y-3 transition-opacity ${isRenderPixelRatioLimited ? 'opacity-100' : 'opacity-45 pointer-events-none'}`}>
+                            <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                <span className="opacity-60">{t('options.renderPixelRatioValue')}</span>
+                                <span className="font-mono opacity-70">{renderPixelRatioLabel}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max={RENDER_PIXEL_RATIO_OPTIONS.length - 1}
+                                step="1"
+                                value={Math.max(0, selectedRenderPixelRatioIndex)}
+                                onChange={(event) => handleRenderPixelRatioSliderChange(event.target.value)}
+                                className={rangeInputClass}
+                                aria-label={t('options.renderPixelRatioValue')}
+                                disabled={!isRenderPixelRatioLimited}
+                            />
+                            {/* 档位可能变（现在 0.5..2 六档），刻度用两端对齐而不是写死的几列。 */}
+                            <div className="flex justify-between text-[11px] font-mono opacity-50" style={{ color: 'var(--text-secondary)' }}>
+                                {RENDER_PIXEL_RATIO_OPTIONS.map(pixelRatio => (
+                                    <span key={pixelRatio}>{pixelRatio}</span>
+                                ))}
+                            </div>
+                        </div>
+                    </SettingsRow>
                     <SettingsRow
                         title={t('options.visualizerFrameRate')}
                         description={t('options.visualizerFrameRateDesc')}

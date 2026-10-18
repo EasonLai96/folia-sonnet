@@ -1,5 +1,6 @@
 import type { SongResult } from '../types';
 import type { VideoExportPreset } from '../types/videoExport';
+import { getNativeDevicePixelRatio } from '../utils/renderPixelRatio';
 
 // src/services/electronVideoExport.ts
 // Low-level Electron/Chromium recording helpers used by the player export hook.
@@ -44,7 +45,9 @@ export const waitForExportViewport = async (preset: VideoExportPreset, timeoutMs
     const tolerance = 4;
     const deadline = performance.now() + timeoutMs;
     for (;;) {
-        const dpr = window.devicePixelRatio || 1;
+        // 导出窗口是按物理像素铺的，这里必须用真实 DPR —— 渲染分辨率上限只该压低画布，不该
+        // 把导出尺寸也一起缩小（那会直接录出一张糊的片子）。
+        const dpr = getNativeDevicePixelRatio();
         const physicalWidth = Math.round(window.innerWidth * dpr);
         const physicalHeight = Math.round(window.innerHeight * dpr);
         if (
@@ -170,7 +173,7 @@ export const getMainWindowVideoCaptureStream = async (preset: VideoExportPreset)
         const settings = videoTrack.getSettings();
         console.log(
             `[VideoExport] self capture -> ${settings.width}x${settings.height}@${settings.frameRate} ` +
-            `(preset=${preset.width}x${preset.height}, dpr=${window.devicePixelRatio})`,
+            `(preset=${preset.width}x${preset.height}, dpr=${getNativeDevicePixelRatio()})`,
         );
     }
 

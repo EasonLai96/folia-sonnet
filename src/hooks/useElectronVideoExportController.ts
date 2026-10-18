@@ -23,6 +23,7 @@ import {
 } from '../services/videoExportFramePipeline';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
+import { getNativeDevicePixelRatio } from '../utils/renderPixelRatio';
 import { useAppChromeStore } from '../stores/useAppChromeStore';
 import { setIsPanelOpen } from '../stores/useAppViewStore';
 import { currentTime } from '../stores/motionSignals';
@@ -163,7 +164,8 @@ export const useElectronVideoExportController = ({
                 const prepared = await electron.prepareVideoExportWindow({
                     width: preset.width,
                     height: preset.height,
-                    dpr: window.devicePixelRatio,
+                    // 主进程拿这个数去换算导出窗口的物理尺寸，必须是屏幕真实的 DPR，不能是渲染上限。
+                    dpr: getNativeDevicePixelRatio(),
                 });
                 if (prepared === false || !prepared.success) {
                     throw new Error(t('export.windowResizeFailed'));

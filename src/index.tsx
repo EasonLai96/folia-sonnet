@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import { ensureBackgroundRenderGateInstalled } from './utils/backgroundRenderGate';
 import { installGlobalVisualizerFrameRateLimiter } from './utils/frameRateLimiter';
+import { installRenderPixelRatioLimit } from './utils/renderPixelRatio';
 import { installConsoleLogCapture } from './utils/consoleLogBuffer';
 import { installDebugModule } from './services/debug/debugModule';
 import { installMemorySampleFeed } from './services/debug/memorySamples';
@@ -36,6 +37,7 @@ installMemorySampleFeed();
  */
 ensureBackgroundRenderGateInstalled();
 installGlobalVisualizerFrameRateLimiter();
+installRenderPixelRatioLimit();
 /*
  * 帧耗时 / 长任务采样。用户报「卡顿」时靠它区分「我们的渲染开销」与「设备性能不足」，
  * 在调试面板的 Perf 页看。必须装在帧率限制器之后：它优先用限制器保存的原生 rAF，

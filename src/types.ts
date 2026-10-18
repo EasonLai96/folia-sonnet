@@ -126,6 +126,8 @@ export type ThemeMode = 'default' | 'ai' | 'custom';
 export type BuiltinVisualizerMode = 'classic' | 'cadenza' | 'partita' | 'fume' | 'monet';
 export type VisualizerMode = BuiltinVisualizerMode | (string & {});
 export type VisualizerFrameRate = 'off' | 120 | 90 | 60 | 30;
+/** 画布渲染分辨率的上限，见 utils/renderPixelRatio.ts。 */
+export type RenderPixelRatio = 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2;
 
 export type HomeViewTab = 'playlist' | 'local' | 'albums' | 'navidrome' | 'radio' | 'cloud';
 

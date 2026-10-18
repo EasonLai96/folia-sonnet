@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { getEffectiveRenderPixelRatio, getNativeDevicePixelRatio, subscribeRenderPixelRatio } from '../utils/renderPixelRatio';
 
 // src/hooks/useMediaQuery.ts
 // Shared media query subscription so layout branches can read a breakpoint without hand-rolling matchMedia.
@@ -32,29 +33,37 @@ export const useMediaQuery = (query: string): boolean => {
     return useSyncExternalStore(subscribe, getSnapshot, () => false);
 };
 
-const readDevicePixelRatio = (): number => (
-    typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
-);
-
 /**
- * Current `devicePixelRatio`, so raster sources can be picked at the resolution the screen will
- * actually paint them at.
+ * Current effective `devicePixelRatio`, so raster sources can be picked at the resolution the
+ * screen will actually paint them at.
  *
- * Dragging a window onto a display with another density changes the ratio without changing the
- * CSS viewport, so `resize` misses it. The ratio is watched instead through a media query pinned
- * to its own current value: that query stops matching the instant the ratio moves, and the state
- * change re-runs the effect to pin a query to the new one.
+ * Two things move the ratio. Dragging a window onto a display with another density changes the
+ * screen's density without changing the CSS viewport, so `resize` misses it: the screen's ratio is
+ * watched through a media query pinned to its own current value, which stops matching the instant
+ * that ratio moves and lets the effect re-pin. The render-resolution cap (utils/renderPixelRatio.ts)
+ * moves the ratio without any screen change at all, so it is watched through its own subscription.
  */
 export const useDevicePixelRatio = (): number => {
-    const [ratio, setRatio] = useState(readDevicePixelRatio);
+    const [ratio, setRatio] = useState(getEffectiveRenderPixelRatio);
+    const [nativeRatio, setNativeRatio] = useState(getNativeDevicePixelRatio);
 
     useEffect(() => {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-        const mediaQuery = window.matchMedia(`(resolution: ${ratio}dppx)`);
-        const handleChange = () => setRatio(readDevicePixelRatio());
-        mediaQuery.addEventListener('change', handleChange);
-        return () => mediaQuery.removeEventListener('change', handleChange);
-    }, [ratio]);
+        if (typeof window === 'undefined') return;
+        const unsubscribeRenderPixelRatio = subscribeRenderPixelRatio(() => {
+            setRatio(getEffectiveRenderPixelRatio());
+        });
+        if (typeof window.matchMedia !== 'function') return unsubscribeRenderPixelRatio;
+        const mediaQuery = window.matchMedia(`(resolution: ${nativeRatio}dppx)`);
+        const handleScreenChange = () => {
+            setNativeRatio(getNativeDevicePixelRatio());
+            setRatio(getEffectiveRenderPixelRatio());
+        };
+        mediaQuery.addEventListener('change', handleScreenChange);
+        return () => {
+            mediaQuery.removeEventListener('change', handleScreenChange);
+            unsubscribeRenderPixelRatio();
+        };
+    }, [nativeRatio]);
 
     return ratio;
 };
