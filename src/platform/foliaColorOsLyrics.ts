@@ -58,6 +58,15 @@ export const getColorOsLyricsSupport = async (): Promise<ColorOsLyricsSupport> =
     return cachedSupport;
 };
 
+/**
+ * 上次探测的结论（同步读缓存），没探测过就是 null。
+ *
+ * 设置搜索要在**不挂载页面**的前提下判断这一项在不在（`option()` 的 `available` 是同步的），
+ * 而真正的探测是一次异步原生调用 —— 只能拿缓存里的结论。探测在 App 启动推歌词时就跑过
+ * 一次（useColorOsLyricFeed），所以打开设置时通常已经有答案了。
+ */
+export const peekColorOsLyricsSupport = (): ColorOsLyricsSupport | null => cachedSupport;
+
 export const publishColorOsLyricInfo = async (
     lyricInfo: string,
     hasTranslation: boolean,
