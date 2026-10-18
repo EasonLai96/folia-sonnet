@@ -20,6 +20,7 @@ export { PictureChoice } from './PictureChoice';
 export { PictureGrid, type PictureState } from './PictureGrid';
 export { Popover } from './Popover';
 export { Progress } from './Progress';
+export { RangeInput } from './RangeInput';
 export { Reveal } from './Reveal';
 export { Row } from './Row';
 export { Segmented } from './Segmented';

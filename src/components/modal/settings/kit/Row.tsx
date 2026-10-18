@@ -38,9 +38,13 @@ type RowProps = {
     label?: React.ReactNode;
     /** A caution, shown with a dot in place of a label. */
     notice?: React.ReactNode;
-    /** One short line under the label: a few words that say what the option does. */
+    /**
+     * One short line under the label: a few words that say what the option does. The rows we added
+     * keep their wording behind the "i" instead, so a row is one label and one control, like the
+     * rest of the page; `noteKey` on the option is what carries it.
+     */
     hint?: React.ReactNode;
-    /** The longer explanation behind the "i". */
+    /** The longer explanation behind the "i"; the option's own `noteKey` is used when none is given. */
     note?: React.ReactNode;
     /** A row that belongs under the one above it: indented. One that depends on a switch goes in a Reveal. */
     sub?: boolean;
@@ -70,6 +74,9 @@ export const Row: React.FC<RowProps> = ({ option, label, notice, hint, note, sub
         hintId: !notice && text && hint ? `${id}hint` : undefined,
     };
     const noteId = `${id}note`;
+    // The wording lives on the option so the search can match it too; a row that has to say
+    // something that changes with a switch still passes `note` of its own.
+    const resolvedNote = note ?? (option?.noteKey ? t(option.noteKey) : undefined);
 
     // A click on a control in the row, or in a menu one of them opened, is that control's; any
     // other click in the row, and the keyboard on the link itself, opens the link.
@@ -117,7 +124,7 @@ export const Row: React.FC<RowProps> = ({ option, label, notice, hint, note, sub
                                     {t('options.settingsDesktopOnly')}
                                 </span>
                             )}
-                            {note && (
+                            {resolvedNote && (
                                 <button
                                     type="button"
                                     aria-label={t('options.settingsRowDetails')}
@@ -144,10 +151,10 @@ export const Row: React.FC<RowProps> = ({ option, label, notice, hint, note, sub
                         {isLink && <ChevronRight size={16} className="shrink-0 text-[color:var(--st-t2)]" />}
                     </div>
                 )}
-                {note && (
+                {resolvedNote && (
                     <Unfold open={noteOpen} className="relative basis-full">
                         <div id={noteId} className="max-w-[540px] pb-0.5 pt-1.5 text-xs leading-[19px] text-[color:var(--st-t2)]">
-                            {note}
+                            {resolvedNote}
                         </div>
                     </Unfold>
                 )}

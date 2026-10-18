@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Row, Toggle } from './kit';
 import { getColorOsLyricsSupport, type ColorOsLyricsSupport } from '../../../platform/foliaColorOsLyrics';
 import { useColorOsLyricsStore } from '../../../stores/useColorOsLyricsStore';
+import { O } from './pages/integration/options';
 
 // src/components/modal/settings/AndroidColorOsLyricsSetting.tsx
 // ColorOS 原生锁屏 / 息屏歌词（C16 = ColorOS 16+）的开关，fork 独有。
@@ -24,7 +24,6 @@ const isAndroidNativeRuntime = (): boolean => (
 );
 
 export const AndroidColorOsLyricsSetting: React.FC = () => {
-    const { t } = useTranslation();
     const [support, setSupport] = useState<ColorOsLyricsSupport | null>(null);
     const enabled = useColorOsLyricsStore(state => state.enabled);
     const setEnabled = useColorOsLyricsStore(state => state.setEnabled);
@@ -46,12 +45,11 @@ export const AndroidColorOsLyricsSetting: React.FC = () => {
     if (!support?.supported) return null;
 
     return (
-        // 与页面上其它项同一套：一句短说明（hint），完整的那一段进「i」里展开（note）。
-        // 底下那行小字是唯一的探测证据（到底把这台机器认成 ColorOS 几），留着。
+        // 行由 kit 的 Row 画：标签与说明都取自 `O.colorOsLyrics` 那条声明
+        // （labelKey / noteKey），说明不再铺在标签底下，而是收进「i」。
+        // below 里那行小字是唯一的探测证据（到底把这台机器认成 ColorOS 几），留着。
         <Row
-            label={t('options.colorOsLyrics')}
-            hint={t('options.colorOsLyricsDesc')}
-            note={t('options.colorOsLyricsNote')}
+            option={O.colorOsLyrics}
             below={support.colorOsMajor > 0 ? (
                 <span className="text-[11px] tabular-nums text-[color:var(--st-t3)]">
                     ColorOS {support.colorOsMajor}

@@ -24,6 +24,8 @@ export type SettingsSearchEntry = {
     label: string;
     /** Where the entry is: the category, then the group. Empty for a category. */
     path: string;
+    /** The row's explanation, the one behind its "i": searched as well as its label. */
+    detail?: string;
 };
 
 type Translate = (key: string) => string;
@@ -58,6 +60,7 @@ export const buildSettingsSearchEntries = (
             groupId: option.group.id,
             label: t(option.labelKey),
             path: `${section.label} › ${groupTitle}`,
+            detail: option.noteKey ? t(option.noteKey) : undefined,
         });
     }
 
@@ -87,10 +90,12 @@ export const searchSettings = (
         }
     });
 
+    // A word people look for usually sits in the explanation rather than in the label, so the row's
+    // own text is what it is found by; its place, and the commands that name it, come second.
     const byLabel: SettingsSearchEntry[] = [];
     const byOther: SettingsSearchEntry[] = [];
     for (const entry of entries) {
-        if (contains(entry.label)) {
+        if (contains(entry.label) || contains(entry.detail ?? '')) {
             byLabel.push(entry);
         } else if (contains(entry.path) || (entry.targetId ? targetHits.has(entry.targetId) : sectionHits.has(entry.sectionId))) {
             byOther.push(entry);

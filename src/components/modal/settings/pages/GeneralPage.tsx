@@ -3,47 +3,20 @@ import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppLanguagePreference } from '../../../../i18n/config';
-import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
 import { selectPonderSettingsSnapshot, usePonderStore } from '../../../../stores/usePonderStore';
 import { useSettingsModalStore } from '../../../../stores/useSettingsModalStore';
-import { Button, Group, Reveal, Row, Segmented, Select, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
+import { Button, Group, Reveal, Row, Segmented, Select, Toggle, type SettingsOptionDef } from '../kit';
 import AndroidScreenAwakeSetting from '../AndroidScreenAwakeSetting';
 import { FoundUpdateRow } from './FoundUpdateRow';
+import { ANDROID, LANGUAGE, LAUNCH, O, PONDER, UPDATE } from './general/options';
 import { useSettingsPage } from './settingsPageContext';
 
 // src/components/modal/settings/pages/GeneralPage.tsx
 // The 通用 page: the interface language, what the app does when it starts and how its window
 // buttons show, the desktop app's update check (with the new version, once one is found), and the
 // hints of the Ponder tutorials.
-
-const LANGUAGE: SettingsGroupDef = { id: 'languageSettings', titleKey: 'options.languageSettings' };
-const LAUNCH: SettingsGroupDef = { id: 'labWindowAndTools', titleKey: 'options.settingsHeadingLaunch' };
-const UPDATE: SettingsGroupDef = { id: 'updateCheck', titleKey: 'options.updateCheck', electronOnly: true };
-const PONDER: SettingsGroupDef = { id: 'ponderHints', titleKey: 'options.ponderHints' };
-/**
- * 安卓专有那一项（fork 独有）：屏幕常亮。
- *
- * 显示那几项（毛玻璃 / 歌词扁平 / 设备类型 / 手机适配）搬去了外观页，Lyricon 搬去了
- * 「连接与集成」页 —— 都是「看」的东西，堆在通用页里只是因为以前那里挂的是老式卡片。
- * 整组只有安卓才画（组件自己也判一次运行时），所以靠 `available` 让它在桌面端连同这张
- * 空卡、带这一条搜索结果一起退场。
- */
-const ANDROID: SettingsGroupDef = { id: 'androidSettings', titleKey: 'options.androidSettings', available: isCapacitorAndroid };
-
-const O = {
-    language: option(LANGUAGE, 'appLanguage', 'options.appLanguage'),
-    autoPlay: option(LAUNCH, 'autoPlayOnLaunch', 'options.autoPlayOnLaunch'),
-    openPlayer: option(LAUNCH, 'openPlayerOnLaunch', 'options.openPlayerOnLaunch', { electronOnly: true }),
-    titlebarButtons: option(LAUNCH, 'alwaysShowMainWindowTitlebar', 'options.alwaysShowMainWindowTitlebar'),
-    updateCheck: option(UPDATE, 'enableUpdateCheck', 'options.enableUpdateCheck'),
-    autoUpdate: option(UPDATE, 'enableAutoUpdate', 'options.enableAutoUpdate'),
-    updateChannel: option(UPDATE, 'updateChannel', 'options.updateChannel'),
-    ponderHints: option(PONDER, 'ponderHintVisibility', 'options.ponderHints'),
-    ponderTouchButton: option(PONDER, 'ponderTouchButton', 'options.ponderTouchButton'),
-    keepScreenAwake: option(ANDROID, 'keepScreenAwake', 'options.keepScreenAwake', { available: isCapacitorAndroid }),
-};
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
 

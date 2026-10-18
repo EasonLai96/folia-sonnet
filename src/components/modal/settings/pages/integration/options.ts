@@ -50,13 +50,18 @@ export const O = {
      * 别的项那样由 Row 顺手登记 —— 没在这儿声明，设置搜索就一条都搜不到：搜「锁歌词」
      * 什么都没有，可页面上明明有那个开关。
      *
+     * `noteKey` 是行尾那个「i」里展开的完整说明；行上不再铺一行小字。
      * `available` 决定搜索列不列它（同步），得跟组件自己的显示条件对上：
      *  Lyricon —— 安卓才有；
      *  锁歌词  —— 只有探测到 ColorOS 16+ 才渲染，而探测是异步的，所以拿缓存里的结论
      *             （peekColorOsLyricsSupport）；还没探测过就先不列，比列了却点不到强。
      */
-    lyricon: option(SYSTEM_LYRICS, 'lyricon', 'options.enableLyricon', { available: () => isCapacitorAndroid() }),
+    lyricon: option(SYSTEM_LYRICS, 'lyricon', 'options.enableLyricon', {
+        noteKey: 'options.lyriconDesc',
+        available: isCapacitorAndroid,
+    }),
     colorOsLyrics: option(SYSTEM_LYRICS, 'colorOsLyrics', 'options.colorOsLyrics', {
+        noteKey: 'options.colorOsLyricsDesc',
         available: () => isCapacitorAndroid() && peekColorOsLyricsSupport()?.supported === true,
     }),
 };

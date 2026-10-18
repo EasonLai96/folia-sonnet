@@ -3,7 +3,8 @@ import { Store, Video } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import SettingsRow from './SettingsRow';
 import { settingsDividerClassFor } from './settingsCardClasses';
-import { Button, Reveal, Segmented, Toggle } from './kit';
+import { Button, RangeInput, Reveal, Segmented, Toggle } from './kit';
+import { WALLPAPER } from './pages/appearance/options';
 import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { encodeWallpaperImage } from '../../../utils/wallpaperImage';
 import { isCapacitorAndroid } from '../../../platform/runtime';
@@ -373,8 +374,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
     return (
         <div>
             <SettingsRow
-                title={t('options.lyricsWallpaperApply')}
-                    description={t('options.lyricsWallpaperApplyDesc')}
+                option={WALLPAPER.apply}
                     control={(
                         <Button onClick={handleOpenWallpaperPicker}>
                             {isWallpaperActive
@@ -385,7 +385,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     dividerClass={dividerClass}
                 />
                 <SettingsRow
-                    title={t('options.lyricsWallpaperStyle')}
+                    option={WALLPAPER.style}
                     description={lyricsWallpaperStyle === 'minimal'
                         ? t('options.lyricsWallpaperStyleMinimalDesc')
                         : t('options.lyricsWallpaperStyleDesc')}
@@ -408,19 +408,17 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         {/* 小窗的底色浓度。单独一根：它是另一层系统窗口，
                             跟壁纸背景那根、叠层那根都无关。 */}
                         <SettingsRow
-                            title={t('options.floatingLyricsOpacity')}
-                            description={t('options.floatingLyricsOpacityDesc')}
+                            option={WALLPAPER.floatingOpacity}
                             dividerClass={dividerClass}
                             control={(
                                 <div className="flex items-center gap-2">
                                     {/* 下限 0：要的就是「只有字、没有底」，尤其叠在安全区上时。 */}
-                                    <input
-                                        type="range"
+                                    <RangeInput
                                         min={0}
                                         max={100}
                                         step={5}
                                         value={Math.round(wallpaperFloatingOpacity * 100)}
-                                        onChange={(event) => onSetWallpaperFloatingOpacity(Number(event.target.value) / 100)}
+                                        onChange={value => onSetWallpaperFloatingOpacity(value / 100)}
                                         className="h-1 w-28 cursor-pointer accent-white"
                                     />
                                     <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -432,8 +430,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         {/* 叠在安全区上面：小窗贴到屏幕最顶上那一条（盖住状态栏），
                             此时高度方向不再参与摆放，只给左右。 */}
                         <SettingsRow
-                            title={t('options.floatingLyricsOverSafeArea')}
-                            description={t('options.floatingLyricsOverSafeAreaDesc')}
+                            option={WALLPAPER.floatingOverSafeArea}
                             dividerClass={dividerClass}
                             control={(
                                 <Toggle checked={wallpaperFloatingOverSafeArea} onChange={onToggleWallpaperFloatingOverSafeArea} />
@@ -448,18 +445,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         */}
                         <Reveal when={wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea}>
                             <SettingsRow
-                                title={t('options.floatingLyricsOffsetX')}
-                                description={t('options.floatingLyricsOffsetXDesc')}
+                                option={WALLPAPER.floatingOffsetX}
                                 dividerClass={dividerClass}
                                 control={(
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="range"
+                                        <RangeInput
                                             min={0}
                                             max={100}
                                             step={5}
                                             value={Math.round(wallpaperFloatingOffsetX * 100)}
-                                            onChange={(event) => onSetWallpaperFloatingOffsetX(Number(event.target.value) / 100)}
+                                            onChange={value => onSetWallpaperFloatingOffsetX(value / 100)}
                                             className="h-1 w-28 cursor-pointer accent-white"
                                         />
                                         <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -473,18 +468,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             每次拖动都会立刻下发，小窗当场跟着变。占满时不参与。 */}
                         <Reveal when={wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea}>
                             <SettingsRow
-                                title={t('options.floatingLyricsWidth')}
-                                description={t('options.floatingLyricsWidthDesc')}
+                                option={WALLPAPER.floatingWidth}
                                 dividerClass={dividerClass}
                                 control={(
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="range"
+                                        <RangeInput
                                             min={50}
                                             max={100}
                                             step={5}
                                             value={Math.round(wallpaperFloatingWidth * 100)}
-                                            onChange={(event) => onSetWallpaperFloatingWidth(Number(event.target.value) / 100)}
+                                            onChange={value => onSetWallpaperFloatingWidth(value / 100)}
                                             className="h-1 w-28 cursor-pointer accent-white"
                                         />
                                         <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -498,8 +491,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             横屏下原生那边不认这一条，自动退回宽度滑条给的宽。 */}
                         <Reveal when={wallpaperFloatingOverSafeArea}>
                             <SettingsRow
-                                title={t('options.floatingLyricsFillSafeArea')}
-                                description={t('options.floatingLyricsFillSafeAreaDesc')}
+                                option={WALLPAPER.floatingFillSafeArea}
                                 dividerClass={dividerClass}
                                 control={(
                                     <Toggle checked={wallpaperFloatingFillSafeArea} onChange={onToggleWallpaperFloatingFillSafeArea} />
@@ -510,18 +502,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         <Reveal when={wallpaperFloatingOverSafeArea && wallpaperFloatingFillSafeArea}>
                             <>
                                 <SettingsRow
-                                    title={t('options.floatingLyricsAvoidWidth')}
-                                    description={t('options.floatingLyricsAvoidWidthDesc')}
+                                    option={WALLPAPER.floatingAvoidWidth}
                                     dividerClass={dividerClass}
                                     control={(
                                         <div className="flex items-center gap-2">
-                                            <input
-                                                type="range"
+                                            <RangeInput
                                                 min={0}
                                                 max={50}
                                                 step={2}
                                                 value={Math.round(wallpaperFloatingAvoidWidth * 100)}
-                                                onChange={(event) => onSetWallpaperFloatingAvoidWidth(Number(event.target.value) / 100)}
+                                                onChange={value => onSetWallpaperFloatingAvoidWidth(value / 100)}
                                                 className="h-1 w-28 cursor-pointer accent-white"
                                             />
                                             <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -531,18 +521,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                     )}
                                 />
                                 <SettingsRow
-                                    title={t('options.floatingLyricsAvoidOffsetX')}
-                                    description={t('options.floatingLyricsAvoidOffsetXDesc')}
+                                    option={WALLPAPER.floatingAvoidOffsetX}
                                     dividerClass={dividerClass}
                                     control={(
                                         <div className="flex items-center gap-2">
-                                            <input
-                                                type="range"
+                                            <RangeInput
                                                 min={0}
                                                 max={100}
                                                 step={2}
                                                 value={Math.round(wallpaperFloatingAvoidOffsetX * 100)}
-                                                onChange={(event) => onSetWallpaperFloatingAvoidOffsetX(Number(event.target.value) / 100)}
+                                                onChange={value => onSetWallpaperFloatingAvoidOffsetX(value / 100)}
                                                 className="h-1 w-28 cursor-pointer accent-white"
                                             />
                                             <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -556,8 +544,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         {/* 字号：动态 = 跟着窗口高度算（拖大窗口字就跟着大）；
                             自定义 = 自己指定。默认动态。 */}
                         <SettingsRow
-                            title={t('options.floatingLyricsFontSize')}
-                            description={t('options.floatingLyricsFontSizeDesc')}
+                            option={WALLPAPER.floatingFontSize}
                             dividerClass={dividerClass}
                             control={(
                                 <Segmented
@@ -572,18 +559,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         />
                 <Reveal when={wallpaperFloatingFontSizeMode === 'custom'}>
                     <SettingsRow
-                        title={t('options.floatingLyricsFontSizeCustom')}
-                                description={t('options.floatingLyricsFontSizeCustomDesc')}
+                        option={WALLPAPER.floatingFontSizeCustom}
                                 dividerClass={dividerClass}
                                 control={(
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="range"
+                                        <RangeInput
                                             min={10}
                                             max={32}
                                             step={1}
                                             value={Math.round(wallpaperFloatingFontSize)}
-                                            onChange={(event) => onSetWallpaperFloatingFontSize(Number(event.target.value))}
+                                            onChange={onSetWallpaperFloatingFontSize}
                                             className="h-1 w-28 cursor-pointer accent-white"
                                         />
                                         <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -596,8 +581,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 {/* 拖到角落 / 缩到最小又上了锁之后光靠手势弄不回来，
                             所以这里给一颗「重置」当出口。 */}
                         <SettingsRow
-                            title={t('options.floatingLyricsWindow')}
-                            description={t('options.floatingLyricsResetDesc')}
+                            option={WALLPAPER.floatingWindow}
                             dividerClass={dividerClass}
                             control={(
                                 <Button onClick={handleResetFloatingLyricsWindow}>
@@ -612,8 +596,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 {/* 可视化叠层要 SYSTEM_ALERT_WINDOW；没授权时它静默不工作，
                     用户只会看到「壁纸跟以前一样」，所以这里必须给明确入口。 */}
                 <SettingsRow
-                    title={t('options.lyricsWallpaperOverlay')}
-                    description={t('options.lyricsWallpaperOverlayDesc')}
+                    option={WALLPAPER.overlay}
                     dividerClass={dividerClass}
                     control={(
                         <Button onClick={handleOpenOverlaySettings}>
@@ -625,8 +608,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 叠层总开关：关掉之后一层都不挂，下面几项也就没有意义了。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayEnabled')}
-                    description={t('options.wallpaperOverlayEnabledDesc')}
+                    option={WALLPAPER.overlayEnabled}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayEnabled} onChange={onToggleWallpaperOverlayEnabled} />
@@ -634,18 +616,16 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 叠层不透明度：整层从几乎看不见到完全不透明。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayOpacity')}
-                    description={t('options.wallpaperOverlayOpacityDesc')}
+                    option={WALLPAPER.overlayOpacity}
                     dividerClass={dividerClass}
                     control={(
                         <div className="flex items-center gap-2">
-                            <input
-                                type="range"
+                            <RangeInput
                                 min={10}
                                 max={100}
                                 step={5}
                                 value={Math.round(wallpaperOverlayOpacity * 100)}
-                                onChange={(event) => onSetWallpaperOverlayOpacity(Number(event.target.value) / 100)}
+                                onChange={value => onSetWallpaperOverlayOpacity(value / 100)}
                                 className="h-1 w-28 cursor-pointer accent-white"
                             />
                             <span className="w-9 text-right font-mono text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
@@ -656,8 +636,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 叠层是否在所有应用之上显示。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayAllApps')}
-                    description={t('options.wallpaperOverlayAllAppsDesc')}
+                    option={WALLPAPER.overlayAllApps}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayAllApps} onChange={onToggleWallpaperOverlayAllApps} />
@@ -665,8 +644,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 音乐锁屏：锁屏之上也挂同一层。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayLockScreen')}
-                    description={t('options.wallpaperOverlayLockScreenDesc')}
+                    option={WALLPAPER.overlayLockScreen}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayLockScreen} onChange={onToggleWallpaperOverlayLockScreen} />
@@ -674,8 +652,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 叠层只在锁屏上出现：桌面 / 所有应用 / App 内都不挂。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayLockScreenOnly')}
-                    description={t('options.wallpaperOverlayLockScreenOnlyDesc')}
+                    option={WALLPAPER.overlayLockScreenOnly}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayLockScreenOnly} onChange={onToggleWallpaperOverlayLockScreenOnly} />
@@ -772,8 +749,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 )}
                 {/* 跟随 + 叠层时，原生那层的歌词/进度条要不要让位。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayHideNativeLyrics')}
-                    description={t('options.wallpaperOverlayHideNativeLyricsDesc')}
+                    option={WALLPAPER.overlayHideNativeLyrics}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayHideNativeLyrics} onChange={onToggleWallpaperOverlayHideNativeLyrics} />
@@ -781,8 +757,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 暂停时是否收起叠层。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayHideWhenPaused')}
-                    description={t('options.wallpaperOverlayHideWhenPausedDesc')}
+                    option={WALLPAPER.overlayHideWhenPaused}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayHideWhenPaused} onChange={onToggleWallpaperOverlayHideWhenPaused} />
@@ -790,8 +765,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 歌词唱完之后（长尾奏）是否收起叠层。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayHideAfterLyricsEnd')}
-                    description={t('options.wallpaperOverlayHideAfterLyricsEndDesc')}
+                    option={WALLPAPER.overlayHideAfterLyricsEnd}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayHideAfterLyricsEnd} onChange={onToggleWallpaperOverlayHideAfterLyricsEnd} />
@@ -805,8 +779,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                   再关掉这一项。
                 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlayHideCoverArt')}
-                    description={t('options.wallpaperOverlayHideCoverArtDesc')}
+                    option={WALLPAPER.overlayHideCoverArt}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayHideCoverArt} onChange={onToggleWallpaperOverlayHideCoverArt} />
@@ -814,24 +787,21 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 {/* 纯音乐（没有歌词）时是否显示叠层。 */}
                 <SettingsRow
-                    title={t('options.wallpaperOverlaySkipInstrumental')}
-                    description={t('options.wallpaperOverlaySkipInstrumentalDesc')}
+                    option={WALLPAPER.overlaySkipInstrumental}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlaySkipInstrumental} onChange={onToggleWallpaperOverlaySkipInstrumental} />
                     )}
                 />
                 <SettingsRow
-                    title={t('options.wallpaperOverlayHideNativeProgress')}
-                    description={t('options.wallpaperOverlayHideNativeProgressDesc')}
+                    option={WALLPAPER.overlayHideNativeProgress}
                     dividerClass={dividerClass}
                     control={(
                         <Toggle checked={wallpaperOverlayHideNativeProgress} onChange={onToggleWallpaperOverlayHideNativeProgress} />
                     )}
                 />
                 <SettingsRow
-                    title={t('options.lyricsWallpaperBackground')}
-                    description={t('options.lyricsWallpaperBackgroundDesc')}
+                    option={WALLPAPER.background}
                     dividerClass={dividerClass}
                     control={(
                         <Segmented
@@ -917,8 +887,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     </Reveal>
                 </SettingsRow>
                 <SettingsRow
-                    title={t('options.lyricsWallpaperBlur')}
-                    description={t('options.lyricsWallpaperBlurDesc')}
+                    option={WALLPAPER.blur}
                     dividerClass={dividerClass}
                 >
                     <div className="space-y-3">
@@ -926,34 +895,30 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             <span className="opacity-60">{t('options.lyricsWallpaperBlurValue')}</span>
                             <span className="font-mono opacity-70">{Math.round(lyricsWallpaperBlur * 100)}%</span>
                         </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="5"
+                        <RangeInput
+                            min={0}
+                            max={100}
+                            step={5}
                             value={Math.round(lyricsWallpaperBlur * 100)}
-                            onChange={(event) => onSetLyricsWallpaperBlur(Number(event.target.value) / 100)}
+                            onChange={value => onSetLyricsWallpaperBlur(value / 100)}
                             className={rangeInputClass}
-                            aria-label={t('options.lyricsWallpaperBlurValue')}
+                            ariaLabel={t('options.lyricsWallpaperBlurValue')}
                         />
                     </div>
                 </SettingsRow>
                 <SettingsRow
-                    title={t('options.lyricsWallpaperProgress')}
-                    description={t('options.lyricsWallpaperProgressDesc')}
+                    option={WALLPAPER.progress}
                     control={<Toggle checked={lyricsWallpaperProgress} onChange={onToggleLyricsWallpaperProgress} />}
                     dividerClass={dividerClass}
                 />
                 <SettingsRow
-                    title={t('options.lyricsWallpaperTranslation')}
-                    description={t('options.lyricsWallpaperTranslationDesc')}
+                    option={WALLPAPER.translation}
                     control={<Toggle checked={lyricsWallpaperTranslation} onChange={onToggleLyricsWallpaperTranslation} />}
                     dividerClass={dividerClass}
                 />
                 {/* 字体来路：跟随播放页 / 单独指定。选「单独」才有下面那个选字体的按钮。 */}
                 <SettingsRow
-                    title={t('options.lyricsWallpaperFontMode')}
-                    description={t('options.lyricsWallpaperFontModeDesc')}
+                    option={WALLPAPER.fontMode}
                     dividerClass={dividerClass}
                     control={(
                         <Segmented
@@ -968,8 +933,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 />
                 <Reveal when={wallpaperLyricsFontMode === 'custom'}>
                     <SettingsRow
-                        title={t('options.lyricsWallpaperFont')}
-                        description={t('options.lyricsWallpaperFontDesc')}
+                        option={WALLPAPER.font}
                         control={(
                             <div className="flex shrink-0 items-center gap-1.5">
                                 <Button onClick={() => void handlePickWallpaperFont()}>
@@ -1013,8 +977,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     </SettingsRow>
                 </Reveal>
                 <SettingsRow
-                    title={t('options.lyricsWallpaperFeed')}
-                    description={t('options.lyricsWallpaperFeedDesc')}
+                    option={WALLPAPER.feed}
                     control={<Toggle checked={lyricsWallpaperFeed} onChange={onToggleLyricsWallpaperFeed} />}
                     dividerClass={dividerClass}
                     isLast

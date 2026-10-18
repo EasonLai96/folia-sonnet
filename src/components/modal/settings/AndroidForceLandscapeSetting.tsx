@@ -1,7 +1,7 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { Row, Toggle } from './kit';
 import { useAndroidLayoutSettingsStore } from '../../../stores/useAndroidLayoutSettingsStore';
+import { O } from './pages/appearance/options';
 
 // src/components/modal/settings/AndroidForceLandscapeSetting.tsx
 // 安卓独占的「强制横屏」：打开就把 Activity 锁成横屏，关掉交回系统跟着传感器转。
@@ -11,8 +11,8 @@ import { useAndroidLayoutSettingsStore } from '../../../stores/useAndroidLayoutS
 // （原生那道 `isEnabled()` 门已随它一起去掉，见 PhoneLayoutOrientation）。
 // 于是这一行现在**自己就是一个完整的开关**，不再依赖任何前置项。
 //
-// 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这里只是里面的一行
-// （与 AndroidLyriconSetting 同款）。
+// 行由 kit 的 Row 画：标签与说明都取自 `O.forceLandscape` 那一条声明
+// （labelKey / noteKey），说明不再铺在标签底下，而是收进「i」。
 
 const isAndroidNativeRuntime = (): boolean => (
     typeof window !== 'undefined'
@@ -20,19 +20,13 @@ const isAndroidNativeRuntime = (): boolean => (
 );
 
 const AndroidForceLandscapeSetting: React.FC = () => {
-    const { t } = useTranslation();
     const orientation = useAndroidLayoutSettingsStore(state => state.phoneFitOrientation);
     const setOrientation = useAndroidLayoutSettingsStore(state => state.setPhoneFitOrientation);
 
     if (!isAndroidNativeRuntime()) return null;
 
     return (
-        // 与页面上其它项同一套：一句短说明（hint），完整的那一段进「i」里展开（note）。
-        <Row
-            label={t('options.forceLandscape')}
-            hint={t('options.forceLandscapeHint')}
-            note={t('options.forceLandscapeDesc')}
-        >
+        <Row option={O.forceLandscape}>
             <Toggle
                 checked={orientation === 'landscape'}
                 onChange={() => setOrientation(orientation === 'landscape' ? 'portrait' : 'landscape')}

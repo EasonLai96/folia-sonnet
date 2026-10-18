@@ -1,5 +1,6 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { useRowAria } from './Row';
+import { sliderValueOnTrack, useSliderGesture } from './sliderGesture';
 
 // src/components/modal/settings/kit/Slider.tsx
 // A slider with its value beside it. The filled part of the track is a gradient cut at --st-p, which
@@ -15,11 +16,9 @@ import { useRowAria } from './Row';
 //
 // Stacked, for a narrow column: alone in its Row, the value ends the label's line and the track
 // spans the row under it (kit.css lets the two parts lie in the row itself).
-
-/** The thumb is 16px wide: its centre stops this far inside each end of the track. */
-const THUMB_INSET = 8;
-/** How near a mark, in px, the thumb has to be to land on it. */
-const MARK_REACH = 6;
+//
+// Which way a press means to go is asked of sliderGesture: a finger that lands on the track and
+// then travels up or down the page is a scroll, and the value stays where it was.
 
 const RANGE_CLASS = [
     'st-slider block h-5 min-w-0 max-w-full cursor-pointer appearance-none bg-transparent disabled:cursor-not-allowed',
@@ -32,22 +31,6 @@ const RANGE_CLASS = [
     '[&::-moz-range-progress]:h-1 [&::-moz-range-progress]:rounded-full [&::-moz-range-progress]:bg-[var(--st-accent)]',
     '[&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white',
 ].join(' ');
-
-const decimalsOf = (value: number) => (String(value).split('.')[1] ?? '').length;
-
-/** `value` as the track can show it: inside min and max, on a step counted from min. */
-const onTrack = (value: number, min: number, max: number, step: number): number => {
-    const stepped = min + Math.round((Math.min(max, Math.max(min, value)) - min) / step) * step;
-    return Number(Math.min(max, stepped).toFixed(Math.max(decimalsOf(step), decimalsOf(min))));
-};
-
-/** Where a drag lands: on the nearest mark when the thumb is within `reach` of it (in the value's unit), else where the thumb is. */
-export const landOnMark = (value: number, marks: ReadonlyArray<number>, reach: number): number => {
-    const nearest = marks.reduce<number | null>((best, mark) => (
-        best === null || Math.abs(mark - value) < Math.abs(best - value) ? mark : best
-    ), null);
-    return nearest !== null && Math.abs(nearest - value) <= reach ? nearest : value;
-};
 
 type SliderProps = {
     value: number;
@@ -65,14 +48,19 @@ type SliderProps = {
 };
 
 export const Slider: React.FC<SliderProps> = ({ value, min, max, step = 1, onChange, format, marks, stacked, disabled }) => {
-    // A pointer is moving the thumb: only then does the value land on marks.
-    const dragging = useRef(false);
-    const inputRef = useRef<HTMLInputElement>(null);
     const aria = useRowAria();
-    const shown = onTrack(value, min, max, step);
+    const { inputRef, handlers } = useSliderGesture({
+        min,
+        max,
+        step,
+        onChange,
+        disabled,
+        marks: marks?.map(mark => mark.value),
+    });
+    const shown = sliderValueOnTrack(value, min, max, step);
     const filled = max > min ? ((shown - min) / (max - min)) * 100 : 0;
     // Each mark where the track can show it: what the thumb lands on and what a press on its name sets.
-    const stops = marks?.map(mark => ({ value: onTrack(mark.value, min, max, step), label: mark.label }));
+    const stops = marks?.map(mark => ({ value: sliderValueOnTrack(mark.value, min, max, step), label: mark.label }));
     const named = stops?.some(mark => mark.label !== undefined) ?? false;
     const dim = disabled ? ' opacity-40' : '';
     const text = format(shown);
@@ -115,38 +103,13 @@ export const Slider: React.FC<SliderProps> = ({ value, min, max, step = 1, onCha
                 ref={inputRef}
                 type="range"
                 {...aria}
+                {...handlers}
                 aria-valuetext={text}
                 min={min}
                 max={max}
                 step={step}
                 value={shown}
                 disabled={disabled}
-                onPointerDown={() => {
-                    dragging.current = true;
-                }}
-                onPointerUp={() => {
-                    dragging.current = false;
-                }}
-                onPointerCancel={() => {
-                    dragging.current = false;
-                }}
-                // A pointer let go outside the slider may not say so here.
-                onBlur={() => {
-                    dragging.current = false;
-                }}
-                onKeyDown={() => {
-                    dragging.current = false;
-                }}
-                onChange={(event) => {
-                    const next = Number(event.currentTarget.value);
-                    if (!dragging.current || !stops) {
-                        onChange(next);
-                        return;
-                    }
-                    // MARK_REACH px of the thumb's travel, in the value's unit.
-                    const reach = ((max - min) * MARK_REACH) / Math.max(1, event.currentTarget.offsetWidth - 2 * THUMB_INSET);
-                    onChange(landOnMark(next, stops.map(mark => mark.value), reach));
-                }}
                 className={`${RANGE_CLASS} ${stacked ? 'w-full' : 'w-[200px]'}${stops ? ' relative' : ''}`}
                 style={{ '--st-p': `${filled}%` } as React.CSSProperties}
             />
@@ -171,5 +134,8 @@ export const Slider: React.FC<SliderProps> = ({ value, min, max, step = 1, onCha
         </span>
     );
 };
+
+// Kept here: the pages and the tests read it from the slider's own file.
+export { landOnMark } from './sliderGesture';
 
 export default Slider;

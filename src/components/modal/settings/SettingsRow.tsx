@@ -1,53 +1,53 @@
 import React from 'react';
+import { Row, type SettingsOptionDef } from './kit';
 
 // src/components/modal/settings/SettingsRow.tsx
-// One row inside a grouped settings card: title and description on the left, the control on the
-// right, a hairline under every row but the card's last. The rows share a card so a section reads
-// as one block instead of a stack of separate boxes.
+// One row of the wallpaper section. It used to draw its own two lines — the title, then the
+// description under it — inside a card the section drew for itself; the pages have moved to the
+// kit, and so has it: the kit's Row draws the label and the control, and the description is kept
+// behind the row's "i" rather than printed under the label, which is where the other rows of the
+// settings keep theirs. `dividerClass` and `isLast` belonged to that card of its own; they are left
+// so the section's older callers pass them without a change.
 
 type SettingsRowProps = {
-    title: React.ReactNode;
+    /** The row's option: it gives the label, the note behind the "i", and the id a landing looks for. */
+    option?: SettingsOptionDef;
+    /** Title of a row that is none of the page's options. */
+    title?: React.ReactNode;
+    /** The explanation, kept behind the "i". */
     description?: React.ReactNode;
-    /** A second, quieter line for caveats that should not compete with the description. */
+    /** A second line in the same place, for a caveat. */
     note?: React.ReactNode;
     /** Usually a toggle; anything that sits at the row's right edge. */
     control?: React.ReactNode;
-    /** Content under the title block that spans the row's full width, e.g. a slider. */
+    /** Content under the title block spanning the row's full width, e.g. a slider. */
     children?: React.ReactNode;
-    dividerClass: string;
+    sub?: boolean;
+    disabled?: boolean;
+    dividerClass?: string;
     isLast?: boolean;
 };
 
-const SettingsRow: React.FC<SettingsRowProps> = ({
+export const SettingsRow: React.FC<SettingsRowProps> = ({
+    option,
     title,
     description,
     note,
     control,
     children,
-    dividerClass,
-    isLast = false,
+    sub,
+    disabled,
 }) => (
-    <div className={`p-4 space-y-3${isLast ? '' : ` border-b ${dividerClass}`}`}>
-        <div className="flex items-center justify-between gap-4">
-            <div className="space-y-1 text-left min-w-0">
-                <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                    {title}
-                </div>
-                {description && (
-                    <div className="text-xs opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
-                        {description}
-                    </div>
-                )}
-                {note && (
-                    <div className="text-[11px] opacity-40 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
-                        {note}
-                    </div>
-                )}
-            </div>
-            {control && <div className="shrink-0">{control}</div>}
-        </div>
-        {children}
-    </div>
+    <Row
+        option={option}
+        label={title}
+        note={description || note ? <>{description}{note}</> : undefined}
+        below={children}
+        sub={sub}
+        disabled={disabled}
+    >
+        {control}
+    </Row>
 );
 
 type SettingsToggleProps = {

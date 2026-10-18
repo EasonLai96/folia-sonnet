@@ -8,15 +8,16 @@ import { openSettings } from '../../../../stores/useSettingsModalStore';
 import { useThemeSettingsStore } from '../../../../stores/useThemeSettingsStore';
 import { useVisualizerSettingsStore } from '../../../../stores/useVisualizerSettingsStore';
 import { openAIEndpointOf } from '../../../../utils/openAIEndpoint';
-import { Button, FoldedGroup, Group, NumberField, Reveal, Row, Segmented, TextField, Toggle, Value, option, parseNumberText, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
+import { Button, FoldedGroup, Group, NumberField, Reveal, Row, Segmented, TextField, Toggle, Value, parseNumberText, type SettingsOptionDef } from '../kit';
 import { settingsAnchorSubview } from '../../../../utils/settingsAnchorModel';
-import { hasElectronBridge, isCapacitorAndroid } from '../../../../platform/runtime';
+import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { settingsCardClassFor } from '../settingsCardClasses';
 import AndroidForceLandscapeSetting from '../AndroidForceLandscapeSetting';
 import DeviceTypeSetting from '../DeviceTypeSetting';
 import GlassSurfaceSetting from '../GlassSurfaceSetting';
 import LyricFlatSetting from '../LyricFlatSetting';
 import LyricsWallpaperSettingsSection from '../LyricsWallpaperSettingsSection';
+import { AI, LYRICS_WALLPAPER_OPTIONS, LYRICS, LYRICS_WALLPAPER, O, SONG_THEME, THEME, VIEW } from './appearance/options';
 import AiProviderSettings from '../AiProviderSettings';
 import { AiConnectionTestReply, useAiConnectionTest } from './AiConnectionTest';
 import { useSettingsPage, type AiApiKeyName } from './settingsPageContext';
@@ -27,55 +28,8 @@ import { useSettingsPage, type AiApiKeyName } from './settingsPageContext';
 // The lyric animation workbench and the theme colour editor are the existing overlays; their rows
 // here only open them.
 
-const LYRICS: SettingsGroupDef = { id: 'lyricsRenderer', titleKey: 'options.lyricsRenderer' };
-const THEME: SettingsGroupDef = { id: 'themePresets', titleKey: 'options.settingsHeadingTheme' };
-const SONG_THEME: SettingsGroupDef = { id: 'songTheme', titleKey: 'options.settingsHeadingSongTheme' };
-const AI: SettingsGroupDef = { id: 'electronSettings', titleKey: 'options.electronSettings', electronOnly: true };
-/**
- * 显示那一组（fork 独有）：毛玻璃、歌词扁平两端都画；设备类型与手机适配只有安卓有
- * （组件自己判运行时，搜索按 available 退场）。原在「通用」页，那里剩下的都是语言、
- * 启动、更新这类「行为」，这几项讲的是「长什么样」，所以搬到这里，排在歌词那组之后。
- */
-const VIEW: SettingsGroupDef = { id: 'surfaceView', titleKey: 'options.settingsHeadingView' };
-/**
- * 歌词动态壁纸（fork 独有，只有安卓画）：原来整节塞在「歌词动画」那张卡里，
- * 「歌词动画样式」和「设为壁纸 / 样式 / 字体……」两件事混在一张卡上。现在独立成组 ——
- * 自己一张卡、自己一个页签（anchor id 沿用 lyricsWallpaper，深链不受影响）。
- */
-const LYRICS_WALLPAPER: SettingsGroupDef = { id: 'lyricsWallpaper', titleKey: 'options.lyricsWallpaperSection' };
-
-const O = {
-    lyricsAnimation: option(LYRICS, 'lyricsAnimationAdjust', 'options.lyricsAnimationAdjust'),
-    // 歌词动态壁纸（fork 独有）：整节只有安卓画，搜索里跟着一起退场（available）。
-    lyricsWallpaper: option(LYRICS_WALLPAPER, 'lyricsWallpaper', 'options.lyricsWallpaperSection', {
-        available: () => isCapacitorAndroid(),
-    }),
-    daylight: option(THEME, 'daylightMode', 'options.daylightMode'),
-    preset: option(THEME, 'themePreset', 'options.themePresets'),
-    themePark: option(THEME, 'openThemePark', 'options.openThemePark'),
-    autoSwitch: option(SONG_THEME, 'autoSwitchSongTheme', 'options.autoSwitchSongTheme'),
-    autoGenerate: option(SONG_THEME, 'autoGenerateSongTheme', 'options.autoGenerateSongTheme'),
-    source: option(SONG_THEME, 'themeGenerationSource', 'options.themeGenerationSource'),
-    preferCustom: option(SONG_THEME, 'preferCustomTheme', 'options.preferCustomTheme'),
-    // 下面两项是 AiProviderSettings 那块卡片里的（fork 独有）：桌面端那块由 Electron 主进程
-    // 设置顶掉，非桌面才画，搜索里跟着一起退场。
-    cloudCache: option(SONG_THEME, 'cloudCache', 'options.cloudCache', { available: () => !hasElectronBridge() }),
-    cloudCacheBaseUrl: option(SONG_THEME, 'cloudCacheBaseUrl', 'options.cloudCacheBaseUrl', { available: () => !hasElectronBridge() }),
-    glassSurface: option(VIEW, 'glassSurface', 'options.glassSurface'),
-    lyricFlat: option(VIEW, 'lyricFlat', 'options.lyricFlat'),
-    deviceType: option(VIEW, 'deviceType', 'options.deviceType', { available: () => isCapacitorAndroid() }),
-    forceLandscape: option(VIEW, 'forceLandscape', 'options.forceLandscape', { available: () => isCapacitorAndroid() }),
-    aiProvider: option(AI, 'aiProvider', 'options.aiProvider'),
-    geminiKey: option(AI, 'geminiApiKey', 'options.geminiApiKey'),
-    openaiUrl: option(AI, 'openaiApiUrl', 'options.openaiApiUrl'),
-    openaiModel: option(AI, 'openaiApiModel', 'options.openaiApiModel'),
-    openaiTemperature: option(AI, 'openaiApiTemperature', 'options.openaiApiTemperature'),
-    openaiStream: option(AI, 'openaiApiStream', 'options.openaiApiStream'),
-    openaiKey: option(AI, 'openaiApiKey', 'options.openaiApiKey'),
-    aiProxy: option(AI, 'useSystemProxyAI', 'options.useSystemProxyAI'),
-};
-
-export const OPTIONS: SettingsOptionDef[] = Object.values(O);
+/** What the search can find on this page: the rows declared above, plus the wallpaper section's. */
+export const OPTIONS: SettingsOptionDef[] = [...Object.values(O), ...LYRICS_WALLPAPER_OPTIONS];
 
 /**
  * 歌词动态壁纸那一节（fork 独有，Android 专有）。

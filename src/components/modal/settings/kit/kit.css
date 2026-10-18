@@ -15,6 +15,14 @@
     outline-offset: -2px;
 }
 
+/* ---- who a touch on the track belongs to: up and down is the page's to scroll, side to side is
+   the slider's to move. The gesture test in sliderGesture.ts only decides whether the press counts
+   as a change; it cannot prise a scrolling finger out of the input's hands. Without this the
+   browser hands the whole gesture to the range control and the page never moves. */
+.st-slider {
+    touch-action: pan-y;
+}
+
 .st-slider:focus-visible {
     outline: none;
 }

@@ -1,11 +1,12 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Segmented } from './kit';
+import { Row, Segmented } from './kit';
 import { useSettingsKitTheme } from './kit/kitTheme';
 import { resolveCurrentUiScale, useDeviceProfileStore } from '../../../stores/useDeviceProfileStore';
 import UiScaleSlider from '../../shared/UiScaleSlider';
 import { resolveDeviceType, type DeviceType } from '../../../services/androidPhoneLayout';
 import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
+import { O } from './pages/appearance/options';
 
 // src/components/modal/settings/DeviceTypeSetting.tsx
 // 设备类型（手机 / 平板）+ 界面缩放。首启引导里问过一次，这里随时改。
@@ -14,8 +15,8 @@ import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
 // services/androidPhoneLayout）。缩放是另一回事，由滑条定，拉过一次就以它为准。
 // 桌面端不问也不显示 —— 窗口多宽自己说了算。
 //
-// 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这一项只是里面的一行
-// （与 AndroidLyriconSetting 同款）；滑条占整行宽，单独写在行下面。
+// 两行都由 kit 的 Row 画：标签与说明都取自各自的 option 声明（labelKey / noteKey），
+// 说明不再铺在标签底下，而是收进「i」。
 
 const DEVICE_TYPES: readonly DeviceType[] = ['phone', 'tablet'];
 
@@ -31,15 +32,7 @@ const DeviceTypeSetting: React.FC = () => {
 
     return (
         <>
-            <div className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="min-w-0 flex-1 space-y-1">
-                    <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
-                        {t('options.deviceType')}
-                    </div>
-                    <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
-                        {t('options.deviceTypeDesc')}
-                    </div>
-                </div>
+            <Row option={O.deviceType}>
                 <Segmented<DeviceType>
                     value={deviceType}
                     options={DEVICE_TYPES.map(type => ({
@@ -48,15 +41,19 @@ const DeviceTypeSetting: React.FC = () => {
                     }))}
                     onChange={setDeviceType}
                 />
-            </div>
-            <div className="px-4 pb-4">
-                <UiScaleSlider
-                    isDaylight={isDaylight}
-                    value={resolveCurrentUiScale(uiScale, deviceType)}
-                    onChange={setUiScale}
-                    showCompactHint={resolveDeviceType(deviceType) === 'phone'}
-                />
-            </div>
+            </Row>
+            <Row
+                option={O.uiScale}
+                below={(
+                    <UiScaleSlider
+                        isDaylight={isDaylight}
+                        value={resolveCurrentUiScale(uiScale, deviceType)}
+                        onChange={setUiScale}
+                        showCompactHint={resolveDeviceType(deviceType) === 'phone'}
+                        compact
+                    />
+                )}
+            />
         </>
     );
 };
