@@ -153,12 +153,14 @@ const AndroidUpdatePanel: React.FC<AndroidUpdatePanelProps> = ({
     // 这一块画在设置 → 帮助页「关于」那张 kit 卡片里（以及启动时的更新弹窗），
     // 所以自己不再画一张卡：没有边框、没有圆角、也不限宽度 —— 之前它是
     // `w-full max-w-sm` 的一张带边框的卡，嵌在卡片里右边一大条空白。
+    // 底色也一并去掉了：整块 bg-white/[0.06] 会让「检查更新」这一行比上面「版本」
+    // 那行深一档，看着像另一个东西；现在跟同卡里的其它行一个底色。
     // 左右内边距照 kit 那一行的 pl-4 / pr-4，字和上面的「版本」那行对齐。
     return (
         <div
             data-folia-update-panel="true"
             data-folia-update-action={action}
-            className={`${widthClassName} bg-white/[0.06] px-4 py-3 font-sans`}
+            className={`${widthClassName} px-4 py-3 font-sans`}
         >
             <div className="mb-2.5 flex items-start gap-2">
                 <span className={`mt-[1px] shrink-0 ${phase.kind === 'failed' || result?.status === 'failed' ? 'text-amber-500' : isHighlight ? 'text-amber-500' : 'opacity-50'}`}>

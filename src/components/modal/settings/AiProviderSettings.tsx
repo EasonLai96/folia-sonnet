@@ -16,6 +16,7 @@ import {
     updateFoliaCloudSettings,
 } from '../../../services/foliaCloud';
 import { createAiFetch } from '../../../services/aiNativeFetch';
+import { Toggle } from './kit';
 import {
     getDirectorStateVersion,
     readDirectorSettings,
@@ -153,17 +154,8 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                     {description}
                 </div>
             </div>
-            <button
-                type="button"
-                onClick={() => onChange(!active)}
-                aria-pressed={active}
-                aria-label={label}
-                className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${active
-                    ? 'bg-[rgba(114,119,134,1)]'
-                    : (isDaylight ? 'bg-black/15' : 'bg-white/15')}`}
-            >
-                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${active ? 'translate-x-6' : 'translate-x-0'}`} />
-            </button>
+            {/* 开关统一用 kit 那一颗（样子就是原来云缓存这颗），别再就地手写一个。 */}
+            <Toggle checked={active} onChange={onChange} label={label} />
         </div>
     );
 
@@ -444,17 +436,12 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                             {t('options.cloudCacheDesc')}
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => updateFoliaCloudSettings({ enabled: !cloudCache.enabled })}
-                        aria-pressed={cloudCache.enabled}
-                        aria-label={t('options.cloudCache')}
-                        className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${cloudCache.enabled
-                            ? 'bg-[rgba(114,119,134,1)]'
-                            : (isDaylight ? 'bg-black/15' : 'bg-white/15')}`}
-                    >
-                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${cloudCache.enabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+                    {/* 开关统一用 kit 那一颗：这一颗的样子本来就是照它定的。 */}
+                    <Toggle
+                        checked={cloudCache.enabled}
+                        onChange={() => updateFoliaCloudSettings({ enabled: !cloudCache.enabled })}
+                        label={t('options.cloudCache')}
+                    />
                 </div>
 
                 <div className="pt-4 space-y-3">
