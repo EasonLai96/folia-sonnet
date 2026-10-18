@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
 import { notifyStageResolved } from '../services/aiStage';
-import { type AiThemeSongRef, writeLocalAiThemeOverride, readLocalAiThemeOverride } from '../services/aiThemeCloud';
+import { type AiThemeSongRef, pullCachedThemeByKey, writeLocalAiThemeOverride, readLocalAiThemeOverride } from '../services/aiThemeCloud';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -561,6 +561,20 @@ export function useThemeController({
                 applyDualTheme(override, { respectCustomPreference: false });
                 setCurrentSongHasLocalAiTheme(true);
                 return 'local-override' as const;
+            }
+
+            /*
+             * 从「AI 主题」那一屏点播放进来的：曲目上带着云端那条键 —— **直接用它**，
+             * 不再走生成。生成要有歌词、要有 API Key，而这条缓存存在的意义就是
+             * 不必再算一次；少了这一段，点播放就是「歌放起来了，主题一点没变」。
+             */
+            const cloudKey = localSong.aiCloudThemeKey;
+            if (cloudKey) {
+                const cached = await pullCachedThemeByKey(cloudKey);
+                if (cached) {
+                    applyDualTheme(cached, { respectCustomPreference: false });
+                    return 'cloud-theme' as const;
+                }
             }
         }
         setCurrentSongHasLocalAiTheme(false);

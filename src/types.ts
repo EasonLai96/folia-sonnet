@@ -1257,6 +1257,13 @@ export interface SongResult {
   qqMid?: string;
   kgHash?: string;
   amllDbPlatform?: AmllDbPlatform;
+  /**
+   * 云端缓存里那条主题键 —— 只有从「AI 主题」那一屏（云端歌名清单）挑出来的歌才有。
+   *
+   * 点了播放要**直接用上云上那一条**，而不是再生成一遍：生成要有歌词、要有 API Key，
+   * 而这条缓存存在的意义就是不必再算一次。见 services/aiThemeCloud.ts。
+   */
+  aiCloudThemeKey?: string;
 }
 
 export interface OnlineLyricsState {

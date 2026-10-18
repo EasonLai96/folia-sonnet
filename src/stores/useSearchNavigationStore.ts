@@ -223,7 +223,7 @@ const searchCloudThemeSongs = async (
     const found = await mapWithConcurrency(
         names,
         CLOUD_RESOLVE_CONCURRENCY,
-        entry => resolveCloudThemeSong(entry.songTitle).catch(() => null),
+        entry => resolveCloudThemeSong(entry.songTitle, entry.key).catch(() => null),
     );
     const results = found.filter((song): song is UnifiedSong => Boolean(song));
     const total = Number(page?.total ?? 0);

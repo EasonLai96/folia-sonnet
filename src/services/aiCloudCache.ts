@@ -247,8 +247,13 @@ export const highlightWordsPresent = (words: readonly string[], lyricText: strin
         && coverage >= HIGHLIGHT_WORD_COVERAGE_MIN;
 };
 
-/** 一次 GET。出错一律当没命中 —— 缓存的纪律是永不阻塞功能。 */
-const fetchEntry = async (kind: AiCloudCacheKind, key: string): Promise<unknown> => {
+/**
+ * 一次 GET，把原始 payload 交回调用方（校验是调用方的事）。
+ *
+ * 只有「按已知键直接取一条」这种用法要它 —— 其余一律走 `pullAiCloudCache`，
+ * 那条路还会按歌名兜底一层。
+ */
+export const fetchEntry = async (kind: AiCloudCacheKind, key: string): Promise<unknown> => {
     try {
         const response = await createAiFetch()(resolveAiCloudCacheUrl(kind, key), {
             method: 'GET',

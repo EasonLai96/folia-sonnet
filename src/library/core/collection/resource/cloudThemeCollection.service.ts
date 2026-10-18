@@ -29,7 +29,7 @@ export type CloudThemeCollectionDeps = {
     /** 拉一段歌名。 */
     readNames: (page: { limit: number; offset: number }) => Promise<{ total: number; songs: CloudThemeNameEntry[] }>;
     /** 拿一个歌名去平台上搜，返回最像的那一首；搜不到返回 null（那一行会被去掉）。 */
-    resolveSong: (songTitle: string) => Promise<SongResult | null>;
+    resolveSong: (songTitle: string, cacheKey?: string) => Promise<SongResult | null>;
 };
 
 /** 占位行还没有对应的曲目（渲染与播放都该让它不可点）。 */
@@ -92,7 +92,7 @@ export const createCloudThemeCollectionResource = (
                 const index = cursor;
                 cursor += 1;
                 const position = from + index;
-                const found = await deps.resolveSong(names[index].songTitle).catch(() => null);
+                const found = await deps.resolveSong(names[index].songTitle, names[index].key).catch(() => null);
                 if (disposed || ticket !== generation) return;
                 const current = state.get().tracks;
                 const expected = current[position];

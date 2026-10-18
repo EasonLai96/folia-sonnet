@@ -1,4 +1,4 @@
-import { fingerprintLyricSource, pullAiCloudCache, pushAiCloudCache } from './aiCloudCache';
+import { fetchEntry, fingerprintLyricSource, pullAiCloudCache, pushAiCloudCache } from './aiCloudCache';
 import { getFromCache, removeFromCache, saveToCache } from './db';
 import { sanitizeDualTheme } from './themeSanitizer';
 import type { DualTheme } from '../types';
@@ -72,7 +72,44 @@ export const pushAiThemeToCloud = async (song: AiThemeSongRef, dualTheme: DualTh
 );
 
 /**
- * 从云端拉一首歌的主题。
+ * 按**已知键**直接取一条里的主题。
+ *
+ * 搜索页那个「AI 主题」来源给的就是键（云端歌名清单里那一行），点播放要的是
+ * 「立刻用上那一条」，不该再去生成一遍 —— 生成要有歌词、要有 API Key，
+ * 而这条缓存存在的意义就是不用再算一次。
+ *
+ * 键可能是两种 kind：本文件推的 `'theme'`（整份就是 DualTheme），以及舞台决策那条
+ * `'stage'`（主题只是它的一半，在 `payload.theme` 上）。歌名清单按歌名分组，
+ * 分不出来是哪种，所以两种都试。
+ */
+export const pullCachedThemeByKey = async (key: string): Promise<DualTheme | null> => {
+    if (!/^[a-f0-9]{32}$/.test(key)) {
+        return null;
+    }
+
+    const asTheme = await fetchEntry('theme', key);
+    if (isDualThemeLike(asTheme)) {
+        return sanitizeDualTheme(asTheme);
+    }
+
+    const stage = await fetchEntry('stage', key);
+    if (isDualThemeLike(stage)) {
+        return sanitizeDualTheme(stage);
+    }
+    const half = isRecord(stage) ? stage.theme : null;
+    return isDualThemeLike(half) ? sanitizeDualTheme(half) : null;
+};
+
+/** `payload` 长得像不像一份完整的主题（浅 + 深都要有东西）。 */
+const isDualThemeLike = (value: unknown): boolean => (
+    isRecord(value) && isRecord(value.light) && isRecord(value.dark)
+);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+/**
+ * 从云端拉一首歌的主题（按歌名 + 歌手算键）。
  *
  * 缓存里的东西一律当不可信输入：形状不对就跟没命中一样（返回 null），
  * 服务端一条脏数据不能把播放页搞崩。
