@@ -60,11 +60,13 @@ const SongActions: React.FC<SongActionsProps> = ({ like, onLocatePlayingSong, on
             <PanelIconButton label={t('ui.backToHome')} onClick={onNavigateHome}>
                 <HomeIcon size={17} />
             </PanelIconButton>
-            {onOpenSettings && (
-                <PanelIconButton label={t('ui.options')} onClick={onOpenSettings}>
-                    <Settings size={17} />
-                </PanelIconButton>
-            )}
+            {/*
+             * 与下面主题区那两颗（ThemeSourceRow / ThemeNameRow）同一套：size="s" + filled，
+             * 图标 15px。默认那档是 8×8 的透明底，混在一排里看着像少了一块。
+             */}
+            <PanelIconButton size="s" filled label={t('ui.options')} onClick={onOpenSettings}>
+                <Settings size={15} />
+            </PanelIconButton>
         </div>
     );
 };

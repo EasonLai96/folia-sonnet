@@ -430,9 +430,11 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                 </div>
             </div>
 
-            {/* 云缓存：紧挨着 AI 歌词配置下面，默认打开；没填 Key 也能拉。 */}
-            <div className={`rounded-xl border overflow-hidden ${settingsCardClass}`}>
-                <div className={`flex flex-wrap items-center justify-between gap-4 p-4 border-b ${rowDividerClass}`}>
+            {/* 云缓存：紧挨着 AI 歌词配置下面，默认打开；没填 Key 也能拉。
+                不再单独套一张带边框的卡 —— 外层已经是 kit 的 Group 卡片，这里再套一层
+                就是三层边框。改成组内的一行，用一条发丝线和上面分开。 */}
+            <div className="p-4">
+                <div className={`flex flex-wrap items-center justify-between gap-4 pb-4 border-b ${rowDividerClass}`}>
                     <div className="space-y-1 text-left min-w-0">
                         <div className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                             <Cloud size={15} className="opacity-70" aria-hidden="true" />
@@ -455,7 +457,7 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                     </button>
                 </div>
 
-                <div className="p-4 space-y-3">
+                <div className="pt-4 space-y-3">
                     <label className="block space-y-1 text-left">
                         <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
                             {t('options.cloudCacheBaseUrl')}
