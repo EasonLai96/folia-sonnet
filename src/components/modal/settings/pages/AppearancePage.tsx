@@ -12,7 +12,7 @@ import { Button, FoldedGroup, Group, NumberField, Reveal, Row, Segmented, TextFi
 import { settingsAnchorSubview } from '../../../../utils/settingsAnchorModel';
 import { hasElectronBridge, isCapacitorAndroid } from '../../../../platform/runtime';
 import { settingsCardClassFor } from '../settingsCardClasses';
-import AndroidPhoneFitSetting from '../AndroidPhoneFitSetting';
+import AndroidForceLandscapeSetting from '../AndroidForceLandscapeSetting';
 import DeviceTypeSetting from '../DeviceTypeSetting';
 import GlassSurfaceSetting from '../GlassSurfaceSetting';
 import LyricFlatSetting from '../LyricFlatSetting';
@@ -64,7 +64,7 @@ const O = {
     glassSurface: option(VIEW, 'glassSurface', 'options.glassSurface'),
     lyricFlat: option(VIEW, 'lyricFlat', 'options.lyricFlat'),
     deviceType: option(VIEW, 'deviceType', 'options.deviceType', { available: () => isCapacitorAndroid() }),
-    phoneFit: option(VIEW, 'phoneFit', 'options.phoneFit', { available: () => isCapacitorAndroid() }),
+    forceLandscape: option(VIEW, 'forceLandscape', 'options.forceLandscape', { available: () => isCapacitorAndroid() }),
     aiProvider: option(AI, 'aiProvider', 'options.aiProvider'),
     geminiKey: option(AI, 'geminiApiKey', 'options.geminiApiKey'),
     openaiUrl: option(AI, 'openaiApiUrl', 'options.openaiApiUrl'),
@@ -182,7 +182,7 @@ const AppearancePage: React.FC = () => {
                 <LyricFlatSetting />
                 {/* 下面两项组件内部自行判断运行时：非安卓直接返回 null，这里不用再判端。 */}
                 <DeviceTypeSetting />
-                <AndroidPhoneFitSetting />
+                <AndroidForceLandscapeSetting />
             </Group>
 
             <Group def={THEME}>

@@ -61,7 +61,12 @@ export const applyAndroidPhoneFit = (
 };
 
 export const installAndroidPhoneFitPreference = (): void => {
-    applyAndroidPhoneFit(readStoredAndroidPhoneFit(), readStoredAndroidPhoneFitOrientation());
+    /*
+     * 总开关恒为 false —— 「手机适配」那一行已经从设置里删掉了，没有入口的东西不该
+     * 在启动时被盘上那份旧值重新打开（以前打开过的人会一直带着那套覆盖样式）。
+     * 方向这一份还要照旧恢复：「强制横屏」要看它。
+     */
+    applyAndroidPhoneFit(false, readStoredAndroidPhoneFitOrientation());
 };
 
 /**

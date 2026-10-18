@@ -32,8 +32,14 @@ export const useAndroidLayoutSettingsStore = create<AndroidLayoutSettingsState>(
     },
     setPhoneFitOrientation: (orientation) => {
         writeStoredAndroidPhoneFitOrientation(orientation);
-        applyAndroidPhoneFit(get().phoneFitEnabled, orientation);
-        syncAndroidPhoneFitNative(get().phoneFitEnabled, orientation);
+        /*
+         * 第一个参数（手机适配总开关）恒为 false：那一行已经从设置里删了，这里不能再
+         * 顺手把 `data-folia-phone-fit` 打开 —— 否则一个没有入口的开关会一直生效。
+         * 方向属性照旧写，横屏那套缩放要看它。
+         */
+        applyAndroidPhoneFit(false, orientation);
+        // 原生侧：横屏锁横屏，其它交回系统（PhoneLayoutOrientation 不再看总开关）。
+        syncAndroidPhoneFitNative(true, orientation);
         set({ phoneFitOrientation: orientation });
     },
 }));
