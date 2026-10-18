@@ -8,6 +8,7 @@ import { calculateReplayGain } from '../../../../utils/replayGain';
 import { applyAudioEqualizerSettings } from '../../../../services/audioEqualizerGraph';
 import { type AudioEffectChain } from '../../../../services/audioEffects/effectChain';
 import { buildPlaybackGraph } from '../../../../services/playbackGraph';
+import { createSpectrumTap } from '../../../../services/spectrumTap';
 import { cachePlayedTrackAssets } from '../../../../services/playedTrackCache';
 import { registerPlaybackFadeGraph } from '../../../../services/playbackFade';
 import { rampGain, type AutomixDeckChain } from '../../../../services/automix/crossfadeGraph';
@@ -187,6 +188,20 @@ export function usePlaybackAudioBridge({
             if (!decksConnected) {
                 console.warn('[AudioContext] Deck setup incomplete, automix will stay idle');
             }
+
+            /*
+             * 频谱改由音频线程抽（AudioWorklet），主线程只读最新一份 —— 见 services/spectrumTap。
+             *
+             * 这一步是**加成**不是依赖：走不通（没有 AudioWorklet / WebView 不让加载 Blob）
+             * 它就自己返回 false，取频谱照旧走 analyser 的 getByteFrequencyData，只是那就还是
+             * 每帧等一次音频线程。挂在 analyser 之后，拿到的是同一份信号。
+             */
+            void createSpectrumTap(ctx, analyser, {
+                fftSize: 2048,
+                // 与下面 analyser 的平滑同一个值：换一条路不等于换一套观感。
+                smoothingTimeConstant: analyser.smoothingTimeConstant,
+            });
+
             applyReplayGain();
             syncOutputGain(getTargetPlaybackVolume(), 0);
         } catch (error) {

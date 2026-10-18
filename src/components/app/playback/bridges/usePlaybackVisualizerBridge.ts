@@ -6,6 +6,7 @@ import { PlayerState } from '../../../../types';
 import type { AudioBands, LyricData } from '../../../../types';
 import { setCurrentLineIndex, setPlayerState } from '../../../../stores/usePlaybackStore';
 import { selectDisplayLyrics, usePlaybackStore } from '../../../../stores/usePlaybackStore';
+import { readLatestSpectrum } from '../../../../services/spectrumTap';
 import { audioBands, audioPower, currentTime, lyricCurrentTime } from '../../../../stores/motionSignals';
 
 // src/components/app/playback/bridges/usePlaybackVisualizerBridge.ts
@@ -101,13 +102,30 @@ export function usePlaybackVisualizerBridge({
         // is downstream of both, so it has real signal: dropping to the idle breath here would put
         // a visible stutter at exactly the moment meant to be seamless.
         const hasAudibleSignal = isActuallyPlaying || isTransitionAudible();
-        // 频谱不必每帧都问一次 —— 见 SPECTRUM_READ_INTERVAL_MS。
+        /*
+         * 频谱有两条路，能用哪条用哪条：
+         *
+         *  · **音频线程抽的那条**（services/spectrumTap）—— 拿到的是人家已经算好的一份，读它
+         *    **一次都不等音频线程**，所以每一帧都能用，不必降频；
+         *  · **AnalyserNode 那条** —— `getByteFrequencyData` 是同步的，要等音频线程把最近一次
+         *    渲染结果交出来，缓冲越大等得越久，所以降到 ~30Hz（SPECTRUM_READ_INTERVAL_MS）。
+         *
+         * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
+         */
+        const tapped = readLatestSpectrum();
+        // 取成局部变量：ref 上的 .current 进不了分支条件的窄化，后面要直接用它。
+        const analyser = analyserRef.current;
+        // 只有第二条才需要这个间隔。
         const nowMsValue = performance.now();
         const spectrumDue = nowMsValue - spectrumReadAtMsRef.current >= SPECTRUM_READ_INTERVAL_MS;
+        const process = (value: number, boost = 2) => {
+            const normalized = value / 255;
+            return Math.pow(normalized, boost) * 255;
+        };
 
         // 三态，不是二态：有信号但这一帧不该读频谱时**什么都不写** —— 沿用上一次的读数。
         // 写成 if/else 会让这些帧掉进 idle breath，律动就在真频谱和呼吸之间每帧来回跳。
-        if (!hasAudibleSignal || !analyserRef.current) {
+        if (!hasAudibleSignal || (!tapped && !analyser)) {
             const time = Date.now() / 2000;
             const breath = (Math.sin(time) + 1) * 20;
             audioPower.set(breath);
@@ -117,12 +135,20 @@ export function usePlaybackVisualizerBridge({
             audioBands.vocal.set(breath);
             audioBands.treble.set(breath);
             audioBands.spectrum?.set(new Uint8Array(0));
-        } else if (spectrumDue) {
+        } else if (tapped) {
+            audioBands.spectrum?.set(tapped.spectrum);
+            audioPower.set(process((tapped.bass + tapped.lowMid) / 2, 3));
+            audioBands.bass.set(process(tapped.bass, 1.8));
+            audioBands.lowMid.set(process(tapped.lowMid, 2));
+            audioBands.mid.set(process(tapped.mid, 2));
+            audioBands.vocal.set(process(tapped.vocal, 1.5));
+            audioBands.treble.set(process(tapped.treble, 2));
+        } else if (analyser && spectrumDue) {
             // 记在真正去读之前：这次同步等待算进间隔里，缓冲大也不会把节奏挤成一帧一次。
             spectrumReadAtMsRef.current = nowMsValue;
-            const bufferLength = analyserRef.current.frequencyBinCount;
+            const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
-            analyserRef.current.getByteFrequencyData(dataArray);
+            analyser.getByteFrequencyData(dataArray);
             audioBands.spectrum?.set(dataArray);
 
             const getEnergy = (minHz: number, maxHz: number): number => {
@@ -141,11 +167,6 @@ export function usePlaybackVisualizerBridge({
             const mid = getEnergy(400, 1200);
             const vocal = getEnergy(1000, 3500);
             const treble = getEnergy(3500, 12000);
-
-            const process = (value: number, boost = 2) => {
-                const normalized = value / 255;
-                return Math.pow(normalized, boost) * 255;
-            };
 
             audioPower.set(process((bass + lowMid) / 2, 3));
             audioBands.bass.set(process(bass, 1.8));
