@@ -440,7 +440,12 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         />
                         {/* 叠加模式下的左右位置。只给初值：原生那边拖过之后以拖出来的为准。
                             占满整条时没有「左右」可言，那两根一起收起来。 */}
-                        {wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea && (
+                        {/*
+                            左右位置 / 宽度 / 避开区域这几行随开关出现和收起：一律走 Reveal，
+                            跟同页其它「依赖上一行」的行一样地展开 / 收起。之前是 `&&` 直接
+                            挂载，开关一拨整段就凭空消失，看着像界面抽了一下。
+                        */}
+                        <Reveal when={wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea}>
                             <SettingsRow
                                 title={t('options.floatingLyricsOffsetX')}
                                 description={t('options.floatingLyricsOffsetXDesc')}
@@ -462,10 +467,10 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                     </div>
                                 )}
                             />
-                        )}
+                        </Reveal>
                         {/* 宽度：占屏幕宽度的比例。和左右位置那根一样，
                             每次拖动都会立刻下发，小窗当场跟着变。占满时不参与。 */}
-                        {wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea && (
+                        <Reveal when={wallpaperFloatingOverSafeArea && !wallpaperFloatingFillSafeArea}>
                             <SettingsRow
                                 title={t('options.floatingLyricsWidth')}
                                 description={t('options.floatingLyricsWidthDesc')}
@@ -487,10 +492,10 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                     </div>
                                 )}
                             />
-                        )}
+                        </Reveal>
                         {/* 占满整条安全区：左右不再留空，宽度滑条也让位。
                             横屏下原生那边不认这一条，自动退回宽度滑条给的宽。 */}
-                        {wallpaperFloatingOverSafeArea && (
+                        <Reveal when={wallpaperFloatingOverSafeArea}>
                             <SettingsRow
                                 title={t('options.floatingLyricsFillSafeArea')}
                                 description={t('options.floatingLyricsFillSafeAreaDesc')}
@@ -499,9 +504,9 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                     <Toggle checked={wallpaperFloatingFillSafeArea} onChange={onToggleWallpaperFloatingFillSafeArea} />
                                 )}
                             />
-                        )}
+                        </Reveal>
                         {/* 避开区域：挖孔 / 刘海那一块。字从它两边绕过去，不是被裁掉。 */}
-                        {wallpaperFloatingOverSafeArea && wallpaperFloatingFillSafeArea && (
+                        <Reveal when={wallpaperFloatingOverSafeArea && wallpaperFloatingFillSafeArea}>
                             <>
                                 <SettingsRow
                                     title={t('options.floatingLyricsAvoidWidth')}
@@ -546,7 +551,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                     )}
                                 />
                             </>
-                        )}
+                        </Reveal>
                         {/* 字号：动态 = 跟着窗口高度算（拖大窗口字就跟着大）；
                             自定义 = 自己指定。默认动态。 */}
                         <SettingsRow

@@ -1,10 +1,9 @@
 import React from 'react';
-import { ChevronRight, CircleHelp, ExternalLink, Lightbulb, MessageCircle, Sparkles, Users, type LucideIcon } from 'lucide-react';
+import { ChevronRight, CircleHelp, ExternalLink, Lightbulb, Sparkles, Users, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { openPonderNavigation } from '../../../../services/ponder/pagePonderTarget';
 import { BUILD_KIND_TAGS, getBuildKind } from '../../../../utils/buildProvenance';
 import { PRIMARY_MODIFIER_LABEL } from '../../../../utils/platform';
-import { openDiscordInvite } from '../../../shared/discordCommunity';
 import { QQ_COMMUNITY_GROUP_NUMBER } from '../../../shared/qqCommunity';
 import { HELP_TAB_PLAYER_CONTROLS, HELP_TAB_PRIMARY_SHORTCUTS } from '../../userGuideContent';
 import { Button, CopyButton, CopyValue, Group, Keys, Row, type SettingsGroupDef } from '../kit';
@@ -146,7 +145,6 @@ const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, o
 
             <Group def={SUPPORT} bare>
                 <Row label={iconLabel(CircleHelp, t('aiHelp.openButton'))} onClick={onOpenAiHelp} />
-                <Row label={iconLabel(MessageCircle, t('help.joinDiscord'))} onClick={openDiscordInvite} />
                 {/* A QQ group has no link that opens it: the row gives its number to copy. */}
                 <Row label={iconLabel(Users, t('help.communityQq'))}>
                     <CopyValue value={QQ_COMMUNITY_GROUP_NUMBER} />

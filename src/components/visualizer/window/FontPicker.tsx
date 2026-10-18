@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Search, Upload, X } from 'lucide-react';
+import { Loader2, Search, Store, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { List, useListRef } from 'react-window';
 import type { Theme } from '../../../types';
@@ -40,6 +40,8 @@ type FontPickerProps = {
     /** Back to the built-in font. */
     onClear: () => void;
     onUpload?: (file: File) => Promise<{ ok: boolean; error?: string; }>;
+    /** Opens the font market over this picker: the fonts published from the admin panel. */
+    onOpenFontMarket?: () => void;
     onClose: () => void;
 };
 
@@ -144,7 +146,7 @@ const FontRow = ({ index, style, ariaAttributes, fonts, family, fontStyle, onCho
 };
 
 export const FontPicker: React.FC<FontPickerProps> = ({
-    family, label, fallbackFamilies, onFallbackFamiliesChange, fontStyle, onChoose, onClear, onUpload, onClose,
+    family, label, fallbackFamilies, onFallbackFamiliesChange, fontStyle, onChoose, onClear, onUpload, onOpenFontMarket, onClose,
 }) => {
     const { t } = useTranslation();
     const [fonts, setFonts] = useState<LocalFontEntry[]>(knownFonts ?? []);
@@ -262,6 +264,11 @@ export const FontPicker: React.FC<FontPickerProps> = ({
                             {t(uploadsInstead ? 'options.uploadCustomFontDesc' : 'options.chooseSystemFontDesc')}
                         </p>
                     </div>
+                    {onOpenFontMarket && (
+                        <Button icon={Store} onClick={onOpenFontMarket}>
+                            {t('options.fontMarket')}
+                        </Button>
+                    )}
                     <Button variant="quiet" icon={X} tip={t('ui.close')} onClick={onClose} />
                 </div>
 
