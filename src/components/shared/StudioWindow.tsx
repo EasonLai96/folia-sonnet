@@ -206,7 +206,15 @@ export const StudioWindow: React.FC<StudioWindowProps> = ({
                         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
                     </header>
                     <div inert={hasOver} className="st-scroll flex min-h-0 flex-col overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:overflow-hidden">
-                        <section className="flex h-[64vh] min-h-[380px] min-w-0 shrink-0 flex-col gap-4 px-4 pb-6 sm:px-6 lg:h-auto lg:min-h-0">{stage}</section>
+                        {/*
+                         * The stage's height below `lg`.
+                         *
+                         * 以前是 64vh / 最小 380px —— 手机上一打开就是大半屏的预览，下面的设置
+                         * 全在屏幕外，得先滑过一整屏预览才够得着，而且手指落在预览上常常什么
+                         * 都滑不动（预览自己是静态的）。压到 52vh / 最小 320px：预览还是看得清
+                         * 楚，下面那栏能露出头，一滑就到。
+                         */}
+                        <section className="flex h-[52vh] min-h-[320px] min-w-0 shrink-0 flex-col gap-4 px-4 pb-6 sm:px-6 lg:h-auto lg:min-h-0">{stage}</section>
                         <aside className="flex min-w-0 shrink-0 flex-col border-t border-[var(--st-line)] lg:min-h-0 lg:border-l lg:border-t-0">
                             {children}
                         </aside>

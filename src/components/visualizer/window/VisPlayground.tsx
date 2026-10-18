@@ -476,7 +476,7 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
              * 的高度就让给下面那栏。
              */}
             <div
-                className="relative min-h-[160px] max-h-[38vh] flex-1 overflow-hidden rounded-xl shadow-[0_0_0_1px_var(--st-line)]"
+                className="relative min-h-[150px] max-h-[38vh] flex-1 overflow-hidden rounded-xl shadow-[0_0_0_1px_var(--st-line)]"
                 style={{ backgroundColor: previewTheme.backgroundColor }}
             >
                 {/* The style is drawn as large as the app's window and scaled to fit. */}
@@ -557,7 +557,9 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
                     columns={isWideWindow ? SHELF_COLUMNS.wide : SHELF_COLUMNS.narrow}
                     onChange={mode => onVisualizerModeChange?.(mode)}
                     label={t('ui.animationMode')}
-                    maxHeight={250}
+                    // 样式网格自己也滚：它一高，预览就被顶没、那一栏也放不下（StudioWindow
+                    // 在窄屏给整块的房间只有 52vh）。压到 180，上下都留得出来。
+                    maxHeight={180}
                     className="-mx-4"
                 />
             </div>
