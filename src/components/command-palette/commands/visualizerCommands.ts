@@ -123,6 +123,14 @@ export const visualizerCommands: CommandPaletteCommand[] = [
         ['lyric freeze', 'freeze fix', 'linux', 'glow', 'fd leak', 'stepped glow', '歌词卡死', '动画卡死', '画面定格', '发光半径分档', '发光', 'faguangbanjing', 'fgbj'],
         context => context.visualizer.toggleGlowBlurQuantize(),
     ),
+    createToggleCommand(
+        'visualizer-toggle-render-pixel-ratio',
+        'visualizer',
+        'Lower render resolution to speed up slow machines',
+        'Cap the pixel ratio canvases draw at, the biggest single win on weak GPUs and high-DPI laptops',
+        ['render resolution', 'pixel ratio', 'dpr', 'performance', 'low end', 'lag', 'slow', 'render scale', '渲染分辨率', '像素比', '性能', '卡顿', '低配', '糊一点'],
+        context => context.visualizer.toggleRenderPixelRatio(),
+    ),
     createToggleCommand('visualizer-toggle-random-per-song', 'visualizer', 'Random visualizer for every song', 'Toggle a random lyric animation mode whenever the song changes', ['random visualizer', 'random animation', 'per song', '随机歌词动画', '每首歌随机动画'], context => context.visualizer.toggleRandomVisualizerModePerSong()),
     {
         id: 'background-monet-full-overlay',

@@ -17,6 +17,7 @@ import VisualizerRenderer from '../components/visualizer/VisualizerRenderer';
 import { collectVisualizerTunings } from '../utils/visualizer/tunings';
 import { NO_LYRIC_LINES } from '../utils/lyrics/noLyricLines';
 import { installGlobalVisualizerFrameRateLimiter } from '../utils/frameRateLimiter';
+import { installRenderPixelRatioLimit } from '../utils/renderPixelRatio';
 
 /*
  * 把整页底色压回透明。
@@ -53,6 +54,10 @@ forceTransparentBackdrop();
  * 挂上去就会让桌面歌词在退到后台的瞬间冻住 —— 恰恰把它存在的意义取消了。
  */
 installGlobalVisualizerFrameRateLimiter();
+/*
+ * 渲染分辨率上限同理：壁纸页的歌词画布也是自己算 DPR 的，不装就只剩主窗口受这个设置管。
+ */
+installRenderPixelRatioLimit();
 import { buildBuiltinDualTheme } from '../hooks/themeControllerState';
 import { useVisualizerSettingsStore } from '../stores/useVisualizerSettingsStore';
 import { useTypographySettingsStore } from '../stores/useTypographySettingsStore';

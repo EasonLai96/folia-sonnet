@@ -14,8 +14,9 @@ import { create } from 'zustand';
 import { getVisualizerModeLabel } from '../components/visualizer/registry';
 import type { StoredTuning, VisualizerTuningSettings } from '../components/visualizer/tuningDefinition';
 import { getBackgroundSettingsSlices, getStoredVisualizerTunings } from '../components/visualizer/tuningRegistry';
-import { type SmartBeatSettings, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
+import { type RenderPixelRatio, type SmartBeatSettings, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
 import { VISUALIZER_FRAME_RATE_STORAGE_KEY, setGlobalVisualizerFrameRate } from '../utils/frameRateLimiter';
+import { RENDER_PIXEL_RATIO_STORAGE_KEY, readStoredRenderPixelRatio, setGlobalRenderPixelRatio } from '../utils/renderPixelRatio';
 import { GLOW_BLUR_QUANTIZE_STORAGE_KEY, readStoredGlowBlurQuantize, setGlowBlurQuantized } from '../utils/glowBlurQuantize';
 import i18n from '../i18n/config';
 import { setStatusMessage } from './useStatusMessageStore';
@@ -61,6 +62,13 @@ type OwnSettingsState = {
     visualizerOpacity: number;
     visualizerBackgroundMode: VisualizerBackgroundMode | null;
     visualizerFrameRate: VisualizerFrameRate;
+    /**
+     * 画布渲染分辨率的上限，null = 跟随屏幕。
+     *
+     * 存的是用户「想要的上限」，不是生效值：屏幕只有 1× 时选 2× 什么都不会变，库里的值仍然是 2×，
+     * 换到高分屏上才生效。见 utils/renderPixelRatio.ts。
+     */
+    renderPixelRatio: RenderPixelRatio | null;
     visualizerMode: VisualizerMode;
     randomVisualizerModePerSong: boolean;
     /** Snap animated glow blur radii to a bounded set. See components/visualizer/wordGlow.ts. */
@@ -183,6 +191,7 @@ type OwnSettingsState = {
     handleSetVisualizerBackgroundMode: (mode: VisualizerBackgroundMode) => void;
     handleResetVisualizerBackgroundMode: () => void;
     handleSetVisualizerFrameRate: (frameRate: VisualizerFrameRate) => void;
+    handleSetRenderPixelRatio: (limit: RenderPixelRatio | null) => void;
     handleSetVisualizerMode: (mode: VisualizerMode, options?: { notify?: boolean }) => void;
     handleToggleRandomVisualizerModePerSong: (enable: boolean) => void;
     handleToggleGlowBlurQuantize: (enable: boolean) => void;
@@ -289,6 +298,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     visualizerOpacity: readStoredVisualizerOpacity(),
     visualizerBackgroundMode: readStoredVisualizerBackgroundMode(),
     visualizerFrameRate: readStoredVisualizerFrameRate(),
+    renderPixelRatio: readStoredRenderPixelRatio(),
     visualizerMode: readStoredVisualizerMode(),
     randomVisualizerModePerSong: getStoredBoolean('random_visualizer_mode_per_song', false),
     glowBlurQuantize: readStoredGlowBlurQuantize(),
@@ -378,6 +388,17 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         }
         setGlobalVisualizerFrameRate(frameRate);
         set({ visualizerFrameRate: frameRate });
+    },
+    handleSetRenderPixelRatio: (limit) => {
+        if (typeof window !== 'undefined') {
+            if (limit === null) {
+                localStorage.removeItem(RENDER_PIXEL_RATIO_STORAGE_KEY);
+            } else {
+                localStorage.setItem(RENDER_PIXEL_RATIO_STORAGE_KEY, String(limit));
+            }
+        }
+        setGlobalRenderPixelRatio(limit);
+        set({ renderPixelRatio: limit });
     },
     handleSetVisualizerMode: (mode, options) => {
         if (typeof window !== 'undefined') {

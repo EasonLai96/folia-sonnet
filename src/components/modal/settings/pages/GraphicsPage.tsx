@@ -7,6 +7,7 @@ import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChrome
 import { useThemeSettingsStore } from '../../../../stores/useThemeSettingsStore';
 import { useVisualizerSettingsStore } from '../../../../stores/useVisualizerSettingsStore';
 import { VISUALIZER_FRAME_RATE_OPTIONS } from '../../../../utils/frameRateLimiter';
+import { DEFAULT_RENDER_PIXEL_RATIO, RENDER_PIXEL_RATIO_OPTIONS } from '../../../../utils/renderPixelRatio';
 import { Group, Link, Reveal, Row, Segmented, Toggle, option, useSettingsKitTheme, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 
 // src/components/modal/settings/pages/GraphicsPage.tsx
@@ -33,6 +34,9 @@ const O = {
     frameRate: option(PERFORMANCE, 'visualizerFrameRate', 'options.visualizerFrameRate'),
     frameRateValue: option(PERFORMANCE, 'visualizerFrameRateValue', 'options.visualizerFrameRateValue'),
     glowFix: option(PERFORMANCE, 'glowBlurQuantize', 'options.glowBlurQuantize'),
+    // 这两行是 fork 自己加的，说明收进「i」（`noteKey`）而不是印在标签下面 —— 见 kit/Row.tsx 的说明。
+    renderPixelRatio: option(PERFORMANCE, 'renderPixelRatio', 'options.renderPixelRatio', { noteKey: 'options.renderPixelRatioDesc' }),
+    renderPixelRatioValue: option(PERFORMANCE, 'renderPixelRatioValue', 'options.renderPixelRatioValue'),
     followSystem: option(MOTION, 'reduceMotionFollowSystem', 'options.reduceMotionFollowSystem'),
 };
 
@@ -52,6 +56,8 @@ export const OPTIONS: SettingsOptionDef[] = [
 ];
 
 const FRAME_RATE_CHOICES = VISUALIZER_FRAME_RATE_OPTIONS.map(rate => ({ value: String(rate), label: `${rate} FPS` }));
+/** 档位直接印出来（0.5 / 0.75 / 1 / 1.25 / 1.5 / 2），不补尾随零。 */
+const RENDER_PIXEL_RATIO_CHOICES = RENDER_PIXEL_RATIO_OPTIONS.map(ratio => ({ value: String(ratio), label: `×${ratio}` }));
 
 const GraphicsPage: React.FC = () => {
     const { t } = useTranslation();
@@ -67,8 +73,10 @@ const GraphicsPage: React.FC = () => {
     const visualizer = useVisualizerSettingsStore(useShallow(state => ({
         frameRate: state.visualizerFrameRate,
         glowFix: state.glowBlurQuantize,
+        renderPixelRatio: state.renderPixelRatio,
         setFrameRate: state.handleSetVisualizerFrameRate,
         setGlowFix: state.handleToggleGlowBlurQuantize,
+        setRenderPixelRatio: state.handleSetRenderPixelRatio,
     })));
     const motion = useMotionSettingsStore(useShallow(state => ({
         surfaces: state.reducedMotionSurfaces,
@@ -80,6 +88,10 @@ const GraphicsPage: React.FC = () => {
     // Native blur can drop frames on some GPUs, so switching it on asks first.
     const [nativeBlurAsking, setNativeBlurAsking] = useState(false);
     const frameRateLimited = visualizer.frameRate !== 'off';
+    const isRenderPixelRatioLimited = visualizer.renderPixelRatio !== null;
+    // 关着的时候档位停在默认档，打开的瞬间就落在这一档；右边显示的却是**当前生效**的像素比
+    // （跟随屏幕时就是屏幕自己的值），所以关/开两边都不会出现「显示的数和画面对不上」。
+    const selectedRenderPixelRatio = isRenderPixelRatioLimited ? visualizer.renderPixelRatio : DEFAULT_RENDER_PIXEL_RATIO;
 
     return (
         <>
@@ -109,6 +121,24 @@ const GraphicsPage: React.FC = () => {
                             onChange={(value) => {
                                 const rate = VISUALIZER_FRAME_RATE_OPTIONS.find(candidate => String(candidate) === value);
                                 if (rate) visualizer.setFrameRate(rate);
+                            }}
+                        />
+                    </Row>
+                </Reveal>
+                <Row option={O.renderPixelRatio}>
+                    <Toggle
+                        checked={isRenderPixelRatioLimited}
+                        onChange={enabled => visualizer.setRenderPixelRatio(enabled ? DEFAULT_RENDER_PIXEL_RATIO : null)}
+                    />
+                </Row>
+                <Reveal when={isRenderPixelRatioLimited}>
+                    <Row sub option={O.renderPixelRatioValue}>
+                        <Segmented
+                            value={String(selectedRenderPixelRatio)}
+                            options={RENDER_PIXEL_RATIO_CHOICES}
+                            onChange={(value) => {
+                                const ratio = RENDER_PIXEL_RATIO_OPTIONS.find(candidate => String(candidate) === value);
+                                if (ratio) visualizer.setRenderPixelRatio(ratio);
                             }}
                         />
                     </Row>

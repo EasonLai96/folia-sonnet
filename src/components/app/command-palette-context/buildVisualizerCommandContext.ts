@@ -5,6 +5,7 @@ import { useVideoLayerSettingsStore } from '../../../stores/useVideoLayerSetting
 import { getVisualizerRegistryEntry } from '../../visualizer/registry';
 import { isLyricSegmentationAiAvailable } from '../../../services/aiText';
 import type { LyricSegmentationActions } from '../playback/createLyricSegmentationActions';
+import { DEFAULT_RENDER_PIXEL_RATIO } from '../../../utils/renderPixelRatio';
 
 // src/components/app/command-palette-context/buildVisualizerCommandContext.ts
 // The `visualizer` namespace. Almost entirely store-backed: App.tsx used to relay all seven
@@ -24,6 +25,12 @@ export const buildVisualizerCommandContext = (
         toggleGlowBlurQuantize: () => visualizer.handleToggleGlowBlurQuantize(
             !useVisualizerSettingsStore.getState().glowBlurQuantize,
         ),
+        toggleRenderPixelRatio: () => {
+            const current = useVisualizerSettingsStore.getState();
+            current.handleSetRenderPixelRatio(
+                current.renderPixelRatio === null ? DEFAULT_RENDER_PIXEL_RATIO : null,
+            );
+        },
         setVisualizerBackgroundMode: visualizer.handleSetVisualizerBackgroundMode,
         setMonetBackgroundTuning: visualizer.handleSetMonetBackgroundTuning,
         setLatentBackgroundTuning: visualizer.handleSetLatentBackgroundTuning,

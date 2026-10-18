@@ -190,6 +190,7 @@ const createContext = (overrides: CommandPaletteContextOverrides = {}): CommandP
             setVisualizerMode: vi.fn(),
             toggleRandomVisualizerModePerSong: vi.fn(),
             toggleGlowBlurQuantize: vi.fn(),
+            toggleRenderPixelRatio: vi.fn(),
             setVisualizerBackgroundMode: vi.fn(),
             setMonetBackgroundTuning: vi.fn(),
             setLatentBackgroundTuning: vi.fn(),

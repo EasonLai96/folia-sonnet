@@ -19,6 +19,7 @@ import {
 } from '../../../../utils/playbackSyncBridge';
 import { resolveStagePlayerPositionSec } from '../../../../utils/stagePlayerSnapshot';
 import { getPlaybackSongKey, getPlaybackSourceRef } from '../../../../utils/appPlaybackGuards';
+import { getNativeDevicePixelRatio } from '../../../../utils/renderPixelRatio';
 import { omni } from '../../../../services/onlineMusic/omni';
 import { createRemoteTrackTransitionFeed, type RemoteTrackTransitionFeed } from './remoteTrackTransitionFeed';
 import { useStableActionSurface } from '../../../../hooks/useStableCallbacks';
@@ -498,11 +499,12 @@ export const useElectronPlaybackBridge = ({
         const intervalId = window.setInterval(() => publish(), 500);
         const unsubscribeActions = subscribeRemoteActions(() => publish());
 
-        let lastReportedDpr = window.devicePixelRatio || 1;
+        // 主进程用这个数决定 OBS 画面源的物理尺寸，所以只跟随真实屏幕，不跟渲染分辨率上限。
+        let lastReportedDpr = getNativeDevicePixelRatio();
         const handleResize = () => {
             publish();
             // Only report DPR when it actually changes (avoids unnecessary IPC round-trips).
-            const currentDpr = window.devicePixelRatio || 1;
+            const currentDpr = getNativeDevicePixelRatio();
             if (currentDpr !== lastReportedDpr) {
                 lastReportedDpr = currentDpr;
                 window.electron?.reportDevicePixelRatio(currentDpr);
