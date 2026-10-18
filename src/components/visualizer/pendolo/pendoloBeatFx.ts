@@ -1,4 +1,4 @@
-import { parseColorChannels } from '../colorMix';
+import { parseColorChannels } from '../../../utils/visualizer/colorMix';
 import {
     getBeatFxFiredCounts,
     getBeatFxIntensities,
