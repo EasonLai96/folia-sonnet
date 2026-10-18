@@ -468,9 +468,15 @@ const VisPlayground: React.FC<VisPlaygroundProps> = ({
 
     const stage = (
         <>
-            {/* The sample always shows the theme being previewed, whatever the window's own colours. */}
+            {/*
+             * The sample always shows the theme being previewed, whatever the window's own colours.
+             *
+             * `max-h`：窄窗口（手机）时预览和参数区是上下排的，`flex-1` 会把剩下的高度全吃
+             * 掉，参数那一栏被挤成一条 —— 滑块只有几像素高，根本拖不动。给预览封个顶，多出来
+             * 的高度就让给下面那栏。
+             */}
             <div
-                className="relative min-h-[160px] flex-1 overflow-hidden rounded-xl shadow-[0_0_0_1px_var(--st-line)]"
+                className="relative min-h-[160px] max-h-[38vh] flex-1 overflow-hidden rounded-xl shadow-[0_0_0_1px_var(--st-line)]"
                 style={{ backgroundColor: previewTheme.backgroundColor }}
             >
                 {/* The style is drawn as large as the app's window and scaled to fit. */}
