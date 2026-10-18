@@ -1580,6 +1580,7 @@ export default {
     "onlineProvider": "Online music provider",
     "providerNotConfigured": "API is not configured for Web",
     "providerDesktopOnly": "Desktop app only",
+    "providerNotReady": "Not fully supported here yet",
     "providerNoAccount": "No sign-in needed",
     "allProviders": "All",
     "allProvidersDetail": "{{count}} providers",

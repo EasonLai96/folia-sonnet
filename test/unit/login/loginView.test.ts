@@ -40,6 +40,15 @@ describe('the platform column', () => {
         expect(rowStatus(row('a', { ...signedIn, ...off }))).toBe('off');
     });
 
+    // 路是通的、但还没走全（汽水在安卓上）：也算不能选，但 configured 仍旧为真 ——
+    // 差别就在这里：已登录的账号不会被清掉（accountRead.ts 只认 configured）。
+    it('treats a platform that is not ready here yet as out of reach, without dropping the account', () => {
+        const notReady = { availability: { configured: true, canSignIn: false as const } };
+        const kept = row('qishui', { ...signedIn, ...notReady });
+        expect(rowStatus(kept)).toBe('off');
+        expect(kept.availability.configured).toBe(true);
+    });
+
     it('orders the rows: the platform in use, the signed-in ones, the ones that ran out, the rest as registered', () => {
         const rows = [row('a'), row('b', ranOut), row('c', signedIn), row('d'), row('e', signedIn), row('f', off), row('g', { requiresAccount: false })];
         expect(orderRows(rows, 'd').map(entry => entry.providerId)).toEqual(['d', 'c', 'e', 'b', 'a', 'f', 'g']);

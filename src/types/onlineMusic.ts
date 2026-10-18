@@ -69,6 +69,18 @@ export interface ProviderCapabilities {
 export interface ProviderAvailability {
     configured: boolean;
     reason?: 'not-configured' | 'runtime-unavailable';
+    /**
+     * 这一路此刻能不能**开始一次新登录**；不实现即视为可以登录。
+     *
+     * 与 `configured` 是两件事，别混：`configured` 说的是「这个运行环境够不够得着这个平台」，
+     * 够不着就要当没人登录 —— accountRead.ts 会据此**清掉**那一行的账号；而这一项说的是路
+     * 是通的、只是还没走全，所以**只挡住新登录**，已经登录的账号照旧能读。
+     *
+     * 汽水在安卓上正是后者：原生宿主在（`isQishuiNativeAvailable()`），但签名、音频、收藏
+     * 还有缺口。若图省事直接回 `configured: false`，已登录的人会被清掉、又因入口置灰再也
+     * 登不回来 —— 等于把人锁死在门外。
+     */
+    canSignIn?: boolean;
 }
 
 export interface ProviderAccountSummary {

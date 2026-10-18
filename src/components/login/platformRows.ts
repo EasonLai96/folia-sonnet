@@ -4,11 +4,16 @@ import type { OnlineProviderId, ProviderAccountSummary } from '../../types/onlin
 // 一个平台作为一行时的规则，主页的登录按钮、切换器和登录窗口的那一列共用：它此刻是什么状态，
 // 它们排成什么顺序，切换器上画哪一个。都是纯函数。
 
-/** 一行（一个平台）此刻的状态。'off'：这个构建够不着它（没有配置），不能选。 */
+/**
+ * 一行（一个平台）此刻的状态。
+ *
+ * 'off'：不能选，也不能开始一次新登录 —— 要么这个运行环境够不着它（`configured` 为假），
+ * 要么路还没走全（`canSignIn` 为假）。两种都不能点，但只有前一种会清掉已登录的账号。
+ */
 export type RowStatus = 'signed-in' | 'ran-out' | 'signed-out' | 'accountless' | 'off';
 
 export const rowStatus = (provider: ProviderAccountSummary): RowStatus => {
-    if (!provider.availability.configured) return 'off';
+    if (!provider.availability.configured || provider.availability.canSignIn === false) return 'off';
     if (provider.requiresAccount === false) return 'accountless';
     if (provider.status === 'authenticated') return 'signed-in';
     return provider.error === 'auth-required' ? 'ran-out' : 'signed-out';
@@ -19,9 +24,9 @@ const RANK: Record<RowStatus, number> = { 'signed-in': 1, 'ran-out': 2, 'signed-
 /**
  * 那一列的顺序：正在用的（也就是上次用的）平台在最前，然后是已登录的、登录失效的，其余按注册的顺序。
  *
- * 这个运行环境够不着的平台（`runtime-unavailable`：要走桌面端那座桥的 YouTube Music / Spotify）
+ * 这个运行环境够不着的平台（`runtime-unavailable`：那几家要走桌面端那座桥的）
  * **照样列出来**，只是置灰、不能选、悬停说原因。原来把它们整行过滤掉，于是在安卓上那一列里
- * 从头到尾没有这两家 —— 看着像这个版本压根没接，而不是「它们在这台机器上用不了」。
+ * 从头到尾没有那几家 —— 看着像这个版本压根没接，而不是「它们在这台机器上用不了」。
  */
 export const orderRows = (providers: readonly ProviderAccountSummary[], firstId: OnlineProviderId | null): ProviderAccountSummary[] => (
     providers

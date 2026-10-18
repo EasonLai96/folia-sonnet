@@ -39,10 +39,13 @@ export const PlatformMark: React.FC<PlatformMarkProps> = ({ providerId, label, s
      * 有「应用本尊」图标的平台亮那颗图标，不画字。
      *
      * 登录窗口是上游重画过的：它只认 provider 声明的 `mark`（一个字 + 一种颜色），
-     * 从来不看 assets/providers 里那张来源图标表 —— 于是网易云、QQ 音乐、酷狗这些
-     * fork 的平台在登录界面一律变成一个彩色的字，而资料库的平台徽章、来源角标
+     * 从来不看 assets/providers 里那张来源图标表 —— 于是我们自己接的那几家
+     * 在登录界面一律变成一个彩色的字，而资料库的平台徽章、来源角标
      * （ProviderConnectButton / BravaisProviderAvatar）都是同一张表里取的图，
      * 两边对不上。这里按 fork 各处同一条规矩补上：有图就用图，没图才回落字 + 颜色。
+     *
+     * 注释里不点名平台：这一层要与平台无关（loginModuleKnowsNoPlatform 那条守卫会扫本目录），
+     * 平台自己的东西由它自己的 adapter 通过 omni 声明。
      */
     const hasAppIcon = providerId in PROVIDER_APP_ICONS;
     return (

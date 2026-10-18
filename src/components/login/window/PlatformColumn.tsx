@@ -23,14 +23,18 @@ const SEARCH_FROM = 12;
 const ROW_SIZE = 'min-h-[46px] max-h-[68px] flex-[1_1_0]';
 
 /**
- * 置灰那一行说的原因。
+ * 置灰那一行说的原因。三种，各说各的：
  *
- * 「没配置 API」和「这台机器上跑不起来」是两回事：后者（runtime-unavailable）是 YouTube Music
- * / Spotify 这类要走桌面端那座桥的平台，在安卓上就是这个状态 —— 说成「未配置」会让人以为是
- * 这个构建漏了它们。
+ * - 「还没完全支持」：路是通的、协议没走全。说成「未配置」会让人以为填个地址就能用，
+ *   说成「仅桌面端」又与事实相反 —— 桌面端之外**正是**它本来要去的那一端。
+ * - 「仅桌面端」：这台机器跑不起来（`runtime-unavailable`），那几家要走桌面端那座桥的
+ *   平台在安卓上就是这个状态。
+ * - 「未配置 API」：剩下那种，真的只是没填地址。
  */
 const offTextKey = (row: ProviderAccountSummary): string => (
-    row.availability.reason === 'runtime-unavailable' ? 'home.providerDesktopOnly' : 'home.providerNotConfigured'
+    row.availability.canSignIn === false ? 'home.providerNotReady'
+        : row.availability.reason === 'runtime-unavailable' ? 'home.providerDesktopOnly'
+            : 'home.providerNotConfigured'
 );
 
 /** 竖着的一行名字下面那一句：登录着的是谁，或者这个平台此刻的状态。 */

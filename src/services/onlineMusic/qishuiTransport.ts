@@ -1,4 +1,4 @@
-import type { ProviderErrorCode } from '../../types/onlineMusic';
+import type { ProviderAvailability, ProviderErrorCode } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
 import { isQishuiNativeAvailable, requestQishuiNative } from '../../platform/foliaNative';
 
@@ -40,11 +40,21 @@ const hasDesktopBridge = () => (
     typeof window !== 'undefined' && typeof window.electron?.qishuiRequest === 'function'
 );
 
-export const getQishuiTransportAvailability = () => (
-    hasDesktopBridge() || isQishuiNativeAvailable()
-        ? { configured: true } as const
-        : { configured: false, reason: 'runtime-unavailable' } as const
-);
+/**
+ * 汽水此刻能不能用，按运行环境分三档：
+ *
+ * - 桌面端：Electron 那座桥在，照旧可用。
+ * - 安卓：原生宿主确实在（`isQishuiNativeAvailable()`），但签名、音频、收藏还有缺口 ——
+ *   让人点进去会点到一半掉出来。所以 `configured` **仍旧为真**：已登录的账号不被清掉
+ *   （accountRead.ts 只看 `configured`），只是挡住新登录，登录窗口那一行随之置灰。
+ *   若图省事直接回 `configured: false`，已登录的人会被清掉、又因入口置灰再也登不回来。
+ * - 网页端：两条路都没有，当够不着。
+ */
+export const getQishuiTransportAvailability = (): ProviderAvailability => {
+    if (hasDesktopBridge()) return { configured: true };
+    if (isQishuiNativeAvailable()) return { configured: true, canSignIn: false };
+    return { configured: false, reason: 'runtime-unavailable' };
+};
 
 const PROVIDER_ERROR_CODES = new Set<ProviderErrorCode>([
     'auth-required', 'unsupported', 'not-public', 'unavailable', 'not-playable',

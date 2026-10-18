@@ -1580,6 +1580,7 @@ export default {
     "onlineProvider": "Penyedia musik online",
     "providerNotConfigured": "API tidak dikonfigurasi untuk Web",
     "providerDesktopOnly": "Hanya aplikasi desktop",
+    "providerNotReady": "Belum didukung penuh di sini",
     "providerNoAccount": "Tanpa login",
     "allProviders": "Semua",
     "allProvidersDetail": "{{count}} penyedia",

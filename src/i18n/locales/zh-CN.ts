@@ -1581,6 +1581,7 @@ export default {
     "onlineProvider": "在线音乐平台",
     "providerNotConfigured": "Web 端未配置 API",
     "providerDesktopOnly": "仅桌面端可用",
+    "providerNotReady": "这一端还没完全支持",
     "providerNoAccount": "无需登录",
     "allProviders": "全部",
     "allProvidersDetail": "{{count}} 个平台",
