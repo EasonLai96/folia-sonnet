@@ -13,6 +13,14 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     lyricsRenderer: { section: 'appearance' },
     // 歌词动态壁纸那一节（fork 独有，只有安卓画；见 LyricsWallpaperSettingsSection）。
     lyricsWallpaper: { section: 'appearance' },
+    // 显示那四项（fork 独有；后两项只有安卓画，运行时判断在那两个组件里）。
+    glassSurface: { section: 'appearance' },
+    lyricFlat: { section: 'appearance' },
+    deviceType: { section: 'appearance' },
+    phoneFit: { section: 'appearance' },
+    // 云缓存那两项（fork 独有，AiProviderSettings 那块里的；只有非桌面才画）。
+    cloudCache: { section: 'appearance' },
+    cloudCacheBaseUrl: { section: 'appearance' },
     themePresets: { section: 'appearance' },
     electronSettings: { section: 'appearance' },
 
@@ -51,6 +59,8 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     languageSettings: { section: 'general' },
     ponderHints: { section: 'general' },
     pinnedCommands: { section: 'interaction' },
+    // 屏幕常亮（fork 独有，只有安卓画；见 AndroidScreenAwakeSetting）。
+    keepScreenAwake: { section: 'general' },
 
     // pages/GeneralPage (start-up and window)
     labWindowAndTools: { section: 'general' },

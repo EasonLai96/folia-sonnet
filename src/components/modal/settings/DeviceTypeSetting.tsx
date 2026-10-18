@@ -1,7 +1,7 @@
 import React from 'react';
-import { Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import SettingsSectionHeading from './navigation/SettingsSectionHeading';
+import { Segmented } from './kit';
+import { useSettingsKitTheme } from './kit/kitTheme';
 import { resolveCurrentUiScale, useDeviceProfileStore } from '../../../stores/useDeviceProfileStore';
 import UiScaleSlider from '../../shared/UiScaleSlider';
 import { resolveDeviceType, type DeviceType } from '../../../services/androidPhoneLayout';
@@ -13,21 +13,15 @@ import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
 // 设备类型只影响横屏：选了手机的话横屏时再收一档，同一块屏才塞得下桌面那套布局（见
 // services/androidPhoneLayout）。缩放是另一回事，由滑条定，拉过一次就以它为准。
 // 桌面端不问也不显示 —— 窗口多宽自己说了算。
+//
+// 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这一项只是里面的一行
+// （与 AndroidLyriconSetting 同款）；滑条占整行宽，单独写在行下面。
 
 const DEVICE_TYPES: readonly DeviceType[] = ['phone', 'tablet'];
 
-type DeviceTypeSettingProps = {
-    isDaylight: boolean;
-    settingsCardClass: string;
-    theme?: { secondaryColor?: string } | null;
-};
-
-const DeviceTypeSetting: React.FC<DeviceTypeSettingProps> = ({
-    isDaylight,
-    settingsCardClass,
-    theme,
-}) => {
+const DeviceTypeSetting: React.FC = () => {
     const { t } = useTranslation();
+    const { isDaylight } = useSettingsKitTheme();
     const deviceType = useDeviceProfileStore(state => state.deviceType);
     const setDeviceType = useDeviceProfileStore(state => state.setDeviceType);
     const uiScale = useDeviceProfileStore(state => state.uiScale);
@@ -36,49 +30,34 @@ const DeviceTypeSetting: React.FC<DeviceTypeSettingProps> = ({
     if (!isAndroidNativeRuntime()) return null;
 
     return (
-        <div className="space-y-4">
-            <SettingsSectionHeading icon={Smartphone} label={t('options.deviceTypeSection')} />
-            <div className={`p-4 rounded-xl border ${settingsCardClass}`}>
-                <div className="space-y-1 min-w-0">
-                    <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+        <>
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                    <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
                         {t('options.deviceType')}
                     </div>
-                    <div className="text-xs opacity-50 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                    <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
                         {t('options.deviceTypeDesc')}
                     </div>
                 </div>
-                <div className="mt-3 flex items-center gap-2">
-                    {DEVICE_TYPES.map(type => {
-                        const isSelected = deviceType === type;
-                        return (
-                            <button
-                                key={type}
-                                type="button"
-                                aria-pressed={isSelected}
-                                data-device-type-option={type}
-                                onClick={() => setDeviceType(type)}
-                                className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
-                                    isSelected
-                                        ? ''
-                                        : (isDaylight ? 'bg-zinc-100 hover:bg-zinc-200' : 'bg-white/[0.06] hover:bg-white/10')
-                                }`}
-                                style={isSelected ? { backgroundColor: theme?.secondaryColor || 'rgba(114, 119, 134, 1)', color: '#fff' } : undefined}
-                            >
-                                {t(`options.deviceType${type === 'phone' ? 'Phone' : 'Tablet'}`)}
-                            </button>
-                        );
-                    })}
-                </div>
+                <Segmented<DeviceType>
+                    value={deviceType}
+                    options={DEVICE_TYPES.map(type => ({
+                        value: type,
+                        label: t(`options.deviceType${type === 'phone' ? 'Phone' : 'Tablet'}`),
+                    }))}
+                    onChange={setDeviceType}
+                />
+            </div>
+            <div className="px-4 pb-4">
                 <UiScaleSlider
-                    className="mt-4"
                     isDaylight={isDaylight}
-                    accentColor={theme?.secondaryColor}
                     value={resolveCurrentUiScale(uiScale, deviceType)}
                     onChange={setUiScale}
                     showCompactHint={resolveDeviceType(deviceType) === 'phone'}
                 />
             </div>
-        </div>
+        </>
     );
 };
 

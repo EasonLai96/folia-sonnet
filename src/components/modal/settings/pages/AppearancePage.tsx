@@ -10,8 +10,12 @@ import { useVisualizerSettingsStore } from '../../../../stores/useVisualizerSett
 import { openAIEndpointOf } from '../../../../utils/openAIEndpoint';
 import { Button, FoldedGroup, Group, NumberField, Reveal, Row, Segmented, TextField, Toggle, Value, option, parseNumberText, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { settingsAnchorSubview } from '../../../../utils/settingsAnchorModel';
-import { isCapacitorAndroid } from '../../../../platform/runtime';
+import { hasElectronBridge, isCapacitorAndroid } from '../../../../platform/runtime';
 import { settingsCardClassFor } from '../settingsCardClasses';
+import AndroidPhoneFitSetting from '../AndroidPhoneFitSetting';
+import DeviceTypeSetting from '../DeviceTypeSetting';
+import GlassSurfaceSetting from '../GlassSurfaceSetting';
+import LyricFlatSetting from '../LyricFlatSetting';
 import LyricsWallpaperSettingsSection from '../LyricsWallpaperSettingsSection';
 import AiProviderSettings from '../AiProviderSettings';
 import { AiConnectionTestReply, useAiConnectionTest } from './AiConnectionTest';
@@ -27,6 +31,12 @@ const LYRICS: SettingsGroupDef = { id: 'lyricsRenderer', titleKey: 'options.lyri
 const THEME: SettingsGroupDef = { id: 'themePresets', titleKey: 'options.settingsHeadingTheme' };
 const SONG_THEME: SettingsGroupDef = { id: 'songTheme', titleKey: 'options.settingsHeadingSongTheme' };
 const AI: SettingsGroupDef = { id: 'electronSettings', titleKey: 'options.electronSettings', electronOnly: true };
+/**
+ * 显示那一组（fork 独有）：毛玻璃、歌词扁平两端都画；设备类型与手机适配只有安卓有
+ * （组件自己判运行时，搜索按 available 退场）。原在「通用」页，那里剩下的都是语言、
+ * 启动、更新这类「行为」，这几项讲的是「长什么样」，所以搬到这里，排在歌词那组之后。
+ */
+const VIEW: SettingsGroupDef = { id: 'surfaceView', titleKey: 'options.settingsHeadingView' };
 
 const O = {
     lyricsAnimation: option(LYRICS, 'lyricsAnimationAdjust', 'options.lyricsAnimationAdjust'),
@@ -41,6 +51,14 @@ const O = {
     autoGenerate: option(SONG_THEME, 'autoGenerateSongTheme', 'options.autoGenerateSongTheme'),
     source: option(SONG_THEME, 'themeGenerationSource', 'options.themeGenerationSource'),
     preferCustom: option(SONG_THEME, 'preferCustomTheme', 'options.preferCustomTheme'),
+    // 下面两项是 AiProviderSettings 那块卡片里的（fork 独有）：桌面端那块由 Electron 主进程
+    // 设置顶掉，非桌面才画，搜索里跟着一起退场。
+    cloudCache: option(SONG_THEME, 'cloudCache', 'options.cloudCache', { available: () => !hasElectronBridge() }),
+    cloudCacheBaseUrl: option(SONG_THEME, 'cloudCacheBaseUrl', 'options.cloudCacheBaseUrl', { available: () => !hasElectronBridge() }),
+    glassSurface: option(VIEW, 'glassSurface', 'options.glassSurface'),
+    lyricFlat: option(VIEW, 'lyricFlat', 'options.lyricFlat'),
+    deviceType: option(VIEW, 'deviceType', 'options.deviceType', { available: () => isCapacitorAndroid() }),
+    phoneFit: option(VIEW, 'phoneFit', 'options.phoneFit', { available: () => isCapacitorAndroid() }),
     aiProvider: option(AI, 'aiProvider', 'options.aiProvider'),
     geminiKey: option(AI, 'geminiApiKey', 'options.geminiApiKey'),
     openaiUrl: option(AI, 'openaiApiUrl', 'options.openaiApiUrl'),
@@ -143,6 +161,15 @@ const AppearancePage: React.FC = () => {
                     <Value>{getVisualizerModeLabel(visualizerMode, t)}</Value>
                 </Row>
                 <LyricsWallpaperSection isDaylight={isDaylight} />
+            </Group>
+
+            {/* 显示那四项：排在歌词那组之后、主题之前；每行自带左右两栏的行式排布。 */}
+            <Group def={VIEW}>
+                <GlassSurfaceSetting />
+                <LyricFlatSetting />
+                {/* 下面两项组件内部自行判断运行时：非安卓直接返回 null，这里不用再判端。 */}
+                <DeviceTypeSetting />
+                <AndroidPhoneFitSetting />
             </Group>
 
             <Group def={THEME}>

@@ -3,19 +3,13 @@ import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppLanguagePreference } from '../../../../i18n/config';
+import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
 import { selectPonderSettingsSnapshot, usePonderStore } from '../../../../stores/usePonderStore';
 import { useSettingsModalStore } from '../../../../stores/useSettingsModalStore';
 import { Button, Group, Reveal, Row, Segmented, Select, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
-import { useSettingsKitTheme } from '../kit/kitTheme';
-import { settingsCardClassFor } from '../settingsCardClasses';
-import AndroidPhoneFitSetting from '../AndroidPhoneFitSetting';
 import AndroidScreenAwakeSetting from '../AndroidScreenAwakeSetting';
-import AndroidLyriconSetting from '../AndroidLyriconSetting';
-import DeviceTypeSetting from '../DeviceTypeSetting';
-import GlassSurfaceSetting from '../GlassSurfaceSetting';
-import LyricFlatSetting from '../LyricFlatSetting';
 import { FoundUpdateRow } from './FoundUpdateRow';
 import { useSettingsPage } from './settingsPageContext';
 
@@ -29,12 +23,14 @@ const LAUNCH: SettingsGroupDef = { id: 'labWindowAndTools', titleKey: 'options.s
 const UPDATE: SettingsGroupDef = { id: 'updateCheck', titleKey: 'options.updateCheck', electronOnly: true };
 const PONDER: SettingsGroupDef = { id: 'ponderHints', titleKey: 'options.ponderHints' };
 /**
- * 安卓专有那几项（fork 独有）。
+ * 安卓专有那一项（fork 独有）：屏幕常亮。
  *
- * 桌面端页面走的是 kit 的 Row，这几项还是老式卡片，塞不进去，所以整块挂在页面末尾；
- * 三项里有两个自己判运行时（非安卓返回 null），另外两个（玻璃面 / 歌词扁平）两端都显示。
+ * 显示那几项（毛玻璃 / 歌词扁平 / 设备类型 / 手机适配）搬去了外观页，Lyricon 搬去了
+ * 「连接与集成」页 —— 都是「看」的东西，堆在通用页里只是因为以前那里挂的是老式卡片。
+ * 整组只有安卓才画（组件自己也判一次运行时），所以靠 `available` 让它在桌面端连同这张
+ * 空卡、带这一条搜索结果一起退场。
  */
-const ANDROID: SettingsGroupDef = { id: 'androidSettings', titleKey: 'options.androidSettings' };
+const ANDROID: SettingsGroupDef = { id: 'androidSettings', titleKey: 'options.androidSettings', available: isCapacitorAndroid };
 
 const O = {
     language: option(LANGUAGE, 'appLanguage', 'options.appLanguage'),
@@ -46,6 +42,7 @@ const O = {
     updateChannel: option(UPDATE, 'updateChannel', 'options.updateChannel'),
     ponderHints: option(PONDER, 'ponderHintVisibility', 'options.ponderHints'),
     ponderTouchButton: option(PONDER, 'ponderTouchButton', 'options.ponderTouchButton'),
+    keepScreenAwake: option(ANDROID, 'keepScreenAwake', 'options.keepScreenAwake', { available: isCapacitorAndroid }),
 };
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
@@ -63,8 +60,6 @@ const GeneralPage: React.FC = () => {
     const titlebarButtons = usePlayerChromeSettingsStore(state => state.alwaysShowMainWindowTitlebar);
     const setTitlebarButtons = usePlayerChromeSettingsStore(state => state.handleToggleAlwaysShowMainWindowTitlebar);
     const ponder = usePonderStore(useShallow(selectPonderSettingsSnapshot));
-    const { isDaylight } = useSettingsKitTheme();
-    const androidSettingsCardClass = settingsCardClassFor(isDaylight);
 
     const resolvedLanguage = i18n.resolvedLanguage;
     const resolvedLanguageLabel = resolvedLanguage?.startsWith('zh')
@@ -178,16 +173,11 @@ const GeneralPage: React.FC = () => {
                 </Row>
             </Group>
 
-            <Group def={ANDROID}>
-                <Row below={<GlassSurfaceSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-                <Row below={<LyricFlatSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-                {/* 下面三项组件内部自行判断运行时：非安卓直接返回 null。 */}
-                <Row below={<DeviceTypeSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-                <Row below={<AndroidScreenAwakeSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-                <Row below={<AndroidPhoneFitSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-                {/* 状态栏歌词：开关曾随 IntegrationSettingsSubview 一起被删，这里补回挂载点。 */}
-                <Row below={<AndroidLyriconSetting isDaylight={isDaylight} settingsCardClass={androidSettingsCardClass} />} />
-            </Group>
+            {isCapacitorAndroid() && (
+                <Group def={ANDROID}>
+                    <AndroidScreenAwakeSetting />
+                </Group>
+            )}
         </>
     );
 };

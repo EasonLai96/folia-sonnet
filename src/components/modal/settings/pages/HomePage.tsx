@@ -37,6 +37,8 @@ const O = {
     tabExplore: option(HOME, 'showHomeTabExplore', 'options.showHomeTabExplore'),
     tabAlbums: option(HOME, 'showHomeTabAlbums', 'options.showHomeTabAlbums'),
     tabLocal: option(HOME, 'showHomeTabLocal', 'options.showHomeTabLocal'),
+    // 「AI 主题」：云端的那一页没有「显示某某页签」这种说法，标签直接沿用页签自己的名字。
+    tabCloud: option(HOME, 'showHomeTabCloud', 'home.aiTheme'),
     cardStyle: option(HOME, 'grid3dCardStyle', 'options.grid3dCardStyle'),
     rememberPosition: option(HOME, 'rememberHomeCardPosition', 'options.rememberHomeCardPosition'),
     fullBleedCover: option(GRID, 'gridViewFullBleedCover', 'options.gridViewFullBleedCover'),
@@ -58,6 +60,7 @@ const HomePage: React.FC = () => {
         tabAlbums: state.showHomeTabAlbums,
         tabLocal: state.showHomeTabLocal,
         tabExplore: state.showHomeTabExplore,
+        tabCloud: state.showHomeTabCloud,
         cardStyle: state.grid3dCardStyle,
         rememberPosition: state.rememberHomeCardPosition,
         setTabPlaylist: state.handleToggleHomeTabPlaylist,
@@ -65,6 +68,7 @@ const HomePage: React.FC = () => {
         setTabAlbums: state.handleToggleHomeTabAlbums,
         setTabLocal: state.handleToggleHomeTabLocal,
         setTabExplore: state.handleToggleHomeTabExplore,
+        setTabCloud: state.handleToggleHomeTabCloud,
         setCardStyle: state.handleSetGrid3dCardStyle,
         setRememberPosition: state.handleToggleRememberHomeCardPosition,
     })));
@@ -108,6 +112,7 @@ const HomePage: React.FC = () => {
                             { id: O.tabExplore.id, label: t('home.explore'), checked: home.tabExplore, onChange: home.setTabExplore, disabled: !hasExplore },
                             { id: O.tabAlbums.id, label: t('home.albums'), checked: home.tabAlbums, onChange: home.setTabAlbums },
                             { id: O.tabLocal.id, label: t('localMusic.folder'), checked: home.tabLocal, onChange: home.setTabLocal },
+                            { id: O.tabCloud.id, label: t('home.aiTheme'), checked: home.tabCloud, onChange: home.setTabCloud },
                         ]}
                     />
                 </Row>

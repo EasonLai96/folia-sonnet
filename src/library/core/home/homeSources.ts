@@ -101,6 +101,8 @@ export type LibraryHomeTabVisibility = {
     explore: boolean;
     albums: boolean;
     local: boolean;
+    /** 「AI 主题」：云端缓存里做过主题的歌。以前无条件出现，现在与其它页签一样能关掉。 */
+    cloud: boolean;
 };
 
 /**
@@ -125,7 +127,7 @@ export const resolveHomeTabs = ({
     ...(visibility.local ? [{ key: 'local' as const, label: { key: 'localMusic.folder' }, disabledReason: resolveLocalUnavailableReason(localAvailability) }] : []),
     // 「AI 主题」：云端缓存里所有做过主题的歌。它排在「本地」后面 —— 两者都不是某个平台
     // 的歌单，属于「别的来源」那一档。点它不铺墙（云端压根没有歌单），直接进曲目列表。
-    { key: 'cloud' as const, label: { key: 'home.aiTheme' } },
+    ...(visibility.cloud ? [{ key: 'cloud' as const, label: { key: 'home.aiTheme' } }] : []),
     ...(navidromeEnabled ? [{ key: 'navidrome' as const, label: { key: 'navidrome.title', fallback: 'Navidrome' } }] : []),
 ];
 

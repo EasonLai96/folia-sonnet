@@ -56,6 +56,7 @@ export const useLibraryHomeSources = ({
         explore: state.showHomeTabExplore,
         albums: state.showHomeTabAlbums,
         local: state.showHomeTabLocal,
+        cloud: state.showHomeTabCloud,
     })));
     // The FM card doubles as the mode readout: the card is the only place the current mode shows
     // up outside the player, and the picker can change it while this grid stays mounted.

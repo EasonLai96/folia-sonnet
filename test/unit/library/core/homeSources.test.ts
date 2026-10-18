@@ -102,7 +102,7 @@ describe('home tabs', () => {
 
     it('lists playlist, radio, albums, local, AI themes and navidrome in that order', () => {
         const tabs = resolveHomeTabs({
-            visibility: { playlist: true, radio: true, explore: false, albums: true, local: true },
+            visibility: { playlist: true, radio: true, explore: false, albums: true, local: true, cloud: true },
             navidromeEnabled: true,
             online,
             localAvailability: supported,
@@ -114,17 +114,17 @@ describe('home tabs', () => {
 
     it('hides the tabs the layout settings turn off and Navidrome when it is disabled', () => {
         const tabs = resolveHomeTabs({
-            visibility: { playlist: true, radio: false, explore: false, albums: true, local: false },
+            visibility: { playlist: true, radio: false, explore: false, albums: true, local: false, cloud: false },
             navidromeEnabled: false,
             online,
             localAvailability: supported,
         });
-        // 「AI 主题」不属于任何平台也没开关：本地那一项关掉了它照样在。
-        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'albums', 'cloud']);
+        // 「AI 主题」不属于任何平台，但和其它页签一样受设置开关管：关掉就不再出现。
+        expect(tabs.map(tab => tab.key)).toEqual(['playlist', 'albums']);
     });
 
     it('shows explore after radio only when the provider has a page of its own and the setting is on', () => {
-        const visibility = { playlist: true, radio: true, explore: true, albums: true, local: false };
+        const visibility = { playlist: true, radio: true, explore: true, albums: true, local: false, cloud: true };
         const withPage = source({ capabilities: { ...ALL, explore: true } });
         const keysOf = (online: ReturnType<typeof source>, shown = visibility) => resolveHomeTabs({
             visibility: shown,
@@ -139,7 +139,7 @@ describe('home tabs', () => {
 
     it('gives each unavailable tab its reason, naming the provider', () => {
         const tabs = translateHomeTabs(resolveHomeTabs({
-            visibility: { playlist: true, radio: true, explore: false, albums: true, local: true },
+            visibility: { playlist: true, radio: true, explore: false, albums: true, local: true, cloud: true },
             navidromeEnabled: false,
             online: source({ capabilities: NONE }),
             localAvailability: { supported: false, reason: 'insecure-http' },

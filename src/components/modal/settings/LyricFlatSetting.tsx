@@ -1,7 +1,6 @@
 import React from 'react';
-import { Type } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import SettingsSectionHeading from './navigation/SettingsSectionHeading';
+import { Toggle } from './kit';
 import { useLyricFlatSettingsStore } from '../../../stores/useLyricFlatSettingsStore';
 
 // src/components/modal/settings/LyricFlatSetting.tsx
@@ -9,50 +8,26 @@ import { useLyricFlatSettingsStore } from '../../../stores/useLyricFlatSettingsS
 //
 // 只管播放页那一层（App 里 [data-folia-lyric-surface] 标记的容器），命令面板、弹窗里的
 // 文字不在作用域内 —— 具体规则见 index.css 的 [data-lyric-flat] 段。
+//
+// 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这一项只是里面的一行
+// （与 AndroidLyriconSetting 同款）。两端都画，不是安卓专属。
 
-type LyricFlatSettingProps = {
-    isDaylight: boolean;
-    settingsCardClass: string;
-    theme?: { secondaryColor?: string } | null;
-};
-
-const LyricFlatSetting: React.FC<LyricFlatSettingProps> = ({
-    isDaylight,
-    settingsCardClass,
-    theme,
-}) => {
+const LyricFlatSetting: React.FC = () => {
     const { t } = useTranslation();
     const enabled = useLyricFlatSettingsStore(state => state.flatLyrics);
     const setEnabled = useLyricFlatSettingsStore(state => state.setFlatLyrics);
 
-    const toggleOffBackgroundClass = isDaylight ? 'bg-zinc-200' : 'bg-[#2A2D35]';
-
     return (
-        <div className="space-y-4">
-            <SettingsSectionHeading icon={Type} label={t('options.lyricFlatSection')} />
-            <div className={`p-4 rounded-xl border ${settingsCardClass}`}>
-                <div className="flex items-center justify-between gap-4">
-                    <div className="space-y-1 min-w-0">
-                        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                            {t('options.lyricFlat')}
-                        </div>
-                        <div className="text-xs opacity-50 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                            {t('options.lyricFlatDesc')}
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        role="switch"
-                        aria-checked={enabled}
-                        aria-label={t('options.lyricFlat')}
-                        onClick={() => setEnabled(!enabled)}
-                        className={`w-12 h-6 rounded-full p-1 transition-colors shrink-0 ${!enabled ? toggleOffBackgroundClass : ''}`}
-                        style={{ backgroundColor: enabled ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                    >
-                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-1">
+                <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
+                    {t('options.lyricFlat')}
+                </div>
+                <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
+                    {t('options.lyricFlatDesc')}
                 </div>
             </div>
+            <Toggle checked={enabled} onChange={() => setEnabled(!enabled)} />
         </div>
     );
 };
