@@ -9,6 +9,8 @@ import { useLibraryHomeDirectory } from '../../core/home/useLibraryHomeDirectory
 import { useLibraryHomeTabsRegistration } from '../../core/home/useLibraryHomeSurfaceRegistration';
 import { setBravaisSearchOpen } from './bravaisHomeUiStore';
 import { useBravaisHomeChrome } from './useBravaisHomeChrome';
+import { useTranslation } from 'react-i18next';
+import { useLibraryHomeCloudThemeEntry } from '../../core/directory/useLibraryHomeCloudTheme';
 import { BravaisHomeLocal, BravaisHomeNavidrome, BravaisHomeOnline } from './BravaisHomeSources';
 import BravaisHomeExplore from './BravaisHomeExplore';
 
@@ -21,6 +23,7 @@ import BravaisHomeExplore from './BravaisHomeExplore';
 // 页签条交给首页 surface 句柄（useLibraryHomeTabsRegistration），命令面板的「打开歌单 / 本地…」写的是同一个页签。
 
 const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
+    const { t } = useTranslation();
     const {
         account,
         user,
@@ -76,6 +79,22 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
         onOpenGridView,
     };
 
+    /*
+     * 「AI 主题」页签：这一屏的曲目列表自己开（下面那个 hook），首页这层留空 ——
+     * 铺一面墙只会挡住刚打开的那层。
+     *
+     * 这一支**必须写在最后那个 else 之前**：原来没有它，'cloud' 就直接掉进兜底的
+     * Navidrome 那一层 —— 于是用户点「AI 主题」看到的是「Navidrome 尚未配置」
+     * （那份配置当然没有），而这一屏本身的曲目列表从来没被打开过。
+     */
+    useLibraryHomeCloudThemeEntry({
+        tab,
+        enabled: isInteractive,
+        onOpenCollection: collection => onOpenGridView?.(collection),
+        label: t('home.aiTheme'),
+        notice: t('home.aiThemeNotice'),
+    });
+
     return (
         <div
             data-library-home="bravais"
@@ -107,6 +126,9 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
                     treesResource={homeResources.localDirectoryTrees}
                     directoryActions={directoryActions}
                 />
+            ) : tab === 'cloud' ? (
+                // 见上面那个 hook：这一屏的曲目列表自己开，首页这层不画东西。
+                null
             ) : (
                 <BravaisHomeNavidrome {...common} meta={tabLabel('navidrome')} overview={homeResources.navidromeOverview} />
             )}

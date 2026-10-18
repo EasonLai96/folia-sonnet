@@ -81,7 +81,15 @@ const LibraryTuiHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
     });
 
     const groups = useMemo(() => resolveHomeSourceGroups(tabs), [tabs]);
-    const activeSource: LibraryHomeSourceGroup['source'] = isOnlineHomeTab(tab) ? 'online' : tab === 'local' ? 'local' : 'navidrome';
+    /*
+     * 「AI 主题」单独一支：原来它掉进兜底的 `'navidrome'`，于是这一屏会去画 Navidrome
+     * 那五个 section（没配置时就是一句「Navidrome 尚未配置」）。
+     */
+    const activeSource: LibraryHomeSourceGroup['source'] = isOnlineHomeTab(tab)
+        ? 'online'
+        : tab === 'local' ? 'local'
+            : tab === 'cloud' ? 'cloud'
+                : 'navidrome';
     const sourceLabel = (group: LibraryHomeSourceGroup) => (
         group.source === 'online' ? online.providerLabel : group.tabs[0]?.label ?? group.source
     );
