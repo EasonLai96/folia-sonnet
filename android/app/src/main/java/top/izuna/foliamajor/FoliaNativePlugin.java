@@ -44,6 +44,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -1789,6 +1790,95 @@ public class FoliaNativePlugin extends Plugin {
             });
         }
         call.resolve();
+    }
+
+    /*
+     * 导出：让用户自己挑保存位置。
+     *
+     * WebView 里 <a download> 在安卓上要么静默丢进 Download、要么干脆没有反应 ——
+     * 用户点「导出歌词」看不到任何「存到哪儿」的界面。这里用系统的
+     * ACTION_CREATE_DOCUMENT（Storage Access Framework）弹一张保存位置选择器，
+     * 选完由原生把字节写进用户给的那个 URI。
+     *
+     * 文本走 content（原生按 UTF-8 编码），二进制走 contentBase64（批量导出那个 zip），
+     * 两条路都不经过 WebView 自己的下载器。
+     */
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        final String fileName = call.getString("fileName", "");
+        final String content = call.getString("content");
+        final String contentBase64 = call.getString("contentBase64");
+        if (fileName == null || fileName.trim().isEmpty()) {
+            call.reject("Missing fileName");
+            return;
+        }
+        if ((content == null || content.isEmpty()) && (contentBase64 == null || contentBase64.isEmpty())) {
+            call.reject("Missing content");
+            return;
+        }
+        final String mimeType = call.getString("mimeType", "application/octet-stream");
+        try {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(mimeType)
+                .putExtra(Intent.EXTRA_TITLE, fileName)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            // 用 Capacitor 的活动回调（@ActivityCallback + startActivityForResult）——
+            // 和导入音频那两条路一个写法，见 pickAudioFiles 上的注释。
+            startActivityForResult(call, intent, "handleSavedFile");
+        } catch (Exception error) {
+            call.reject("Save picker failed: " + error.getMessage(), error);
+        }
+    }
+
+    @ActivityCallback
+    private void handleSavedFile(PluginCall call, ActivityResult result) {
+        JSObject cancelled = new JSObject();
+        cancelled.put("saved", false);
+        cancelled.put("cancelled", true);
+        if (result == null || result.getResultCode() != Activity.RESULT_OK) {
+            call.resolve(cancelled);
+            return;
+        }
+        Intent data = result.getData();
+        Uri uri = data != null ? data.getData() : null;
+        if (uri == null) {
+            call.resolve(cancelled);
+            return;
+        }
+        OutputStream out = null;
+        try {
+            String contentBase64 = call.getString("contentBase64");
+            String content = call.getString("content");
+            byte[] bytes;
+            if (contentBase64 != null && !contentBase64.isEmpty()) {
+                bytes = Base64.decode(contentBase64, Base64.DEFAULT);
+            } else {
+                bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+            }
+            out = getContext().getContentResolver().openOutputStream(uri, "w");
+            if (out == null) {
+                call.reject("Cannot open destination");
+                return;
+            }
+            out.write(bytes);
+            out.flush();
+            JSObject saved = new JSObject();
+            saved.put("saved", true);
+            saved.put("uri", uri.toString());
+            saved.put("name", call.getString("fileName", ""));
+            call.resolve(saved);
+        } catch (Exception error) {
+            call.reject("Write failed: " + error.getMessage(), error);
+        } finally {
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                    // 关不掉也已经写完了。
+                }
+            }
+        }
     }
 
     /*

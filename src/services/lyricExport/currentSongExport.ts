@@ -16,7 +16,7 @@ import { getSongCacheWithLegacyMigration } from '../onlineMusic/resourceCache';
 import { applyUserAdjustments } from './applyUserAdjustments';
 import { getLocalLyricExportPath, isMatchedPureMusic } from './collectLocalLyrics';
 import { songToExportMetadata } from './lyricCacheMetadata';
-import { downloadLyricFile } from './lyricExportFiles';
+import { downloadLyricFile, type LyricFileSaveOutcome } from './lyricExportFiles';
 import type { ExportableLyric, LyricExportFormat } from './types';
 
 // src/services/lyricExport/currentSongExport.ts
@@ -117,16 +117,20 @@ export const buildCurrentSongExportEntry = async ({
     });
 };
 
-/** Downloads the current song's lyrics; resolves false when there is nothing to export. */
+/**
+ * 导出当前这首歌的歌词。
+ *
+ * 返回 'empty'（这首歌没有可导出的歌词）之外，就是保存那一趟的结果：安卓上会弹系统的
+ * 保存位置选择器，用户自己关掉就是 'cancelled' —— 那不算失败，也不该报「没有歌词」。
+ */
 export const exportCurrentSongLyrics = async (
     context: CurrentSongExportContext,
     format: LyricExportFormat,
-): Promise<boolean> => {
+): Promise<LyricFileSaveOutcome | 'empty'> => {
     const entry = await buildCurrentSongExportEntry(context);
-    if (!entry) return false;
-    downloadLyricFile(entry, format, {
+    if (!entry) return 'empty';
+    return downloadLyricFile(entry, format, {
         includeTranslation: true,
         includeRomanization: true,
     });
-    return true;
 };

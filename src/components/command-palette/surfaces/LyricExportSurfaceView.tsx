@@ -6,6 +6,7 @@ import { useLyricSettingsStore } from '../../../stores/useLyricSettingsStore';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
 import { runLyricExport } from '../../../services/lyricExport/runLyricExport';
 import { triggerBlobDownload } from '../../../services/lyricExport/lyricExportFiles';
+import { saveFileWithSystemPicker } from '../../../platform/nativeFileSave';
 import type {
     LyricExportFormat,
     LyricExportOptions,
@@ -81,7 +82,24 @@ export default function LyricExportSurfaceView({
             });
             if (controller.signal.aborted) return;
             if (result.archive) {
-                triggerBlobDownload(result.archive.blob, result.archive.fileName);
+                /*
+                 * 安卓上先弹「存到哪儿」：以前这里是 `<a download>`，WebView 里既不问位置
+                 * 也不给反馈，用户只看到「导出完了但不知道存哪了」。zip 走 base64 那条路。
+                 * 桌面 / 网页没有这个能力，照旧回落 Blob 下载。
+                 */
+                const outcome = await saveFileWithSystemPicker({
+                    fileName: result.archive.fileName,
+                    mimeType: 'application/zip',
+                    blob: result.archive.blob,
+                });
+                if (outcome === 'unavailable') {
+                    triggerBlobDownload(result.archive.blob, result.archive.fileName);
+                }
+                if (outcome === 'cancelled') {
+                    setRunState({ kind: 'idle' });
+                    setStatusMessage({ type: 'info', text: t('lyricExport.cancelled') });
+                    return;
+                }
             }
             setRunState({ kind: 'done', exported: result.exportedCount, skipped: result.skippedCount });
             setStatusMessage({

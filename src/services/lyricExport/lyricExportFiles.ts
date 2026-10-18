@@ -1,5 +1,6 @@
 import { createSafeObjectUrl } from '../../utils/blobGuards';
 import { sanitizeDownloadFileName } from '../../utils/downloadFileName';
+import { saveFileWithSystemPicker } from '../../platform/nativeFileSave';
 import { serializeEnhancedLrc } from '../../utils/lyrics/enhancedLrcSerializer';
 import {
     buildFoliaLyricDocument,
@@ -90,13 +91,26 @@ export const triggerBlobDownload = (blob: Blob, fileName: string): void => {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
 };
 
-/** Downloads a single song's lyrics in one format. */
-export const downloadLyricFile = (
+/** 'saved' 存好了 / 'cancelled' 弹了选择器但用户关掉了（这一端根本不弹就不返回它）。 */
+export type LyricFileSaveOutcome = 'saved' | 'cancelled';
+
+/**
+ * 导出一首歌的歌词。
+ *
+ * 安卓上走原生那张系统的保存位置选择器（ACTION_CREATE_DOCUMENT）—— 以前这里的
+ * `<a download>` 在 WebView 里既不问存哪儿、也不给任何反馈，用户只看到「点了没反应」。
+ * 没有原生能力的一端（桌面、网页）照旧回落成 Blob 下载。
+ */
+export const downloadLyricFile = async (
     entry: ExportableLyric,
     format: LyricExportFormat,
     options: LyricFileContentOptions,
-): void => {
+): Promise<LyricFileSaveOutcome> => {
     const content = buildLyricFileContent(entry, format, options);
-    const blob = new Blob([content], { type: MIME_TYPES[format] });
-    triggerBlobDownload(blob, `${buildLyricFileBaseName(entry)}.${LYRIC_EXPORT_EXTENSIONS[format]}`);
+    const fileName = `${buildLyricFileBaseName(entry)}.${LYRIC_EXPORT_EXTENSIONS[format]}`;
+    const outcome = await saveFileWithSystemPicker({ fileName, mimeType: MIME_TYPES[format], content });
+    // 只有「这一端没有原生保存」才回落：安卓上就算用户取消了，也不该再偷偷下一份。
+    if (outcome !== 'unavailable') return outcome;
+    triggerBlobDownload(new Blob([content], { type: MIME_TYPES[format] }), fileName);
+    return 'saved';
 };

@@ -57,12 +57,16 @@ const LyricFileButton: React.FC<LyricFileButtonProps> = ({ isDaylight, onImportL
         try {
             // Read the stores at click time: the export re-reads the song's raw lyric source, and
             // the source choice may have changed since this row last rendered.
-            const exported = await exportCurrentSongLyrics({
+            const outcome = await exportCurrentSongLyrics({
                 song: currentSong,
                 onScreenLyrics: usePlaybackStore.getState().lyrics,
                 activeLocalLyricsSource: usePlaybackStore.getState().activeLocalLyricsSource,
                 localLyricsPriority: useLyricSettingsStore.getState().localLyricsPriority,
             }, format);
+            // 安卓上会先弹「存到哪儿」；用户自己关掉那张选择器既不算失败、也不算「没有歌词」，
+            // 什么都不提示、面板也保持打开。
+            if (outcome === 'cancelled') return;
+            const exported = outcome === 'saved';
             setStatusMessage({
                 type: exported ? 'success' : 'info',
                 text: exported ? t('lyricExport.exported') : t('lyricExport.noLyrics'),

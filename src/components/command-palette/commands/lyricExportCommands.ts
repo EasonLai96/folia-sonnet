@@ -27,17 +27,19 @@ const exportCurrent = async (format: LyricExportFormat, context: CommandPaletteC
         import('../../../stores/useLyricSettingsStore'),
     ]);
     try {
-        const exported = await exportCurrentSongLyrics({
+        const outcome = await exportCurrentSongLyrics({
             song: currentSong,
             onScreenLyrics: lyrics,
             activeLocalLyricsSource: usePlaybackStore.getState().activeLocalLyricsSource,
             localLyricsPriority: useLyricSettingsStore.getState().localLyricsPriority,
         }, format);
+        // 安卓上会先弹「存到哪儿」；用户自己关掉那张选择器不算失败，也不该说「没有歌词」。
+        if (outcome === 'cancelled') return false;
         setStatusMsg({
-            type: exported ? 'success' : 'info',
-            text: exported ? t('lyricExport.exported', 'Lyrics exported') : t('lyricExport.noLyrics', 'No lyrics to export'),
+            type: outcome === 'saved' ? 'success' : 'info',
+            text: outcome === 'saved' ? t('lyricExport.exported', 'Lyrics exported') : t('lyricExport.noLyrics', 'No lyrics to export'),
         });
-        return exported;
+        return outcome === 'saved';
     } catch (error) {
         console.error('[CommandPalette] Lyric export failed', error);
         setStatusMsg({ type: 'error', text: t('lyricExport.failed', 'Lyric export failed') });
