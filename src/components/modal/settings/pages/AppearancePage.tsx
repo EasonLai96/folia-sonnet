@@ -11,7 +11,7 @@ import { openAIEndpointOf } from '../../../../utils/openAIEndpoint';
 import { Button, FoldedGroup, Group, NumberField, Reveal, Row, Segmented, TextField, Toggle, Value, option, parseNumberText, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { settingsAnchorSubview } from '../../../../utils/settingsAnchorModel';
 import { isCapacitorAndroid } from '../../../../platform/runtime';
-import { settingsCardClassFor, settingsToggleOffClassFor } from '../settingsCardClasses';
+import { settingsCardClassFor } from '../settingsCardClasses';
 import LyricsWallpaperSettingsSection from '../LyricsWallpaperSettingsSection';
 import AiProviderSettings from '../AiProviderSettings';
 import { AiConnectionTestReply, useAiConnectionTest } from './AiConnectionTest';
@@ -56,18 +56,14 @@ export const OPTIONS: SettingsOptionDef[] = Object.values(O);
 /**
  * 歌词动态壁纸那一节（fork 独有，Android 专有）。
  *
- * 上游把外观页重画成 kit 的一排 Row，这一节还是老式的卡片 + 滑条，塞不进 kit 的 Row，
+ * 上游把外观页重画成 kit 的一排 Row，这一节还是老式的行 + 滑条，塞不进 kit 的 Row，
  * 所以整块挂在「歌词动画」那一组下面；组件内部非安卓直接返回 null，这里不用再判端。
- * 主题色那两个类沿用设置窗口自己的算法（settingsCardClasses），别处老页面用的是同一套。
+ * 它整块落在这一组的 kit 卡片里，所以不自己画卡、不自己带边框；里面的开关、分段器、
+ * 按钮都用 kit 的那几个，跟下面「主题」「歌曲主题」两组是同一副样子。
  */
 const LyricsWallpaperSection: React.FC<{ isDaylight: boolean }> = ({ isDaylight }) => (
     <LyricsWallpaperSettingsSection
         isDaylight={isDaylight}
-        settingsCardClass={settingsCardClassFor(isDaylight)}
-        toggleOffBackgroundClass={settingsToggleOffClassFor(isDaylight)}
-        utilityGhostButtonClass={isDaylight
-            ? 'border-black/10 bg-black/[0.025] hover:bg-black/[0.055]'
-            : 'border-white/10 bg-white/5 hover:bg-white/10'}
         rangeInputClass={[
             'w-full h-1.5 rounded-full appearance-none cursor-pointer',
             '[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full',

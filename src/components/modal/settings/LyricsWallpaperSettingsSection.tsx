@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { Store, Video, Wallpaper } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Theme } from '../../../types';
 import { SettingsAnchor } from './navigation/SettingsAnchorContext';
-import SettingsSectionHeading from './navigation/SettingsSectionHeading';
-import SettingsRow, { SettingsToggle } from './SettingsRow';
+import SettingsRow from './SettingsRow';
 import { settingsDividerClassFor } from './settingsCardClasses';
+import { Button, Segmented, Toggle } from './kit';
 import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { encodeWallpaperImage } from '../../../utils/wallpaperImage';
 import { isCapacitorAndroid } from '../../../platform/runtime';
@@ -52,20 +51,12 @@ const BACKGROUND_LABEL_KEYS: Record<'cover' | 'color' | 'image' | 'video', strin
 
 type LyricsWallpaperSettingsSectionProps = {
     isDaylight: boolean;
-    settingsCardClass: string;
-    toggleOffBackgroundClass: string;
-    utilityGhostButtonClass: string;
     rangeInputClass: string;
-    theme?: Theme;
 };
 
 const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionProps> = ({
     isDaylight,
-    settingsCardClass,
-    toggleOffBackgroundClass,
-    utilityGhostButtonClass,
     rangeInputClass,
-    theme,
 }) => {
     const { t } = useTranslation();
     const lyricsWallpaperFeed = useVisualizerSettingsStore(state => state.lyricsWallpaperFeed);
@@ -369,31 +360,33 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
     };
 
     const dividerClass = settingsDividerClassFor(isDaylight);
-    const renderToggle = (checked: boolean, onChange: () => void) => (
-        <SettingsToggle checked={checked} onChange={onChange} offClass={toggleOffBackgroundClass} onColor={theme?.secondaryColor} />
-    );
 
     /* 非安卓平台整节不渲染 —— 放在 hooks 之后，订阅顺序才稳定。 */
     if (!isAndroid) return null;
 
     return (
-        <SettingsAnchor anchorId="lyricsWallpaper" label={t('options.lyricsWallpaperSection')} className="space-y-4">
-            <SettingsSectionHeading icon={Wallpaper} label={t('options.lyricsWallpaperSection')} />
-            <div className={`rounded-xl border overflow-hidden ${settingsCardClass}`}>
+        <SettingsAnchor anchorId="lyricsWallpaper" label={t('options.lyricsWallpaperSection')} className="mt-3">
+            {/*
+                整节挂在外观页「歌词动画」那张 kit 卡片里，所以自己不再画一张卡 ——
+                再套边框就成了卡里套卡。标题照 kit Group 的标题画，让这块的层级和
+                下面「主题」「歌曲主题」两组一致。
+            */}
+            <div className="mb-2 flex min-h-6 items-center gap-1.5 px-1">
+                <Wallpaper size={14} className="shrink-0 text-[color:var(--st-t2)]" />
+                <h3 className="text-[13px] font-semibold leading-5 text-[color:var(--st-t2)]">
+                    {t('options.lyricsWallpaperSection')}
+                </h3>
+            </div>
+            <div>
                 <SettingsRow
                     title={t('options.lyricsWallpaperApply')}
                     description={t('options.lyricsWallpaperApplyDesc')}
                     control={(
-                        <button
-                            type="button"
-                            onClick={handleOpenWallpaperPicker}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                            style={{ color: 'var(--text-primary)' }}
-                        >
+                        <Button onClick={handleOpenWallpaperPicker}>
                             {isWallpaperActive
                                 ? t('options.lyricsWallpaperActive')
                                 : t('options.lyricsWallpaperSet')}
-                        </button>
+                        </Button>
                     )}
                     dividerClass={dividerClass}
                 />
@@ -404,23 +397,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         : t('options.lyricsWallpaperStyleDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
-                            {(['minimal', 'follow'] as const).map((style) => (
-                                <button
-                                    key={style}
-                                    type="button"
-                                    onClick={() => onSetLyricsWallpaperStyle(style)}
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${lyricsWallpaperStyle === style ? '' : 'opacity-60'}`}
-                                    style={lyricsWallpaperStyle === style
-                                        ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
-                                        : { color: 'var(--text-primary)' }}
-                                >
-                                    {style === 'minimal'
-                                        ? t('options.lyricsWallpaperStyleMinimal')
-                                        : t('options.lyricsWallpaperStyleFollow')}
-                                </button>
-                            ))}
-                        </div>
+                        <Segmented
+                            value={lyricsWallpaperStyle}
+                            options={[
+                                { value: 'minimal', label: t('options.lyricsWallpaperStyleMinimal') },
+                                { value: 'follow', label: t('options.lyricsWallpaperStyleFollow') },
+                            ]}
+                            onChange={onSetLyricsWallpaperStyle}
+                        />
                     )}
                 />
                 {/* 精简模式下歌词是那颗可以拖的小窗，拖到角落 / 缩到最小又上了锁之后
@@ -458,14 +442,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             description={t('options.floatingLyricsOverSafeAreaDesc')}
                             dividerClass={dividerClass}
                             control={(
-                                <button
-                                    type="button"
-                                    onClick={() => onToggleWallpaperFloatingOverSafeArea(!wallpaperFloatingOverSafeArea)}
-                                    className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperFloatingOverSafeArea ? toggleOffBackgroundClass : ''}`}
-                                    style={{ backgroundColor: wallpaperFloatingOverSafeArea ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                                >
-                                    <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperFloatingOverSafeArea ? 'translate-x-6' : 'translate-x-0'}`} />
-                                </button>
+                                <Toggle checked={wallpaperFloatingOverSafeArea} onChange={onToggleWallpaperFloatingOverSafeArea} />
                             )}
                         />
                         {/* 叠加模式下的左右位置。只给初值：原生那边拖过之后以拖出来的为准。
@@ -526,14 +503,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 description={t('options.floatingLyricsFillSafeAreaDesc')}
                                 dividerClass={dividerClass}
                                 control={(
-                                    <button
-                                        type="button"
-                                        onClick={() => onToggleWallpaperFloatingFillSafeArea(!wallpaperFloatingFillSafeArea)}
-                                        className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperFloatingFillSafeArea ? toggleOffBackgroundClass : ''}`}
-                                        style={{ backgroundColor: wallpaperFloatingFillSafeArea ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                                    >
-                                        <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperFloatingFillSafeArea ? 'translate-x-6' : 'translate-x-0'}`} />
-                                    </button>
+                                    <Toggle checked={wallpaperFloatingFillSafeArea} onChange={onToggleWallpaperFloatingFillSafeArea} />
                                 )}
                             />
                         )}
@@ -591,23 +561,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             description={t('options.floatingLyricsFontSizeDesc')}
                             dividerClass={dividerClass}
                             control={(
-                                <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
-                                    {(['dynamic', 'custom'] as const).map((mode) => (
-                                        <button
-                                            key={mode}
-                                            type="button"
-                                            onClick={() => onSetWallpaperFloatingFontSizeMode(mode)}
-                                            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${wallpaperFloatingFontSizeMode === mode ? '' : 'opacity-60'}`}
-                                            style={wallpaperFloatingFontSizeMode === mode
-                                                ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
-                                                : { color: 'var(--text-primary)' }}
-                                        >
-                                            {mode === 'dynamic'
-                                                ? t('options.floatingLyricsFontSizeDynamic')
-                                                : t('options.floatingLyricsFontSizeCustom')}
-                                        </button>
-                                    ))}
-                                </div>
+                                <Segmented
+                                    value={wallpaperFloatingFontSizeMode}
+                                    options={[
+                                        { value: 'dynamic', label: t('options.floatingLyricsFontSizeDynamic') },
+                                        { value: 'custom', label: t('options.floatingLyricsFontSizeCustom') },
+                                    ]}
+                                    onChange={onSetWallpaperFloatingFontSizeMode}
+                                />
                             )}
                         />
                         {wallpaperFloatingFontSizeMode === 'custom' && (
@@ -640,16 +601,11 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                             description={t('options.floatingLyricsResetDesc')}
                             dividerClass={dividerClass}
                             control={(
-                                <button
-                                    type="button"
-                                    onClick={handleResetFloatingLyricsWindow}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
+                                <Button onClick={handleResetFloatingLyricsWindow}>
                                     {floatingResetDone
                                         ? t('options.floatingLyricsResetDone')
                                         : t('options.floatingLyricsReset')}
-                                </button>
+                                </Button>
                             )}
                         />
                     </>
@@ -661,16 +617,11 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.lyricsWallpaperOverlayDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={handleOpenOverlaySettings}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                            style={{ color: 'var(--text-primary)' }}
-                        >
+                        <Button onClick={handleOpenOverlaySettings}>
                             {hasOverlayPermission
                                 ? t('options.lyricsWallpaperOverlayGranted')
                                 : t('options.lyricsWallpaperOverlayGrant')}
-                        </button>
+                        </Button>
                     )}
                 />
                 {/* 叠层总开关：关掉之后一层都不挂，下面几项也就没有意义了。 */}
@@ -679,14 +630,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayEnabledDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayEnabled(!wallpaperOverlayEnabled)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayEnabled ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayEnabled ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayEnabled} onChange={onToggleWallpaperOverlayEnabled} />
                     )}
                 />
                 {/* 叠层不透明度：整层从几乎看不见到完全不透明。 */}
@@ -717,14 +661,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayAllAppsDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayAllApps(!wallpaperOverlayAllApps)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayAllApps ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayAllApps ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayAllApps ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayAllApps} onChange={onToggleWallpaperOverlayAllApps} />
                     )}
                 />
                 {/* 音乐锁屏：锁屏之上也挂同一层。 */}
@@ -733,14 +670,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayLockScreenDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayLockScreen(!wallpaperOverlayLockScreen)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayLockScreen ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayLockScreen ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayLockScreen ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayLockScreen} onChange={onToggleWallpaperOverlayLockScreen} />
                     )}
                 />
                 {/* 叠层只在锁屏上出现：桌面 / 所有应用 / App 内都不挂。 */}
@@ -749,14 +679,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayLockScreenOnlyDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayLockScreenOnly(!wallpaperOverlayLockScreenOnly)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayLockScreenOnly ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayLockScreenOnly ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayLockScreenOnly ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayLockScreenOnly} onChange={onToggleWallpaperOverlayLockScreenOnly} />
                     )}
                 />
                 {lockScreenActive && lockScreenStatus && (
@@ -806,14 +729,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayHideNativeLyricsDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayHideNativeLyrics(!wallpaperOverlayHideNativeLyrics)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideNativeLyrics ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayHideNativeLyrics ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideNativeLyrics ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayHideNativeLyrics} onChange={onToggleWallpaperOverlayHideNativeLyrics} />
                     )}
                 />
                 {/* 暂停时是否收起叠层。 */}
@@ -822,14 +738,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayHideWhenPausedDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayHideWhenPaused(!wallpaperOverlayHideWhenPaused)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideWhenPaused ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayHideWhenPaused ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideWhenPaused ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayHideWhenPaused} onChange={onToggleWallpaperOverlayHideWhenPaused} />
                     )}
                 />
                 {/* 歌词唱完之后（长尾奏）是否收起叠层。 */}
@@ -838,14 +747,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayHideAfterLyricsEndDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayHideAfterLyricsEnd(!wallpaperOverlayHideAfterLyricsEnd)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideAfterLyricsEnd ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayHideAfterLyricsEnd ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideAfterLyricsEnd ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayHideAfterLyricsEnd} onChange={onToggleWallpaperOverlayHideAfterLyricsEnd} />
                     )}
                 />
                 {/*
@@ -860,14 +762,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayHideCoverArtDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayHideCoverArt(!wallpaperOverlayHideCoverArt)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideCoverArt ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayHideCoverArt ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideCoverArt ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayHideCoverArt} onChange={onToggleWallpaperOverlayHideCoverArt} />
                     )}
                 />
                 {/* 纯音乐（没有歌词）时是否显示叠层。 */}
@@ -876,14 +771,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlaySkipInstrumentalDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlaySkipInstrumental(!wallpaperOverlaySkipInstrumental)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlaySkipInstrumental ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlaySkipInstrumental ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlaySkipInstrumental ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlaySkipInstrumental} onChange={onToggleWallpaperOverlaySkipInstrumental} />
                     )}
                 />
                 <SettingsRow
@@ -891,14 +779,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.wallpaperOverlayHideNativeProgressDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <button
-                            type="button"
-                            onClick={() => onToggleWallpaperOverlayHideNativeProgress(!wallpaperOverlayHideNativeProgress)}
-                            className={`h-6 w-12 shrink-0 rounded-full p-1 transition-colors ${!wallpaperOverlayHideNativeProgress ? toggleOffBackgroundClass : ''}`}
-                            style={{ backgroundColor: wallpaperOverlayHideNativeProgress ? theme?.secondaryColor || 'rgba(114, 119, 134, 1)' : undefined }}
-                        >
-                            <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${wallpaperOverlayHideNativeProgress ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
+                        <Toggle checked={wallpaperOverlayHideNativeProgress} onChange={onToggleWallpaperOverlayHideNativeProgress} />
                     )}
                 />
                 <SettingsRow
@@ -906,21 +787,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.lyricsWallpaperBackgroundDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
-                            {(['cover', 'color', 'image', 'video'] as const).map((mode) => (
-                                <button
-                                    key={mode}
-                                    type="button"
-                                    onClick={() => onSetLyricsWallpaperBackground(mode)}
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${lyricsWallpaperBackground === mode ? '' : 'opacity-60'}`}
-                                    style={lyricsWallpaperBackground === mode
-                                        ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
-                                        : { color: 'var(--text-primary)' }}
-                                >
-                                    {t(BACKGROUND_LABEL_KEYS[mode])}
-                                </button>
-                            ))}
-                        </div>
+                        <Segmented
+                            value={lyricsWallpaperBackground}
+                            options={(['cover', 'color', 'image', 'video'] as const).map(mode => ({
+                                value: mode,
+                                label: t(BACKGROUND_LABEL_KEYS[mode]),
+                            }))}
+                            onChange={onSetLyricsWallpaperBackground}
+                        />
                     )}
                 >
                     {lyricsWallpaperBackground === 'image' && (
@@ -938,14 +812,9 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 />
                             )}
                             <div className="space-y-2">
-                                <button
-                                    type="button"
-                                    onClick={() => imageInputRef.current?.click()}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
+                                <Button onClick={() => imageInputRef.current?.click()}>
                                     {t('options.lyricsWallpaperPickImage')}
-                                </button>
+                                </Button>
                                 {lyricsWallpaperImage && (
                                     <button
                                         type="button"
@@ -978,16 +847,11 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                                 <Video className="h-6 w-6 opacity-60" />
                             </div>
                             <div className="space-y-2">
-                                <button
-                                    type="button"
-                                    onClick={() => void handlePickVideo()}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
+                                <Button onClick={() => void handlePickVideo()}>
                                     {t(hasVideo
                                         ? 'options.lyricsWallpaperReplaceVideo'
                                         : 'options.lyricsWallpaperPickVideo')}
-                                </button>
+                                </Button>
                                 {hasVideo && (
                                     <button
                                         type="button"
@@ -1030,13 +894,13 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 <SettingsRow
                     title={t('options.lyricsWallpaperProgress')}
                     description={t('options.lyricsWallpaperProgressDesc')}
-                    control={renderToggle(lyricsWallpaperProgress, () => onToggleLyricsWallpaperProgress(!lyricsWallpaperProgress))}
+                    control={<Toggle checked={lyricsWallpaperProgress} onChange={onToggleLyricsWallpaperProgress} />}
                     dividerClass={dividerClass}
                 />
                 <SettingsRow
                     title={t('options.lyricsWallpaperTranslation')}
                     description={t('options.lyricsWallpaperTranslationDesc')}
-                    control={renderToggle(lyricsWallpaperTranslation, () => onToggleLyricsWallpaperTranslation(!lyricsWallpaperTranslation))}
+                    control={<Toggle checked={lyricsWallpaperTranslation} onChange={onToggleLyricsWallpaperTranslation} />}
                     dividerClass={dividerClass}
                 />
                 {/* 字体来路：跟随播放页 / 单独指定。选「单独」才有下面那个选字体的按钮。 */}
@@ -1045,23 +909,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                     description={t('options.lyricsWallpaperFontModeDesc')}
                     dividerClass={dividerClass}
                     control={(
-                        <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: 'var(--text-secondary)' }}>
-                            {(['follow', 'custom'] as const).map((mode) => (
-                                <button
-                                    key={mode}
-                                    type="button"
-                                    onClick={() => onSetWallpaperLyricsFontMode(mode)}
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${wallpaperLyricsFontMode === mode ? '' : 'opacity-60'}`}
-                                    style={wallpaperLyricsFontMode === mode
-                                        ? { backgroundColor: theme?.accentColor || '#3b82f6', color: '#fff' }
-                                        : { color: 'var(--text-primary)' }}
-                                >
-                                    {mode === 'follow'
-                                        ? t('options.lyricsWallpaperFontFollow')
-                                        : t('options.lyricsWallpaperFontCustom')}
-                                </button>
-                            ))}
-                        </div>
+                        <Segmented
+                            value={wallpaperLyricsFontMode}
+                            options={[
+                                { value: 'follow', label: t('options.lyricsWallpaperFontFollow') },
+                                { value: 'custom', label: t('options.lyricsWallpaperFontCustom') },
+                            ]}
+                            onChange={onSetWallpaperLyricsFontMode}
+                        />
                     )}
                 />
                 {wallpaperLyricsFontMode === 'custom' && (
@@ -1070,25 +925,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                         description={t('options.lyricsWallpaperFontDesc')}
                         control={(
                             <div className="flex shrink-0 items-center gap-1.5">
-                                <button
-                                    type="button"
-                                    onClick={() => void handlePickWallpaperFont()}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
+                                <Button onClick={() => void handlePickWallpaperFont()}>
                                     {hasWallpaperFont
                                         ? t('options.lyricsWallpaperReplaceFont')
                                         : t('options.lyricsWallpaperPickFont')}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsFontMarketOpen(true)}
-                                    className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityGhostButtonClass}`}
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
-                                    <Store size={13} />
+                                </Button>
+                                <Button icon={Store} onClick={() => setIsFontMarketOpen(true)}>
                                     {t('options.fontMarket')}
-                                </button>
+                                </Button>
                             </div>
                         )}
                         dividerClass={dividerClass}
@@ -1124,7 +968,7 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
                 <SettingsRow
                     title={t('options.lyricsWallpaperFeed')}
                     description={t('options.lyricsWallpaperFeedDesc')}
-                    control={renderToggle(lyricsWallpaperFeed, () => onToggleLyricsWallpaperFeed(!lyricsWallpaperFeed))}
+                    control={<Toggle checked={lyricsWallpaperFeed} onChange={onToggleLyricsWallpaperFeed} />}
                     dividerClass={dividerClass}
                     isLast
                 />

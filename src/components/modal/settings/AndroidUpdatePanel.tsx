@@ -20,7 +20,8 @@ import { useUpdateCenter } from '../../../hooks/useUpdateCenter';
 import { openExternalUrl } from '../../../utils/openExternalUrl';
 
 // src/components/modal/settings/AndroidUpdatePanel.tsx
-// 安卓「版本更新」这块的自成一体的卡片：状态、下载进度、下载 / 安装全在一个框里。
+// 安卓「版本更新」这一块：状态、下载进度、下载 / 安装都在一处，但自己不带框 ——
+// 设置页里它长在「关于」那张卡里，再画一层边框就是卡里套卡。
 //
 // 之前这里是一排散着的小按钮 + 一条单独的状态文字，手机上既点不准也看不出主次。现在收敛成：
 //   ┌ 状态（发现新版本 v0.7.19 · 68.4 MB）┐
@@ -65,14 +66,14 @@ const failureKeyOf = (message: string): string => {
 };
 
 type AndroidUpdatePanelProps = {
-    /** 卡片宽度类。设置页居中收窄，弹窗里撑满。 */
+    /** 宽度类。默认撑满所在那一列。 */
     widthClassName?: string;
-    /** 卡片右上角的额外操作（弹窗用它放「忽略此版本」）。 */
+    /** 右上角的额外操作（弹窗用它放「忽略此版本」）。 */
     headerAction?: React.ReactNode;
 };
 
 const AndroidUpdatePanel: React.FC<AndroidUpdatePanelProps> = ({
-    widthClassName = 'w-full max-w-sm',
+    widthClassName = 'w-full',
     headerAction,
 }) => {
     const { t } = useTranslation();
@@ -150,10 +151,16 @@ const AndroidUpdatePanel: React.FC<AndroidUpdatePanelProps> = ({
     const isHighlight = action === 'install' || (isAvailable && phase.kind !== 'failed');
 
     return (
+        {/*
+            这一块画在设置 → 帮助页「关于」那张 kit 卡片里（以及启动时的更新弹窗），
+            所以自己不再画一张卡：没有边框、没有圆角、也不限宽度 —— 之前它是
+            `w-full max-w-sm` 的一张带边框的卡，嵌在卡片里右边一大条空白。
+            左右内边距照 kit 那一行的 pl-4 / pr-4，字和上面的「版本」那行对齐。
+        */}
         <div
             data-folia-update-panel="true"
             data-folia-update-action={action}
-            className={`${widthClassName} rounded-2xl border border-white/10 bg-white/[0.06] p-3 font-sans`}
+            className={`${widthClassName} bg-white/[0.06] px-4 py-3 font-sans`}
         >
             <div className="mb-2.5 flex items-start gap-2">
                 <span className={`mt-[1px] shrink-0 ${phase.kind === 'failed' || result?.status === 'failed' ? 'text-amber-500' : isHighlight ? 'text-amber-500' : 'opacity-50'}`}>
