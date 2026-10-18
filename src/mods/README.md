@@ -23,7 +23,7 @@ Folium 模组系统在窗口里的一半：契约（`folium/contract.ts` 是 cli
 | `src/components/visualizer/VisualizerBackdrop.tsx`、`VisualizerShell.tsx` | `FoliumStageLayerSlot`，`player.stage.back` 和 `player.stage.front` | 播放页歌词动画后面和前面的模组图层；预览里没有。在 `VisualizerRenderer` 里由 backdrop 画，换歌词样式时不重新挂载；shell 只在单独使用时画 |
 | `src/components/app/home/FoliumHomePage.tsx`、`useFoliumHomeNavigation.ts` | `homeTabsRegistry` 与它的选择（`folium/registries/homeTabs.ts`）、`useFoliumPanelContext`（`folium/registries/useFoliumPanelContext.ts`） | 首页导航末尾模组的整页（`folium.registries.homeTabs`） |
 | `src/components/visualizer/VisualizerShell.tsx` 等播放页控件 | `usePlayerOverlayReservation`（`src/hooks/usePlayerOverlayLayout.ts`），读的是 `src/services/playerOverlayLayout.ts` | 实验接口 `player.layout`：舞台上下文的 `getLayout()`，由 `folium/registries/stageRegistry.ts` 按模组的选用发给它的挂载 |
-| `src/components/app/playback/bridges/useElectronPlaybackBridge.ts`、`src/services/remoteControlActions.ts`、`src/components/remote/RemoteSheet.tsx` | `folium/registries/remoteActions.ts` | 实验接口 `remote.actions`：模组加在遥控窗口「更多」里「模组」页的按钮，点下去在主窗口执行 |
+| `src/components/app/playback/bridges/useElectronPlaybackBridge.ts`、`src/services/remoteControlActions.ts` | `folium/registries/remoteActions.ts` | 实验接口 `remote.actions`：模组加在遥控窗口「更多」里「模组」页的按钮，点下去在主窗口执行。**目前只有推数据的一半**：快照里带 `remoteActions`，但遥控窗口是 fork 自己的一套 UI，没有渲染它的「模组」页，所以按钮还不会出现在窗口上 |
 | `src/vite-env.d.ts` | `src/mods/types.ts` 里的类型 | `window.electron.mods` 这座桥的类型 |
 | `src/services/hostExtensionHooks.ts` | 不引用 `src/mods`；`runtime/hostEvents.ts` 和 `folium/experimental.ts` 往里装钩子 | 应用在歌词进来、一首歌开始放的地方调它；没装钩子时原样通过，应用不需要知道有模组 |
 | `electron/main.cjs` | `createModSystem`（`electron/modSystem/modSystem.cjs`）、`MOD_PROTOCOL_PRIVILEGED_SCHEME` | 主进程那一半：开关、启动、IPC、`folia-mod://` 协议、退出时收拾 |

@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 // src/components/remote/useRemoteSleeve.ts
-// Which of the remote window's two looks is on screen: the card in use, or the idle look (no
-// keys, the line in their place, and with "expand cover" on, the sleeve: the large cover on the
-// left, the song and the line on the right). The looks slide into each other in remote.css; with
-// reduced motion nothing slides, and this hook swaps them behind a short fade of the whole card
-// instead.
+// Which of the remote window's two looks is on screen: the card in use (keys and timestamps), or
+// the idle look (lyrics instead of keys, and with "expand cover" on, the cover spread over the
+// whole card). The looks slide into each other with CSS transitions; with reduced motion those
+// transitions are switched off and the card would jump, so this hook swaps the looks behind a
+// short fade of the whole card instead.
 
 const SWAP_OUT_MS = 90;
 const SWAP_IN_MS = 140;
