@@ -4359,7 +4359,7 @@ export default {
     "copyPrompt": "Copy prompt",
     "copyPromptTitle": "1. Copy AI Prompt",
     "importJsonTitle": "2. Paste JSON Result",
-    "prompt": "I am using the folia-major music player on GitHub and need help with a problem.\n\nFolia Guide: {{guideUrl}}\nFolia repository: {{repoUrl}}\n\nPlease use these references as context, then help me understand and solve the problem I describe next. If any information is missing, ask what I should provide before making uncertain assumptions."
+    "prompt": "I am using the folia-sonnet music player on GitHub and need help with a problem.\n\nFolia Guide: {{guideUrl}}\nFolia repository: {{repoUrl}}\n\nPlease use these references as context, then help me understand and solve the problem I describe next. If any information is missing, ask what I should provide before making uncertain assumptions."
   },
   "freeSoftwareNotice": {
     "title": "Folia is free software",

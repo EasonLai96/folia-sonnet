@@ -14,7 +14,9 @@ import { iconLabel } from './settings/pages/iconLabel';
 
 const FOLIA_GUIDE_URL = 'https://folia-site.cielaniska.top/guide/llm-routing';
 const FOLIA_DOCS_URL = 'https://folia-site.cielaniska.top/guide/';
-const FOLIA_REPOSITORY_URL = 'https://github.com/chthollyphile/folia-major';
+// fork 的仓库，不是上游 chthollyphile/folia-major —— 同步上游时被带回原版过，
+// 别再让它落回去。
+const FOLIA_REPOSITORY_URL = 'https://github.com/maimai993/folia-sonnet';
 
 const LINKS: SettingsGroupDef = { id: 'aiHelpLinks', titleKey: 'aiHelp.title' };
 const ASK_AI: SettingsGroupDef = { id: 'aiHelpPrompt', titleKey: 'aiHelp.askAiTitle' };
