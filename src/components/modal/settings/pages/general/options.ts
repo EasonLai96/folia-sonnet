@@ -1,5 +1,5 @@
 import { isCapacitorAndroid } from '../../../../../platform/runtime';
-import { option, type SettingsGroupDef } from '../../../kit';
+import { option, type SettingsGroupDef } from '../../kit';
 
 // src/components/modal/settings/pages/general/options.ts
 // The groups and options of the 通用 page, declared apart from the page so the files that draw its

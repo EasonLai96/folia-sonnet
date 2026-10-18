@@ -26,7 +26,8 @@ const ICON_CLASS = {
 
 type ButtonProps = {
     onClick: () => void;
-    variant?: 'primary' | 'quiet';
+    /** 不给就是 `fill`（有底那档）。下面的查表也是这么兜的，别把这一项从类型里删掉。 */
+    variant?: 'fill' | 'primary' | 'quiet';
     icon?: LucideIcon;
     /** Shown in the kit's tooltip on hover and on keyboard focus; the name of a button that is only an icon. */
     tip?: string;

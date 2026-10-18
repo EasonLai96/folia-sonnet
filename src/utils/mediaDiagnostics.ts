@@ -44,6 +44,10 @@ export type MediaDiagnosticsSnapshot = {
     /** 从图尾到声卡的延迟（秒）—— CPU 吃紧时它会变，缓冲够不够看它。 */
     audioContextOutputLatencySec: number | null;
     audioContextState: string | null;
+    /** 这一帧的频谱从哪来：`worklet`（音频线程算好 post 出来）还是 `analyser`（主线程每帧现算 FFT）。 */
+    spectrumSource: SpectrumSource;
+    /** 走 `analyser` 兜底的原因；走 `worklet` 时为 null。 */
+    spectrumSourceReason: string | null;
 };
 
 import type { MotionValue } from 'framer-motion';
@@ -128,7 +132,10 @@ const readAudioContextDiagnostics = (context: AudioContext): void => {
 const describeLatencyHint = (
     hint: AudioContextLatencyCategory | number | 'unknown' | undefined,
 ): string => {
-    if (typeof hint === 'number' && Number.isFinite(hint)) return `${hint}s`;
+    // 先按 `typeof` 分掉数字那一路再回落：`Number.isFinite` 不是类型守卫，写成
+    // `typeof x === 'number' && Number.isFinite(x)` 之后 TS 窄不掉 `number`，
+    // 下面那行 `hint || 'unknown'` 的返回类型就带上 number，跟声明的 string 对不上。
+    if (typeof hint === 'number') return Number.isFinite(hint) ? `${hint}s` : 'unknown';
     return hint || 'unknown';
 };
 

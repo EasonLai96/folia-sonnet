@@ -25,10 +25,15 @@ type UseSessionRestoreControllerParams = {
     blobUrlRef: MutableRefObject<string | null>;
     currentOnlineAudioUrlFetchedAtRef: MutableRefObject<number | null>;
     setLyrics: (nextLyrics: LyricData | null) => void;
+    /*
+     * 结果类型只写 `unknown`，不抄那串字面量并集：这里只是把回调往下一路传，并不按返回值
+     * 分支。抄一遍的话，`restoreCachedThemeForSong` 每多一种结果（例如「本机改过」与「云端缓
+     * 存」这两种）都会让这里编译不过，而它其实根本不关心是哪种。
+     */
     restoreCachedThemeForSong: (songId: ThemeCacheSongKey | SongResult, options?: {
         allowLastUsedFallback?: boolean;
         preserveCurrentOnMiss?: boolean;
-    }) => Promise<'legacy' | 'dual' | 'fallback-dual' | 'restored' | 'none'>;
+    }) => Promise<unknown>;
     persistLastPlaybackCache: (song: SongResult | null, queue: SongResult[]) => Promise<void>;
     clearPersistedStagePlaybackCache: () => Promise<void>;
     loadLocalSongs: () => Promise<void>;

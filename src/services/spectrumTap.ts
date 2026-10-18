@@ -43,8 +43,15 @@ const addModuleWithTimeout = async (context: AudioContext, url: string): Promise
 
 /** 音频线程交出来的一份频谱。读它不需要等任何东西。 */
 export type SpectrumSnapshot = {
-    /** 与 `getByteFrequencyData` 同格式的整条频谱。 */
-    spectrum: Uint8Array;
+    /*
+     * 与 `getByteFrequencyData` 同格式的整条频谱。
+     *
+     * 泛型要写明 `ArrayBuffer`：光写 `Uint8Array` 在 TS 5.7 之后等于
+     * `Uint8Array<ArrayBufferLike>`，比 motionSignals 里那条 `MotionValue`
+     * 装的 `Uint8Array<ArrayBuffer>` 宽，写回去会被判类型不符。运行时这里
+     * 本来就是 `new Uint8Array(ArrayBuffer)`，标窄才是对的。
+     */
+    spectrum: Uint8Array<ArrayBuffer>;
     bass: number;
     lowMid: number;
     mid: number;

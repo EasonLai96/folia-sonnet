@@ -361,6 +361,14 @@ const LyricsWallpaperSettingsSection: React.FC<LyricsWallpaperSettingsSectionPro
     };
 
     const dividerClass = settingsDividerClassFor(isDaylight);
+    /*
+     * 「次要动作」那颗按钮的底：白底 / 黑底两套。它跟实验室那颗是同一个长相，但那边
+     * 是组件内的局部变量，这边拿不到，所以就地照抄一份 —— 不抽出去共享，是因为那颗
+     * 还带着自己的圆角与内边距，两边尺寸并不一样。
+     */
+    const utilityGhostButtonClass = isDaylight
+        ? 'border-zinc-300 bg-white/50 hover:bg-white/80'
+        : 'border-white/10 bg-white/5 hover:bg-white/10';
 
     /* 非安卓平台整节不渲染 —— 放在 hooks 之后，订阅顺序才稳定。 */
     if (!isAndroid) return null;

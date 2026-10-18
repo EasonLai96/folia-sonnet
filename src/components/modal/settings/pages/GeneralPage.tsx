@@ -7,6 +7,7 @@ import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore'
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
 import { selectPonderSettingsSnapshot, usePonderStore } from '../../../../stores/usePonderStore';
 import { useSettingsModalStore } from '../../../../stores/useSettingsModalStore';
+import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { Button, Group, Reveal, Row, Segmented, Select, Toggle, type SettingsOptionDef } from '../kit';
 import AndroidScreenAwakeSetting from '../AndroidScreenAwakeSetting';
 import { FoundUpdateRow } from './FoundUpdateRow';

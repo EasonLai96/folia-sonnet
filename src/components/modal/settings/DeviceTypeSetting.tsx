@@ -34,7 +34,10 @@ const DeviceTypeSetting: React.FC = () => {
         <>
             <Row option={O.deviceType}>
                 <Segmented<DeviceType>
-                    value={deviceType}
+                    // 存里那一份是 `DeviceType | null`（null = 还没问过，按屏幕尺寸推断），
+                    // 而档位必须落在某一档上 —— 所以过一遍 resolveDeviceType，跟下面
+                    // 缩放那行判手机用的是同一个口径。
+                    value={resolveDeviceType(deviceType)}
                     options={DEVICE_TYPES.map(type => ({
                         value: type,
                         label: t(`options.deviceType${type === 'phone' ? 'Phone' : 'Tablet'}`),
