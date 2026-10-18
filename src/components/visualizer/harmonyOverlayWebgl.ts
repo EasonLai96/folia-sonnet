@@ -263,7 +263,14 @@ export class HarmonyOverlayRenderer {
         gl.bindVertexArray(null);
     }
 
-    release(): void {
+    /**
+     * 只删自己建的 GL 对象，不动上下文。
+     *
+     * 上下文被系统收走（安卓 WebView 常见）之后要等 `webglcontextrestored` 才能重画，那时候还得
+     * 用同一个上下文重新建 program 和纹理 —— 所以这里不能顺手 `loseContext()`，否则刚恢复就又被
+     * 自己弄死了。
+     */
+    dispose(): void {
         const gl = this.gl;
         if (!gl) return;
         gl.deleteTexture(this.idleTex);
@@ -271,10 +278,19 @@ export class HarmonyOverlayRenderer {
         gl.deleteBuffer(this.vbo);
         gl.deleteVertexArray(this.vao);
         gl.deleteProgram(this.program);
-        gl.getExtension('WEBGL_lose_context')?.loseContext();
-        this.gl = null;
         this.program = null;
         this.bake = null;
+        this.bakeKey = '';
+        this.lastBakeInput = null;
+    }
+
+    /** 整块不要了：画布即将从文档里摘掉，顺手把上下文还回去。 */
+    release(): void {
+        const gl = this.gl;
+        if (!gl) return;
+        this.dispose();
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+        this.gl = null;
     }
 
     /**

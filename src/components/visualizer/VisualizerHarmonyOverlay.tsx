@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, type MotionValue, useMotionValueEvent, useTransform } from 'framer-motion';
 import type { Line, LyricBackgroundVocal, SubtitleContentMode, Theme, Word } from '../../types';
 import { resolveThemeFontStack, resolveThemeFontWeight, resolveThemeTranslationFontStack } from '../../utils/fontStacks';
@@ -87,6 +87,11 @@ const createHarmonyLine = (vocal: LyricBackgroundVocal): Line => ({
  * 上掉帧的原因。
  *
  * 拿不到 webgl2（或渲染器初始化失败）时整块退回 DOM 版：GPU 这边只是更快，不是唯一画法。
+ *
+ * 画循环那个 effect 故意不依赖歌词 / 字号 / 主题：一张画布上的 webgl2 上下文建好之后不能拆了
+ * 重建 —— `release()` 里有一次 `loseContext()`，同一个 canvas 再 `getContext('webgl2')` 拿回来的
+ * 是那个已经丢掉的上下文，之后每次 draw 都是空操作，画布就白了。所以这些输入走 ref 喂给循环；
+ * 换歌词时组件本来就跟着外层的 key 一起重挂，用不着靠重跑 effect 来换。
  */
 const HarmonyGlText: React.FC<{
     vocal: LyricBackgroundVocal;
@@ -112,52 +117,98 @@ const HarmonyGlText: React.FC<{
     );
     const runs = useMemo(() => buildHarmonyColorRuns(vocal, theme), [theme, vocal]);
 
+    // 每帧要读的输入放在 ref 里：字号 / 主题色 / 歌词换了只决定下一帧画什么，不该把整条 GL 管道
+    // 拆掉重来。
+    const frameInputRef = useRef({
+        vocal,
+        currentTime,
+        theme,
+        fontPx,
+        fontSpec,
+        graphemeTimings,
+        graphemeOffsets,
+        runs,
+    });
     useEffect(() => {
+        frameInputRef.current = {
+            vocal,
+            currentTime,
+            theme,
+            fontPx,
+            fontSpec,
+            graphemeTimings,
+            graphemeOffsets,
+            runs,
+        };
+    });
+
+    /**
+     * 第一次画之前先把高度占住。
+     *
+     * canvas 自带 300×150 的固有比例，`w-full` 时能先撑出两三百 px 高，等 rAF 算出行数再压回去 ——
+     * 整块和声（含下面那行副标题）就会跳一下，看起来像在闪。这里在 paint 之前读一次宽度把高度
+     * 定下来；读布局是要付代价的，但整个组件生命周期里只有这一次。
+     */
+    useLayoutEffect(() => {
         const canvas = canvasRef.current;
-        if (!canvas || typeof ResizeObserver === 'undefined') return undefined;
-        const observer = new ResizeObserver(entries => {
-            const entry = entries[0];
-            if (!entry) return;
-            sizeRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
-        });
-        observer.observe(canvas);
-        return () => observer.disconnect();
-    }, []);
+        if (!canvas || sizeRef.current.height > 0) return;
+        const width = canvas.clientWidth;
+        if (width <= 0) return;
+        const layout = layoutHarmonyText(vocal.text, runs, fontPx, fontSpec, width);
+        const height = resolveHarmonyCanvasHeight(layout);
+        if (height <= 0) return;
+        canvas.style.height = `${height}px`;
+        sizeRef.current = { width, height };
+    }, [fontPx, fontSpec, runs, vocal.text]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return undefined;
-        let renderer: HarmonyOverlayRenderer;
-        try {
-            renderer = new HarmonyOverlayRenderer(canvas);
-        } catch (error) {
-            console.warn('[harmony] WebGL2 unavailable, keeping the DOM path', error);
-            setFallback(true);
-            return undefined;
-        }
-        if (!renderer.isReady) {
-            renderer.release();
-            setFallback(true);
-            return undefined;
-        }
-
+        // 布局必须按「宽度 + 字号」缓存：渲染器靠「layout 是不是同一个对象」判断要不要重烘纹理，
+        // 每帧新建一个对象就等于每帧上传一次字形纹理 —— 那就比 DOM 版还慢了。
+        const layoutCache = new Map<string, ReturnType<typeof layoutHarmonyText>>();
+        let renderer: HarmonyOverlayRenderer | null = null;
         let frame = 0;
         let cancelled = false;
-        const softness = fontPx * 0.45;
-        // 布局必须按宽度缓存：渲染器靠「layout 是不是同一个对象」判断要不要重烘纹理，
-        // 每帧新建一个对象就等于每帧上传一次字形纹理 —— 那就比 DOM 版还慢了。
-            const layoutCache = new Map<number, ReturnType<typeof layoutHarmonyText>>();
+        let contextLost = false;
+
+        const ensureRenderer = (): boolean => {
+            if (renderer?.isReady) return true;
+            let created: HarmonyOverlayRenderer;
+            try {
+                created = new HarmonyOverlayRenderer(canvas);
+            } catch (error) {
+                console.warn('[harmony] WebGL2 unavailable, keeping the DOM path', error);
+                renderer = null;
+                setFallback(true);
+                return false;
+            }
+            if (!created.isReady) {
+                created.release();
+                renderer = null;
+                setFallback(true);
+                return false;
+            }
+            renderer = created;
+            return true;
+        };
+
         const render = () => {
             if (cancelled) return;
             frame = window.requestAnimationFrame(render);
+            // 上下文被系统收走时既不画也不重建：重建要等 restored，抢在前面只会拿到一个死上下文。
+            if (contextLost) return;
+            if (!renderer && !ensureRenderer()) return;
+
+            const input = frameInputRef.current;
             const { width: cssWidth, height: cssHeight } = sizeRef.current;
             // observer 还没喂尺寸就先等一帧：布局要跟着真实宽度排。
             if (cssWidth <= 0 || cssHeight <= 0) return;
-            const widthKey = Math.round(cssWidth);
-            let layout = layoutCache.get(widthKey);
+            const layoutKey = `${Math.round(cssWidth)}|${input.fontSpec}`;
+            let layout = layoutCache.get(layoutKey);
             if (!layout) {
-                layout = layoutHarmonyText(vocal.text, runs, fontPx, fontSpec, cssWidth);
-                layoutCache.set(widthKey, layout);
+                layout = layoutHarmonyText(input.vocal.text, input.runs, input.fontPx, input.fontSpec, cssWidth);
+                layoutCache.set(layoutKey, layout);
             }
             // 画布自己撑到该有的高度：行数变了才重写这个样式，不是每帧都写。
             const canvasHeight = resolveHarmonyCanvasHeight(layout);
@@ -167,39 +218,88 @@ const HarmonyGlText: React.FC<{
                 sizeRef.current = { width: cssWidth, height: canvasHeight };
             }
             try {
-                renderer.draw({
+                renderer?.draw({
                     cssWidth,
                     cssHeight,
                     dpr: Math.min(window.devicePixelRatio || 1, 2.5),
-                    progressPx: resolveHarmonySweepWidth(vocal, graphemeTimings, graphemeOffsets, currentTime.get()),
-                    softnessPx: softness,
+                    progressPx: resolveHarmonySweepWidth(
+                        input.vocal,
+                        input.graphemeTimings,
+                        input.graphemeOffsets,
+                        input.currentTime.get(),
+                    ),
+                    softnessPx: input.fontPx * 0.45,
                     opacity: 1,
                     layout,
-                    fontSpec,
+                    fontSpec: input.fontSpec,
                     idleAlpha: 0.56,
                     // 衬底那圈柔光继续由外层 DOM 那一个元素负责：它是整块一个椭圆，不是每行
                     // 一个，而且是静态的，不参与每帧。
                     drawBackground: false,
-                    backgroundColor: theme.backgroundColor,
+                    backgroundColor: input.theme.backgroundColor,
                 });
             } catch (error) {
                 // 画坏了也不能让歌词消失：交给 DOM 版重画。
                 console.warn('[harmony] draw failed, falling back to DOM', error);
                 cancelled = true;
                 window.cancelAnimationFrame(frame);
-                renderer.release();
+                renderer?.release();
+                renderer = null;
                 setFallback(true);
             }
         };
+
+        // 安卓 WebView 会自己回收 webgl 上下文（内存紧、同一页的 WebGL 画布太多都会）。丢了之后
+        // 继续画就是一块空白，而恢复之后 program 和纹理全没了 —— 两边都得接住，否则这一句和声
+        // 就是一亮一灭地闪。
+        const onContextLost = (event: Event) => {
+            event.preventDefault();
+            contextLost = true;
+            renderer?.dispose();
+            renderer = null;
+        };
+        const onContextRestored = () => {
+            contextLost = false;
+            // 纹理已经跟着上下文没了，重烘一遍。
+            layoutCache.clear();
+            renderer = null;
+        };
+        canvas.addEventListener('webglcontextlost', onContextLost);
+        canvas.addEventListener('webglcontextrestored', onContextRestored);
+
+        if (typeof ResizeObserver === 'undefined') {
+            // 没有 observer 就没有尺寸来源，别留一块白画布：DOM 版自己按 CSS 撑开。
+            canvas.removeEventListener('webglcontextlost', onContextLost);
+            canvas.removeEventListener('webglcontextrestored', onContextRestored);
+            setFallback(true);
+            return undefined;
+        }
+        const observer = new ResizeObserver(entries => {
+            const entry = entries[0];
+            if (!entry) return;
+            sizeRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
+        });
+        observer.observe(canvas);
+
+        if (!ensureRenderer()) {
+            canvas.removeEventListener('webglcontextlost', onContextLost);
+            canvas.removeEventListener('webglcontextrestored', onContextRestored);
+            observer.disconnect();
+            return undefined;
+        }
         frame = window.requestAnimationFrame(render);
 
         return () => {
             cancelled = true;
             window.cancelAnimationFrame(frame);
+            canvas.removeEventListener('webglcontextlost', onContextLost);
+            canvas.removeEventListener('webglcontextrestored', onContextRestored);
+            observer.disconnect();
             layoutCache.clear();
-            renderer.release();
+            renderer?.release();
+            renderer = null;
         };
-    }, [currentTime, fontPx, fontSpec, graphemeOffsets, graphemeTimings, runs, theme, vocal]);
+    }, []);
 
     if (fallback) {
         return <HarmonyGlowText vocal={vocal} currentTime={currentTime} theme={theme} subtitleFontScale={subtitleFontScale} />;

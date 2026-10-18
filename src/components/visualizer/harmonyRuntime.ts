@@ -98,17 +98,25 @@ export const resolveHarmonySnapshotFromVocals = (
     vocals: LyricBackgroundVocal[],
     currentTime: number,
 ): HarmonySnapshot => {
-    const lines = vocals
-        .filter(vocal => vocal.text.trim() && currentTime >= vocal.startTime && currentTime <= vocal.endTime)
-        .sort((left, right) => left.startTime - right.startTime || left.endTime - right.endTime)
-        .map((vocal, index) => ({
+    // 下标取「排序后的全量列表」，不是过滤后的那一份：几段和声叠在一起时，先结束的那段一走，
+    // 后面那段的下标就会从 1 变成 0 —— key 一变整块就重挂一次，看着就是闪一下。
+    const ordered = [...vocals].sort(
+        (left, right) => left.startTime - right.startTime || left.endTime - right.endTime,
+    );
+    const lines = ordered
+        .map((vocal, index) => ({ vocal, index }))
+        .filter(({ vocal }) => vocal.text.trim() && currentTime >= vocal.startTime && currentTime <= vocal.endTime)
+        .map(({ vocal, index }) => ({
             key: `${vocal.startTime}-${vocal.endTime}-${vocal.text}-${index}`,
             vocal,
             tokens: buildHarmonyTokens(vocal, currentTime),
         }));
-    const signature = lines
-        .map(entry => `${entry.key}:${entry.tokens.map(token => token.status).join(',')}`)
-        .join('|');
+    // 签名只描述「哪几句在屏上」。
+    //
+    // 逐字的 waiting/active/passed 不能算进来：那玩意儿每唱完一个词就变一次，而画的人（WebGL 那
+    // 条路和 DOM 那条路）都是自己按 currentTime 推进的，根本不看 status。把它算进签名等于让整块
+    // 和声每秒重渲染好几次 —— 在安卓上就是那句副标题一亮一灭地闪。
+    const signature = lines.map(entry => entry.key).join('|');
 
     return { signature, lines };
 };
