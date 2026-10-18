@@ -1321,6 +1321,7 @@ export default {
     "sourceNetease": "NetEase",
     "sourceLocal": "Local",
     "sourceCloudTheme": "AI themes",
+    "sourceAll": "All",
     "sourceNavidrome": "Navidrome",
     "playTrack": "Play track",
     "error": "Search failed. Please try again.",

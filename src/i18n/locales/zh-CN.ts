@@ -1320,6 +1320,8 @@ export default {
     "placeholder": "搜索歌曲...",
     "sourceNetease": "网易云",
     "sourceLocal": "本地",
+    "sourceCloudTheme": "AI 主题",
+    "sourceAll": "全部",
     "sourceNavidrome": "Navidrome",
     "playTrack": "播放歌曲",
     "error": "搜索失败，请重试。",

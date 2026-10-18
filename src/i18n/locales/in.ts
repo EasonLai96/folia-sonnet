@@ -1316,6 +1316,7 @@ export default {
     "sourceNetease": "NetEase",
     "sourceLocal": "Lokal",
     "sourceCloudTheme": "Tema AI",
+    "sourceAll": "Semua",
     "sourceNavidrome": "Navidrome",
     "playTrack": "Putar trek",
     "error": "Pencarian gagal. Silakan coba lagi.",

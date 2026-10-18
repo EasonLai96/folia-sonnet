@@ -108,7 +108,9 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
             .filter(summary => omni.getProviderCapabilities(summary.providerId).search)
             .map(summary => summary.providerId);
         // 「AI 主题」跟在「本地」后面：它同样不是某个在线平台，是云端缓存里那一批歌。
+        // 「全部」排最前：它是「所有平台一起搜」，本身不是某一个平台（见 store 的 searchAllSources）。
         return [
+            'all',
             activeOnlineProviderId,
             ...online.filter(id => id !== activeOnlineProviderId),
             'local',
@@ -118,6 +120,7 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
     }, [activeOnlineProviderId, providerRegistryVersion]);
     const hasCollection = useCollectionNavigationStore(state => Boolean(state.snapshot?.stack.length));
     const getSourceLabel = (source: SearchSource) => {
+        if (source === 'all') return t('search.sourceAll');
         if (source === 'local') return t('search.sourceLocal');
         if (source === 'cloud') return t('search.sourceCloudTheme');
         if (source === 'navidrome') return t('search.sourceNavidrome');

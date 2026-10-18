@@ -17,7 +17,8 @@ import { resolveCloudThemeSong } from '../library/core/collection/resource/cloud
 const LAST_HOME_VIEW_TAB_KEY = 'last_home_view_tab';
 const DEFAULT_SEARCH_LIMIT = 30;
 /** 'cloud' = 「AI 主题」：在云端缓存的歌名里搜（曲目由客户端拿名字去平台上搜出来）。 */
-export type SearchSource = OnlineProviderId | 'local' | 'navidrome' | 'cloud';
+/** 'all' = 「全部」：每个能搜的在线平台各匀一点，掺上本地曲库一起出。 */
+export type SearchSource = OnlineProviderId | 'local' | 'navidrome' | 'cloud' | 'all';
 export type SearchReturnView = 'home' | 'player';
 
 type SearchExecutorDeps = {
@@ -79,17 +80,22 @@ const getSearchCacheKey = (query: string, sourceTab: SearchSource) => (
 );
 
 export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSource => {
-    if (tab === 'local' || tab === 'navidrome' || tab === 'cloud') {
+    if (tab === 'local' || tab === 'navidrome' || tab === 'cloud' || tab === 'all') {
         return tab;
     }
     if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio' && tab !== 'explore') return tab as OnlineProviderId;
     return DEFAULT_ONLINE_PROVIDER_ID;
 };
 
-/** 这条搜索来源对应的在线平台；本地 / Navidrome 没有平台，返回 null。 */
+/** 这条搜索来源对应的在线平台；本地 / Navidrome / 云缓存 / 「全部」没有单一平台，返回 null。 */
 const providerIdOf = (tab: SearchSource): OnlineProviderId | null => {
     const resolved = resolveSearchSource(tab);
-    return resolved === 'local' || resolved === 'navidrome' || resolved === 'cloud' ? null : resolved;
+    return resolved === 'local'
+        || resolved === 'navidrome'
+        || resolved === 'cloud'
+        || resolved === 'all'
+        ? null
+        : resolved;
 };
 
 export const resolveCommandPaletteSearchSource = (
@@ -235,6 +241,79 @@ const searchOnlineProviderSongs = async (
     return { results: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset };
 };
 
+/** 「全部」里同时跑几个平台：再高就要占住 Capacitor 那座桥（见 mapWithConcurrency 那条注释）。 */
+const ALL_SEARCH_CONCURRENCY = 4;
+
+/** 同一首歌在几家平台上重复出现时用的比对键。 */
+const mergeSongKey = (song: UnifiedSong): string => (
+    `${(song.name ?? '').trim().toLowerCase()}|${(song.artists ?? [])
+        .map(artist => artist?.name ?? '')
+        .join(' ')
+        .trim()
+        .toLowerCase()}`
+);
+
+/**
+ * 「全部」：所有能搜的在线平台一起搜，再掺上本地曲库和 Navidrome。
+ *
+ * 掺的那两份只在第一页加：本地那条路是同步过滤、Navidrome 也不认 offset，翻页时再要一次会
+ * 原样重复一遍。单个平台失败（没登录、超时）只丢那一家，不让这一整屏空掉 —— 「全部」本来就是
+ * 「有几家出几家」。
+ */
+const searchAllSources = async (
+    query: string,
+    offset: number,
+    limit: number,
+    deps: SearchExecutorDeps,
+): Promise<SearchExecutionResult> => {
+    const providerIds = omni.getProviderSummaries()
+        .filter(summary => omni.getProviderCapabilities(summary.providerId).search)
+        .map(summary => summary.providerId);
+    // 每家匀一点：四家各要一整页就是 120 条，第一屏根本翻不到那么远。
+    const perProvider = Math.max(8, Math.ceil(limit / Math.max(1, providerIds.length)));
+    const pages = await mapWithConcurrency(providerIds, ALL_SEARCH_CONCURRENCY, async providerId => {
+        try {
+            return await searchOnlineProviderSongs(providerId, query, perProvider, offset);
+        } catch (error) {
+            console.warn('[SearchStore] "all" search skipped a provider:', providerId, error);
+            return null;
+        }
+    });
+
+    const buckets: UnifiedSong[][] = [];
+    let hasMore = false;
+    pages.forEach(page => {
+        if (!page) return;
+        if (page.results.length > 0) buckets.push(page.results);
+        if (page.hasMore) hasMore = true;
+    });
+
+    if (offset === 0) {
+        const local = searchLocalSongs(deps, query).results;
+        if (local.length > 0) buckets.push(local);
+        const navidrome = (await searchNavidromeSongs(query)).results;
+        if (navidrome.length > 0) buckets.push(navidrome);
+    }
+
+    // 轮着从每个桶里拿一条：第一屏就能看见各家都有，而不是先看完一整页网易云。
+    const merged: UnifiedSong[] = [];
+    const seen = new Set<string>();
+    const deepest = buckets.reduce((widest, bucket) => Math.max(widest, bucket.length), 0);
+    for (let index = 0; index < deepest; index += 1) {
+        buckets.forEach(bucket => {
+            const song = bucket[index];
+            if (!song) return;
+            // 同一首几个平台都有：只留先到的那一份，否则一屏里同一首排四五遍。
+            const key = mergeSongKey(song);
+            if (seen.has(key)) return;
+            seen.add(key);
+            merged.push(song);
+        });
+    }
+
+    return { results: merged, hasMore, nextOffset: offset + perProvider };
+};
+
 const executeSearch = async (
     query: string,
     sourceTab: SearchSource,
@@ -252,6 +331,10 @@ const executeSearch = async (
 
     if (sourceTab === 'cloud') {
         return searchCloudThemeSongs(query, limit, offset);
+    }
+
+    if (sourceTab === 'all') {
+        return searchAllSources(query, offset, limit, deps);
     }
 
     return searchOnlineProviderSongs(sourceTab, query, limit, offset);
@@ -348,7 +431,13 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
     // away), so this keeps it in step. Local and Navidrome are left alone, and the results stay: clearing
     // them is the switch's job.
     followOnlineProvider: (providerId) => set(state => (
-        state.searchSourceTab === 'local' || state.searchSourceTab === 'navidrome' || state.searchSourceTab === providerId
+        // 「本地」「Navidrome」「AI 主题」「全部」都不是某个在线平台：换了当前平台也不该把用户
+        // 从这几个页签上挪走（原来只放了前两个，于是停在「AI 主题」时换平台会被踢回网易云）。
+        state.searchSourceTab === 'local'
+            || state.searchSourceTab === 'navidrome'
+            || state.searchSourceTab === 'cloud'
+            || state.searchSourceTab === 'all'
+            || state.searchSourceTab === providerId
             ? state
             : { searchSourceTab: providerId }
     )),
