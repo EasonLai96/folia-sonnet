@@ -35,7 +35,7 @@ import {
 import { describeKugouLoginFailure, kugouCheckFailure } from './kugouLoginFailure';
 import { describeKugouFailure, isKugouTimeout, kugouNoUrlError } from './kugouFailure';
 import { errorFields } from '../../../utils/errorText';
-import { noteLibraryStep } from '../../nativeBridge/api/libraryTrace.js';
+import { noteLibraryStep } from '../../../nativeBridge/api/libraryTrace.js';
 
 // src/services/onlineMusic/kugou/kugouProvider.ts
 
