@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { pruneHitLog } from './aiCache.js';
+import { isoMinutesAgo, pruneHitLog } from './aiCache.js';
 import { readFontStats } from './fonts.js';
 import type { D1Database, Env } from './app.js';
 
@@ -77,25 +77,51 @@ const clampMinutes = (value: unknown): number => {
     return Math.min(1440, Math.max(1, parsed));
 };
 
-const formatClock = (date: Date): string => {
+/**
+ * 图上所有钟点都按 **UTC+8** 画。
+ *
+ * 存的是 UTC，画的是 UTC（还特意标了「UTC」）—— 可看这张图的人在北京时间里，
+ * 图上写 02:13 而自己手机上是 10:13，「时间不对」就是从这儿来的。写死一个固定偏移
+ * 而不是服务器本地时区：这个服务可能跑在任何机器上，跟着机器走反而更对不上。
+ */
+const DISPLAY_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+const displayParts = (at: Date): { yyyy: string; MM: string; dd: string; hh: string; mm: string; ss: string } => {
+    const shifted = new Date(at.getTime() + DISPLAY_OFFSET_MS);
     const pad = (entry: number) => String(entry).padStart(2, '0');
-    return `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+    return {
+        yyyy: String(shifted.getUTCFullYear()),
+        MM: pad(shifted.getUTCMonth() + 1),
+        dd: pad(shifted.getUTCDate()),
+        hh: pad(shifted.getUTCHours()),
+        mm: pad(shifted.getUTCMinutes()),
+        ss: pad(shifted.getUTCSeconds()),
+    };
 };
 
-/** `YYYY-MM-DDTHH`，按小时分桶用的键。 */
-const hourKeyOf = (iso: string): string => String(iso ?? '').slice(0, 13);
+const formatClock = (date: Date): string => {
+    const { hh, mm } = displayParts(date);
+    return `${hh}:${mm}`;
+};
+
+/** 按**显示时区**的小时分桶用的键：`YYYY-MM-DDTHH`。 */
+const hourKeyOf = (at: Date): string => {
+    const { yyyy, MM, dd, hh } = displayParts(at);
+    return `${yyyy}-${MM}-${dd}T${hh}`;
+};
 
 /*
  * 最近 24 个小时桶，老的在前。
  *
- * 用 UTC 而不是服务器本地时区：这个服务可能跑在任何机器上，图上写死一个
- * 时区反而让人对不上自己的表，所以下面统一标了 UTC。
+ * 分桶用的键与图上标的钟点同一套（UTC+8）：原来键按 UTC 取、标签按 UTC 画，虽然一致，
+ * 但看的人在自己的时区里对不上（见 displayParts 那条注释）。
  */
 const buildHourlyBuckets = (rows: readonly HitLogRow[]): CacheOverview['hourly'] => {
     const counts = new Map<string, number>();
     rows.forEach((row) => {
-        const key = hourKeyOf(row.at);
-        if (!key) return;
+        const parsed = Date.parse(String(row.at ?? ''));
+        if (!Number.isFinite(parsed)) return;
+        const key = hourKeyOf(new Date(parsed));
         counts.set(key, (counts.get(key) ?? 0) + 1);
     });
 
@@ -103,7 +129,7 @@ const buildHourlyBuckets = (rows: readonly HitLogRow[]): CacheOverview['hourly']
     const buckets: CacheOverview['hourly'] = [];
     for (let offset = 23; offset >= 0; offset -= 1) {
         const at = new Date(now - offset * 60 * 60 * 1000);
-        const key = hourKeyOf(at.toISOString());
+        const key = hourKeyOf(at);
         buckets.push({
             hour: key,
             label: formatClock(at),
@@ -131,11 +157,12 @@ export const readCacheOverview = async (
             .prepare('SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes, COALESCE(SUM(hits), 0) AS hits FROM ai_cache')
             .first<{ count: number; bytes: number; hits: number }>(),
         db
-            .prepare("SELECT COUNT(*) AS count FROM ai_cache_hits WHERE at >= datetime('now', ?)")
-            .bind(`-${recentMinutes} minutes`)
+            // 阈值要和 `at`（ISO 串）同一种写法，否则字符串比较会把「当天更早的」也算进来 ——
+            // 于是 5 分钟和 24 小时出来是同一个数。见 aiCache.ts 的 isoMinutesAgo。
+            .prepare(`SELECT COUNT(*) AS count FROM ai_cache_hits WHERE at >= ${isoMinutesAgo(-recentMinutes)}`)
             .first<{ count: number }>(),
         db
-            .prepare("SELECT kind, cache_key, song_title, at FROM ai_cache_hits WHERE at >= datetime('now', '-24 hours') ORDER BY at DESC")
+            .prepare(`SELECT kind, cache_key, song_title, at FROM ai_cache_hits WHERE at >= ${isoMinutesAgo(-24 * 60)} ORDER BY at DESC`)
             .all<HitLogRow>(),
         db
             .prepare('SELECT kind, cache_key, song_title, at FROM ai_cache_hits ORDER BY id DESC LIMIT 5')
@@ -195,7 +222,7 @@ const hourlyChart = (
 
     return `
   <g>
-    <text x="${x}" y="${y - 8}" fill="${COLORS.text}" font-family="${FONT_STACK}" font-size="13" font-weight="600">最近 24 小时命中分布（UTC）</text>
+    <text x="${x}" y="${y - 8}" fill="${COLORS.text}" font-family="${FONT_STACK}" font-size="13" font-weight="600">最近 24 小时命中分布（UTC+8）</text>
     <text x="${x + width}" y="${y - 8}" fill="${COLORS.muted}" font-family="${MONO_STACK}" font-size="10" text-anchor="end">峰值 ${escapeXml(peak)} / 小时</text>
     <line x1="${x}" y1="${axisY}" x2="${x + width}" y2="${axisY}" stroke="${COLORS.line}" stroke-width="1" />
     ${bars}
@@ -226,7 +253,10 @@ const latestRows = (x: number, y: number, rows: readonly HitLogRow[]): string =>
     const body = rows.map((row, index) => {
         const parsed = Date.parse(String(row.at ?? ''));
         const at = Number.isFinite(parsed)
-            ? `${new Date(parsed).toISOString().replace('T', ' ').slice(5, 19)} UTC`
+            ? (() => {
+                const parts = displayParts(new Date(parsed));
+                return `${parts.MM}-${parts.dd} ${parts.hh}:${parts.mm}:${parts.ss}`;
+            })()
             : '—';
         const title = String(row.song_title ?? '').trim() || '（未记录歌名）';
         return `
@@ -250,6 +280,10 @@ export const renderCacheOverviewSvg = (overview: CacheOverview): string => {
         ? '不可用（Worker 无文件系统）'
         : formatBytes(overview.databaseBytes);
 
+    const generated = (() => {
+        const parts = displayParts(new Date());
+        return `${parts.yyyy}-${parts.MM}-${parts.dd} ${parts.hh}:${parts.mm}:${parts.ss}`;
+    })();
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="Folia 云缓存概况">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -261,7 +295,7 @@ export const renderCacheOverviewSvg = (overview: CacheOverview): string => {
   <g>
     <text x="${PADDING}" y="58" fill="${COLORS.text}" font-family="${FONT_STACK}" font-size="22" font-weight="700">Folia 云缓存概况</text>
     <text x="${PADDING}" y="80" fill="${COLORS.muted}" font-family="${FONT_STACK}" font-size="12">AI 主题 + AI 导演 · 按歌词文件 MD5 共享</text>
-    <text x="${WIDTH - PADDING}" y="80" fill="${COLORS.muted}" font-family="${MONO_STACK}" font-size="11" text-anchor="end">生成于 ${escapeXml(new Date().toISOString().replace('T', ' ').slice(0, 19))} UTC</text>
+    <text x="${WIDTH - PADDING}" y="80" fill="${COLORS.muted}" font-family="${MONO_STACK}" font-size="11" text-anchor="end">生成于 ${escapeXml(generated)} UTC+8</text>
   </g>
   <g>
     ${statCard(PADDING, 104, 172, '累计命中', String(overview.totalHits))}

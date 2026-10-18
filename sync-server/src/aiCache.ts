@@ -158,10 +158,23 @@ const readMetaText = (value: unknown, limit: number): string => (
  */
 const HIT_LOG_RETENTION_DAYS = 7;
 
+/*
+ * 时间窗口的比较值必须和 `at` **同一种写法**。
+ *
+ * `at` 是 `new Date().toISOString()`（`2026-10-18T02:13:00.000Z`），而 `datetime('now', …)`
+ * 给的是 `2026-10-18 02:13:00` —— 两个字符串比大小时，第 11 位是 `T` 对空格，`T` 更大，
+ * 于是**同一天里比窗口更早的每一行都算「在窗口内」**：「最近 5 分钟」和「最近 24 小时」
+ * 出来的是同一个数（当天全部），换档看不出区别。这里按 ISO 的写法取阈值，比较才成立。
+ */
+export const isoMinutesAgo = (minutes: number): string => {
+  const whole = Math.round(Number(minutes) || 0);
+  const modifier = `${whole < 0 ? '-' : '+'}${Math.abs(whole)} minutes`;
+  return `strftime('%Y-%m-%dT%H:%M:%S', 'now', '${modifier}')`;
+};
+
 export const pruneHitLog = async (db: D1Database): Promise<void> => {
   await db
-    .prepare("DELETE FROM ai_cache_hits WHERE at < datetime('now', ?)")
-    .bind(`-${HIT_LOG_RETENTION_DAYS} days`)
+    .prepare(`DELETE FROM ai_cache_hits WHERE at < ${isoMinutesAgo(-HIT_LOG_RETENTION_DAYS * 24 * 60)}`)
     .run()
     .catch(() => undefined);
 };
@@ -640,23 +653,48 @@ export const adminCacheRoutes = (() => {
       ? Math.max(1, Math.min(MAX_LIST_LIMIT, requested))
       : DEFAULT_LIST_LIMIT;
 
-    const rows = kind && KIND_PATTERN.test(kind)
-      ? await c.env.FOLIA_SYNC_DB
-        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at FROM ai_cache WHERE kind = ? ORDER BY updated_at DESC LIMIT ?')
-        .bind(kind, limit)
-        .all<AiCacheRow>()
-      : await c.env.FOLIA_SYNC_DB
-        .prepare('SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at FROM ai_cache ORDER BY updated_at DESC LIMIT ?')
-        .bind(limit)
-        .all<AiCacheRow>();
-
-    let entries = (rows.results ?? []).map(mapRow);
-    if (query) {
-      entries = entries.filter((entry) => (
-        `${entry.key} ${entry.songTitle}`.toLowerCase().includes(query)
-      ));
+    /*
+     * 搜索和类型筛选都**下到 SQL 里**。
+     *
+     * 原来是先按 `updated_at` 取回前 500 条，再在内存里筛 —— 于是库里第 501 条往后的一切，
+     * 管理员怎么搜都搜不到（「搜索也搜不到」），而顶上那个「缓存条目（N）」显示的又是这次
+     * 取回的条数，于是永远就是 500（「一直都是 500 个」）。
+     */
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (kind && KIND_PATTERN.test(kind)) {
+      where.push('kind = ?');
+      binds.push(kind);
     }
-    return c.json({ ok: true, entries, limit });
+    if (query) {
+      where.push("(cache_key LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\')");
+      const like = `%${escapeLike(query)}%`;
+      binds.push(like, like);
+    }
+    const clause = where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '';
+
+    // 条数是**整个库**（或筛完之后的）的条数，不是这一页取回多少条。
+    const totalRow = await c.env.FOLIA_SYNC_DB
+      .prepare(`SELECT COUNT(*) AS total FROM ai_cache${clause}`)
+      .bind(...binds)
+      .first<{ total: number }>();
+
+    const rows = await c.env.FOLIA_SYNC_DB
+      .prepare(
+        `SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at
+         FROM ai_cache${clause}
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+      )
+      .bind(...binds, limit)
+      .all<AiCacheRow>();
+
+    return c.json({
+      ok: true,
+      entries: (rows.results ?? []).map(mapRow),
+      total: Number(totalRow?.total ?? 0),
+      limit,
+    });
   });
 
   routes.delete('/:kind/:key', async (c) => {

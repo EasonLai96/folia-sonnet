@@ -287,7 +287,7 @@ export const renderPanelPage = (): string => shell('Folia 云服务后台', `
 
 <div id="payload-modal" hidden></div>
 `, `
-const state = { tab: 'fonts', fonts: [], entries: [] };
+const state = { tab: 'fonts', fonts: [], entries: [], cacheTotal: 0 };
 
 const fmtBytes = (value) => {
   const size = Number(value || 0);
@@ -342,15 +342,14 @@ const renderFonts = () => {
   )).join('');
 };
 
+/*
+ * 搜索与类型筛选都交给服务端（`/admin/api/ai-cache?q=&kind=`）：库里有几百条以上时，
+ * 只取回前 500 条再在内存里筛，第 501 条往后就永远搜不到。
+ * 顶上那个计数用服务端给的 `total`（整个库 / 筛完之后的条数），不是这一页取回多少条。
+ */
 const renderCache = () => {
-  const query = String(document.getElementById('cache-search').value || '').trim().toLowerCase();
-  const kind = String(document.getElementById('cache-kind').value || '');
-  const visible = state.entries.filter((entry) => {
-    if (kind && entry.kind !== kind) return false;
-    if (!query) return true;
-    return \`\${entry.key} \${entry.songTitle || ''}\`.toLowerCase().includes(query);
-  });
-  document.getElementById('cache-count').textContent = String(state.entries.length);
+  const visible = state.entries;
+  document.getElementById('cache-count').textContent = String(state.cacheTotal ?? visible.length);
   document.getElementById('cache-empty').hidden = visible.length > 0;
   document.getElementById('cache-rows').innerHTML = visible.map((entry) => (
     '<tr>'
@@ -383,8 +382,14 @@ const loadFonts = async () => {
 };
 
 const loadCache = async () => {
-  const data = await api('/admin/api/ai-cache?limit=500');
+  const kind = String(document.getElementById('cache-kind')?.value || '');
+  const query = String(document.getElementById('cache-search')?.value || '').trim();
+  const search = new URLSearchParams({ limit: '200' });
+  if (kind) search.set('kind', kind);
+  if (query) search.set('q', query);
+  const data = await api('/admin/api/ai-cache?' + search.toString());
   state.entries = data.entries ?? [];
+  state.cacheTotal = Number(data.total ?? state.entries.length);
   renderCache();
 };
 
@@ -537,8 +542,17 @@ const reloadStatsImage = () => {
 };
 document.getElementById('refresh-stats').addEventListener('click', reloadStatsImage);
 document.getElementById('stats-minutes').addEventListener('change', reloadStatsImage);
-document.getElementById('cache-search').addEventListener('input', renderCache);
-document.getElementById('cache-kind').addEventListener('change', renderCache);
+/*
+ * 缓存那张卡的搜索框与类型下拉都要**重新去服务端要一次**：库超过一页时，
+ * 只有服务端才看得见第 501 条往后那些。输一个字就发一次请求太吵，攒 250ms。
+ */
+let cacheSearchTimer = null;
+const scheduleCacheReload = () => {
+  if (cacheSearchTimer) clearTimeout(cacheSearchTimer);
+  cacheSearchTimer = setTimeout(() => { void loadCache(); }, 250);
+};
+document.getElementById('cache-search').addEventListener('input', scheduleCacheReload);
+document.getElementById('cache-kind').addEventListener('change', () => { void loadCache(); });
 
 document.getElementById('tab-fonts').addEventListener('click', () => {
   state.tab = 'fonts';
