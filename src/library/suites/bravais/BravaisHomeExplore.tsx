@@ -74,9 +74,16 @@ const BravaisHomeExplore: React.FC<{
             // 无账户的平台：与网格对同一状态的说法相同（OnlineProviderAccountlessPanel 的标题）。
             : online.accountView === 'accountless'
                 ? t('home.accountlessTitle', { provider: online.providerLabel })
+                // 读失败了要说失败：以前这一路只分「还在读」和「空页」，error 落进后者，
+                // 于是接口一挂探索页就显示「空的」，看着像这家平台没有内容 —— 缝里那个
+                // 「换一批」才是重试，可文案根本没提示可以重试。
                 : items.length > 0
                     ? undefined
-                    : !feed || feed.status === 'loading' ? t('playlist.loading') : wall.emptyText ?? t('home.exploreEmpty');
+                    : !feed || feed.status === 'loading'
+                        ? t('playlist.loading')
+                        : feed.status === 'error'
+                            ? t('home.exploreFailed')
+                            : wall.emptyText ?? t('home.exploreEmpty');
     const refreshTool = useMemo<BravaisHomeTool | null>(() => (isOn ? {
         id: 'refresh-explore',
         label: t('home.exploreRefresh'),
