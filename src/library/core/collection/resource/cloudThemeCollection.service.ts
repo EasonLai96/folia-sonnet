@@ -115,6 +115,22 @@ export const createCloudThemeCollectionResource = (
         running = true;
         state.set({ status: 'loading', sync: { status: 'syncing' }, error: null }, 'urgent');
         try {
+            /*
+             * 头一页从**随机**一处开始。
+             *
+             * 服务端按 `updated_at DESC` 排，于是从 0 开始永远是「最近被人生成过的那批」——
+             * 每次进这一屏都是同一批歌，越往下越没人看过。先问一次总数再挑起点
+             * （搜索页那个「AI 主题」来源已经是这个做法）。
+             */
+            if (nextOffset === 0 && state.get().tracks.length === 0) {
+                const probe = await deps.readNames({ limit: 1, offset: 0 }).catch(() => null);
+                const count = Number(probe?.total ?? 0);
+                if (count > CLOUD_THEME_PAGE_SIZE) {
+                    nextOffset = Math.floor(Math.random() * (count - CLOUD_THEME_PAGE_SIZE + 1));
+                    total = count;
+                }
+                if (disposed || ticket !== generation) return;
+            }
             while (!disposed && ticket === generation) {
                 const page = await deps.readNames({ limit: CLOUD_THEME_PAGE_SIZE, offset: nextOffset });
                 if (disposed || ticket !== generation) return;
