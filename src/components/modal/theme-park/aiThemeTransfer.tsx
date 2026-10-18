@@ -65,8 +65,15 @@ type AiThemeJsonBoxProps = {
     className?: string;
 };
 
-/** The box the JSON is pasted into, and the error under it. */
-export const AiThemeJsonBox: React.FC<AiThemeJsonBoxProps> = ({ importer, className = 'h-[132px]' }) => {
+/*
+ * The box the JSON is pasted into, and the error under it.
+ *
+ * 尺寸一律用 rem，不用 px —— 界面缩放动的是**根字号**（androidPhoneFit.css 里 `html`
+ * 的 font-size 跟着 `--folia-ui-scale-*` 走）。写死 px 的话，卡片会跟着面板一起变窄，
+ * 里面的行高与输入框高度却不动，于是两行字挤到一起、按钮互相压住。
+ * 数值按 1rem = 16px 折算，与原先的 px 一一对齐。
+ */
+export const AiThemeJsonBox: React.FC<AiThemeJsonBoxProps> = ({ importer, className = 'h-[8.25rem]' }) => {
     const { t } = useTranslation();
 
     return (
@@ -78,9 +85,9 @@ export const AiThemeJsonBox: React.FC<AiThemeJsonBoxProps> = ({ importer, classN
                 aria-label={t('aiHelp.importJsonTitle')}
                 aria-invalid={importer.error ? true : undefined}
                 spellCheck={false}
-                className={`${FIELD_SURFACE_CLASS} st-scroll block w-full resize-none px-2.5 py-2 font-mono text-xs leading-[18px] ${className}`}
+                className={`${FIELD_SURFACE_CLASS} st-scroll block w-full resize-none px-2.5 py-2 font-mono text-xs leading-[1.125rem] ${className}`}
             />
-            {importer.error && <p role="alert" className="mt-2 text-xs leading-[18px] text-[color:var(--st-err)]">{importer.error}</p>}
+            {importer.error && <p role="alert" className="mt-2 text-xs leading-[1.125rem] text-[color:var(--st-err)]">{importer.error}</p>}
         </>
     );
 };

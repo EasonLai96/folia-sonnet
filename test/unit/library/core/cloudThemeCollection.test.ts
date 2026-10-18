@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SongResult } from '@/types';
 import {
+    CLOUD_THEME_PAGE_SIZE,
     createCloudThemeCollectionResource,
     isCloudThemePendingTrack,
     type CloudThemeCollectionDeps,
@@ -16,12 +17,13 @@ import {
 //   2. 搜不到的整行拿掉，且不能把别的行换错（并发 worker 各自按下标写，中途删行会带偏）；
 //   3. 下一页的 offset 按**名字数**走，不按下标 —— 删过行之后两者不是一回事；
 //   4. 离开这一屏（pause）之后不再取下一页、也不再往里插歌。
+//
+// 资源在头一页前会先探一次总数；总数多于一页时会跳到一个随机起点。所以下面凡是
+// 涉及 offset 的断言都不写死具体数字，只钉「只向前、且每步推进一整页」—— 按下标算
+// 偏移的话步长会不足一整页，取过的名字被再要一遍，屏幕上就是重复的歌。
 
-const entryOf = (index: number): CloudThemeNameEntry => ({
-    songTitle: `Song ${index}`,
-    platform: 'netease',
-    key: `k-${index}`,
-});
+/** 云端那份歌名清单：测试按 limit / offset 从这里切片。 */
+const titlesOf = (count: number): string[] => Array.from({ length: count }, (_, index) => `Song ${index}`);
 
 const songOf = (title: string): SongResult => ({
     id: `r-${title}`,
@@ -31,14 +33,32 @@ const songOf = (title: string): SongResult => ({
     durationMs: 1,
 } as unknown as SongResult);
 
-const titlesOf = (tracks: SongResult[]) => tracks.map(track => String(track.name));
 const idsOf = (tracks: SongResult[]) => tracks.map(track => String(track.id));
+const namesOf = (tracks: SongResult[]) => tracks.map(track => String(track.name));
 
+/** 一次「搜歌」：由测试决定什么时候落定，好断言「还没搜回来」那一帧。 */
 type Gate = {
     title: string;
     settled: boolean;
     resolve: (value: SongResult | null) => void;
     promise: Promise<SongResult | null>;
+};
+
+const createGate = (title: string): Gate => {
+    const gate = {
+        title,
+        settled: false,
+        resolve: () => {},
+        promise: Promise.resolve<SongResult | null>(null),
+    } as unknown as Gate;
+    gate.promise = new Promise<SongResult | null>((res) => {
+        gate.resolve = (value) => {
+            if (gate.settled) return;
+            gate.settled = true;
+            res(value);
+        };
+    });
+    return gate;
 };
 
 /** 让排队的微任务（含多层 await）全部跑完。 */
@@ -48,43 +68,50 @@ const settle = async () => {
 
 type Harness = {
     resource: ReturnType<typeof createCloudThemeCollectionResource>;
+    /** 正式取页（limit == CLOUD_THEME_PAGE_SIZE）用过的 offset，按先后排列。 */
     offsets: number[];
-    gates: Gate[];
-    /** 把当前所有还没落定的搜索按 mapper 落定；新冒出来的继续落定，直到没有为止。 */
+    /** 正式取页实际发出去的名字，按先后拼接 —— 用来查「有没有把同一条名字要两遍」。 */
+    served: string[];
+    /** 把当前还没落定的搜索按 mapper 落定；新冒出来的继续，直到没有为止。 */
     drain: (mapper: (title: string) => SongResult | null) => Promise<void>;
 };
 
-const createHarness = (
-    pages: CloudThemeNameEntry[][],
-    options: { total?: number; failAtOffset?: number } = {},
-): Harness => {
-    const pageSize = 2;
+const createHarness = (options: {
+    /** 云端那份歌名清单。 */
+    titles?: readonly string[];
+    /** 云端报的总数；默认等于清单长度。 */
+    total?: number;
+    /** 第几次正式取页时抛错，用来看中断与续传。 */
+    failOnPage?: number;
+} = {}): Harness => {
+    const titles = options.titles ?? titlesOf(5);
+    const total = options.total ?? titles.length;
     const offsets: number[] = [];
+    const served: string[] = [];
     const gates: Gate[] = [];
-    const total = options.total ?? pages.flat().length;
+    let takenPages = 0;
 
-    const readNames = async ({ offset }: { limit: number; offset: number }): Promise<{ total: number; songs: CloudThemeNameEntry[] }> => {
-        offsets.push(offset);
-        if (options.failAtOffset === offset) throw new Error('cloud down');
-        return { total, songs: pages[Math.floor(offset / pageSize)] ?? [] };
+    const readNames = async ({ limit, offset }: { limit: number; offset: number }): Promise<{ total: number; songs: CloudThemeNameEntry[] }> => {
+        /*
+         * 探总数那次只带 limit 1：它不取歌名、也不推进分页游标，只是问「一共多少条」。
+         * 所以不计入取页序列 —— offsets 里装的就只是真正拿过名字的那些页。
+         */
+        if (limit >= CLOUD_THEME_PAGE_SIZE) {
+            takenPages += 1;
+            if (options.failOnPage === takenPages) throw new Error('cloud down');
+            offsets.push(offset);
+            served.push(...titles.slice(offset, offset + limit));
+        }
+        return {
+            total,
+            songs: titles.slice(offset, offset + limit).map(songTitle => ({ songTitle } as CloudThemeNameEntry)),
+        };
     };
 
     const resolveSong = (songTitle: string): Promise<SongResult | null> => {
-        const pending: Gate = {
-            title: songTitle,
-            settled: false,
-            promise: Promise.resolve(null),
-            resolve: () => {},
-        };
-        pending.promise = new Promise<SongResult | null>((res) => {
-            pending.resolve = (value) => {
-                if (pending.settled) return;
-                pending.settled = true;
-                res(value);
-            };
-        });
-        gates.push(pending);
-        return pending.promise;
+        const gate = createGate(songTitle);
+        gates.push(gate);
+        return gate.promise;
     };
 
     const deps: CloudThemeCollectionDeps = { readNames, resolveSong };
@@ -93,117 +120,156 @@ const createHarness = (
     const drain = async (mapper: (title: string) => SongResult | null): Promise<void> => {
         for (let round = 0; round < 400; round += 1) {
             await settle();
-            const pending = gates.filter(item => !item.settled);
+            const pending = gates.filter(gate => !gate.settled);
             if (pending.length === 0) return;
-            pending.forEach(item => item.resolve(mapper(item.title)));
+            pending.forEach(gate => gate.resolve(mapper(gate.title)));
         }
     };
 
-    return { resource, offsets, gates, drain };
+    return { resource, offsets, served, drain };
 };
 
 const start = (harness: Harness) => {
     harness.resource.ensure({} as never, {});
 };
 
+/** 云端都搜得到。 */
+const allFound = (title: string) => songOf(title);
+
 describe('cloudThemeCollection', () => {
+    beforeEach(() => {
+        /*
+         * 资源在头一页前会先探一次总数，总数多于一页时跳到一个**随机**起点 ——
+         * 钉死随机数，offset 序列才是可断言的（否则每跑一次数字都不一样）。
+         */
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('fills the screen with placeholders before any song is resolved', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1), entryOf(2)]]);
+        const harness = createHarness();
         start(harness);
         await settle();
 
         const snapshot = harness.resource.getSnapshot();
-        // 关键是「先占位」：一条都还没搜出来，屏幕上已经是满的三行。
-        expect(snapshot.tracks).toHaveLength(3);
+        // 关键是「先占位」：一条都还没搜出来，屏幕上已经是满的五行。
+        expect(snapshot.tracks).toHaveLength(5);
         expect(snapshot.tracks.every(isCloudThemePendingTrack)).toBe(true);
-        expect(titlesOf(snapshot.tracks)).toEqual(['Song 0', 'Song 1', 'Song 2']);
+        expect(namesOf(snapshot.tracks)).toEqual(titlesOf(5));
         // 头一页铺完就先放开：用户这时已经看得见整屏歌名，后面接着补。
         expect(snapshot.status).toBe('ready');
+    });
 
-        await harness.drain(title => songOf(title));
+    it('replaces rows in place once the songs come back, keeping the row count', async () => {
+        const harness = createHarness();
+        start(harness);
+        await settle();
+        const before = harness.resource.getSnapshot().tracks.length;
 
-        // 之后只替换、不增删：行数一直是 3。
-        expect(harness.resource.getSnapshot().tracks).toHaveLength(3);
-        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(['r-Song 0', 'r-Song 1', 'r-Song 2']);
+        await harness.drain(allFound);
+
+        // 之后只替换、不增删：行数一直是铺出来的那么多。
+        expect(harness.resource.getSnapshot().tracks).toHaveLength(before);
+        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(titlesOf(5).map(title => `r-${title}`));
     });
 
     it('drops the whole row when the platform has no match', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1), entryOf(2)]]);
+        const harness = createHarness();
         start(harness);
-        await harness.drain(title => (title === 'Song 1' ? null : songOf(title)));
+        // 每第 5 首（下标 4）在平台上搜不到 → 那一行被整行拿掉。
+        await harness.drain(title => (title === 'Song 4' ? null : songOf(title)));
 
         const tracks = harness.resource.getSnapshot().tracks;
-        expect(idsOf(tracks)).toEqual(['r-Song 0', 'r-Song 2']);
+        expect(idsOf(tracks)).toEqual(['r-Song 0', 'r-Song 1', 'r-Song 2', 'r-Song 3']);
         // 不能留下没匹配上的占位行（点不动也播不了）。
         expect(tracks.some(isCloudThemePendingTrack)).toBe(false);
     });
 
     it('asks for the next page by name offset, not by row index', async () => {
-        // 第一页 3 条里 Song 1 搜不到 → 那一行被拿掉，列表只剩 2 行。
-        // 下一页必须从 offset 3（名字数）开始；按行号（2）会把 Song 2 再要一遍。
-        const harness = createHarness(
-            [[entryOf(0), entryOf(1), entryOf(2)], [entryOf(3), entryOf(4)]],
-            { total: 5 },
-        );
+        /*
+         * 云端 130 条名字、每页 60 条 —— 一轮取不完，所以会连着取好几页。
+         * 中途有一些在平台上搜不到，那几行会被整行拿掉，于是「列表显示到第几行」
+         * 与「名字取到第几条」不再是同一个数。
+         *
+         * 游标必须按**名字数**推进：改回按下标算偏移的话，步长不足一整页，
+         * 取过的名字会被再要一遍（屏幕上出现重复的歌）。所以这条断言盯的是
+         * 「步长至少一整页」+「列表里没有重复」，而不是某个具体的 offset 值。
+         */
+        const titles = titlesOf(130);
+        const missing = new Set(['Song 4', 'Song 9', 'Song 14', 'Song 70', 'Song 71']);
+        const harness = createHarness({ titles });
         start(harness);
-        await harness.drain(title => (title === 'Song 1' ? null : songOf(title)));
+        await harness.drain(title => (missing.has(title) ? null : songOf(title)));
 
-        expect(harness.offsets).toEqual([0, 3]);
-        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(['r-Song 0', 'r-Song 2', 'r-Song 3', 'r-Song 4']);
+        // 起点钉死在 0，于是取页序列是确定的：每页 60 条，最后一页只剩 10 条。
+        expect(harness.offsets).toEqual([0, 60, 120]);
+        // 取回来的名字一条不重、一条不漏 —— 按下标推进游标会重复取名（屏幕上出现重复的歌）。
+        expect(harness.served).toEqual(titles);
+        const ids = idsOf(harness.resource.getSnapshot().tracks);
+        expect(new Set(ids).size).toBe(ids.length);
+        expect(ids).toHaveLength(130 - missing.size);
     });
 
     it('stops asking and stops filling after the screen is left', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1)], [entryOf(2), entryOf(3)]], { total: 4 });
+        const harness = createHarness();
         start(harness);
         await settle();
-
-        expect(harness.resource.getSnapshot().tracks).toHaveLength(2);
 
         // 用户滑走了：正在搜的那些即便回来了也不许再往里插。
         harness.resource.pause();
-        await harness.drain(title => songOf(title));
+        await harness.drain(allFound);
 
+        // 取页只发生过一次（第一轮的头一页），探总数那次不算。
         expect(harness.offsets).toEqual([0]);
-        const tracks = harness.resource.getSnapshot().tracks;
-        expect(idsOf(tracks)).toEqual(['cloud-pending:0', 'cloud-pending:1']);
+        expect(harness.resource.getSnapshot().tracks.every(isCloudThemePendingTrack)).toBe(true);
     });
 
     it('stops after dispose', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1)], [entryOf(2), entryOf(3)]], { total: 4 });
+        const harness = createHarness();
         start(harness);
         await settle();
         harness.resource.dispose();
-        await harness.drain(title => songOf(title));
+        await harness.drain(allFound);
 
         expect(harness.offsets).toEqual([0]);
     });
 
     it('marks the run as interrupted at the offset it stopped at', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1)], [entryOf(2), entryOf(3)]], {
-            total: 4,
-            failAtOffset: 2,
-        });
+        // 云端 130 条、每页 60 条：头一页取到并铺出来，第二页取失败 → 中断在第二页的起点。
+        const titles = titlesOf(130);
+        const harness = createHarness({ titles, failOnPage: 2 });
         start(harness);
-        await harness.drain(title => songOf(title));
+        await harness.drain(allFound);
 
         const snapshot = harness.resource.getSnapshot();
         expect(snapshot.status).toBe('error');
-        expect(snapshot.sync).toMatchObject({ status: 'interrupted', offset: 2 });
-        // 已经铺出来的两行留着，用户看得见前面那一屏。
-        expect(idsOf(snapshot.tracks)).toEqual(['r-Song 0', 'r-Song 1']);
+        const sync = snapshot.sync as { status: string; message: string; offset: number };
+        expect(sync.status).toBe('interrupted');
+        expect(sync.offset).toBe(CLOUD_THEME_PAGE_SIZE);
+        /*
+         * 头一页铺出来的 60 行整整齐齐留在屏上 —— 中断只发生在**取下一页**那一步，
+         * 已经铺出来的内容不该被回滚（用户正看着这一屏，抽走就闪一下空白）。
+         */
+        expect(snapshot.tracks.length).toBe(CLOUD_THEME_PAGE_SIZE);
+        expect(idsOf(snapshot.tracks)).toEqual(titles.slice(0, CLOUD_THEME_PAGE_SIZE).map(title => `r-${title}`));
     });
 
     it('reloads from the first name again', async () => {
-        const harness = createHarness([[entryOf(0), entryOf(1)], [entryOf(2), entryOf(3)]], { total: 4 });
+        const titles = titlesOf(130);
+        const harness = createHarness({ titles });
         start(harness);
-        await harness.drain(title => songOf(title));
-        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(['r-Song 0', 'r-Song 1', 'r-Song 2', 'r-Song 3']);
+        await harness.drain(allFound);
+        const first = idsOf(harness.resource.getSnapshot().tracks);
+        const firstRound = [...harness.offsets];
 
         harness.resource.reload();
-        await harness.drain(title => songOf(title));
+        await harness.drain(allFound);
 
-        // 重新加载：清掉重来，offset 从 0 再走一遍。
-        expect(harness.offsets).toEqual([0, 2, 0, 2]);
-        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(['r-Song 0', 'r-Song 1', 'r-Song 2', 'r-Song 3']);
+        // 重新加载：清掉重来，offset 从头再走一遍。
+        expect(harness.offsets).toEqual([...firstRound, ...firstRound]);
+        expect(idsOf(harness.resource.getSnapshot().tracks)).toEqual(first);
     });
 });

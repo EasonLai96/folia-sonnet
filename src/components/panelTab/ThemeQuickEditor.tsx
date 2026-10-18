@@ -249,7 +249,8 @@ const ThemeQuickEditor: React.FC<ThemeQuickEditorProps> = ({
                             <CopyButton text={() => buildAiThemePrompt(promptSource)}>{t('aiHelp.copyPrompt')}</CopyButton>
                         </div>
                         <h3 className="mb-3 mt-5 text-sm leading-5">{t('aiHelp.importJsonTitle')}</h3>
-                        <AiThemeJsonBox importer={importer} className="min-h-[132px] flex-1" />
+                        {/* 高度用 rem 而非 px —— 界面缩放动的是根字号，写死 px 这块不会跟着缩（见 aiThemeTransfer 的注释）。 */}
+                        <AiThemeJsonBox importer={importer} className="min-h-[8.25rem] flex-1" />
                     </div>
                 )}
             </div>

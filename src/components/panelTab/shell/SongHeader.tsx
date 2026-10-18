@@ -16,26 +16,30 @@ import { useMeasuredSize } from './useMeasuredSize';
 /** The height of the folded line, and the side of its cover. */
 export const FOLDED_PX = 48;
 /**
- * 给封面留的余量 —— 文字块有多高，就从页签的高度里让出多少。
+ * 封面与下面文字块之间的距离（上游 14px）。
  *
- * 文字现在压在封面底边上、不再占一行（见 coverHeight 的注释），所以这一项**不是**间距了：
- * 它现在的作用只是让封面别因为文字不再占高就跟着胀大 —— 封面还是原来那一块方的大小。
+ * 这几个尺寸一律用 rem，不用 px —— 界面缩放动的是**根字号**：androidPhoneFit.css 里
+ * `html` 的 font-size 跟着 `--folia-ui-scale-*` 走，而 Tailwind 的间距、字号、圆角大多
+ * 按 rem 算，于是会跟着一起缩。写死 px 的话，滑条拉到底这两处也一动不动：面板缩了、
+ * 封面不缩，比例散掉，按钮就叠到一块去了。
+ *
+ * 数值按 1rem = 16px 折算，与上游原本的 px 一一对齐。
  */
-const COVER_RESERVE_PX = 14;
+const COVER_GAP = '0.875rem';
 /** The large cover is never lower than this, however short the window. */
-const MIN_COVER_PX = 96;
+const MIN_COVER = '6rem';
 /**
- * 整个封面页签（大封面 + 下面歌名/歌手/专辑和那一排按钮）的高度上限。
+ * 整个封面页签（大封面 + 下面那块文字）的高度上限。
  *
- * 光夹封面自己是不够的：窗口够高时 `calc(var(--pn-room) - underPx)` 一路把封面顶到 `COVER_MAX`，
- * 封面是小了，可整块还是快占满一屏。这里连页签一起封顶 —— 封面在剩下的空间里自适应。
+ * 上游没有这一道：窗口一高，封面就一路顶到 336px，手机上几乎占掉一屏。留着它 ——
+ * 这就是「手机没那么大」要的那一下。
  */
-const COVER_TAB_MAX_PX = 330;
+const COVER_TAB_MAX = '20.625rem';
 /**
- * 大封面的上限。以前是 `100cqw`（整个面板内宽）—— 面板一宽，封面就顶到两边，
- * 一屏里几乎只剩封面。现在取内宽的 70%，再封顶 260px：还是那块方的，只是小一圈。
+ * 大封面的边长上限。上游取 `100cqw`（整个面板内宽，约 336px），偏大；
+ * 现在取内宽的 70%，再封顶（约 208px）。
  */
-const COVER_MAX = 'min(70cqw, 260px)';
+const COVER_MAX = 'min(70cqw, 13rem)';
 
 type SongHeaderProps = {
     /** The cover tab is open: the large form. */
@@ -55,33 +59,31 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
     const under = useMeasuredSize(underRef);
     const artists = (currentSong ? getProviderSongMetadata(currentSong).artists : []).map(artist => artist.name).join(' / ');
     /*
-     * 文字改成**叠在**封面底边，不再另占一行。
+     * 回到上游的**两段式**：可用高度（--pn-room）先让出文字块那一截，剩下的全给封面，
+     * 页签整高 = 封面 + 文字块两段。
      *
-     * 以前 header 是「封面 + 下面整块文字」两段高：封面是个居中的方块（左右各留一块空白），
-     * 文字再独占下面一条 —— 于是封面左右那两块、加上封面与文字之间那一整条，看着全是空的。
+     * 之前为了压矮整个页签，把文字挪去压在封面底边上（页签只剩封面那么高）—— 屏一矮，
+     * 封面就缩到下限，文字与下面那排按钮挤在同一条里，于是互相重叠。
+     * 改回两段：封面归封面，歌名/歌手和那一排按钮排在它下面，各占各的位置。
      *
-     * 现在文字压在封面底边上、**横跨整个内宽**，顺手把封面左右那两块空白一起占掉；header
-     * 也就只有封面那么高了。
-     *
-     * 封面自己**不跟着变大**：下面那块的高度照旧从页签高度里让出去（COVER_RESERVE_PX +
-     * 文字实测高度），不然文字一不占行，封面就顶上去把整屏撑满。
+     * 上面那几个常量用 rem 而不是 px：界面缩放动的是根字号，rem 会跟着一起缩，
+     * px 不会 —— 手机上正是这个「各缩各的」把按钮挤到一块的。
      */
-    const reservedPx = COVER_RESERVE_PX + under.height;
-    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(min(var(--pn-room), ${COVER_TAB_MAX_PX}px) - ${reservedPx}px), ${COVER_MAX})`;
+    const underPx = `calc(${COVER_GAP} + ${under.height}px)`;
+    const coverHeight = `clamp(${MIN_COVER}, calc(min(var(--pn-room), ${COVER_TAB_MAX}) - ${underPx}), ${COVER_MAX})`;
 
     return (
         <header
             className="st-t-unfold relative shrink-0 overflow-hidden transition-[height]"
-            style={{ height: isBig ? coverHeight : FOLDED_PX }}
+            style={{ height: isBig ? `calc(${coverHeight} + ${underPx})` : FOLDED_PX }}
         >
             {/* The cover is where the lessons about this panel's song buttons point (data-ponder-panel-artwork). */}
             <div
                 data-ponder-panel-artwork
                 onClick={isBig ? undefined : onShowCover}
-                // 大封面不再铺满内宽：宽高都取 coverHeight（那块方的边长），左右 auto 居中。
-                // 折叠成一行时仍旧靠左。
-                className={`st-t-unfold absolute top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig ? 'left-0 right-0 mx-auto rounded-[10px]' : 'left-0 cursor-pointer rounded-lg'}`}
-                style={isBig ? { width: coverHeight, height: coverHeight } : { width: FOLDED_PX, height: FOLDED_PX }}
+                // 与上游一致：铺满面板内宽，高度按可用高度算（见 coverHeight 的注释）。
+                className={`st-t-unfold absolute left-0 top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig ? 'rounded-[10px]' : 'cursor-pointer rounded-lg'}`}
+                style={isBig ? { width: '100%', height: coverHeight } : { width: FOLDED_PX, height: FOLDED_PX }}
             >
                 {coverUrl ? (
                     <img src={getSizedCoverUrl(coverUrl, 512)} alt="Art" decoding="async" className="h-full w-full object-cover" />
@@ -110,13 +112,9 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
             <div
                 ref={underRef}
                 inert={!isBig}
-                // 压在封面底边上、横跨整个内宽（见上面 coverHeight 的注释）。字直接落在画面上，
-                // 深浅封面都可能，所以带一层阴影；底下再垫一条向上的渐变，别让字糊在亮画面里。
-                className={`st-t-move absolute inset-x-1 bottom-0 transition-[opacity,translate,visibility] ${isBig ? '' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
-                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
+                className={`absolute inset-x-1 bottom-0 transition-[opacity,translate,visibility] ${isBig ? 'st-t-move' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
             >
-                <span className="pointer-events-none absolute inset-x-0 bottom-0 top-[-8px] bg-gradient-to-t from-black/45 to-transparent" aria-hidden />
-                <div className="relative">{children}</div>
+                {children}
             </div>
         </header>
     );
