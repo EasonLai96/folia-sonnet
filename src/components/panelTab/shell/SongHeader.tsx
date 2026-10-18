@@ -15,8 +15,13 @@ import { useMeasuredSize } from './useMeasuredSize';
 
 /** The height of the folded line, and the side of its cover. */
 export const FOLDED_PX = 48;
-/** Between the large cover and what is under it. */
-const COVER_GAP_PX = 14;
+/**
+ * 给封面留的余量 —— 文字块有多高，就从页签的高度里让出多少。
+ *
+ * 文字现在压在封面底边上、不再占一行（见 coverHeight 的注释），所以这一项**不是**间距了：
+ * 它现在的作用只是让封面别因为文字不再占高就跟着胀大 —— 封面还是原来那一块方的大小。
+ */
+const COVER_RESERVE_PX = 14;
 /** The large cover is never lower than this, however short the window. */
 const MIN_COVER_PX = 96;
 /**
@@ -49,14 +54,25 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
     const underRef = useRef<HTMLDivElement>(null);
     const under = useMeasuredSize(underRef);
     const artists = (currentSong ? getProviderSongMetadata(currentSong).artists : []).map(artist => artist.name).join(' / ');
-    const underPx = COVER_GAP_PX + under.height;
-    // 先看整个页签能有多高（窗口留出的房间，和上面那条封顶取小的那个），减掉下面那一块才是封面。
-    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(min(var(--pn-room), ${COVER_TAB_MAX_PX}px) - ${underPx}px), ${COVER_MAX})`;
+    /*
+     * 文字改成**叠在**封面底边，不再另占一行。
+     *
+     * 以前 header 是「封面 + 下面整块文字」两段高：封面是个居中的方块（左右各留一块空白），
+     * 文字再独占下面一条 —— 于是封面左右那两块、加上封面与文字之间那一整条，看着全是空的。
+     *
+     * 现在文字压在封面底边上、**横跨整个内宽**，顺手把封面左右那两块空白一起占掉；header
+     * 也就只有封面那么高了。
+     *
+     * 封面自己**不跟着变大**：下面那块的高度照旧从页签高度里让出去（COVER_RESERVE_PX +
+     * 文字实测高度），不然文字一不占行，封面就顶上去把整屏撑满。
+     */
+    const reservedPx = COVER_RESERVE_PX + under.height;
+    const coverHeight = `clamp(${MIN_COVER_PX}px, calc(min(var(--pn-room), ${COVER_TAB_MAX_PX}px) - ${reservedPx}px), ${COVER_MAX})`;
 
     return (
         <header
             className="st-t-unfold relative shrink-0 overflow-hidden transition-[height]"
-            style={{ height: isBig ? `calc(${coverHeight} + ${underPx}px)` : FOLDED_PX }}
+            style={{ height: isBig ? coverHeight : FOLDED_PX }}
         >
             {/* The cover is where the lessons about this panel's song buttons point (data-ponder-panel-artwork). */}
             <div
@@ -94,9 +110,13 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
             <div
                 ref={underRef}
                 inert={!isBig}
-                className={`absolute inset-x-1 bottom-0 transition-[opacity,translate,visibility] ${isBig ? 'st-t-move' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
+                // 压在封面底边上、横跨整个内宽（见上面 coverHeight 的注释）。字直接落在画面上，
+                // 深浅封面都可能，所以带一层阴影；底下再垫一条向上的渐变，别让字糊在亮画面里。
+                className={`st-t-move absolute inset-x-1 bottom-0 transition-[opacity,translate,visibility] ${isBig ? '' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
+                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
             >
-                {children}
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 top-[-8px] bg-gradient-to-t from-black/45 to-transparent" aria-hidden />
+                <div className="relative">{children}</div>
             </div>
         </header>
     );

@@ -27,6 +27,14 @@ const DOCK_HEIGHT_PX = 36;
 const DOCK_GAP_PX = 12;
 /** Above the open tab: the gap, the hairline, and the gap under it. */
 const BODY_TOP_PX = { gap: 12, line: 1, under: 8 } as const;
+/**
+ * 面板整体上抬多少。
+ *
+ * 播放条那条基线（`bottomBarBottomPx`）只保证面板底边不压到播放条下面，系统手势条 / 导航栏
+ * 那一截不在它的账上 —— 面板的下半截会落进那一带，看着就是「在屏幕外面」。这里再往上抬一点，
+ * 把整块拉回可见区域。
+ */
+const SHELL_LIFT_PX = 16;
 
 type PanelShellProps = {
     isOpen: boolean;
@@ -147,10 +155,12 @@ const PanelSurface: React.FC<PanelSurfaceProps> = ({ hasHandle, isCover, tabKey,
 const PanelShell: React.FC<PanelShellProps> = ({ isOpen, handle, ...surface }) => {
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
     const { ref: layoutRef, invalidate: invalidateLayout } = usePlayerOverlayObstacle('player-panel', 'panel');
+    // 在播放条那条基线之上再抬一点（见 SHELL_LIFT_PX）。
+    const shellBottom = useTransform(bottomBarBottomPx, bottom => bottom + SHELL_LIFT_PX);
 
     return (
         <motion.div
-            style={{ bottom: bottomBarBottomPx }}
+            style={{ bottom: shellBottom }}
             onUpdate={invalidateLayout}
             className="absolute right-0 z-[60] flex flex-col items-end pointer-events-none"
             // 与手柄同一条基线：同样要从系统导航栏里让出来（见 PanelHandle 的注释）。
@@ -158,7 +168,8 @@ const PanelShell: React.FC<PanelShellProps> = ({ isOpen, handle, ...surface }) =
             data-folia-safe-right="shift"
             onClick={(e) => e.stopPropagation()}
         >
-            <div className="pr-4 md:pr-8">
+            {/* 右边多留一点：贴着屏幕边时，那圈 20px 圆角看着像被切掉了一块。 */}
+            <div className="pr-6 md:pr-8">
                 <AnimatePresence>
                     {isOpen && <PanelSurface {...surface} layoutRef={layoutRef} onLayoutUpdate={invalidateLayout} />}
                 </AnimatePresence>
