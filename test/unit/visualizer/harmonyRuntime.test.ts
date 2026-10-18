@@ -52,8 +52,18 @@ describe('harmony runtime', () => {
         expect(firstWord.lines[0].tokens.map(token => token.status)).toEqual(['active', 'static', 'waiting']);
         expect(gap.lines[0].tokens.map(token => token.status)).toEqual(['passed', 'static', 'waiting']);
         expect(secondWord.lines[0].tokens.map(token => token.status)).toEqual(['passed', 'static', 'active']);
-        expect(firstWord.signature).not.toBe(gap.signature);
-        expect(gap.signature).not.toBe(secondWord.signature);
+        /*
+         * 签名只描述「哪几句在屏上」，逐字的 waiting / active / passed 不算进来 ——
+         * 那玩意每唱完一个词就变一次，而画的人（WebGL 那条路与 DOM 那条路）都是自己按
+         * currentTime 推进的，根本不看 status。
+         *
+         * 于是同一段和声在「这个词 / 词间空档 / 下一个词」上签名是**同一个**，要等它
+         * 真的离屏才变 —— 这正是「副标题不再闪」的代价与目的。以前这里断言的是逐字
+         * 变签名，等于把那个闪烁写成了预期行为。
+         */
+        expect(firstWord.signature).toBe(gap.signature);
+        expect(gap.signature).toBe(secondWord.signature);
+        expect(resolveHarmonySnapshot(line, 4.01).signature).not.toBe(firstWord.signature);
     });
 
     it('supports multiple concurrent vocals in stable start-time order', () => {

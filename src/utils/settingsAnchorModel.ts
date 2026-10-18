@@ -17,7 +17,10 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     glassSurface: { section: 'appearance' },
     lyricFlat: { section: 'appearance' },
     deviceType: { section: 'appearance' },
-    phoneFit: { section: 'appearance' },
+    // 原来这里还有一条 `phoneFit`（「手机适配」总开关）。那一行按用户要求删掉了 ——
+    // 打开也不生效，而它门着的「横竖屏兼容」也一并换成了上面 `deviceType` 与
+    // `forceLandscape` 两行（见 AndroidForceLandscapeSetting）。锚点跟着删，
+    // 留着就是一条指向空处的深链：指令照样能跑，只是落不到任何一行上。
     // 云缓存那两项（fork 独有，AiProviderSettings 那块里的；只有非桌面才画）。
     cloudCache: { section: 'appearance' },
     cloudCacheBaseUrl: { section: 'appearance' },
