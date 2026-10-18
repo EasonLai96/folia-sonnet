@@ -5,6 +5,7 @@ import {
     publishColorOsLyricInfo,
 } from '../platform/foliaColorOsLyrics';
 import { isCapacitorAndroid } from '../platform/runtime';
+import { useColorOsLyricsStore } from '../stores/useColorOsLyricsStore';
 import { getSongAlbumLabel, getSongArtistLabel } from '../services/onlineMusic/songMetadata';
 import type { SongResult } from '../types';
 import type { LyricData } from '../types';
@@ -16,8 +17,9 @@ import { buildColorOsLyricInfo } from '../utils/lyrics/colorOsLyricInfo';
 // 让 ColorOS 的原生锁屏 / AOD 歌词页直接消费（装了 Bridge 之后再由它做逐字与样式增强）。
 //
 // 和 Lyricon 那条路最大的差别：**这里不需要任何第三方 App 或 Xposed 模块** ——
-// ColorOS SystemUI 自己认这个键。所以开关不交给用户，只由原生侧的 ROM 探测决定：
-// 不是 ColorOS 16+ 就整条通道不启动。
+// ColorOS SystemUI 自己认这个键。所以「能不能用」只由原生侧的 ROM 探测决定：不是
+// ColorOS 16+ 就整条通道不启动。但「用不用」仍然是用户的 —— 见 useColorOsLyricsStore
+// （默认开），关掉的时候这边负责把锁屏上那行词撤掉。
 //
 // 另一个差别是**不需要喂进度**：SystemUI 从 PlaybackState 自己取时钟往前推，
 // 我们在段内一句话都不说，只在换歌 / 歌词换源时写一次。
@@ -36,6 +38,7 @@ export const useColorOsLyricFeed = ({
 }: UseColorOsLyricFeedOptions): void => {
     const enabled = isCapacitorAndroid();
     const [supported, setSupported] = React.useState(false);
+    const userEnabled = useColorOsLyricsStore(state => state.enabled);
 
     // 判定每进程只做一次：原生那边要读 ROM 属性（必要时还要跑一次 getprop），
     // 结果在 platform 层缓存，这里只取回来决定要不要启动整条通道。
@@ -50,7 +53,7 @@ export const useColorOsLyricFeed = ({
         };
     }, [enabled]);
 
-    const active = enabled && supported;
+    const active = enabled && supported && userEnabled;
     const songKey = song ? getPlaybackSongKey(song) : null;
 
     /**
@@ -68,7 +71,12 @@ export const useColorOsLyricFeed = ({
     }, [songKey]);
 
     React.useEffect(() => {
-        if (!active) return;
+        // 关掉这一路（用户开关 / 探测结果）时也要把锁屏上那行词撤掉 —— 留着就是
+        // 「关了还显示」，而且下一段要等下一次换歌才会覆盖它。
+        if (!active) {
+            void clearColorOsLyricInfo();
+            return;
+        }
         // 没有歌 / 这首歌没词：宁可清掉也不要把上一首的歌词留在锁屏上。
         if (!songKey || !lyrics?.lines?.length) {
             void clearColorOsLyricInfo();
