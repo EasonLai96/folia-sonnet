@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Toggle } from './kit';
+import { Row, Toggle } from './kit';
 import { useAndroidLayoutSettingsStore } from '../../../stores/useAndroidLayoutSettingsStore';
 
 // src/components/modal/settings/AndroidForceLandscapeSetting.tsx
@@ -27,20 +27,17 @@ const AndroidForceLandscapeSetting: React.FC = () => {
     if (!isAndroidNativeRuntime()) return null;
 
     return (
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="min-w-0 flex-1 space-y-1">
-                <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
-                    {t('options.forceLandscape')}
-                </div>
-                <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
-                    {t('options.forceLandscapeDesc')}
-                </div>
-            </div>
+        // 与页面上其它项同一套：一句短说明（hint），完整的那一段进「i」里展开（note）。
+        <Row
+            label={t('options.forceLandscape')}
+            hint={t('options.forceLandscapeHint')}
+            note={t('options.forceLandscapeDesc')}
+        >
             <Toggle
                 checked={orientation === 'landscape'}
                 onChange={() => setOrientation(orientation === 'landscape' ? 'portrait' : 'landscape')}
             />
-        </div>
+        </Row>
     );
 };
 

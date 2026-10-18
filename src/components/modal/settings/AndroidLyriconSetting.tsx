@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Toggle } from './kit';
+import { Row, Toggle } from './kit';
 import { useLyriconStore } from '../../../stores/useLyriconStore';
 
 // src/components/modal/settings/AndroidLyriconSetting.tsx
@@ -22,30 +22,22 @@ const AndroidLyriconSetting: React.FC = () => {
     const connected = useLyriconStore(state => state.connected);
     const setEnabled = useLyriconStore(state => state.handleToggleLyricon);
 
+    // 开了却连不上（没装 Lyricon）：那句提示替掉 hint 直接显示，别让人以为已经生效 ——
+    // 见下面 Row 的 hint。
     if (!isAndroidNativeRuntime()) return null;
 
-    // 开了却连不上（没装 Lyricon）：说一句，别让人以为已经生效。
-    const desc = enabled && !connected ? t('options.lyriconNotConnectedDesc') : t('options.lyriconDesc');
-
     return (
-        // 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这一项只是里面的一行
-        // （与 AndroidColorOsLyricsSetting 同款）。自带边框会变成「卡里套卡」。
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="min-w-0 flex-1 space-y-1">
-                <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
-                    {t('options.enableLyricon')}
-                </div>
-                <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
-                    {desc}
-                </div>
-                {enabled && !connected && (
-                    <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
-                        {t('options.lyriconNotConnected')}
-                    </div>
-                )}
-            </div>
+        // 照页面上其它项的样式来：标签 + 一句短说明（hint），完整的那一段进「i」里展开
+        // （note）。以前是自己画的一整段说明直接铺在标签底下，跟周围那些项不是一套。
+        <Row
+            label={t('options.enableLyricon')}
+            // 开了却连不上（没装 Lyricon）：这句得直接看得见，不能藏在「i」里 ——
+            // 否则界面显示「已开启」而状态栏什么都没有。
+            hint={enabled && !connected ? t('options.lyriconNotConnectedDesc') : t('options.lyriconHint')}
+            note={t('options.lyriconDesc')}
+        >
             <Toggle checked={enabled} onChange={() => setEnabled(!enabled)} />
-        </div>
+        </Row>
     );
 };
 

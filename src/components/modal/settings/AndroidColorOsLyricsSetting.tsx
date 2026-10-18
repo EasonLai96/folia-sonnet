@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Toggle } from './kit';
+import { Row, Toggle } from './kit';
 import { getColorOsLyricsSupport, type ColorOsLyricsSupport } from '../../../platform/foliaColorOsLyrics';
 import { useColorOsLyricsStore } from '../../../stores/useColorOsLyricsStore';
 
@@ -46,24 +46,20 @@ export const AndroidColorOsLyricsSetting: React.FC = () => {
     if (!support?.supported) return null;
 
     return (
-        // 不自带卡片外壳：由所在页的 kit Group 提供那张卡，这一项只是里面的一行
-        // （与 AndroidLyriconSetting 同款）。自带边框会变成「卡里套卡」。
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="min-w-0 flex-1 space-y-1">
-                <div className="text-[13px] font-medium text-[color:var(--st-t1)]">
-                    {t('options.colorOsLyrics')}
-                </div>
-                <div className="text-xs leading-[18px] text-[color:var(--st-t2)]">
-                    {t('options.colorOsLyricsDesc')}
-                </div>
-                {support.colorOsMajor > 0 && (
-                    <div className="text-[11px] tabular-nums text-[color:var(--st-t3)]">
-                        ColorOS {support.colorOsMajor}
-                    </div>
-                )}
-            </div>
+        // 与页面上其它项同一套：一句短说明（hint），完整的那一段进「i」里展开（note）。
+        // 底下那行小字是唯一的探测证据（到底把这台机器认成 ColorOS 几），留着。
+        <Row
+            label={t('options.colorOsLyrics')}
+            hint={t('options.colorOsLyricsDesc')}
+            note={t('options.colorOsLyricsNote')}
+            below={support.colorOsMajor > 0 ? (
+                <span className="text-[11px] tabular-nums text-[color:var(--st-t3)]">
+                    ColorOS {support.colorOsMajor}
+                </span>
+            ) : undefined}
+        >
             <Toggle checked={enabled} onChange={() => setEnabled(!enabled)} />
-        </div>
+        </Row>
     );
 };
 
