@@ -133,6 +133,7 @@ import { useSessionRestoreController } from './components/app/playback/restore/u
 import { useStagePlaybackController } from './components/app/playback/useStagePlaybackController';
 import { useSongThemeAutoGeneration } from './hooks/useSongThemeAutoGeneration';
 import { useThemeController } from './hooks/useThemeController';
+import { registerAiThemeApplier, registerAiThemeProvider } from './services/aiThemeApplyBridge';
 import { useOnlineSongMetadataHydration } from './hooks/useOnlineSongMetadataHydration';
 import { resolveCommandPaletteSearchSource, resolveSearchSource, useSearchNavigationStore } from './stores/useSearchNavigationStore';
 import { useOnlineProviderAccountStore } from './stores/useOnlineProviderAccountStore';
@@ -686,6 +687,7 @@ export default function App() {
         getThemeParkSeedTheme,
         saveCustomDualTheme,
         saveEditedAiDualTheme,
+        applyDualTheme,
         applyCustomTheme,
         handleCustomThemePreferenceChange,
         handleSongThemeAutoSwitchChange,
@@ -703,6 +705,21 @@ export default function App() {
         coverUrl,
         restoreCachedThemeForSong,
     });
+
+    /*
+     * 面板上那颗 AI 主题云同步按钮要两样东西：把一份主题**应用上去**，以及拿到当前
+     * 生效的那**整份**（浅 + 深）。这两样只有这里的主题控制器有，而面板那条链路是
+     * 一层层传 props 的，为这一颗按钮再开一路要动五个文件 —— 改成由这里登记，
+     * 按钮那侧取走用（见 services/aiThemeApplyBridge.ts）。
+     */
+    useEffect(() => {
+        registerAiThemeApplier(dualTheme => applyDualTheme(dualTheme, { respectCustomPreference: false }));
+        registerAiThemeProvider(() => aiTheme);
+        return () => {
+            registerAiThemeApplier(null);
+            registerAiThemeProvider(null);
+        };
+    }, [aiTheme, applyDualTheme]);
 
     // Navigation and Library Hooks
     // manages current view, selected items, and navigation functions across the app

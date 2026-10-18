@@ -35,7 +35,14 @@ const MAX_CONCURRENT_ENTRY_FETCHES = 4;
  * 「这段歌词对应的主题 + 动画」。以前 theme / director 各存一条，同一段歌词交两遍，
  * 两条链路各拉自己那条 —— 既浪费空间，也没法一次往返同时喂饱两条链路。
  */
-export type AiCloudCacheKind = 'stage';
+/**
+ * `theme` = AI 主题（按歌算键，见 services/aiThemeCloud.ts）；
+ * `stage` = 舞台决策（按歌词 + policy 算键）。
+ *
+ * 两种键混在一个 kind 里会互相盖：主题那一路推上去的条目里没有决策，
+ * 正好把别人推的完整条目抹成半截。
+ */
+export type AiCloudCacheKind = 'stage' | 'theme';
 
 /** `/api/ai-cache/<kind>/<md5>`。 */
 export const resolveAiCloudCacheUrl = (kind: AiCloudCacheKind, key: string): string => (

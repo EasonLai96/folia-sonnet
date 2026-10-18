@@ -1,9 +1,9 @@
 import React from 'react';
-import { ArrowUpDown, Check, Moon, RefreshCw, Sparkle, Sparkles, Sun } from 'lucide-react';
+import { ArrowUpDown, Check, Moon, RefreshCw, RotateCcw, Sparkle, Sparkles, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
 import type { ThemeSourceModel } from '../../../hooks/themeControllerState';
-import { useThemeSyncAction } from '../../../hooks/useThemeSyncAction';
+import { useAiThemeCloudSync } from '../../../hooks/useAiThemeCloudSync';
 import { Button } from '../../modal/settings/kit';
 import { PanelIconButton } from '../shell/PanelIconButton';
 import { Segments } from '../shell/Segments';
@@ -37,7 +37,16 @@ const ThemeNameRow: React.FC<ThemeNameRowProps> = ({
     onToggleDaylight,
 }) => {
     const { t } = useTranslation();
-    const { themeSyncState, runThemeSync } = useThemeSyncAction();
+    /*
+     * 这颗按钮走 **AI 云缓存**（kind='theme'），不再碰自建 sync 服务器：
+     * 本机改过就把这一版推上去，没改过就把云端的拉下来当场用。
+     *
+     * 另给一颗「恢复云端版本」—— 只在**本机改过**时出现（没改过的时候云端和本机
+     * 本来就是同一份，那颗按钮没有任何意义）。
+     */
+    const { syncState, runSync, restoreCloudVersion } = useAiThemeCloudSync({
+        locallyEdited: themeSourceModel.hasLocalAiTheme,
+    });
     const hasSync = themeSourceModel.activeSource !== 'default';
 
     const formatThemeDisplayName = (name: string) => {
@@ -68,27 +77,40 @@ const ThemeNameRow: React.FC<ThemeNameRowProps> = ({
                     inert={!hasSync}
                     className={`st-t-move grid transition-[grid-template-columns,opacity,margin] ${hasSync ? 'grid-cols-[1fr]' : '-ml-1.5 grid-cols-[0fr] opacity-0'}`}
                 >
-                    <span className="min-w-0 overflow-hidden">
-                        <PanelIconButton
-                            size="s"
-                            filled
-                            label={themeSyncState === 'syncing'
-                                ? t('options.syncing')
-                                : themeSyncState === 'complete'
-                                    ? t('ui.synced')
-                                    : t('commandPalette.commands.sync-now.title')}
-                            disabled={themeSyncState === 'syncing'}
-                            onClick={() => void runThemeSync()}
-                        >
-                            {themeSyncState === 'syncing' ? (
-                                <RefreshCw size={15} className="animate-spin" />
-                            ) : themeSyncState === 'complete' ? (
-                                <Check size={15} className="text-[color:var(--st-ok)]" strokeWidth={3} />
-                            ) : (
-                                <ArrowUpDown size={15} />
-                            )}
-                        </PanelIconButton>
-                    </span>
+                        <span className="min-w-0 overflow-hidden">
+                            <span className="flex items-center gap-1.5">
+                                <PanelIconButton
+                                    size="s"
+                                    filled
+                                    label={syncState === 'syncing'
+                                        ? t('options.syncing')
+                                        : syncState === 'complete'
+                                            ? t('ui.synced')
+                                            : t('commandPalette.commands.sync-now.title')}
+                                    disabled={syncState === 'syncing'}
+                                    onClick={() => void runSync()}
+                                >
+                                    {syncState === 'syncing' ? (
+                                        <RefreshCw size={15} className="animate-spin" />
+                                    ) : syncState === 'complete' ? (
+                                        <Check size={15} className="text-[color:var(--st-ok)]" strokeWidth={3} />
+                                    ) : (
+                                        <ArrowUpDown size={15} />
+                                    )}
+                                </PanelIconButton>
+                                {themeSourceModel.hasLocalAiTheme && (
+                                    <PanelIconButton
+                                        size="s"
+                                        filled
+                                        label={t('ui.aiThemeRestoreCloud')}
+                                        disabled={syncState === 'syncing'}
+                                        onClick={() => void restoreCloudVersion()}
+                                    >
+                                        <RotateCcw size={15} />
+                                    </PanelIconButton>
+                                )}
+                            </span>
+                        </span>
                 </span>
                 <Segments
                     size="s"

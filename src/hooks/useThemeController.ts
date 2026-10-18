@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
 import { notifyStageResolved } from '../services/aiStage';
+import { type AiThemeSongRef, writeLocalAiThemeOverride, readLocalAiThemeOverride } from '../services/aiThemeCloud';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -61,6 +62,12 @@ const saveSyncedThemeWithoutBlocking = (...args: Parameters<typeof saveSyncedThe
     });
 };
 const CUSTOM_THEME_PREFERRED_KEY = 'custom_theme_preferred';
+
+/** 云端 / 本地那两层只认「歌名 + 歌手」，把 SongResult 折成它要的形状。 */
+const songRefOf = (song: SongResult): AiThemeSongRef => ({
+    title: song?.name,
+    artist: song?.artists?.map(artist => artist.name).filter(Boolean).join('、'),
+});
 
 const sanitizeCustomTheme = (
     theme: Theme,
@@ -427,6 +434,17 @@ export function useThemeController({
         if (songKey != null) {
             void saveToCache(`dual_theme_${songKey}`, sanitized);
         }
+        /*
+         * 「本机改过」这一份单独记一份（services/aiThemeCloud.ts）。
+         *
+         * 之后这首歌一律以它为准：云端那条还在，但不许反过来盖掉用户刚改的颜色
+         * —— 少了这一层，切走再切回来就会被云端的旧版本顶掉，改完像没改。
+         */
+        if (syncSong) {
+            void writeLocalAiThemeOverride(songRefOf(syncSong), sanitized);
+            // 面板那颗「恢复云端版本」靠它决定出不出来 —— 改完当场就该在。
+            setCurrentSongHasLocalAiTheme(true);
+        }
         if (syncSong) {
             saveSyncedThemeWithoutBlocking(syncSong, sanitized, 'edited');
         }
@@ -529,10 +547,22 @@ export function useThemeController({
         }
 
         /*
-         * 以前在这里先翻本地缓存（`dual_theme_*` / `theme_*`）—— 那份缓存按用户要求删掉了。
-         * 生成结果现在只存在云端（services/aiStage.ts）：命中云端的那一次在
-         * generateThemeFromLyrics 里就已经返回，走不到这里。
+         * 先看**本机改过**那一版（services/aiThemeCloud.ts）：用户在快速编辑里改过的歌，
+         * 一律以本机为准，云端那条不许反过来盖掉它。
+         *
+         * 以前这里翻的是 `dual_theme_*` 那份全量本地缓存 —— 那份按用户要求删掉了
+         * （生成结果只存云端，见 services/aiStage.ts）；留下来的是「改过」这一份，
+         * 它不是缓存，是用户的编辑。
          */
+        const localSong = typeof songOrId === 'object' && songOrId !== null ? songOrId : null;
+        if (localSong) {
+            const override = await readLocalAiThemeOverride(songRefOf(localSong));
+            if (override) {
+                applyDualTheme(override, { respectCustomPreference: false });
+                setCurrentSongHasLocalAiTheme(true);
+                return 'local-override' as const;
+            }
+        }
         setCurrentSongHasLocalAiTheme(false);
 
         if (options?.allowLastUsedFallback) {
