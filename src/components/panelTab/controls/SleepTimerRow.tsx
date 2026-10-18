@@ -3,7 +3,7 @@ import { CalendarClock, ChevronDown, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
 import { useSleepTimerStore } from '../../../stores/useSleepTimerStore';
-import { DioramaSettingsToggle } from '../../visualizer/diorama/DioramaSettingsToggle';
+import { Toggle } from '../../modal/settings/kit';
 import { canExitApp } from '../../../platform/foliaNative';
 import {
     formatSleepTimerClock,
@@ -155,14 +155,23 @@ const SleepTimerRow: React.FC<SleepTimerRowProps> = ({ theme, isDaylight }) => {
                         .replace('{{count}}', String(readSleepTimerTotalMinutes(plan))))
             : t('commandPalette.sleepTimerRowUnset', '未设置');
 
-    const wellBg = isDaylight ? 'bg-black/5' : 'bg-black/20';
+    /*
+     * 与下面「播放页透明背景」那一行同一套：平铺的一行、同样的行高与内边距、同一颗开关。
+     *
+     * 以前这里是一块带底色的「井」（外层 bg-black/20 + rounded-xl），控制页上只有它一个是
+     * 这么画的，跟下面的透明背景那行摆在一起像两种东西；开关也是另一颗（DioramaSettingsToggle，
+     * 跟着主题走色、尺寸也不一样），跟下面那颗并排完全不像一对。现在两处都跟下面对齐。
+     *
+     * 整行**不能**照搬成 <label>：那一行是整行点击切换开关，而这一行标题上还有「展开/收起」
+     * 的点击，套进 label 会让点展开顺手把开关也拨一下。
+     */
     return (
-        <div className={`${wellBg} rounded-xl px-2.5 py-2`}>
-            <div className="flex items-center gap-2">
+        <div>
+            <div className="flex min-h-11 items-center gap-3 px-1 py-1.5">
                 <button
                     type="button"
                     onClick={() => setExpanded(prev => !prev)}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
                     aria-expanded={expanded}
                 >
                     <Timer
@@ -170,7 +179,7 @@ const SleepTimerRow: React.FC<SleepTimerRowProps> = ({ theme, isDaylight }) => {
                         className="shrink-0"
                         style={enabled ? { color: theme.accentColor } : { opacity: 0.4 }}
                     />
-                    <span className="shrink-0 text-xs font-bold">{t('commandPalette.sleepTimerRowTitle', '定时关闭')}</span>
+                    <span className="shrink-0 text-sm leading-5">{t('commandPalette.sleepTimerRowTitle', '定时关闭')}</span>
                     <span
                         className={`min-w-0 flex-1 truncate text-[10px] tabular-nums ${enabled ? '' : 'opacity-50'}`}
                         style={{ color: 'var(--text-secondary)' }}
@@ -183,7 +192,7 @@ const SleepTimerRow: React.FC<SleepTimerRowProps> = ({ theme, isDaylight }) => {
                         aria-hidden
                     />
                 </button>
-                <DioramaSettingsToggle
+                <Toggle
                     checked={enabled}
                     disabled={!hasPlan}
                     label={t('commandPalette.sleepTimerRowTitle', '定时关闭')}
@@ -192,13 +201,11 @@ const SleepTimerRow: React.FC<SleepTimerRowProps> = ({ theme, isDaylight }) => {
                         if (next && !hasPlan) setExpanded(true);
                         handleToggleSleepTimer(next);
                     }}
-                    theme={theme}
-                    isDaylight={isDaylight}
                 />
             </div>
 
             {expanded && (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2 px-1">
                     <SleepTimerChips
                         accentColor={theme.accentColor}
                         isDaylight={isDaylight}
