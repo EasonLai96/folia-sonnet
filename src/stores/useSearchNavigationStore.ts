@@ -158,24 +158,70 @@ const searchNavidromeSongs = async (query: string): Promise<SearchExecutionResul
 };
 
 /**
- * 「AI 主题」：在云端缓存的歌名里搜。
+ * 一批并发跑，跑完再换下一批。
  *
- * 云端只存歌名，所以先按名字在云端筛出一批，再拿这些名字去当前登着的平台把曲目搜出来
- * —— 与首页那一屏同一条路（core/services/cloudThemeCollectionDeps），只是这里带上了查询词。
+ * 「AI 主题」那一屏每一首都要拿歌名去平台上搜一次 —— 一次 30 个并发会把 Capacitor
+ * 那座桥占死（别的平台跟着一起超时，见 Capacitor 桥那节），所以压到 6 个。
+ */
+const CLOUD_RESOLVE_CONCURRENCY = 6;
+
+const mapWithConcurrency = async <T, R>(
+    items: readonly T[],
+    limit: number,
+    worker: (item: T) => Promise<R>,
+): Promise<R[]> => {
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+        for (;;) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= items.length) return;
+            results[index] = await worker(items[index] as T);
+        }
+    });
+    await Promise.all(lanes);
+    return results;
+};
+
+/**
+ * 「AI 主题」：在云端缓存的歌名里**搜**，或者不带词地**逛**。
+ *
+ * 云端只存歌名，所以先按名字在云端要一批（给了词就是筛），再拿这些名字去当前登着的
+ * 平台把曲目搜出来 —— 与首页那一屏同一条路（cloudThemeCollectionDeps）。
  * 平台上搜不到的名字直接不出结果：列一行播不了的歌没有意义。
+ *
+ * **不带词 = 逛**：服务端按 `updated_at DESC` 排，永远从最新那一条开始翻，于是每次
+ * 进来都是同一批歌。这里先问一次总数，再随机挑一个起点，从那儿顺序往下翻 —— 每次
+ * 看到的是库里不同的一个窗口。剩下的交给 `loadMoreSearchResults` 接着往下懒加载。
+ *
+ * 随机起点只在第一页算：翻页时沿用传进来的 offset，否则每翻一页都跳到别处去。
  */
 const searchCloudThemeSongs = async (
     query: string,
     limit: number,
     offset: number,
 ): Promise<SearchExecutionResult> => {
-    const page = await listAiCloudCacheSongs({ limit, offset, query }).catch(() => null);
+    const browsing = !query.trim();
+    let start = offset;
+    if (browsing && offset === 0) {
+        const probe = await listAiCloudCacheSongs({ limit: 1, offset: 0 }).catch(() => null);
+        const total = Number(probe?.total ?? 0);
+        if (total > limit) {
+            start = Math.floor(Math.random() * (total - limit + 1));
+        }
+    }
+    const page = await listAiCloudCacheSongs({ limit, offset: start, query }).catch(() => null);
     const names = page?.songs ?? [];
     if (names.length === 0) return { results: [], hasMore: false, nextOffset: offset };
-    const found = await Promise.all(names.map(entry => resolveCloudThemeSong(entry.songTitle).catch(() => null)));
+    const found = await mapWithConcurrency(
+        names,
+        CLOUD_RESOLVE_CONCURRENCY,
+        entry => resolveCloudThemeSong(entry.songTitle).catch(() => null),
+    );
     const results = found.filter((song): song is UnifiedSong => Boolean(song));
     const total = Number(page?.total ?? 0);
-    const consumed = offset + names.length;
+    const consumed = start + names.length;
     return { results, hasMore: consumed < total, nextOffset: consumed };
 };
 
@@ -308,7 +354,11 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
     )),
     submitSearch: async ({ query, sourceTab, deps, returnView = 'home' }) => {
         const trimmedQuery = (query ?? get().searchQuery).trim();
-        if (!trimmedQuery) {
+        /*
+         * 「AI 主题」那一屏是**逛**云端缓存里都有什么歌：点那个页签时手上还没有词，
+         * 空词也要能拉一屏下来（随机起点那一段见 searchCloudThemeSongs）。
+         */
+        if (!trimmedQuery && sourceTab !== 'cloud') {
             return false;
         }
 
@@ -397,7 +447,8 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             || !hasMore
             || isSearching
             || isLoadingMore
-            || !searchQuery.trim()
+            // 「AI 主题」是逛：它本来就没有词，空词也要能接着往下翻（见 submitSearch 那条注释）。
+            || (!searchQuery.trim() && searchSourceTab !== 'cloud')
         ) {
             return;
         }
