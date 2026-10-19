@@ -16,8 +16,8 @@
 | components | 1024+ |
 | test/dev | 1024+ |
 | library | 256+ |
+| services | 256+ |
 | backend/electron | 128+ |
-| services | 128+ |
 | utils | 128+ |
 | hooks | 64+ |
 | src (其他) | 64+ |
@@ -33,7 +33,7 @@
 
 | 被依赖量级 | 模块 |
 | --- | --- |
-| 512+ | `src/types.ts` |
+| 1024+ | `src/types.ts` |
 | 256+ | `src/types/onlineMusic.ts` |
 | 128+ | `src/types/ponder.ts` |
 | 128+ | `src/utils/appPlaybackGuards.ts` |
@@ -43,11 +43,11 @@
 | 64+ | `src/mods/folium/contract.ts` |
 | 64+ | `src/services/db.ts` |
 | 64+ | `src/services/onlineMusic/omni.ts` |
+| 64+ | `src/stores/useAppViewStore.ts` |
 | 64+ | `src/stores/usePlaybackStore.ts` |
 | 64+ | `src/stores/useStatusMessageStore.ts` |
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
-| 32+ | `src/components/visualizer/colorMix.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
 | 32+ | `src/components/visualizer/registry.tsx` |
 | 32+ | `src/components/wall/wallSlots.ts` |
@@ -57,13 +57,14 @@
 | 32+ | `src/library/core/directory/directory.contract.ts` |
 | 32+ | `src/library/core/home/homeModel.contract.ts` |
 | 32+ | `src/library/suites/bravais/bravaisLayer.ts` |
+| 32+ | `src/platform/runtime.ts` |
 | 32+ | `src/services/baseThemes.ts` |
 | 32+ | `src/services/onlineMusic/providerRegistry.ts` |
 | 32+ | `src/services/onlineMusic/songMetadata.ts` |
 | 32+ | `src/stores/motionSignals.ts` |
-| 32+ | `src/stores/useAppViewStore.ts` |
 | 32+ | `src/stores/useAudioSettingsStore.ts` |
 | 32+ | `src/stores/useOnlineProviderAccountStore.ts` |
+| 32+ | `src/stores/usePlayerChromeSettingsStore.ts` |
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
 | 32+ | `src/stores/useVisualizerSettingsStore.ts` |
 | 32+ | `src/types/localLibrary.ts` |
@@ -73,6 +74,7 @@
 | 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
 | 32+ | `src/utils/lyrics/renderHints.ts` |
+| 32+ | `src/utils/visualizer/colorMix.ts` |
 | 32+ | `test/component/fixtures.ts` |
 
 ## 动态注册点
@@ -313,12 +315,6 @@
 这些边命中了规则，但目标模块在运行时根本不含 UI（不传递依赖 react）。
 依赖方向没问题，是文件住在了 UI 目录（`src/components/`、`src/library/` 的 suites / app）下面。修法是移动文件，不是改依赖。
 
-- `src/services/obs/visualSettingsConfig.ts` → `src/components/visualizer/tuningRegistry.ts`
-- `src/services/ponder/pagePonderTarget.ts` → `src/components/modal/settings/navigation/settingsAnchorModel.ts`
-- `src/services/sync/settingsSnapshot.ts` → `src/components/visualizer/tuningRegistry.ts`
 - `src/stores/useExploreFeedStore.ts` → `src/components/app/home/explore/exploreFeedMemory.ts`
-- `src/stores/usePlaybackStore.ts` → `src/components/app/playback/createCoverUrlResolver.ts`
-- `src/stores/useSettingsModalStore.ts` → `src/components/command-palette/pinnedCommandPreferences.ts`
 - `src/stores/useVisualizerSettingsStore.ts` → `src/components/visualizer/tuningRegistry.ts`
-- `src/utils/themeColorMath.ts` → `src/components/visualizer/colorMix.ts`
 
