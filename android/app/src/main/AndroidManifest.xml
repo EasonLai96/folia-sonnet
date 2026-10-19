@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!--
         把自己申报成「游戏」（appCategory），让系统把它当成渲染密集的应用。
 
@@ -284,4 +285,13 @@
         这是 **normal 级权限**，装的时候就给了，不需要运行时弹窗。
     -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!--
+        HDR 投影「真的把系统亮度顶满」：窗口级覆盖（BRIGHTNESS_OVERRIDE_FULL）只对我们
+        自己的窗口有效，设置里那个滑块一动不动，带自动亮度 / 阳光屏的 ROM 还会把它压回去。
+        这是「特殊权限」，装的时候不给，得用户在系统设置里开一次（设置 → 应用 → 权限 →
+        修改系统设置）；没给的话投影只走窗口覆盖那一条，界面上会提示。
+        tools:ignore 是因为 lint 对所有 protected 权限都报 ProtectedPermissions。
+    -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 </manifest>

@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // test/unit/services/hdrProjection.test.ts
 // 「HDR 投影」那个 5 秒倒计时。
 //
-// 倒计时只有一个，启动时那条路（上次开着）与手动拨开关共用它 —— 各跑一个的话，
-// 启动那一个会在用户已经拨掉之后照样翻一次屏。这几条钉的就是「谁取消都取消的是同一个」
-// 以及「数完才生效」。
+// 倒计时只有一个：手动拨开关那一条，与「启动时」共用它 —— 各跑一个的话，启动那一个
+// 会在用户已经拨掉之后照样翻一次屏。这几条钉的就是「谁取消都取消的是同一个」
+// 以及「数完才生效」。启动时本身**不恢复**开关（见下面那一组）。
 //
 // 落地效果只验**看得见的那一半**：<html> 上的镜像属性、方向锁那一份落盘、以及推给
 // 原生的亮度。原生那半在真机上才有，这里只验「推过去了、推的是对的值」。
@@ -104,18 +104,35 @@ describe('HDR 投影的开关两头', () => {
         expect(boostCalls).toEqual([false]);
     });
 
-    it('启动时上次还开着：镜像先落，剩下的等倒计时带过去', () => {
+    /*
+     * **不恢复**。这个开关一手管着屏幕方向、整屏镜像和窗口亮度，任何一件在某台机器上
+     * 出岔子（早先的色彩模式就是把整屏压成黑的那一件），用户唯一能做的就是重启 ——
+     * 一旦自动恢复，重启也回不来，等于把自己锁死在黑屏里。所以重启必须回到关。
+     */
+    it('启动时一律回到关：上次开着也不恢复，只把上一趟留下的收回去', () => {
         vi.useFakeTimers();
         writeStoredHdrProjection(true);
         installHdrProjectionPreference();
 
-        // 镜像不能等：属性晚一帧，开屏那一下会先按正的画面铺一遍再翻过去。
-        expect(mirrorAttr()).toBe('true');
-        expect(readHdrProjectionCountdown()).toBe(5);
+        expect(readStoredHdrProjection()).toBe(false);
+        expect(mirrorAttr()).toBe('false');
+        // 不排倒计时 —— 也就是不会自己横过去、把亮度顶上去。
+        expect(readHdrProjectionCountdown()).toBe(0);
 
-        vi.advanceTimersByTime(5000);
+        // 但上一趟落盘的那几样得还：强制横屏那份设置，以及全局的系统亮度。
+        expect(localStorage.getItem(ORIENTATION_KEY)).toBe('portrait');
+        expect(boostCalls).toEqual([false]);
+
+        vi.advanceTimersByTime(10_000);
+        expect(boostCalls).toEqual([false]);
+    });
+
+    /* 用户自己原本就锁着横屏的话，关掉 HDR 该还回横屏 —— 一律按竖屏还等于改了他的设置。 */
+    it('关掉时还的是打开前的方向', () => {
+        localStorage.setItem(ORIENTATION_KEY, 'landscape');
+        void applyHdrProjection(true);
+        void applyHdrProjection(false);
         expect(localStorage.getItem(ORIENTATION_KEY)).toBe('landscape');
-        expect(boostCalls).toEqual([true]);
     });
 
     it('启动时上次是关着的：不排任何倒计时', () => {

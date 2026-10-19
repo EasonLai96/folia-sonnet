@@ -1739,6 +1739,19 @@ export default function App() {
     }, [hdrProjectionActive, playerChromeVisibilityMode, setPlayerChromeVisibilityModeTo]);
 
     /*
+     * 开起来弹一条。这一档下界面是整屏收掉的，屏幕上只剩可视化与提示条 —— 没有这句，
+     * 用户看着一块屏幕无从判断它到底生效没有（「黑屏」「点击没反应」就是这么来的）。
+     */
+    useEffect(() => {
+        if (!hdrProjectionActive) return;
+        setStatusMsg({
+            type: 'info',
+            text: t('ui.hdrProjectionOnHint', 'HDR 投影已开启 · 点两次空白退出'),
+            nonce: Date.now(),
+        });
+    }, [hdrProjectionActive, setStatusMsg, t]);
+
+    /*
      * 点击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
      *
      * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，

@@ -66,14 +66,14 @@ interface FoliaNativePlugin {
      */
     setScreenAwake(options: { awake: boolean }): Promise<void>;
     /**
-     * 「HDR 投影」的显示那一半：亮度顶到最亮，并尽量切到 HDR 色彩模式。
+     * 「HDR 投影」的显示那一半：亮度顶到最亮。
      *
-     * 亮度是 **Activity 窗口** 的属性，WebView 里改不动（也不去改系统设置：那是
-     * 窗口级覆盖，只有我们的窗口在前台才生效，退到后台由系统照常接管）。
-     * 色彩模式那半是尽力而为 —— 屏幕不支持就退回广色域、再不行保持默认，
-     * 亮度那一半照样生效。
+     * 亮度是 **Activity 窗口** 的属性，WebView 里改不动，所以走这里。原生那半做两件事：
+     * 窗口级覆盖（不用任何权限，总能做）+ 拿到 WRITE_SETTINGS 时顺手把系统亮度也顶满。
+     * 只有前者生效时，设置里那个滑块是不动的，带自动亮度的 ROM 还可能把它压回去 ——
+     * 所以结果要报回来，界面上才好提示。
      */
-    setDisplayBoost(options: { boost: boolean }): Promise<void>;
+    setDisplayBoost(options: { boost: boolean }): Promise<DisplayBoostResult>;
     /**
      * 音频焦点策略：是否允许后台与其他音源同时播放。
      *
@@ -196,17 +196,30 @@ export const setScreenAwake = async (awake: boolean): Promise<void> => {
     }
 };
 
+/** 亮度那半落地的结果：「系统亮度写没写进去」与「有没有那个权限」。 */
+export type DisplayBoostResult = {
+    /** 系统设置里的亮度真的被顶满了（窗口覆盖总是会做，不体现在这里）。 */
+    systemBrightness: boolean;
+    /** WRITE_SETTINGS 授权拿到了没有 —— 没拿到就是只有窗口覆盖那一条在起作用。 */
+    canWriteSettings: boolean;
+};
+
 /**
- * 「HDR 投影」的显示那一半：最高亮度 + HDR 色彩模式（见 FoliaNativePlugin.setDisplayBoost）。
+ * 「HDR 投影」的显示那一半：最高亮度（见 FoliaNativePlugin.setDisplayBoost）。
  *
  * 失败一律静默 —— 桌面端 / 老版本 App 没有这个方法，而**横屏与镜像那两半照旧生效**，
- * 整个开关不该因为亮度够不着就看起来是坏的。
+ * 整个开关不该因为亮度够不着就看起来是坏的。够不着就按「什么都没做成」报回去。
  */
-export const setDisplayBoost = async (boost: boolean): Promise<void> => {
+export const setDisplayBoost = async (boost: boolean): Promise<DisplayBoostResult> => {
     try {
-        await FoliaNative.setDisplayBoost({ boost });
+        const result = await FoliaNative.setDisplayBoost({ boost });
+        return {
+            systemBrightness: result?.systemBrightness === true,
+            canWriteSettings: result?.canWriteSettings === true,
+        };
     } catch {
-        // 同上：亮度与色彩模式不该影响界面本身能不能用。
+        // 同上：亮度不该影响界面本身能不能用。
+        return { systemBrightness: false, canWriteSettings: false };
     }
 };
 

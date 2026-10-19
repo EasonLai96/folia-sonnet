@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -1931,57 +1930,132 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     /*
-     * 「HDR 投影」的显示那一半：把亮度顶到最亮，并尽量切到 HDR 色彩模式。
+     * 「HDR 投影」的显示那一半：把亮度顶到最亮。
      *
      * 屏幕亮度在 WebView 里改不动 —— 那是 Activity 窗口的属性（`lp.screenBrightness`），
      * 网页拿不到自己的窗口。所以要走这里。
      *
-     * 用的是**窗口覆盖**（BRIGHTNESS_OVERRIDE_*）而不是去改系统设置：
-     * 只有我们的窗口在前台时它才生效，退到后台由系统照常接管 —— 既不用申请
-     * WRITE_SETTINGS 权限，也不存在「忘了还原就把用户亮度改掉了」这回事。
+     * 两条腿都走：
+     *   1. **窗口覆盖**（BRIGHTNESS_OVERRIDE_*）：不用任何权限，进程活着就有效，
+     *      退到后台由系统照常接管 —— 不会把用户的亮度永久改掉。
+     *   2. **真的写系统亮度**：窗口覆盖只对我们自己的窗口生效，设置里那个滑块一动不动，
+     *      而带「阳光屏 / 护眼 / 自动亮度」的 ROM（ColorOS 一类）会按自己的策略把它压回
+     *      去，用户看到的就是「开了 HDR，屏幕一点没亮」。所以拿到 WRITE_SETTINGS 授权时
+     *      顺手把系统亮度也顶满，并在关掉时还原成开之前的值与模式。
      *
-     * 色彩模式同理：设备不支持 HDR 会直接抛，那就退回广色域，再不行保持默认 ——
-     * 亮度那一半已经生效了，色彩只是锦上添花，不该让整个开关看起来是坏的。
+     * WRITE_SETTINGS 是「特殊权限」，装的时候不给，得用户在系统设置里亲手开一次；
+     * 没给就只靠第 1 条，返回值里把这件事报回去，界面上才好提示。
      */
     @PluginMethod
     public void setDisplayBoost(PluginCall call) {
         boolean boost = Boolean.TRUE.equals(call.getBoolean("boost", false));
+        final boolean[] wroteSystem = new boolean[] { false };
+        final boolean[] canWrite = new boolean[] { false };
         Activity activity = getActivity();
         if (activity != null) {
             activity.runOnUiThread(() -> {
                 try {
                     android.view.Window window = activity.getWindow();
                     android.view.WindowManager.LayoutParams params = window.getAttributes();
+                    /*
+                     * 只动亮度，不动色彩模式。
+                     *
+                     * 早先这里还试着把窗口切进 COLOR_MODE_HDR（不支持再退广色域），结果在
+                     * 不支持的机器上整屏发黑：窗口被当成 HDR / 广色域的合成目标，而 WebView
+                     * 画的是 sRGB，同一个像素值被按另一条曲线解释，画面就被压到近乎全黑 ——
+                     * 偏偏这个开关是落盘的，一黑就再也找不到地方把它关掉。
+                     *
+                     * 亮度覆盖是窗口自己的属性，不碰色彩空间；投到玻璃上要的「够亮」它已经
+                     * 够了，HDR 那半收益没有、风险很大，不再碰。
+                     */
                     params.screenBrightness = boost
                         ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
                         : android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
                     window.setAttributes(params);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        /*
-                         * COLOR_MODE_HDR 需要屏幕真的支持（很多机器不支持，会直接抛
-                         * IllegalArgumentException）；广色域那一档覆盖面广得多。
-                         * 两档都失败就什么都不做 —— 亮度那半已经生效了。
-                         */
-                        try {
-                            window.setColorMode(boost
-                                ? ActivityInfo.COLOR_MODE_HDR
-                                : ActivityInfo.COLOR_MODE_DEFAULT);
-                        } catch (Throwable unsupportedHdr) {
-                            try {
-                                window.setColorMode(boost
-                                    ? ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
-                                    : ActivityInfo.COLOR_MODE_DEFAULT);
-                            } catch (Throwable ignored) {
-                                // 这块屏两种都不认：保持默认。
-                            }
-                        }
+                    /*
+                     * 投影时别息屏：手机躺在仪表台上没人碰，系统息屏时间一到整屏就黑了，
+                     * 而且这时候用户看不到「再点一次」的入口。
+                     */
+                    if (boost) {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    } else {
+                        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    }
+                    canWrite[0] = canWriteSystemSettings();
+                    if (canWrite[0]) {
+                        wroteSystem[0] = writeSystemBrightness(boost);
                     }
                 } catch (Throwable ignored) {
                     // Activity 正在 finishing：窗口已经没了。
                 }
+                /*
+                 * 结果要等窗口那段跑完再给：`canWrite` / `wroteSystem` 是在里面填的，
+                 * 放在 runOnUiThread 外面 resolve 的话读到的永远是初始的 false。
+                 */
+                call.resolve(buildDisplayBoostResult(wroteSystem[0], canWrite[0]));
             });
+            return;
         }
-        call.resolve();
+        call.resolve(buildDisplayBoostResult(false, false));
+    }
+
+    private JSObject buildDisplayBoostResult(boolean wroteSystem, boolean canWrite) {
+        JSObject result = new JSObject();
+        result.put("systemBrightness", wroteSystem);
+        result.put("canWriteSettings", canWrite);
+        return result;
+    }
+
+    /** WRITE_SETTINGS 拿到了没有（这是特殊权限，只能用户在系统设置里给）。 */
+    private boolean canWriteSystemSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                return Settings.System.canWrite(getContext());
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /*
+     * 改完记得还原：系统亮度是全局的，忘了还就是把用户的屏幕永久钉在最亮。
+     * 开之前的值与自动 / 手动模式存在进程里，关掉开关时照原样写回去。
+     */
+    private int savedSystemBrightness = -1;
+    private int savedSystemBrightnessMode = -1;
+
+    private boolean writeSystemBrightness(boolean boost) {
+        try {
+            ContentResolver resolver = getContext().getContentResolver();
+            if (boost) {
+                if (savedSystemBrightness < 0) {
+                    savedSystemBrightness = Settings.System.getInt(
+                        resolver, Settings.System.SCREEN_BRIGHTNESS, 255);
+                    savedSystemBrightnessMode = Settings.System.getInt(
+                        resolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC);
+                }
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 255);
+                return true;
+            }
+            if (savedSystemBrightness >= 0) {
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    savedSystemBrightnessMode == Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                        ? Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                        : Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC);
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS,
+                    savedSystemBrightness);
+                savedSystemBrightness = -1;
+                savedSystemBrightnessMode = -1;
+                return true;
+            }
+            return false;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private List<JSObject> parseCookieHeader(String header, String domain) {

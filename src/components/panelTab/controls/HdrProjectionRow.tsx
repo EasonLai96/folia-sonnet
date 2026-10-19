@@ -6,9 +6,11 @@ import { Toggle } from '../../modal/settings/kit';
 import {
     applyHdrProjection,
     cancelHdrProjectionCountdown,
+    readDisplayBoostResult,
     readHdrProjectionCountdown,
     readStoredHdrProjection,
     startHdrProjectionCountdown,
+    subscribeDisplayBoostResult,
     subscribeHdrProjectionCountdown,
     writeStoredHdrProjection,
 } from '../../../services/hdrProjection';
@@ -36,6 +38,11 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
     const { t } = useTranslation();
     const [enabled, setEnabled] = useState(() => readStoredHdrProjection());
     const [remaining, setRemaining] = useState(() => readHdrProjectionCountdown());
+    /*
+     * 亮度那一趟的结果在倒计时数完之后才回来（服务里异步推给原生），所以它跟
+     * 「还剩几秒」一样是订阅来的 —— 数完那一下自己会送到这里。
+     */
+    const [brightness, setBrightness] = useState(() => readDisplayBoostResult());
 
     /*
      * 倒计时只有一个（收在 services/hdrProjection.ts），启动时那条路与手动拨开关
@@ -43,6 +50,7 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
      * 打开面板，看到的就是它剩下的秒数，取消也取消的是同一个。
      */
     useEffect(() => subscribeHdrProjectionCountdown(setRemaining), []);
+    useEffect(() => subscribeDisplayBoostResult(setBrightness), []);
 
     useEffect(() => {
         // 数完那一下由服务写盘并生效；取消同理。两边都把开关的状态拉回实际值。
@@ -76,7 +84,7 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
                         onClick={() => {
                             cancelHdrProjectionCountdown();
                             writeStoredHdrProjection(false);
-                            applyHdrProjection(false);
+                            void applyHdrProjection(false);
                             setEnabled(false);
                         }}
                         className="flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-semibold opacity-60 transition-opacity hover:opacity-100"
@@ -101,13 +109,19 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
                          */
                         cancelHdrProjectionCountdown();
                         writeStoredHdrProjection(false);
-                        applyHdrProjection(false);
+                        void applyHdrProjection(false);
                         setEnabled(false);
                     }}
                 />
             </div>
             <p className="px-1 pb-1 text-[10px] leading-4" style={{ color: 'var(--text-secondary)', opacity: 0.55 }}>
                 {t('ui.hdrProjectionNote', '屏幕朝上放着，画面经挡风玻璃反射回来才是正的 —— 关掉即还原。')}
+                {on && !brightness.systemBrightness && (
+                    <>
+                        <br />
+                        {t('ui.hdrProjectionBrightnessNote', '系统亮度没被改动：需要系统设置里的「修改系统设置」权限，没给的话只在 App 内提亮。')}
+                    </>
+                )}
             </p>
         </div>
     );

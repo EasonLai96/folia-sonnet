@@ -1005,5 +1005,21 @@ html[data-runtime='capacitor-android'] .bravais-seam-body {
  * 按钮，不需要 JS 里再换算一遍。
  */
 html[data-folia-mirror='true'] {
+  /*
+   * 高度必须写明，否则整屏会塌成 0 高 —— 黑屏。
+   *
+   * 元素一旦有 transform，就会变成所有 position: fixed 后代的**包含块**；而应用外壳
+   * 正是 `fixed inset-0`（AppShell.tsx）。<html> 默认高度是 auto，它的内容又全是
+   * fixed / absolute（都不参与布局），于是自己塌成 0 高 —— 外壳那四个 inset:0 解析到
+   * 一个 0 高的框上，整屏就什么都不剩了。偏偏自带内容高度的浮层（提示条）还看得见，
+   * 看上去就是「提示条被镜像了，界面却是一块黑」。
+   *
+   * 100% 是相对初始包含块（视口）算的，不进这条 transform 的坐标系，所以给了就是满屏。
+   */
+  height: 100%;
   transform: scaleX(-1);
+}
+
+html[data-folia-mirror='true'] body {
+  height: 100%;
 }
