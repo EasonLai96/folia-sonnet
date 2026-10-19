@@ -33,6 +33,14 @@ type SearchExecutionResult = {
     nextOffset: number;
 };
 
+/**
+ * 流式回吐：某一路搜完了就先把它那批结果送上来（当前只有「全部」用）。
+ *
+ * **不保证是最终结果**：后面还有别的平台在跑，送上来的是「此刻已经有的全部」，
+ * 下一次回调会把它整份再送一遍（不是增量追加），所以调用方直接整份替换即可。
+ */
+type SearchPartialSink = (results: UnifiedSong[], hasMore: boolean) => void;
+
 type SearchCacheEntry = {
     results: UnifiedSong[];
     offset: number;
@@ -256,62 +264,90 @@ const mergeSongKey = (song: UnifiedSong): string => (
 /**
  * 「全部」：所有能搜的在线平台一起搜，再掺上本地曲库和 Navidrome。
  *
- * 掺的那两份只在第一页加：本地那条路是同步过滤、Navidrome 也不认 offset，翻页时再要一次会
- * 原样重复一遍。单个平台失败（没登录、超时）只丢那一家，不让这一整屏空掉 —— 「全部」本来就是
- * 「有几家出几家」。
+ * **流式**：谁先搜完谁先出，不等最后一家。给了 `onPartial` 就会被叫好几次，每次都带上「此刻
+ * 已经有的全部」，调用方整份替换即可 —— 于是「有多少先显示多少，新平台好了再插进来」。
+ * 单个平台失败（没登录、超时）只丢那一家，不让这一整屏空掉 —— 「全部」本来就是「有几家出几家」。
+ *
+ * 掺的本地 / Navidrome 只在第一页加：本地那条路是同步过滤、Navidrome 也不认 offset，翻页时
+ * 再要一次会原样重复一遍。
  */
 const searchAllSources = async (
     query: string,
     offset: number,
     limit: number,
     deps: SearchExecutorDeps,
+    onPartial?: SearchPartialSink,
 ): Promise<SearchExecutionResult> => {
     const providerIds = omni.getProviderSummaries()
         .filter(summary => omni.getProviderCapabilities(summary.providerId).search)
         .map(summary => summary.providerId);
     // 每家匀一点：四家各要一整页就是 120 条，第一屏根本翻不到那么远。
     const perProvider = Math.max(8, Math.ceil(limit / Math.max(1, providerIds.length)));
-    const pages = await mapWithConcurrency(providerIds, ALL_SEARCH_CONCURRENCY, async providerId => {
-        try {
-            return await searchOnlineProviderSongs(providerId, query, perProvider, offset);
-        } catch (error) {
-            console.warn('[SearchStore] "all" search skipped a provider:', providerId, error);
-            return null;
-        }
-    });
 
-    const buckets: UnifiedSong[][] = [];
-    let hasMore = false;
-    pages.forEach(page => {
-        if (!page) return;
-        if (page.results.length > 0) buckets.push(page.results);
-        if (page.hasMore) hasMore = true;
-    });
-
-    if (offset === 0) {
-        const local = searchLocalSongs(deps, query).results;
-        if (local.length > 0) buckets.push(local);
-        const navidrome = (await searchNavidromeSongs(query)).results;
-        if (navidrome.length > 0) buckets.push(navidrome);
-    }
-
-    // 轮着从每个桶里拿一条：第一屏就能看见各家都有，而不是先看完一整页网易云。
-    const merged: UnifiedSong[] = [];
+    /*
+     * 每来一桶就往已经显示的那批里**插**，而不是攒齐了一次性排。
+     *
+     * 位置按「这一首在自己桶里的序号」定：插到第一个序号更大的行前面。于是两家都有结果时
+     * 排成 A0 B0 A1 B1 …（跟以前一次性轮着拿的成品一样，第一屏就能看见各家都有），
+     * 而**已经在屏幕上的那些行只往下让位、不重新排序** —— 一次性重排会把用户正在看的那几行
+     * 挪走，那才是流式最难看的地方。
+     */
+    const rows: { song: UnifiedSong; rank: number }[] = [];
     const seen = new Set<string>();
-    const deepest = buckets.reduce((widest, bucket) => Math.max(widest, bucket.length), 0);
-    for (let index = 0; index < deepest; index += 1) {
-        buckets.forEach(bucket => {
-            const song = bucket[index];
-            if (!song) return;
+    let hasMore = false;
+
+    const insertBucket = (bucket: UnifiedSong[]): number => {
+        let added = 0;
+        bucket.forEach((song, rank) => {
             // 同一首几个平台都有：只留先到的那一份，否则一屏里同一首排四五遍。
             const key = mergeSongKey(song);
             if (seen.has(key)) return;
             seen.add(key);
-            merged.push(song);
+            let at = rows.length;
+            for (let index = 0; index < rows.length; index += 1) {
+                if (rows[index].rank > rank) {
+                    at = index;
+                    break;
+                }
+            }
+            rows.splice(at, 0, { song, rank });
+            added += 1;
         });
+        return added;
+    };
+
+    const takeBucket = (bucket: UnifiedSong[], more = false) => {
+        const added = insertBucket(bucket);
+        if (more) hasMore = true;
+        if (added > 0 && onPartial) {
+            onPartial(rows.map(row => row.song), hasMore);
+        }
+    };
+
+    // 本地那一路是同步的，先出：输完词立刻就有东西看，不用等任何一家平台回话。
+    // Navidrome 那一路跟平台一起跑，回来再插，不堵在前面。
+    const navidromePromise = offset === 0
+        ? searchNavidromeSongs(query).catch(() => null)
+        : null;
+    if (offset === 0) {
+        takeBucket(searchLocalSongs(deps, query).results);
     }
 
-    return { results: merged, hasMore, nextOffset: offset + perProvider };
+    await mapWithConcurrency(providerIds, ALL_SEARCH_CONCURRENCY, async providerId => {
+        try {
+            const page = await searchOnlineProviderSongs(providerId, query, perProvider, offset);
+            takeBucket(page.results, page.hasMore);
+        } catch (error) {
+            console.warn('[SearchStore] "all" search skipped a provider:', providerId, error);
+        }
+    });
+
+    if (navidromePromise) {
+        const navidrome = await navidromePromise;
+        if (navidrome) takeBucket(navidrome.results);
+    }
+
+    return { results: rows.map(row => row.song), hasMore, nextOffset: offset + perProvider };
 };
 
 const executeSearch = async (
@@ -319,7 +355,8 @@ const executeSearch = async (
     sourceTab: SearchSource,
     offset: number,
     limit: number,
-    deps: SearchExecutorDeps
+    deps: SearchExecutorDeps,
+    onPartial?: SearchPartialSink
 ): Promise<SearchExecutionResult> => {
     if (sourceTab === 'local') {
         return searchLocalSongs(deps, query);
@@ -334,7 +371,7 @@ const executeSearch = async (
     }
 
     if (sourceTab === 'all') {
-        return searchAllSources(query, offset, limit, deps);
+        return searchAllSources(query, offset, limit, deps, onPartial);
     }
 
     return searchOnlineProviderSongs(sourceTab, query, limit, offset);
@@ -468,8 +505,21 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             scrollTop: 0,
         });
 
+        /*
+         * 「全部」是流式的：一家搜完就先把那时已有的整批送上来（见 searchAllSources），
+         * 这里只管整份替换。
+         *
+         * **`isSearching` 留到最后才关**：它是「还有平台在跑」的意思，界面靠
+         * `searchResults` 有没有东西来决定画不画转圈，所以先出结果和「还在搜」能同时成立。
+         * 缓存也只写最终那一份 —— 中途那几批不是完整结果，写进去会把半屏结果当缓存。
+         */
+        const applyPartial = (results: UnifiedSong[], partialHasMore: boolean) => {
+            if (get().requestId !== requestId) return;
+            set({ searchResults: results, hasMore: partialHasMore });
+        };
+
         try {
-            const result = await executeSearch(trimmedQuery, sourceTab, 0, get().limit, deps);
+            const result = await executeSearch(trimmedQuery, sourceTab, 0, get().limit, deps, applyPartial);
             if (get().requestId !== requestId) {
                 return true;
             }
@@ -529,6 +579,9 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             offset,
             limit,
         } = get();
+        // 翻页也走流式：中途那几批都挂在「进来时那一份」后面，最终那一次用同一个底，
+        // 所以不会出现「中途插了一批、最后又把整页追加一遍」的重复。
+        const baseResults = searchResults || [];
 
         if (
             searchSourceTab === 'local'
@@ -546,12 +599,23 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
         set({ isLoadingMore: true, searchError: null });
 
         try {
-            const result = await executeSearch(searchQuery, searchSourceTab, offset, limit, deps);
+            const applyPartial = (page: UnifiedSong[], partialHasMore: boolean) => {
+                if (get().requestId !== requestId) return;
+                set({ searchResults: [...baseResults, ...page], hasMore: partialHasMore });
+            };
+            const result = await executeSearch(
+                searchQuery,
+                searchSourceTab,
+                offset,
+                limit,
+                deps,
+                applyPartial,
+            );
             if (get().requestId !== requestId) {
                 return;
             }
             set(state => {
-                const results = [...(searchResults || []), ...result.results];
+                const results = [...baseResults, ...result.results];
                 return {
                     searchResults: results,
                     hasMore: result.hasMore,

@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { Disc, Play, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedSong } from '../../../types';
@@ -13,7 +14,13 @@ import { getProviderSongMetadata } from '../../../services/onlineMusic/songMetad
 
 type SearchResultRowProps = {
     track: UnifiedSong;
-    style: React.CSSProperties;
+    style?: React.CSSProperties;
+    /**
+     * 这一行是新插进来的（「全部」流式搜索时另一家平台刚回来）。
+     *
+     * 由 SearchResultsList 在挂载那一刻钉住，之后一直是个常量：行被挤到别的位置不会重播。
+     */
+    entering?: boolean;
     isDaylight: boolean;
     onPlayTrack: (track: UnifiedSong) => void;
     onAddTrackToQueue: (track: UnifiedSong) => void;
@@ -31,6 +38,7 @@ const formatDuration = (duration: number) => {
 const SearchResultRow: React.FC<SearchResultRowProps> = ({
     track,
     style,
+    entering = false,
     isDaylight,
     onPlayTrack,
     onAddTrackToQueue,
@@ -51,13 +59,25 @@ const SearchResultRow: React.FC<SearchResultRowProps> = ({
     ));
 
     return (
-        <div style={style} className="px-2 py-1.5">
-            <div
+        <div style={style} className="h-full px-2 py-1.5">
+            {/*
+                入场动画挂在这一层（卡片本身），不动外面那一层：
+                外面那层的 `transform` 是 react-window 用来定位的，写进去会把行挪飞。
+                让位时的滑动是 SearchResultsList 给它加的 transform 过渡，也不是这里的活。
+            */}
+            <motion.div
+                initial={entering ? { opacity: 0, y: 10 } : false}
+                /*
+                 * 不可用那 55% 只能写在这儿：framer 动完就把 opacity 落在行内 style 上，
+                 * 类名里的 opacity-55 会被它盖掉。
+                 */
+                animate={{ opacity: isUnavailable ? 0.55 : 1, y: 0 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 className={`group flex h-full items-center gap-3 rounded-2xl border px-3 transition-colors ${
                     isDaylight
                         ? 'border-black/[0.05] bg-black/[0.035] hover:bg-black/[0.07]'
                         : 'border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08]'
-                } ${isUnavailable ? 'opacity-55' : ''}`}
+                }`}
             >
                 <button
                     type="button"
@@ -149,7 +169,7 @@ const SearchResultRow: React.FC<SearchResultRowProps> = ({
                         <Plus size={16} />
                     </button>
                 )}
-            </div>
+            </motion.div>
         </div>
     );
 };

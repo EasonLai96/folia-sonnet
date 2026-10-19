@@ -1344,6 +1344,7 @@ export default {
     "sourceAll": "All",
     "sourceNavidrome": "Navidrome",
     "playTrack": "Play track",
+    "streamingMore": "Still searching other platforms…",
     "error": "Search failed. Please try again.",
     "retry": "Retry",
     "catalogUnavailable": "This album or artist cannot be opened because the provider did not return a valid catalog ID."

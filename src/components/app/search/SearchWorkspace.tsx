@@ -261,7 +261,12 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                     </header>
 
                     <div className="mx-auto mt-3 min-h-0 w-full max-w-5xl flex-1">
-                        {isSearching || awaitingFirstResult ? (
+                        {/*
+                            「全部」是流式的：出了一批就把 isSearching 之外的东西都备好了，
+                            这里只要**已经有结果**就立刻画列表，不再拿一个大转圈把整屏占住
+                            （见 store 里 submitSearch 的 applyPartial）。
+                        */}
+                        {results.length === 0 && (isSearching || awaitingFirstResult) ? (
                             <div className="flex h-full items-center justify-center">
                                 <Loader2 className="h-9 w-9 animate-spin opacity-45" />
                             </div>
@@ -295,6 +300,16 @@ const SearchWorkspace: React.FC<SearchWorkspaceProps> = ({
                                         onOpenAlbum={onOpenAlbum}
                                     />
                                 </div>
+                                {/*
+                                    还有平台没回来：列表已经在长了，所以只补一行小字，
+                                    不再盖一层转圈把刚出来的结果挡住。
+                                */}
+                                {isSearching && (
+                                    <div className="flex shrink-0 items-center justify-center gap-2 py-2.5 text-xs opacity-55">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        <span>{t('search.streamingMore')}</span>
+                                    </div>
+                                )}
                                 {searchError ? (
                                     <div className="flex shrink-0 items-center justify-center gap-3 py-3 text-sm">
                                         <span className="opacity-60">{searchErrorText}</span>

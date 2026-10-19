@@ -1344,6 +1344,7 @@ export default {
     "sourceAll": "Semua",
     "sourceNavidrome": "Navidrome",
     "playTrack": "Putar trek",
+    "streamingMore": "Masih mencari di platform lain…",
     "error": "Pencarian gagal. Silakan coba lagi.",
     "retry": "Coba Lagi",
     "catalogUnavailable": "Album atau artis ini tidak dapat dibuka karena penyedia tidak mengembalikan ID katalog yang valid."
