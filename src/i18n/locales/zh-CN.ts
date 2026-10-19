@@ -1740,7 +1740,6 @@ export default {
     "personalFm": "私人FM",
     "aiTheme": "AI 主题",
     "aiThemeNotice": "此处为云端所有缓存 AI 主题的歌曲",
-    "aiThemeReopen": "换一批看看",
     "dailyRecommendations": "每日推荐",
     "dailyRecommendationsDescription": "为你定制的每日歌曲",
     "dailyRecommendationsSummary": "每天根据你的音乐偏好更新",

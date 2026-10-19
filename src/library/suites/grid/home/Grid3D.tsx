@@ -33,7 +33,6 @@ import { useLibraryHomeDirectory } from '../../../core/home/useLibraryHomeDirect
 import { useLibraryHomeListRegistration, useLibraryHomeTabsRegistration } from '../../../core/home/useLibraryHomeSurfaceRegistration';
 import { cycleIndex } from '../../../core/home/homeSources';
 import { useLibraryHomeCloudThemeEntry } from '../../../core/directory/useLibraryHomeCloudTheme';
-import CloudThemeHomeLane from '../../../core/home/CloudThemeHomeLane';
 import { useLibraryAccountProviders } from '../../../core/account/useLibraryAccount';
 import { resolveProviderSelectLabel } from '../../../core/account/accountRules';
 import { translateHomeMessage } from '../../../core/home/homeSources';
@@ -197,7 +196,7 @@ export const Grid3D: React.FC<Grid3DProps> = (props) => {
     const showUpdateIndicator = useUpdateIndicator();
 
     // 「AI 主题」页签：不铺墙，直接开那一屏的曲目列表（云端没有歌单可列）。
-    const cloudTheme = useLibraryHomeCloudThemeEntry({
+    useLibraryHomeCloudThemeEntry({
         tab: homeViewTab,
         enabled: isInteractive,
         onOpenCollection: collection => onOpenGridView?.(collection),
@@ -543,18 +542,9 @@ export const Grid3D: React.FC<Grid3DProps> = (props) => {
                         declaredHomeActions={declaredActions}
                     />
                 ) : homeViewTab === 'cloud' ? (
-                    /*
-                     * 「AI 主题」：这一屏的曲目列表自己开（上面那个 hook），首页这层是在**它关掉之后**
-                     * 才被看见的 —— 所以不能留空，要有一颗能再进去的按钮，否则返回到这里就是一片
-                     * 空白、点什么都没反应。
-                     */
-                    <CloudThemeHomeLane
-                        label={t('home.aiTheme')}
-                        notice={t('home.aiThemeNotice')}
-                        actionLabel={t('home.aiThemeReopen')}
-                        disabled={!isInteractive}
-                        onOpen={cloudTheme.reopen}
-                    />
+                    // 「AI 主题」：这一屏的曲目列表自己开（useLibraryHomeCloudThemeEntry），
+                    // 首页这层留空 —— 铺一面墙只会挡住刚打开的那层。
+                    null
                 ) : homeViewTab === 'local' ? (
                     <div className="w-full h-full flex-1">
                         <LocalGrid3DView

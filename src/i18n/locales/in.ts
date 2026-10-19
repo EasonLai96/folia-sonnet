@@ -1739,7 +1739,6 @@ export default {
     "personalFm": "FM Pribadi",
     "aiTheme": "Tema AI",
     "aiThemeNotice": "Semua lagu yang tema AI-nya tersimpan di cloud",
-    "aiThemeReopen": "Ganti batch",
     "dailyRecommendations": "Rekomendasi Harian",
     "dailyRecommendationsDescription": "Campuran harian yang dibuat khusus untuk Anda",
     "dailyRecommendationsSummary": "Diperbarui setiap hari berdasarkan selera mendengar Anda",

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { HomeViewTab } from '../../../types';
 import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '../collection/collection.contract';
+import { collectionKey } from '../collection/collectionIdentity';
+import { getActiveGridViewCollection } from '../collection/collectionNavigation';
+import { useCollectionNavigationStore } from '../../../stores/useCollectionNavigationStore';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
 
 // src/library/core/bindings/useLibraryHomeCloudTheme.ts
@@ -18,15 +21,24 @@ export const buildCloudThemeCollection = (name: string): CloudGridViewCollection
     name,
 });
 
+/** 这一屏的集合身份键（只有一个，且不含随名字变的字段 —— 名字是翻译，会随语言变）。 */
+const AI_THEME_KEY = collectionKey({
+    source: 'cloud',
+    id: AI_THEME_COLLECTION_ID,
+    type: 'playlist',
+});
+
 /**
  * 切到「AI 主题」页签就打开那一屏，并说一句这一屏是什么。
  *
- * 只在这一次切换上自动开一次（openedRef）：从曲目列表返回时页签还是它，不该又被弹进去一次
- * —— 否则返回等于把它重新打开，用户永远退不到首页。
+ * ⭐ 打开这件事必须**幂等**，判据存在 store 而不是组件里。
  *
- * 自动开**只有那一次**，于是退出之后还留一条手动的路：`reopen` 给首页那一层用（那一层本来是
- * 空的，见各自的 cloud 分支）。少了它，返回之后首页是一片空白、又没有任何东西可按 —— 看上去
- * 就是「进了 AI 主题就退不出来了」。
+ * 它是个根集合（navigateToCollection → openRoot），每开一次就往浏览器历史压一条记录。
+ * 而它又是切页签时由 effect 自动开的 —— 于是首页一重挂（切 view 回来、切 suite、弹层开合导致的
+ * 重挂载），ref 就归零、就再压一条。栈里堆着好几层一模一样的 AI 主题，点返回落到的是**上一个
+ * AI 主题**：画面纹丝不动，看上去就是「返回按了没用、退不到主界面」。
+ *
+ * 所以判据读导航栈本身（它跨重挂载活着）：已经在看这一屏就直接不做。
  */
 export const useLibraryHomeCloudThemeEntry = ({
     tab,
@@ -43,9 +55,12 @@ export const useLibraryHomeCloudThemeEntry = ({
     label: string;
     /** 已翻译的那句「这一屏是什么」。 */
     notice: string;
-}): { reopen: () => void } => {
+}): void => {
     const openedRef = useRef(false);
     const open = useCallback(() => {
+        // 已经在看这一屏就什么都不做：再开一次等于再压一层历史（后果见上面的说明）。
+        const active = getActiveGridViewCollection(useCollectionNavigationStore.getState().snapshot);
+        if (active && collectionKey(active) === AI_THEME_KEY) return;
         setStatusMessage({ type: 'info', text: notice });
         onOpenCollection(buildCloudThemeCollection(label));
     }, [label, notice, onOpenCollection]);
@@ -59,12 +74,4 @@ export const useLibraryHomeCloudThemeEntry = ({
         openedRef.current = true;
         open();
     }, [enabled, open, tab]);
-
-    /* 每一次都是新的一批：那一屏的资源会清空列表并从云端随机一处重新开始（reload 同路）。 */
-    const reopen = useCallback(() => {
-        if (!enabled) return;
-        open();
-    }, [enabled, open]);
-
-    return useMemo(() => ({ reopen }), [reopen]);
 };
