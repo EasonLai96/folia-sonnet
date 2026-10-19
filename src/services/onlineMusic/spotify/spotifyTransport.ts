@@ -1,6 +1,6 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
 import type { ProviderAvailability, ProviderErrorCode } from '../../../types/onlineMusic';
-import { isSpotifyNativeAvailable } from '../../../platform/foliaNative';
+import { isSpotifyNativeAvailable } from './spotifyNative';
 import { runSpotifyInPage } from './spotifyInPageRuntime';
 
 // src/services/onlineMusic/spotify/spotifyTransport.ts

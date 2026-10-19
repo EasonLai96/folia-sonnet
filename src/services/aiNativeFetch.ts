@@ -1,7 +1,7 @@
 // src/services/aiNativeFetch.ts
 // 浏览器直接请求 AI 服务会被 CORS 拦掉，安卓容器里改用已经存在的原生 OkHttp 桥转发。
 //
-// 那条转发本身与 AI 无关，已经抽到 services/nativeHttpFetch（YTM 的页内协议层也在用）；
+// 那条转发本身与 AI 无关，已经抽到 services/nativeHttpFetch（别处也在用它绕过同源检查）；
 // 这里是 AI 这个**用法**：更宽的超时 + 云缓存那条旁路。
 
 import { createNativeFetch, isNativeHttpFetchAvailable, type NativeHttpPlugin } from './nativeHttpFetch';

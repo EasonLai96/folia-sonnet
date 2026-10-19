@@ -198,6 +198,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BrowserPlugin.class);
         // 汽水音乐：签名宿主（隐藏 WebView + bdms.js）的原生桥。
         registerPlugin(FoliaQishuiPlugin.class);
+        // YouTube Music：只管「登录一次、把 YouTube 的 cookie 交出来」，取数不经过原生
+        // （youtubei.js 跑在主 WebView 里，见 FoliaYtmPlugin 的说明）。
+        registerPlugin(FoliaYtmPlugin.class);
+        // Spotify：只管 OAuth —— 回调要一个本地端口（5588），换 token 会撞 CORS，
+        // 两件 WebView 都做不了（见 FoliaSpotifyPlugin 的说明）。
+        registerPlugin(FoliaSpotifyPlugin.class);
 
         super.onCreate(savedInstanceState);
 

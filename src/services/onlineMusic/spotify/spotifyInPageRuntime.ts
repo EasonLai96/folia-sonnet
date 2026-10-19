@@ -1,9 +1,12 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
+import type { ProviderUser } from '../../../types/onlineMusic';
+import { createNativeFetch } from '../../../services/nativeHttpFetch';
 import {
     isSpotifyNativeAvailable,
     refreshSpotifyNativeSession,
     requestSpotifyNativeSignIn,
-} from '../../../platform/foliaNative';
+} from './spotifyNative';
+import { spotifyId } from './spotifyNormalize';
 
 // src/services/onlineMusic/spotify/spotifyInPageRuntime.ts
 //
@@ -12,15 +15,24 @@ import {
 // 为什么不是桌面端那一套：桌面端的 `query` 是 librespot 的**内部接口**（home / libraryV3 /
 // searchTracks 那 12 个名字），背后是 protobuf 与 Spotify 自己的私有端点，安卓上拿不到
 // librespot（`@lox-audioserver/node-librespot` 是原生 Node 模块，没有 android-arm64 预编译）。
-// 所以这里换成公开 Web API —— 它是 CORS 友好的，浏览器里直接 fetch 就行。
 //
-// ⚠️ 代价：公开 Web API 给的 JSON 形状**与桌面端 librespot 给的不一样**。
-// spotifyProvider / spotifyNormalize 目前按桌面端那套形状解析，所以这一层出来之后还要过一遍
-// 归一化（见各 case 上的注释）。本轮先把「能登录、能拿到数据」这条路打通。
+// ⚠️ 而公开 Web API 给的 JSON **与桌面端那套内部形状完全不同**（那边是
+// `searchV2.tracksV2.items[].item.data`，这边是 `tracks.items[]`）。所以这一层不是「转发」，
+// 是**翻译**：每一次查询在返回前折回桌面端的形状（见下面的 trackOf / albumOf 等），
+// 于是 spotifyProvider / spotifyCatalog / spotifyLibrary / spotifyNormalize 一行都不用改。
+// 反过来（改下游去适配两种形状）会让每个解析点都长出一条安卓分支，那是留不得的。
+//
+// 请求走原生 OkHttp 桥而不是直接 fetch：WebView 里的页面是有来源的，跨域要走同源检查。
+// （api.spotify.com 本来是给了 CORS 头的，但这条路与另一家共用一份实现，一并避开
+// 各家 ROM 对 WebView 网络策略的差别。）
 //
 // 原生只管 OAuth：收回调需要本地端口（5588），换 token 会撞 CORS，两件 WebView 都做不了。
 
 const API = 'https://api.spotify.com/v1';
+/** 公开 API 一页最多 50 行；下游按「实际给了几行」翻页，少给只是多请求几次。 */
+const MAX_ROWS = 50;
+/** 一次登录最多等这么久，与原生侧（FoliaSpotifyPlugin）一致。 */
+const LOGIN_TTL_MS = 10 * 60 * 1000;
 
 /** 桌面端那 12 个 query 里，公开 Web API 没有对应物件的。 */
 const UNSUPPORTED_QUERIES = new Set(['home', 'homeSection', 'browsePage', 'queryWhatsNewFeed']);
@@ -38,11 +50,6 @@ let session: Session | null = null;
 
 export const isSignedInSpotifyInPage = (): boolean => session !== null;
 
-const requireSignIn = (what: string): string => {
-    if (!session) throw new OnlineProviderError('auth-required', `Spotify sign-in is needed for ${what}`, 'spotify');
-    return session.accessToken;
-};
-
 /** token 快过期就先续一次（提前 60 秒）。 */
 const ensureFreshToken = async (): Promise<string> => {
     if (!session) throw new OnlineProviderError('auth-required', 'Spotify is not signed in', 'spotify');
@@ -55,79 +62,344 @@ const ensureFreshToken = async (): Promise<string> => {
     return session.accessToken;
 };
 
-const call = async (path: string, token: string): Promise<unknown> => {
-    const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+const call = async (path: string, token: string): Promise<any> => {
+    const response = await createNativeFetch()(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (response.status === 401) throw new OnlineProviderError('auth-required', 'Spotify said the sign-in is no longer valid', 'spotify');
     if (response.status === 403) throw new OnlineProviderError('not-playable', 'Spotify refused this request', 'spotify');
     if (!response.ok) throw new OnlineProviderError('network', `Spotify answered ${response.status}`, 'spotify');
-    return response.json();
+    return response.json().catch(() => null);
+};
+
+// ─── 形状翻译：公开 Web API → 桌面端那套内部形状 ────────────────────────────────────
+// 下面每个 `…Of` 的字段名都对着 spotifyNormalize.ts 里那几个 interface，改那边要一起改。
+
+type WebImage = { url?: string; width?: number | null };
+
+const sources = (images: WebImage[] | undefined): Array<{ url: string; width: number | null }> => (
+    (images ?? []).map(image => ({ url: String(image?.url ?? ''), width: image?.width ?? null }))
+);
+
+const artistRow = (artist: any): any => ({
+    uri: String(artist?.uri ?? (artist?.id ? `spotify:artist:${artist.id}` : '')),
+    profile: { name: String(artist?.name ?? '') },
+});
+
+const trackOf = (track: any): any => {
+    if (!track) return null;
+    const album = track.album;
+    return {
+        __typename: 'Track',
+        uri: String(track.uri ?? (track.id ? `spotify:track:${track.id}` : '')),
+        name: String(track.name ?? ''),
+        artists: { items: (track.artists ?? []).map(artistRow) },
+        // 专辑里的曲目是「简化曲目」，没有 album 字段 —— 那由读取方用「它所在的专辑」补上
+        // （spotifyCatalog.getAlbumTracks 就是把 beside.album 传进去的）。
+        ...(album ? {
+            albumOfTrack: {
+                uri: String(album.uri ?? (album.id ? `spotify:album:${album.id}` : '')),
+                name: String(album.name ?? ''),
+                coverArt: { sources: sources(album.images) },
+            },
+        } : {}),
+        duration: { totalMilliseconds: Number(track.duration_ms ?? 0) || 0 },
+    };
+};
+
+const albumOf = (album: any): any => {
+    const releaseDate = String(album?.release_date ?? '');
+    const year = Number(releaseDate.slice(0, 4)) || undefined;
+    return {
+        __typename: 'Album',
+        uri: String(album?.uri ?? (album?.id ? `spotify:album:${album.id}` : '')),
+        name: String(album?.name ?? ''),
+        coverArt: { sources: sources(album?.images) },
+        artists: { items: (album?.artists ?? []).map(artistRow) },
+        // 公开 API 只给一个日期字符串，精度随专辑而定（年 / 月 / 日都有），交给那边解析。
+        date: { ...(releaseDate ? { isoString: releaseDate } : {}), ...(year ? { year } : {}) },
+        albumType: String(album?.album_type ?? ''),
+        tracks: { totalCount: Number(album?.total_tracks ?? 0) || 0 },
+    };
+};
+
+const artistOf = (artist: any): any => ({
+    uri: String(artist?.uri ?? (artist?.id ? `spotify:artist:${artist.id}` : '')),
+    profile: { name: String(artist?.name ?? '') },
+    visuals: { avatarImage: { sources: sources(artist?.images) } },
+});
+
+const playlistOf = (playlist: any): any => ({
+    __typename: 'Playlist',
+    uri: String(playlist?.uri ?? (playlist?.id ? `spotify:playlist:${playlist.id}` : '')),
+    name: String(playlist?.name ?? ''),
+    description: String(playlist?.description ?? ''),
+    images: { items: [{ sources: sources(playlist?.images) }] },
+    ownerV2: { data: { name: String(playlist?.owner?.display_name ?? '') } },
+    content: { totalCount: Number(playlist?.tracks?.total ?? 0) || 0 },
+});
+
+// ─── 参数读取 ────────────────────────────────────────────────────────────────────
+
+/** `spotify:track:xxx` 与裸 id 都认：调用方两种都给。 */
+const idOf = (value: unknown): string => {
+    const text = String(value ?? '').trim();
+    const tail = text.split(':').pop() ?? '';
+    return /^[0-9A-Za-z]{22}$/.test(tail) ? tail : text;
+};
+
+const clampRows = (value: unknown): number => {
+    const asked = Number(value ?? MAX_ROWS);
+    if (!Number.isFinite(asked) || asked <= 0) return MAX_ROWS;
+    return Math.min(MAX_ROWS, Math.round(asked));
+};
+
+const offsetOf = (value: unknown): number => {
+    const offset = Number(value ?? 0);
+    return Number.isFinite(offset) && offset > 0 ? Math.round(offset) : 0;
 };
 
 export const signOutSpotifyInPage = (): void => {
     session = null;
 };
 
+/** 登录态下这个人是谁。拿不到就老实说「没人」，别编一个空账号（那会被当成已登录）。 */
+const readSignedInUser = async (): Promise<ProviderUser | null> => {
+    if (!session) return null;
+    try {
+        const me = await call('/me', await ensureFreshToken());
+        const nickname = String(me?.display_name ?? me?.id ?? '');
+        if (!nickname) return null;
+        return { id: String(me?.id ?? nickname), nickname, avatarUrl: me?.images?.[0]?.url ?? undefined };
+    } catch (error) {
+        console.warn('[Spotify] Could not read the signed-in account', error);
+        return null;
+    }
+};
+
 export const runSpotifyInPage = async (operation: string, params: Record<string, unknown> = {}): Promise<unknown> => {
-    if (operation === 'login_status') return { signedIn: session !== null };
+    if (operation === 'login_status') return readSignedInUser();
     if (operation === 'logout') {
         signOutSpotifyInPage();
-        return { signedIn: false };
+        return {};
     }
+    /*
+     * 安卓上 OAuth 是原生 Activity + 本地端口**一次性走完**的，所以 `login_start` 就会等到
+     * 出结果。折回桌面端那套「开始 → 轮询」的形状：成了给一个 key，随后 `login_check`
+     * 立刻答 confirmed；没成就直接抛 —— 原因词原样带在 cause 上，
+     * spotifyLoginFailure 靠它挑出该显示哪一句（'cannot-listen' / 'access-denied' / …）。
+     */
     if (operation === 'login_start') {
         const result = await requestSpotifyNativeSignIn();
-        if (!result.ok) throw new OnlineProviderError('auth-required', result.error.message, 'spotify', result.error.code);
+        if (!result.ok) {
+            throw new OnlineProviderError(
+                result.error.code === 'unavailable' ? 'unavailable' : 'auth-required',
+                result.error.message,
+                'spotify',
+                result.error.code,
+            );
+        }
         const { accessToken, refreshToken, expiresInMs } = result.session;
         session = { accessToken, refreshToken, expiresAtMs: Date.now() + expiresInMs };
-        return { signedIn: true };
+        return { key: `native-${Date.now()}`, expiresInMs: LOGIN_TTL_MS };
     }
-    if (operation === 'login_check') return { signedIn: session !== null };
-    if (operation === 'login_cancel') return { signedIn: session !== null };
+    if (operation === 'login_check') return { state: session ? 'confirmed' : 'expired' };
+    if (operation === 'login_open') return {};
+    if (operation === 'login_cancel') return {};
     if (UNSUPPORTED.has(operation)) {
         throw new OnlineProviderError('unsupported', `Spotify ${operation} is not available on Android yet`, 'spotify');
     }
 
     const token = await ensureFreshToken();
-    const id = String(params.id ?? params.uri ?? params.playlistId ?? params.albumId ?? params.artistId ?? '');
-    const value = (key: string) => String(params[key] ?? '');
 
-    switch (operation) {
-        case 'library':
-            // 桌面端给的是「已收藏曲目」一页；公开 API 对应 /me/tracks。
-            return call('/me/tracks?limit=50', token);
-        case 'lyrics':
-            // 公开 Web API 根本不提供歌词（桌面端是 librespot 走私有端点拿的）。
-            throw new OnlineProviderError('unsupported', 'Spotify lyrics are not in the public API', 'spotify');
-        case 'query': {
-            const name = value('name');
-            if (UNSUPPORTED_QUERIES.has(name)) {
-                throw new OnlineProviderError('unsupported', `Spotify ${name} has no public equivalent`, 'spotify');
+    if (operation === 'library') {
+        const page = await call(`/me/tracks?limit=${clampRows(params.limit)}&offset=${offsetOf(params.offset)}`, token);
+        return likedAnswerOf(page);
+    }
+
+    if (operation === 'lyrics') {
+        // 公开 Web API 根本不提供歌词（桌面端是 librespot 走私有端点拿的）。
+        throw new OnlineProviderError('unsupported', 'Spotify lyrics are not in the public API', 'spotify');
+    }
+
+    if (operation !== 'query') {
+        throw new OnlineProviderError('unsupported', `Spotify ${operation} is not available on Android yet`, 'spotify');
+    }
+
+    /*
+     * 参数在 `variables` 里，不在顶层：`querySpotify(name, variables)` 发的是
+     * `{ name, variables }`。早先这里在顶层找 `query`，于是搜索永远带空关键词。
+     */
+    const variables = (params.variables ?? {}) as Record<string, unknown>;
+    const name = String(params.name ?? '');
+    if (UNSUPPORTED_QUERIES.has(name)) {
+        throw new OnlineProviderError('unsupported', `Spotify ${name} has no public equivalent`, 'spotify');
+    }
+
+    switch (name) {
+        case 'searchTracks': {
+            const term = String(variables.searchTerm ?? variables.query ?? '');
+            const page = await call(
+                `/search?q=${encodeURIComponent(term)}&type=track&limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`,
+                token,
+            );
+            return {
+                searchV2: {
+                    tracksV2: {
+                        items: ((page?.tracks?.items ?? []) as any[]).map(track => ({ item: { data: trackOf(track) } })),
+                    },
+                },
+            };
+        }
+        case 'getTrack': {
+            const track = await call(`/tracks/${idOf(variables.uri ?? variables.id)}`, token);
+            const shaped = trackOf(track);
+            /*
+             * 艺术家必须放在 `firstArtist` 上：spotifyProvider 那边是用
+             * `[...firstArtist, ...otherArtists]` 重拼 `artists` 的，只给 `artists`
+             * 会被那一次覆盖抹成空 —— 表现为「歌曲在，歌手没了」。
+             */
+            return { trackUnion: { ...shaped, firstArtist: { items: shaped?.artists?.items ?? [] }, otherArtists: { items: [] } } };
+        }
+        case 'getAlbum': {
+            const albumId = idOf(variables.uri ?? variables.id);
+            // 表头与这一页曲目是两个接口：一次拿两样，省得每张专辑点进去都发两次。
+            const [album, page] = await Promise.all([
+                call(`/albums/${albumId}`, token),
+                call(`/albums/${albumId}/tracks?limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`, token),
+            ]);
+            return {
+                albumUnion: {
+                    ...albumOf(album),
+                    tracksV2: {
+                        totalCount: Number(page?.total ?? 0) || 0,
+                        items: ((page?.items ?? []) as any[]).map(track => ({ track: trackOf(track) })),
+                    },
+                },
+            };
+        }
+        case 'fetchPlaylist': {
+            const playlistId = idOf(variables.uri ?? variables.id);
+            const [list, page] = await Promise.all([
+                call(`/playlists/${playlistId}`, token),
+                call(`/playlists/${playlistId}/tracks?limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`, token),
+            ]);
+            return {
+                playlistV2: {
+                    ...playlistOf(list),
+                    content: {
+                        totalCount: Number(page?.total ?? list?.tracks?.total ?? 0) || 0,
+                        items: ((page?.items ?? []) as any[]).map(row => ({ itemV2: { data: trackOf(row?.track) } })),
+                    },
+                },
+            };
+        }
+        case 'queryArtistOverview': {
+            const artistId = idOf(variables.uri ?? variables.id);
+            const [artist, top, albums] = await Promise.all([
+                call(`/artists/${artistId}`, token),
+                call(`/artists/${artistId}/top-tracks?market=from_token`, token),
+                // 公开 API 不给「专辑数 / 单曲数」这两个分开的数，只有专辑那一页的总数。
+                call(`/artists/${artistId}/albums?limit=1`, token),
+            ]);
+            return {
+                artistUnion: {
+                    ...artistOf(artist),
+                    discography: {
+                        topTracks: { items: ((top?.tracks ?? []) as any[]).map(track => ({ track: trackOf(track) })) },
+                        albums: { totalCount: Number(albums?.total ?? 0) || 0 },
+                        singles: { totalCount: 0 },
+                    },
+                },
+            };
+        }
+        case 'queryArtistDiscographyAll': {
+            const artistId = idOf(variables.uri ?? variables.id);
+            const page = await call(
+                `/artists/${artistId}/albums?include_groups=album,single,appears_on,compilation`
+                    + `&limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`,
+                token,
+            );
+            return {
+                artistUnion: {
+                    discography: {
+                        all: {
+                            totalCount: Number(page?.total ?? 0) || 0,
+                            items: ((page?.items ?? []) as any[]).map(album => ({ releases: { items: [albumOf(album)] } })),
+                        },
+                    },
+                },
+            };
+        }
+        case 'libraryV3': {
+            const filters = Array.isArray(variables.filters) ? variables.filters.map(String) : [String(variables.filters ?? '')];
+            const wantsAlbums = filters.some(filter => filter.toLowerCase().includes('album'));
+            const rows = `limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`;
+            if (wantsAlbums) {
+                const page = await call(`/me/albums?${rows}`, token);
+                return {
+                    me: {
+                        libraryV3: {
+                            totalCount: Number(page?.total ?? 0) || 0,
+                            items: ((page?.items ?? []) as any[]).map(row => ({ item: { data: albumOf(row?.album) } })),
+                        },
+                    },
+                };
             }
-            switch (name) {
-                case 'searchTracks':
-                    return call(`/search?q=${encodeURIComponent(value('query') || value('q'))}&type=track&limit=50`, token);
-                case 'getTrack':
-                    return call(`/tracks/${id}`, token);
-                case 'getAlbum':
-                    return call(`/albums/${id}`, token);
-                case 'fetchPlaylist':
-                    return call(`/playlists/${id}`, token);
-                case 'queryArtistOverview':
-                    return call(`/artists/${id}`, token);
-                case 'queryArtistDiscographyAll':
-                    return call(`/artists/${id}/albums?limit=50`, token);
-                case 'libraryV3':
-                case 'fetchLibraryTracks':
-                    return call('/me/tracks?limit=50', token);
-                case 'areEntitiesInLibrary':
-                    return call(`/me/tracks/contains?ids=${encodeURIComponent(value('ids'))}`, token);
-                default:
-                    throw new OnlineProviderError('unsupported', `Spotify query ${name} is not available on Android yet`, 'spotify');
-            }
+            const page = await call(`/me/playlists?${rows}`, token);
+            return {
+                me: {
+                    libraryV3: {
+                        totalCount: Number(page?.total ?? 0) || 0,
+                        items: ((page?.items ?? []) as any[]).map(list => ({ item: { data: playlistOf(list) } })),
+                    },
+                },
+            };
+        }
+        case 'fetchLibraryTracks': {
+            const page = await call(`/me/tracks?limit=${clampRows(variables.limit)}&offset=${offsetOf(variables.offset)}`, token);
+            return likedAnswerOf(page);
+        }
+        case 'areEntitiesInLibrary': {
+            const uris = (Array.isArray(variables.uris) ? variables.uris : String(variables.uris ?? '').split(','))
+                .map(String).filter(Boolean);
+            /*
+             * 顺序必须与问的 uris 一一对应：那边是按下标把结果配回每首歌的
+             * （spotifyLibrary.areSongsLiked）。所以不能「先查曲目再查专辑」拼起来，
+             * 得分头查完再按原顺序排回去。
+             */
+            const saved = new Map<string, boolean>();
+            const trackIds = uris.filter(uri => uri.includes(':track:')).map(uri => spotifyId(uri, 'track')).filter(Boolean);
+            const albumIds = uris.filter(uri => uri.includes(':album:')).map(uri => spotifyId(uri, 'album')).filter(Boolean);
+            const [tracks, albums] = await Promise.all([
+                trackIds.length ? call(`/me/tracks/contains?ids=${encodeURIComponent(trackIds.join(','))}`, token) : null,
+                albumIds.length ? call(`/me/albums/contains?ids=${encodeURIComponent(albumIds.join(','))}`, token) : null,
+            ]);
+            (tracks as boolean[] | null)?.forEach((value, at) => { if (trackIds[at]) saved.set(`track:${trackIds[at]}`, value === true); });
+            (albums as boolean[] | null)?.forEach((value, at) => { if (albumIds[at]) saved.set(`album:${albumIds[at]}`, value === true); });
+            return {
+                lookup: uris.map(uri => {
+                    const kind = uri.includes(':album:') ? 'album' : 'track';
+                    const id = kind === 'album' ? spotifyId(uri, 'album') : spotifyId(uri, 'track');
+                    const value = saved.get(`${kind}:${id}`);
+                    return { data: { saved: value === true } };
+                }),
+            };
         }
         default:
-            throw new OnlineProviderError('unsupported', `Spotify ${operation} is not available on Android yet`, 'spotify');
+            throw new OnlineProviderError('unsupported', `Spotify query ${name} is not available on Android yet`, 'spotify');
     }
 };
+
+/** 「我喜欢的歌曲」那一页：桌面端装在 `me.library.tracks` 里。 */
+const likedAnswerOf = (page: any): unknown => ({
+    me: {
+        library: {
+            tracks: {
+                totalCount: Number(page?.total ?? 0) || 0,
+                items: ((page?.items ?? []) as any[]).map(row => ({ track: { _uri: String(row?.track?.uri ?? ''), data: trackOf(row?.track) } })),
+            },
+        },
+    },
+});
 
 /** 取当前 token（给要拼 URL 的地方用）；没登录就是 null。 */
 export const peekSpotifyAccessToken = (): string | null => session?.accessToken ?? null;

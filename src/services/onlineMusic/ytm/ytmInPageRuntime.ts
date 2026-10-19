@@ -2,14 +2,14 @@ import { OnlineProviderError } from '../../../types/onlineMusic';
 import type { ProviderUser } from '../../../types/onlineMusic';
 import { isCapacitorAndroid } from '../../../platform/runtime';
 import { isNativeHttpFetchAvailable, createNativeFetch } from '../../../services/nativeHttpFetch';
-import { requestYtmNativeSignIn, type YtmNativeSession } from '../../../platform/foliaNative';
+import { requestYtmNativeSignIn, type YtmNativeSession } from './ytmNative';
 
 /**
  * 安卓 WebView 里这套页内协议层能不能用。
  *
  * 它**不需要为它新写原生**：youtubei.js 是浏览器库，跑在主 WebView 里，搜索 / 专辑 /
  * 歌单 / 歌词匿名就能通。原生（FoliaYtm 那座登录 Activity）只在「要用户自己的歌单」
- * 时才需要，所以没登录不等于不可用 —— 这与 Spotify 那边（每一步都要 token）是两回事。
+ * 时才需要，所以没登录不等于不可用 —— 这与「每一步都要 token」的那一家是两回事。
  *
  * 但**有一条原生依赖**：WebView 里的页面是有来源的（https://localhost），直连
  * youtube.com 会被同源检查掐掉（youtubei.js 的文档也明写「浏览器里必须走自己的代理」）。
