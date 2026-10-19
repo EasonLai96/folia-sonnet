@@ -1018,13 +1018,29 @@ html[data-folia-mirror='true'] {
    */
   height: 100%;
   /*
-   * 顺手把根上的滚动也关掉：<html> 一旦能滚，捏合缩放那一套就能拖着画面走
-   * （body 自己是 overflow: hidden，但根没关的话文档层还能滚）。
+   * 根必须**自己钉在视口上**，光 `overflow: hidden` 挡不住。
+   *
+   * 元素一有 transform 就成了所有 `position: fixed` 后代的包含块（见上），代价是那些后代
+   * 不再跟着视口走，而是**跟着文档一起滚**。外壳正是 `fixed inset-0`，于是文档滚多少，
+   * 整个界面就被拖走多少 —— 拖出去的那一片是 body 的底色（#09090b），看上去就是「整屏
+   * 被拖到屏幕外，全黑了」（播放页最明显：那一屏本来就是一整块铺满的视觉层）。
+   *
+   * 而变换过的根不再把 `overflow` 交给视口，文档层那一档滚动照旧存在，写在根上的
+   * `overflow: hidden` 关不掉它 —— 只能让根自己退出文档流：fixed + inset:0 之后整个文档
+   * 没有可滚的内容，怎么拖都拖不动画面。
+   *
+   * 只在镜像时生效（普通状态下根还是那个根，滚动、输入框顶起键盘那一套照旧）。
    */
+  position: fixed;
+  inset: 0;
   overflow: hidden;
+  /* 拖到头别把这一次拖动手势再传给外面（那会露出 WebView 的底）。 */
+  overscroll-behavior: none;
   transform: scaleX(-1);
 }
 
 html[data-folia-mirror='true'] body {
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
