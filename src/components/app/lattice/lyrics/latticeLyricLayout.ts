@@ -1,6 +1,9 @@
 import type { Line } from '../../../../types';
 import { buildMonetDisplayTokens, splitMonetGraphemes, type MonetDisplayToken } from '../../../visualizer/monet/monetLyricsModel';
 import { resolveThemeFontStack, resolveThemeTranslationFontStack, resolveThemeFontWeight } from '../../../../utils/fontStacks';
+import { buildLineGraphemeTimeline, splitLyricGraphemes } from '../../../../utils/lyrics/graphemeTiming';
+import { getLineRenderEndTime } from '../../../../utils/lyrics/renderHints';
+import { segmentLyricWords } from '../../../../utils/lyrics/wordSegmentation';
 import type { LatticeLyricInput } from './types';
 import { resolveMonetFillWidth } from '../../../visualizer/monet/monetLyricMotion';
 
@@ -68,9 +71,72 @@ export function wrapLatticeTokens(tokens: MonetDisplayToken[], width: number, fo
     return pieces;
 }
 
+/*
+ * 没有逐字时间的行（普通 LRC）在 Monet 的 token 化里是「一整行一个 token」，于是整行只能有
+ * 一个颜色 —— AI 主题按词标记的高亮色在磁贴墙上一个都落不上，看过去就是整行一个色。
+ *
+ * 播放页那些样式（classic / cadenza / fume）不是这么切的：它们把行切成词再逐词取色。这里按
+ * 同一份分词（segmentLyricWords，认用户手改过的 wordSegments 与 icu-folia 烘上去的
+ * autoWordSegments）把整行切成词级 token，时间沿用整行那条逐字时间线按词切片 —— 扫光、
+ * 换行都照旧，只是每个词能自己拿一个颜色。
+ */
+function buildLatticeLineTokens(line: Line): MonetDisplayToken[] {
+    if (line.words.length > 0) {
+        return buildMonetDisplayTokens(line);
+    }
+
+    const graphemes = splitLyricGraphemes(line.fullText);
+    if (graphemes.length === 0) {
+        return buildMonetDisplayTokens(line);
+    }
+
+    // 分词给的是「字符下标」，而扫光要的是「字素下标」，两者在 emoji / 组合字符上不是一回事。
+    const graphemeAt = new Int32Array(line.fullText.length);
+    let cursor = 0;
+    for (let index = 0; index < graphemes.length; index++) {
+        for (let offset = 0; offset < graphemes[index].length; offset++) {
+            graphemeAt[cursor + offset] = index;
+        }
+        cursor += graphemes[index].length;
+    }
+
+    const timeline = buildLineGraphemeTimeline(line);
+    const tokens: MonetDisplayToken[] = [];
+    for (const segment of segmentLyricWords(line)) {
+        const endChar = segment.index + segment.segment.length;
+        if (endChar <= segment.index) continue;
+        const first = graphemeAt[segment.index] ?? 0;
+        const last = graphemeAt[endChar - 1] ?? first;
+        const slice = timeline.slice(first, last + 1);
+        tokens.push({
+            text: segment.segment,
+            startTime: slice[0]?.startTime ?? line.startTime,
+            endTime: slice[slice.length - 1]?.endTime ?? line.endTime,
+            key: `${line.startTime}-word-${segment.index}`,
+            timed: true,
+            startOffset: segment.index,
+            endOffset: endChar,
+            graphemeTimings: slice,
+        });
+    }
+    if (tokens.length === 0) {
+        return buildMonetDisplayTokens(line);
+    }
+
+    // 最后一个词的收尾时间跟着整行的「渲染结束时间」走（renderHints 会把它推后），
+    // 与以前「整行一个 token」时 end = getLineRenderEndTime(line) 的行为一致。
+    const renderEnd = getLineRenderEndTime(line);
+    const tail = tokens[tokens.length - 1];
+    if (renderEnd > tail.endTime) {
+        tokens[tokens.length - 1] = { ...tail, endTime: renderEnd };
+    }
+
+    return tokens;
+}
+
 export function layoutLatticeLine(line: Line, type: LatticeTypography, width: number, measure: MeasureText,
     romanization: boolean) {
-    const tokens = buildMonetDisplayTokens(line);
+    const tokens = buildLatticeLineTokens(line);
     const pieces = wrapLatticeTokens(tokens, width, type.font, type.lineHeight, measure);
     const rows = (pieces.at(-1)?.row ?? 0) + 1;
     const translation = type.showTranslation ? (romanization ? line.romanization : line.translation) : '';

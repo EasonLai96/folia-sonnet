@@ -2,7 +2,7 @@ import type { Container, Mesh, MeshGeometry, Shader, Sprite, Texture } from 'pix
 import type { MonetVisibleLineEntry } from '../../../visualizer/monet/monetLyricsModel';
 import { resolveMonetSweepEdgeSoftness, resolveMonetSweepEnd } from '../../../visualizer/monet/monetLyricsModel';
 import { resolveMonetFillWidth, resolveMonetGlow, clampMonetProgress } from '../../../visualizer/monet/monetLyricMotion';
-import { buildWordColorRangesFromMatchers, prepareWordColorMatchers, resolveTokenColorMap } from '../../../visualizer/wordColoring';
+import { buildWordColorRangesFromMatchers, prepareWordColorMatchers, resolveTokenColorMap, resolveWordColor } from '../../../visualizer/wordColoring';
 import { colorWithAlpha, mixColors } from '../../../../utils/visualizer/colorMix';
 import { getLineRenderEndTime } from '../../../../utils/lyrics/renderHints';
 import type { LatticeLyricInput } from './types';
@@ -40,13 +40,27 @@ export function createLatticeLineView(pixi: Pixi, raster: LatticeRaster, parent:
      * 副歌那一条本来就是往强调色上混（与莫奈一致），不动。
      */
     const accent = chorus ? mixColors(input.theme.primaryColor, input.theme.accentColor, 0.48) : colorWithAlpha(input.theme.accentColor, 0.98);
+    /*
+     * 逐字着色：先按「关键字在整行里连续出现」取区间色（与 Monet 一致），取不到再按
+     * **逐词**取一次 —— 用的是全应用同一条规则 resolveWordColor（中日韩默认
+     * 'target-contains-token'：关键字包含这个词就算命中，不要求整句里连续出现）。
+     *
+     * 只有第一档时，磁贴墙的命中条件比播放页严得多：播放页那些样式（classic / cadenza /
+     * fume）都是逐词 resolveWordColor，关键字与歌词里的词只要字面有交叠就上色；磁贴墙却要
+     * 关键字整段落在行里。同一份 AI wordColors，于是播放页有高亮、磁贴墙一个都没有。
+     */
+    const resolvePieceColor = (piece: LyricPiece) => {
+        if (piece.translation) return (input.subtitleTheme ?? input.theme).primaryColor;
+        return colors.get(piece.token.key)
+            ?? resolveWordColor(piece.text, input.theme.wordColors, accent, { keywordColoringEnabled: input.keywordColoringEnabled });
+    };
     const destroyPiece = (view: PieceView) => {
         view.sprite.destroy(); view.sweep.shader.destroy(); view.glow.forEach(sprite => sprite.destroy()); view.texture.destroy(true);
     };
     const createPiece = (piece: LyricPiece): PieceView => {
         const px = piece.translation ? type.translationPx : type.fontPx;
         const image = raster.rasterize(piece.text, piece.translation ? type.translationFont : type.font, px, resolution);
-        const color = piece.translation ? (input.subtitleTheme ?? input.theme).primaryColor : colors.get(piece.token.key) ?? accent;
+        const color = resolvePieceColor(piece);
         const base = new pixi.Color(input.theme.primaryColor).toArray();
         const sweep = createLatticeSweepShader(pixi, base, new pixi.Color(color).toArray(), image.texture);
         sweep.uniforms.uGlyphRange = [(image.pad - piece.tokenOffset) / image.width, (piece.offsets.at(-1) ?? piece.width) / image.width];
