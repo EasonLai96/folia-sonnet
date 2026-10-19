@@ -482,9 +482,17 @@ interface FoliaYtmPlugin {
 
 const FoliaYtm = registerPlugin<FoliaYtmPlugin>('FoliaYtm');
 
-/** 安卓上 YTM 那座登录 Activity 在不在。 */
+/**
+ * 安卓上 YTM 那座登录 Activity 在不在。
+ *
+ * ⚠️ 这里必须用 `Capacitor.isPluginAvailable`，**不能**写
+ * `typeof FoliaYtm?.signIn === 'function'`：`registerPlugin` 给回来的是个代理，任何
+ * 方法名问过去都是 function，于是原生侧根本没实现时这一句也返回 true —— 表现为
+ * 「还没登录就显示有账号、点退出登录报未知错误」（真出过一次）。
+ * `isPluginAvailable` 查的是原生侧上报的 pluginHeaders，没注册就是 false。
+ */
 export const isYtmNativeAvailable = (): boolean => (
-    isCapacitorAndroid() && typeof FoliaYtm?.signIn === 'function'
+    isCapacitorAndroid() && Capacitor.isPluginAvailable('FoliaYtm')
 );
 
 /** 让用户登录 YouTube 并把 cookie 交回来。取消 / 超时都是 ok:false，不是抛错。 */
@@ -535,9 +543,9 @@ interface FoliaSpotifyPlugin {
 
 const FoliaSpotify = registerPlugin<FoliaSpotifyPlugin>('FoliaSpotify');
 
-/** 安卓上 Spotify 的登录插件在不在。 */
+/** 安卓上 Spotify 的登录插件在不在。为什么不能用 `typeof` 判，见 isYtmNativeAvailable 那条注释。 */
 export const isSpotifyNativeAvailable = (): boolean => (
-    isCapacitorAndroid() && typeof FoliaSpotify?.signIn === 'function'
+    isCapacitorAndroid() && Capacitor.isPluginAvailable('FoliaSpotify')
 );
 
 /** 走完一次 OAuth（授权码 + PKCE，没有 client secret）。取消 / 超时都是 ok:false。 */
