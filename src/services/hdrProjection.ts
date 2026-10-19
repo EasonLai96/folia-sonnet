@@ -148,6 +148,18 @@ export const applyHdrProjection = async (enabled: boolean): Promise<DisplayBoost
     return brightness;
 };
 
+/**
+ * 关掉：取消还没走完的倒计时 + 落盘 + 整条还原（方向、镜像、亮度）。
+ *
+ * 收在这里是因为**关掉有两条路** —— 控制面板那颗开关，和 HDR 下「点两次空白退出」。
+ * 两条各写一遍的话，早晚会有一次只做了其中一半（比如关了开关却没人去还原亮度）。
+ */
+export const disableHdrProjection = (): void => {
+    cancelHdrProjectionCountdown();
+    writeStoredHdrProjection(false);
+    void applyHdrProjection(false);
+};
+
 /* ---------------------------------------------------------------------------
  * 「现在是不是 HDR 投影」
  * -------------------------------------------------------------------------

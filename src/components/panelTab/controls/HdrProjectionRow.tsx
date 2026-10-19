@@ -4,15 +4,13 @@ import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
 import { Toggle } from '../../modal/settings/kit';
 import {
-    applyHdrProjection,
-    cancelHdrProjectionCountdown,
+    disableHdrProjection,
     readDisplayBoostResult,
     readHdrProjectionCountdown,
     readStoredHdrProjection,
     startHdrProjectionCountdown,
     subscribeDisplayBoostResult,
     subscribeHdrProjectionCountdown,
-    writeStoredHdrProjection,
 } from '../../../services/hdrProjection';
 
 // src/components/panelTab/controls/HdrProjectionRow.tsx
@@ -82,9 +80,7 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
                     <button
                         type="button"
                         onClick={() => {
-                            cancelHdrProjectionCountdown();
-                            writeStoredHdrProjection(false);
-                            void applyHdrProjection(false);
+                            disableHdrProjection();
                             setEnabled(false);
                         }}
                         className="flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-semibold opacity-60 transition-opacity hover:opacity-100"
@@ -107,9 +103,7 @@ const HdrProjectionRow: React.FC<HdrProjectionRowProps> = ({ theme }) => {
                          * 关掉是**立刻**的，没有倒计时：亮度顶在那儿刺眼，
                          * 画面还是反的，等 5 秒毫无意义。
                          */
-                        cancelHdrProjectionCountdown();
-                        writeStoredHdrProjection(false);
-                        void applyHdrProjection(false);
+                        disableHdrProjection();
                         setEnabled(false);
                     }}
                 />

@@ -65,7 +65,15 @@ export const useHdrExitConfirm = (options: {
             return;
         }
         armedRef.current = true;
-        setStatusMessage({ type: 'info', text: hint, nonce: Date.now() });
+        /*
+         * 这条提示**不吃点击**（`inert`）。
+         *
+         * 提示条浮在可视化那一层上面，默认是 `pointer-events: auto` —— 用户顺着刚才点
+         * 的地方再补一下，那一下会被提示条自己吃掉，根本到不了视觉层；3 秒窗口一过又
+         * 回到「第一次点」，于是就成了「一直提示再点一次，怎么也退不出去」。
+         * 让点击穿过去，点它跟点空白是同一回事，「点任意处继续退出」才成立。
+         */
+        setStatusMessage({ type: 'info', text: hint, nonce: Date.now(), inert: true });
         timerRef.current = window.setTimeout(() => {
             // 过期就回到「第一次点」：那一下多半是误触（手机在颠，屏幕还是反的）。
             disarm();

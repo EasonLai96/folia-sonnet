@@ -1200,6 +1200,12 @@ export interface StatusMessage {
   onAction?: () => void;
   cancelLabel?: string;
   onCancel?: () => void;
+  /**
+   * 这条提示**不吃点击**（提示条默认是 `pointer-events: auto`，会浮在可视化那一层上面
+   * 把点击接走）。给「点一下空白 → 弹提示 → 再点一下任意处」这种用法用：不然用户补的
+   * 那一下落在提示条上，就永远到不了下面那一层，于是只能反复弹同一句提示。
+   */
+  inert?: boolean;
   persistent?: boolean;
 }
 

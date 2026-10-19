@@ -110,6 +110,7 @@ import { useImmersiveLyricsBars } from './hooks/useImmersiveLyricsBars';
 import { useScreenAwake } from './hooks/useScreenAwake';
 import { usePlayerChromeAutoHide } from './hooks/usePlayerChromeAutoHide';
 import { useHdrExitConfirm, useHdrProjectionActive } from './hooks/useHdrProjection';
+import { disableHdrProjection } from './services/hdrProjection';
 import { useIdleCursorHide } from './hooks/useIdleCursorHide';
 import { usePlaybackAudioBridge } from './components/app/playback/bridges/usePlaybackAudioBridge';
 import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
@@ -1779,9 +1780,16 @@ export default function App() {
             return;
         }
         if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
-            confirmHdrExit(() => setIsPlayerChromeHidden(prev => !prev));
+            /*
+             * HDR 下「点空白退出」退的是**投影本身**（横屏 / 镜像 / 亮度一起还原），
+             * 不是把收起来的界面再翻出来 —— 界面本来就是整屏收着的，翻出来翻回去看着
+             * 跟没反应一样，而用户要的是退出这个模式。
+             */
+            confirmHdrExit(hdrProjectionActive
+                ? disableHdrProjection
+                : () => setIsPlayerChromeHidden(prev => !prev));
         }
-    }, [confirmHdrExit, consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
+    }, [confirmHdrExit, consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, hdrProjectionActive, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
 
     const { personalFmSelection, personalFmSelectionLabel, isPersonalFmModeSupported, setPersonalFmSelection } = usePersonalFmModeController({
         isFmMode,

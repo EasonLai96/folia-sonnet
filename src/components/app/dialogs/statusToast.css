@@ -61,6 +61,8 @@
 
 .status-toast.has-buttons { padding-right: 9px; }
 .status-toast.is-leaving { pointer-events: none; }
+/* 不吃点击：点它跟点它盖住的那一层是同一回事（HDR 投影的「再点一次退出」靠这个）。 */
+.status-toast.is-inert { pointer-events: none; }
 
 .status-toast-line {
     display: flex;

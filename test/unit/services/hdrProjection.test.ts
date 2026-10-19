@@ -24,6 +24,7 @@ vi.mock('@/platform/foliaNative', () => ({
 const {
     applyHdrProjection,
     cancelHdrProjectionCountdown,
+    disableHdrProjection,
     installHdrProjectionPreference,
     readHdrProjectionCountdown,
     readStoredHdrProjection,
@@ -123,6 +124,27 @@ describe('HDR 投影的开关两头', () => {
         expect(localStorage.getItem(ORIENTATION_KEY)).toBe('portrait');
         expect(boostCalls).toEqual([false]);
 
+        vi.advanceTimersByTime(10_000);
+        expect(boostCalls).toEqual([false]);
+    });
+
+    /*
+     * 关掉有两条路（面板那颗开关、HDR 下点两次空白），所以收在同一个出口里 ——
+     * 只做一半的话，最典型的后果就是亮度顶在那儿没人还原。
+     */
+    it('关掉一次做完：掐掉倒计时 + 落盘 + 横屏镜像亮度一起还原', () => {
+        vi.useFakeTimers();
+        startHdrProjectionCountdown();
+        writeStoredHdrProjection(true);
+        disableHdrProjection();
+
+        expect(readHdrProjectionCountdown()).toBe(0);
+        expect(readStoredHdrProjection()).toBe(false);
+        expect(mirrorAttr()).toBe('false');
+        expect(localStorage.getItem(ORIENTATION_KEY)).toBe('portrait');
+        expect(boostCalls).toEqual([false]);
+
+        // 倒计时被掐掉了，到点也不会再翻一次屏。
         vi.advanceTimersByTime(10_000);
         expect(boostCalls).toEqual([false]);
     });
