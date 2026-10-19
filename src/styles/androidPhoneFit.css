@@ -1017,6 +1017,11 @@ html[data-folia-mirror='true'] {
    * 100% 是相对初始包含块（视口）算的，不进这条 transform 的坐标系，所以给了就是满屏。
    */
   height: 100%;
+  /*
+   * 顺手把根上的滚动也关掉：<html> 一旦能滚，捏合缩放那一套就能拖着画面走
+   * （body 自己是 overflow: hidden，但根没关的话文档层还能滚）。
+   */
+  overflow: hidden;
   transform: scaleX(-1);
 }
 

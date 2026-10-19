@@ -253,12 +253,21 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * 两件 WebView 默认不干、而播放器必须要的事。
+     * 三件 WebView 默认不干 / 默认干错、而播放器必须要的事。
      *
      * `setMediaPlaybackRequiresUserGesture(false)`：默认要用户先点过屏幕才允许播放音频，
      * 于是「点通知栏的播放」或恢复播放时经常静默失败。
      * `MIXED_CONTENT_ALWAYS_ALLOW`：页面本身是 https://localhost，封面与部分音频地址还是
      * http，默认会被拦成混合内容（报错毫无特征：`TypeError: Failed to fetch`）。
+     *
+     * 关掉**页面级缩放**：viewport 只写了 `width=device-width, initial-scale=1.0`，没写
+     * maximum-scale / user-scalable，于是 WebView 默认允许捏合缩放。这是个铺满整块屏幕的
+     * 应用（外壳是 fixed inset-0），捏上去之后画面整体放大、边上的内容被裁掉，还能拖着看
+     * 被裁的部分、一路拖到屏幕外 —— 而且这一档缩放会被 WebView 记着，转屏、重新聚焦都
+     * 带着它，看上去就是「忽然自动放大了」。
+     *
+     * 走 WebSettings 而不是回头改 index.html 的 viewport：那是给所有端用的，桌面端不该
+     * 跟着一起失去缩放，而 WebView 上 setSupportZoom 是最终说了算的那一层。
      */
     private void applyWebViewPlaybackSettings() {
         WebView webView = getBridge() == null ? null : getBridge().getWebView();
@@ -266,6 +275,8 @@ public class MainActivity extends BridgeActivity {
         WebSettings settings = webView.getSettings();
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
     }
 
     /**
