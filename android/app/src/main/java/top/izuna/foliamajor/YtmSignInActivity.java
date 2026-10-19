@@ -117,7 +117,7 @@ public class YtmSignInActivity extends AppCompatActivity {
     /** 顶上一条：左边取消、右边「完成」（自动判定没赶上时用它手动收）。 */
     private View buildBar() {
         LinearLayout bar = new LinearLayout(this);
-        int height = (int) TypedValue.applyDimension(TypedValue.COMPLEXITY_UNITS_DIP, 52, getResources().getDisplayMetrics());
+        int height = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 52, getResources().getDisplayMetrics());
         bar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height));
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { HomeViewTab } from '../../../types';
 import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '../collection/collection.contract';
 import { collectionKey } from '../collection/collectionIdentity';
-import { getActiveGridViewCollection } from '../collection/collectionNavigation';
-import { useCollectionNavigationStore } from '../../../stores/useCollectionNavigationStore';
+// getActiveGridViewCollection 与导航 store 同住（stores/useCollectionNavigationStore），
+// 不在 collection/collectionNavigation 里 —— 那边只有 push / pop / trail 这些纯判定。
+import { getActiveGridViewCollection, useCollectionNavigationStore } from '../../../stores/useCollectionNavigationStore';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
 
 // src/library/core/bindings/useLibraryHomeCloudTheme.ts

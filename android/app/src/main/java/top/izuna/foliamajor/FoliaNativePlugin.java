@@ -611,6 +611,34 @@ public class FoliaNativePlugin extends Plugin {
             || "PATCH".equalsIgnoreCase(method);
     }
 
+    /**
+     * 按名字取一个请求头，**不区分大小写**。
+     *
+     * HTTP 头的名字本来就大小写不敏感（`Content-Type` 与 `content-type` 是同一个头），
+     * 而 JSONObject 的键是敏感的 —— 只按小写问一次，来自别处的 `Content-Type` 就取不到。
+     * JS 侧现在是 `new Headers(...)` 给的（都是小写），所以看起来没问题；但桥是公开的，
+     * 手写一个头名字就能让它悄悄落空。缺了就返回 null（不是空串）：调用方一律按 null 判。
+     */
+    private static String optHeader(JSObject headers, String name) {
+        if (headers == null) return null;
+        Object direct = headers.opt(name);
+        if (direct != null) {
+            String value = String.valueOf(direct);
+            return value.isEmpty() ? null : value;
+        }
+        Iterator<String> keys = headers.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (key != null && key.equalsIgnoreCase(name)) {
+                Object value = headers.opt(key);
+                if (value == null) return null;
+                String text = String.valueOf(value);
+                return text.isEmpty() ? null : text;
+            }
+        }
+        return null;
+    }
+
     @PluginMethod
     public void httpRequest(PluginCall call) {
         String url = call.getString("url", "");
@@ -638,7 +666,7 @@ public class FoliaNativePlugin extends Plugin {
             }
             // OkHttp 这里没有 cookie jar，所以要把 WebView 的 cookie 库自己带上，
             // 除非调用方已经显式塞了 Cookie 头。
-            if (headers == null || headers.optString("cookie") == null) {
+            if (headers == null || optHeader(headers, "cookie") == null) {
                 String storedCookies = CookieManager.getInstance().getCookie(url);
                 if (storedCookies != null && !storedCookies.isEmpty()) {
                     builder.header("Cookie", storedCookies);
@@ -649,7 +677,20 @@ public class FoliaNativePlugin extends Plugin {
             if (bodyBase64 != null && !bodyBase64.isEmpty()) {
                 body = RequestBody.create(MediaType.parse("application/octet-stream"), Base64.decode(bodyBase64, Base64.DEFAULT));
             } else if (bodyText != null && !bodyText.isEmpty()) {
-                MediaType mediaType = MediaType.parse(headers == null ? null : headers.optString("content-type", null));
+                /*
+                 * Content-Type 取不到时**不许传 null 给 MediaType.parse**：OkHttp 4 是 Kotlin 写的，
+                 * 那个方法的参数是「非空接收者」，传 null 当场 NPE（`-parameter <this>` 那个报错就是它），
+                 * 整条请求连发出去的机会都没有。
+                 *
+                 * 退回 `text/plain;charset=UTF-8` —— 这正是 fetch 对「字符串 body + 没指定类型」
+                 * 的处理（浏览器就是这么发的）。少了这一层，那些 POST 一段裸字符串的接口在桌面上
+                 * 好好的、到安卓上直接把插件方法抛穿。
+                 */
+                String contentType = headers == null ? null : optHeader(headers, "content-type");
+                MediaType mediaType = MediaType.parse(
+                    contentType == null || contentType.isEmpty()
+                        ? "text/plain;charset=UTF-8"
+                        : contentType);
                 body = RequestBody.create(mediaType, bodyText);
             }
             String requestMethod = method == null ? "GET" : method;
