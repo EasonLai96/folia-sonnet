@@ -30,7 +30,16 @@ export function createLatticeLineView(pixi: Pixi, raster: LatticeRaster, parent:
     const quad = createLatticeQuadGeometry(pixi);
     const matchers = prepareWordColorMatchers(input.theme.wordColors, input.keywordColoringEnabled);
     const colors = resolveTokenColorMap(layout.pieces.map(p => p.token), buildWordColorRangesFromMatchers(entry.line.fullText, matchers));
-    const accent = chorus ? mixColors(input.theme.primaryColor, input.theme.accentColor, 0.48) : colorWithAlpha(input.theme.primaryColor, 0.98);
+    /*
+     * 唱过去那一段的颜色：命中主题关键字（AI 主题的 wordColors）用关键字自己的颜色，
+     * 没命中就兜到主题的**强调色** —— 与别处歌词渲染同一条规矩（classic / cadenza / fume
+     * 的 resolveWordColor 兜底都是 theme.accentColor，claddagh 同理）。
+     *
+     * 以前这里兜的是 primaryColor：磁贴墙上「唱到的」和「没唱到的」于是同一个颜色，
+     * AI 主题的高亮色在这里一点都看不出来 —— 播放页有、磁贴墙没有，差的就这一行。
+     * 副歌那一条本来就是往强调色上混（与莫奈一致），不动。
+     */
+    const accent = chorus ? mixColors(input.theme.primaryColor, input.theme.accentColor, 0.48) : colorWithAlpha(input.theme.accentColor, 0.98);
     const destroyPiece = (view: PieceView) => {
         view.sprite.destroy(); view.sweep.shader.destroy(); view.glow.forEach(sprite => sprite.destroy()); view.texture.destroy(true);
     };
