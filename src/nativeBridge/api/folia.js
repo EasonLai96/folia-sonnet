@@ -40,6 +40,20 @@ import {
   handleQQSubscriptionStatus,
   handleQQSongLikeWrite,
   handleQQAlbumSubscribe,
+  readNewSongs,
+  readNewAlbums,
+  readToplists,
+  readToplistSongs,
+  readPlaylistCategories,
+  readCategoryPlaylists,
+  readRadar,
+  readRadioList,
+  readRadioTracks,
+  readSimilarSongs,
+  readUserVip,
+  readUserCloud,
+  createPlaylist,
+  searchCatalog,
 } from './qq.js';
 import {
   qqWechatGetLoginQr,
@@ -70,6 +84,10 @@ import {
   downloadKGLyricByCandidate,
   kgPostAndroidSigned,
   upgradeKGYouthDayVip,
+  handlePlaylistAdd,
+  handlePlaylistDel,
+  handlePlaylistTracksAdd,
+  handlePlaylistTracksDel,
 } from './kugou.js';
 import { handleBodianRequest } from './bodian.js';
 
@@ -1049,6 +1067,53 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
     return await handleQQAlbumSubscribe(params, cookie);
   }
 
+  // ---- 探索页那一组（3.3.3）—— 新歌、新碟、榜单、分类是公开内容，其余要登录 ----
+  if (operation === 'recommend_new_songs') {
+    return await readNewSongs(params, cookie);
+  }
+  if (operation === 'recommend_new_albums') {
+    return await readNewAlbums(params, cookie);
+  }
+  if (operation === 'recommend_toplists') {
+    return await readToplists(cookie);
+  }
+  if (operation === 'recommend_toplist') {
+    return await readToplistSongs(params, cookie);
+  }
+  if (operation === 'recommend_categories') {
+    return await readPlaylistCategories(cookie);
+  }
+  if (operation === 'recommend_category_playlists') {
+    return await readCategoryPlaylists(params, cookie);
+  }
+  if (operation === 'recommend_radar') {
+    return await readRadar(params, cookie);
+  }
+  if (operation === 'radio_list') {
+    return await readRadioList(cookie);
+  }
+  if (operation === 'radio_tracks') {
+    return await readRadioTracks(params, cookie);
+  }
+  if (operation === 'song_similar') {
+    return await readSimilarSongs(params, cookie);
+  }
+  // ---- 账号的两条与建歌单 ----
+  if (operation === 'user_vip') {
+    return await readUserVip(cookie);
+  }
+  if (operation === 'user_cloud') {
+    return await readUserCloud(params, cookie);
+  }
+  if (operation === 'user_playlist_create') {
+    return await createPlaylist(params, cookie);
+  }
+  if (operation === 'search') {
+    return await searchCatalog(params, cookie);
+  }
+  // `login_refresh` 是 Serverless 后端换 token 的那条路由：本地桥的会话就是 cookie 本身，
+  // 没有可换的东西。服务层把这里的 UNSUPPORTED 当成「后端没有这条路由」，不再来问。
+
   return {
     __foliaBridgeError: 'UNSUPPORTED',
     provider: 'qq',
@@ -1311,6 +1376,20 @@ async function handleFoliaKugouRequest(input, url) {
   if (operation === 'youth_day_vip') return await claimKGYouthDayVip(cookie, params.receive_day);
   if (operation === 'youth_day_vip_upgrade') {
     return await upgradeKGYouthDayVip(cookie, firstValue(params.userid, params.kugouid));
+  }
+
+  // ---- 歌单的写入：收藏 / 取消收藏歌单与专辑，往歌单加歌、从歌单删歌 ----
+  if (operation === 'playlist_add') {
+    return await handlePlaylistAdd(params, cookie);
+  }
+  if (operation === 'playlist_del') {
+    return await handlePlaylistDel(params, cookie);
+  }
+  if (operation === 'playlist_tracks_add') {
+    return await handlePlaylistTracksAdd(params, cookie);
+  }
+  if (operation === 'playlist_tracks_del') {
+    return await handlePlaylistTracksDel(params, cookie);
   }
 
   return {

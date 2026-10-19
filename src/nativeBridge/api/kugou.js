@@ -929,7 +929,11 @@ async function kgPostAndroidSigned(baseURL, urlPath, cookieHeader, bodyData, ext
    * 但返回的歌列表是空的（「每日推荐是空的」）。空 body 该由原生侧补成 0 长度的 body
    * （见 FoliaNativePlugin.httpRequest），JS 这边不要动它。
    */
-  const bodyJson = bodyData === undefined ? '' : JSON.stringify(bodyData || {});
+  // 密文一类的 body 本身已经是字符串（opts.rawBody），不能再 JSON 化一遍：signature 是
+  // 按服务端将收到的那串字节算的（见上面 body 串的说明），多一层引号就对不上。
+  const bodyJson = opts.rawBody
+    ? String(bodyData === undefined || bodyData === null ? '' : bodyData)
+    : bodyData === undefined ? '' : JSON.stringify(bodyData || {});
   const params = Object.assign({
     dfid,
     mid,
@@ -945,7 +949,7 @@ async function kgPostAndroidSigned(baseURL, urlPath, cookieHeader, bodyData, ext
     .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
     .join('&');
   const url = `${String(baseURL || '').replace(/\/$/, '')}${urlPath.startsWith('/') ? urlPath : `/${urlPath}`}?${qs}`;
-  return kgFetchJSON(url, {
+  const init = {
     mobile: true,
     method: 'POST',
     referer: 'https://www.kugou.com/',
@@ -962,7 +966,9 @@ async function kgPostAndroidSigned(baseURL, urlPath, cookieHeader, bodyData, ext
       'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
     }, buildKGAuthHeaders(token), extraHeaders),
     body: bodyJson,
-  });
+  };
+  // 歌单的删除接口回的是密文，不是 JSON：opts.rawText 取原文，交给调用方自己解。
+  return opts.rawText ? kgFetchText(url, init) : kgFetchJSON(url, init);
 }
 
 /**
@@ -4714,9 +4720,21 @@ export {
   searchKGLyricCandidates,
   downloadKGLyricByCandidate,
   kgFetchJSON,
+  kgFetchText,
   kgPostAndroidSigned,
   getKGMid,
   signatureKGWebParams,
+  kgCookieUserId,
+  kgCookieToken,
+  KG_ANDROID_APPID,
+  KG_ANDROID_CLIENTVER,
+  KG_ANDROID_SIGN_SALT,
+  KG_CLOUDLIST_GATEWAY,
+  KG_CLOUDLIST_ROUTER,
   // 只给单测用：歌手字段的兼容逻辑（collectKGAuthors）藏在行映射里，不导出来测不到。
   mapKGSong,
 };
+
+// 歌单的写入（收藏 / 取消收藏 / 增删曲目）住在自己的目录里：那一组只服务这一个平台，
+// 不该再堆进共享的桥文件。
+export * from './kugou/playlists.js';

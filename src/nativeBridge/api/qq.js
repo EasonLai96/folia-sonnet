@@ -1803,6 +1803,8 @@ export async function handleQQLyric(mid, id, cookieHeader) {
 
 export { getQQCookie, mapQQTrack, qqSongDetail };
 export { qqMusicRequest, qqGetJSON, buildQQAuthComm, qqSongDetailsBatch };
+// 探索页那组（3.3.3）要用 musicu 与「要登录」那两个帮手。
+export { qqMusicuCall, qqMusicuBatch, qqAuthRequired, qqBridgeFailure };
 
 // ---- qq-music-api 3.2.0 / 3.3.0 的新路由：推荐与写入 ----
 //
@@ -1822,12 +1824,8 @@ const QQ_LOGIN_REQUIRED_CODE = 1000;
  * musicu 的两层码：整体一个，req_0 里还有一个（外加 subcode）。
  * 任一层非零都不是成功；1000 单独认出来，交给调用方当成「登录失效」而不是空数据。
  */
-function qqMusicuRead(json) {
-  const gatewayCode = Number(json && json.code);
-  if (!json || !Number.isFinite(gatewayCode) || gatewayCode !== 0) {
-    return { ok: false, loginRequired: false, code: gatewayCode, data: null };
-  }
-  const block = json.req_0;
+/** 单个 req_N 的两层码。1000 单独认出来，好让调用方当成「登录失效」而不是空数据。 */
+function qqMusicuReadBlock(block) {
   if (!block || typeof block !== 'object') return { ok: false, loginRequired: false, code: -1, data: null };
   const code = Number(block.code);
   const subcode = block.subcode === undefined ? 0 : Number(block.subcode);
@@ -1837,12 +1835,41 @@ function qqMusicuRead(json) {
   return { ok: true, loginRequired: false, code: 0, data: block.data };
 }
 
+function qqMusicuRead(json) {
+  const gatewayCode = Number(json && json.code);
+  if (!json || !Number.isFinite(gatewayCode) || gatewayCode !== 0) {
+    return { ok: false, loginRequired: false, code: gatewayCode, data: null };
+  }
+  return qqMusicuReadBlock(json.req_0);
+}
+
 async function qqMusicuCall(module, method, param, cookieHeader, extraComm) {
   const json = await qqMusicRequest({
     comm: buildQQAuthComm(cookieHeader, extraComm),
     req_0: { module, method, param },
   }, cookieHeader);
   return qqMusicuRead(json);
+}
+
+/**
+ * 一次请求带多支调用（req_0 / req_1 / …）。新碟上架要把地区清单和专辑放在同一次请求里，
+ * 上游就是这么发的；分开问也能读，但两支的口径可能对不上。
+ */
+async function qqMusicuBatch(descriptors, cookieHeader, extraComm) {
+  const payload = { comm: buildQQAuthComm(cookieHeader, extraComm) };
+  descriptors.forEach((descriptor, index) => {
+    payload[`req_${index}`] = {
+      module: descriptor.module,
+      method: descriptor.method,
+      param: descriptor.param,
+    };
+  });
+  const json = await qqMusicRequest(payload, cookieHeader);
+  const gatewayCode = Number(json && json.code);
+  if (!json || !Number.isFinite(gatewayCode) || gatewayCode !== 0) {
+    return descriptors.map(() => ({ ok: false, loginRequired: false, code: gatewayCode, data: null }));
+  }
+  return descriptors.map((descriptor, index) => qqMusicuReadBlock(json[`req_${index}`]));
 }
 
 const qqAuthRequired = (where) => ({
@@ -2161,3 +2188,7 @@ async function qqVerifyTrackPresence(dirId, ids, cookieHeader) {
   if (found === 0) return 'absent';
   return 'unknown';
 }
+
+// 探索页那组路由（3.3.3）住在自己的目录里：那一组的代码只服务这一个平台，
+// 不该再堆进共享的桥文件。
+export * from './qq/explore.js';

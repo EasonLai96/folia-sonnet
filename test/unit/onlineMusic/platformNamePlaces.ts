@@ -104,12 +104,14 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     // qq 121 → 125：扫码确认后要把会话真正交出去那一次（桥原先返回空 cookie），
     // 新增取换票那份 cookie 并交出的一行，加说明它的三行注释。
     'src/nativeBridge/api/folia.js': { n: { netease: 9, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation' },
-    'src/nativeBridge/api/kugou.js': { n: { kugou: 244 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
+    // 245：歌单的写入搬进 kugou/ 目录后，这里只多出把它转出去的那一行（其余只是从它取常量）。
+    'src/nativeBridge/api/kugou.js': { n: { kugou: 245 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the playlist writes 2026-10-19' },
     'src/nativeBridge/api/libraryTrace.js': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },
     'src/nativeBridge/api/netease.js': { n: { netease: 64, qq: 14, kugou: 1 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     'src/nativeBridge/api/qq-login-qr.js': { n: { qq: 103 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     'src/nativeBridge/api/qq-wechat-login.js': { n: { qq: 44 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
-    'src/nativeBridge/api/qq.js': { n: { qq: 473 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
+    // 481：探索页那组（3.3.3）搬进 qq/ 目录后，这里只多出把帮手与那一组转出去的两行。
+    'src/nativeBridge/api/qq.js': { n: { qq: 481 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the explore routes 2026-10-19' },
     'src/services/aiCloudCache.ts': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },
     'src/services/aiStage.ts': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },
     'src/services/automix/trackProfile.ts': { n: { spotify: 1 }, kind: 'doc' },
