@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { HomeViewTab } from '../../../types';
 import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '../collection/collection.contract';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
@@ -21,7 +21,12 @@ export const buildCloudThemeCollection = (name: string): CloudGridViewCollection
 /**
  * 切到「AI 主题」页签就打开那一屏，并说一句这一屏是什么。
  *
- * 只在这一次切换上开一次（openedRef）：从曲目列表返回时页签还是它，不该又被弹进去一次。
+ * 只在这一次切换上自动开一次（openedRef）：从曲目列表返回时页签还是它，不该又被弹进去一次
+ * —— 否则返回等于把它重新打开，用户永远退不到首页。
+ *
+ * 自动开**只有那一次**，于是退出之后还留一条手动的路：`reopen` 给首页那一层用（那一层本来是
+ * 空的，见各自的 cloud 分支）。少了它，返回之后首页是一片空白、又没有任何东西可按 —— 看上去
+ * 就是「进了 AI 主题就退不出来了」。
  */
 export const useLibraryHomeCloudThemeEntry = ({
     tab,
@@ -38,8 +43,13 @@ export const useLibraryHomeCloudThemeEntry = ({
     label: string;
     /** 已翻译的那句「这一屏是什么」。 */
     notice: string;
-}): void => {
+}): { reopen: () => void } => {
     const openedRef = useRef(false);
+    const open = useCallback(() => {
+        setStatusMessage({ type: 'info', text: notice });
+        onOpenCollection(buildCloudThemeCollection(label));
+    }, [label, notice, onOpenCollection]);
+
     useEffect(() => {
         if (tab !== 'cloud') {
             openedRef.current = false;
@@ -47,7 +57,14 @@ export const useLibraryHomeCloudThemeEntry = ({
         }
         if (!enabled || openedRef.current) return;
         openedRef.current = true;
-        setStatusMessage({ type: 'info', text: notice });
-        onOpenCollection(buildCloudThemeCollection(label));
-    }, [enabled, label, notice, onOpenCollection, tab]);
+        open();
+    }, [enabled, open, tab]);
+
+    /* 每一次都是新的一批：那一屏的资源会清空列表并从云端随机一处重新开始（reload 同路）。 */
+    const reopen = useCallback(() => {
+        if (!enabled) return;
+        open();
+    }, [enabled, open]);
+
+    return useMemo(() => ({ reopen }), [reopen]);
 };

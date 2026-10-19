@@ -8,6 +8,7 @@ import {
     type DuplicateOccurrenceCache,
 } from './collectionEntries';
 import { matchTrackIndexes } from './collectionQuery';
+import { isCloudThemePendingTrack } from './resource/cloudThemeCollection.service';
 import {
     deriveDisplayTracks,
     derivePlayableTracks,
@@ -49,7 +50,19 @@ export const useCollectionView = ({
         () => deriveDisplayTracks(tracks, hiddenKeys, localSort),
         [hiddenKeys, localSort, tracks],
     );
-    const playableTracks = useMemo(() => derivePlayableTracks(displayTracks, isSongUnavailable), [displayTracks]);
+    /*
+     * 「AI 主题」的占位行也排在这里。
+     *
+     * 那一屏先把云端的歌名铺成等长的占位行，再一条一条去平台上搜出来换掉；占位行只有个
+     * 歌名和一个假的 id（`cloud-pending:N`），既没有音源也没有时长。放进可播放清单就等于
+     * 让用户拿到一串守不到任何东西的 id 去播：「播放全部」会把队列填成半真半假，
+     * 一首一首点下去则一部分直接失败。所以它们既不该播放、也不该入队 —— 顺带连
+     * 「这个范围有几首可播」的数也不能算进去（contextTracks 就是从 playableTracks 派生的）。
+     */
+    const playableTracks = useMemo(
+        () => derivePlayableTracks(displayTracks, song => isSongUnavailable(song) || isCloudThemePendingTrack(song)),
+        [displayTracks],
+    );
 
     const occurrenceCacheRef = useRef<DuplicateOccurrenceCache | null>(null);
     const occurrences = useMemo(() => {

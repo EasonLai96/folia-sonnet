@@ -7,6 +7,8 @@ import { readOnlineTracksCache, writeOnlineTracksCache } from './onlineCollectio
 import { createOnlineCollectionResource, type OnlineCollectionResourceDeps } from './onlineCollectionResource.service';
 import { createNavidromeCollectionResource } from './navidromeCollectionResource.service';
 import { resolveNavidromeServerScope } from './navidromeCollectionTracks.service';
+import { createCloudThemeCollectionResource } from './cloudThemeCollection.service';
+import { cloudThemeDeps } from './cloudThemeCollectionDeps.service';
 import { createStaticCollectionResource } from './staticCollectionResource.service';
 
 // src/library/core/collection/resource/createCollectionResource.service.ts
@@ -46,5 +48,12 @@ export const resolveCollectionResourceKey = (
 export const createCollectionResource = (key: string, descriptor: LibraryCollectionDescriptor): CollectionResource => {
     if (descriptor.source === 'online') return createOnlineCollectionResource(key, onlineDeps);
     if (descriptor.source === 'navidrome') return createNavidromeCollectionResource(key);
+    /*
+     * 「AI 主题」：缺这个分支时它掉进最后那个 static 兜底 —— 静态资源拿着一个**空数组**，
+     * 于是集合层、命令面板、删歌与重排全都正常，屏幕上却永远一条曲目都没有。
+     * cloudThemeCollection.service 里那套「先向云端要 60 个歌名、铺成占位行、再逐个去当前
+     * 平台搜出来」整份都写完了，却一直没有任何文件 import 它，正是因为这个分支空着。
+     */
+    if (descriptor.source === 'cloud') return createCloudThemeCollectionResource(key, cloudThemeDeps);
     return createStaticCollectionResource(key, []);
 };

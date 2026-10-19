@@ -11,6 +11,7 @@ import { setBravaisSearchOpen } from './bravaisHomeUiStore';
 import { useBravaisHomeChrome } from './useBravaisHomeChrome';
 import { useTranslation } from 'react-i18next';
 import { useLibraryHomeCloudThemeEntry } from '../../core/directory/useLibraryHomeCloudTheme';
+import CloudThemeHomeLane from '../../core/home/CloudThemeHomeLane';
 import { BravaisHomeLocal, BravaisHomeNavidrome, BravaisHomeOnline } from './BravaisHomeSources';
 import BravaisHomeExplore from './BravaisHomeExplore';
 
@@ -87,7 +88,7 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
      * Navidrome 那一层 —— 于是用户点「AI 主题」看到的是「Navidrome 尚未配置」
      * （那份配置当然没有），而这一屏本身的曲目列表从来没被打开过。
      */
-    useLibraryHomeCloudThemeEntry({
+    const cloudTheme = useLibraryHomeCloudThemeEntry({
         tab,
         enabled: isInteractive,
         onOpenCollection: collection => onOpenGridView?.(collection),
@@ -127,8 +128,18 @@ const BravaisHome: React.FC<LibraryHomeSurfaceProps> = (props) => {
                     directoryActions={directoryActions}
                 />
             ) : tab === 'cloud' ? (
-                // 见上面那个 hook：这一屏的曲目列表自己开，首页这层不画东西。
-                null
+                /*
+                 * 见上面那个 hook：这一屏的曲目列表自己开，首页这层只有那一屏**关掉之后**才看得见。
+                 * 所以这里必须留一颗能回去的按钮（cloudTheme.reopen）—— 留空的话，返回之后首页是
+                 * 一片空白、按任何地方都没有反应。
+                 */
+                <CloudThemeHomeLane
+                    label={t('home.aiTheme')}
+                    notice={t('home.aiThemeNotice')}
+                    actionLabel={t('home.aiThemeReopen')}
+                    disabled={!isInteractive}
+                    onOpen={cloudTheme.reopen}
+                />
             ) : (
                 <BravaisHomeNavidrome {...common} meta={tabLabel('navidrome')} overview={homeResources.navidromeOverview} />
             )}

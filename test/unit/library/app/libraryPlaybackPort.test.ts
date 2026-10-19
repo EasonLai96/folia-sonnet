@@ -69,6 +69,23 @@ describe('library playback port', () => {
         expect(props.onAddAllToQueue).toHaveBeenCalledWith([onlineSong, onlineSong], { suppressToast: true });
     });
 
+    /*
+     * 「AI 主题」的占位行：只有歌名和一个假 id（`cloud-pending:N`），还没有音源、没有时长。
+     * 播放与入队必须在端口这一层挡住 —— 卡片的入口很多（点击、Enter、队列按钮、命令面板），
+     * 逐个去判会漏，而这里是所有 renderer 共同的那一个出口。
+     */
+    it('swallows a placeholder row of the AI-theme page', () => {
+        const props = surface();
+        const placeholder = { id: 'cloud-pending:3', name: 'X', artists: [], album: { id: '', name: '' }, durationMs: 0 } as SongResult;
+        const port = createLibraryPlaybackPort(props);
+        port.playTrack(placeholder, [placeholder]);
+        port.enqueueTrack(placeholder);
+        expect(props.onPlaySong).not.toHaveBeenCalled();
+        expect(props.onAddSongToQueue).not.toHaveBeenCalled();
+        expect(props.onAddLocalSongToQueue).not.toHaveBeenCalled();
+        expect(props.onAddNavidromeSongsToQueue).not.toHaveBeenCalled();
+    });
+
     it('returns nothing when the host does not count', () => {
         const props = { ...surface(), onAddAllToQueue: undefined };
         expect(createLibraryPlaybackPort(props).enqueueAll([onlineSong])).toBeUndefined();

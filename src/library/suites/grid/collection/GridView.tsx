@@ -514,12 +514,18 @@ export const GridView: React.FC<GridViewProps> = ({
     const isNavidromeCollection = collectionSource === 'navidrome';
     const isAlbumCollection = collection?.type === 'album';
     const isDailyRecommendationsCollection = collectionSource === 'online' && collection?.type === 'daily_recommendations';
+    // 「AI 主题」那一屏：云端给的是歌名，整屏可以重拉。它的 reload 会从随机一处重新开始，
+    // 所以那一颗按钮既是「重来」也是「换一批」（见 core/services/cloudThemeCollection 的 reload）。
+    const isCloudThemeCollection = collectionSource === 'cloud';
     // 每日推荐自带「刷新」，私人 FM 不分页；其余在线集合都能跳过缓存整张重新拉取。
     const canReloadOnlineCollection = mode === 'tracks'
         && collectionSource === 'online'
         && isOnlineResource
         && !isDailyRecommendationsCollection
         && collection?.type !== 'radio';
+    /** 这一颗按键该不该出现：在线是跳过缓存重取，「AI 主题」是换一批。 */
+    const canReloadThisCollection = canReloadOnlineCollection
+        || (mode === 'tracks' && isCloudThemeCollection && resource?.kind === 'cloud');
     const {
         isLocalFolderCollection,
         isLocalAllSongsCollection,
@@ -1586,7 +1592,7 @@ export const GridView: React.FC<GridViewProps> = ({
         setSortField: sorting.setField,
         setSortDirection: sorting.setDirection,
         setSortPreset: sorting.applyPreset,
-        canReloadOnlineCollection: canReloadOnlineCollection && !loading,
+        canReloadOnlineCollection: canReloadThisCollection && !loading,
         playFiltered: () => onPlayAll?.(contextActionTracks),
         enqueueFiltered: () => onAddAllToQueue?.(contextActionTracks),
         reloadOnlineCollection,
@@ -1660,7 +1666,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 <ChevronLeft size={20} />
             </button>
 
-            {(progressiveLoading.backgroundLoading || backgroundLoadError) && (
+            {(progressiveLoading.backgroundLoading || backgroundLoadError) && !isCloudThemeCollection && (
                 <button
                     type="button"
                     onClick={resumeBackgroundSync}
@@ -1680,6 +1686,26 @@ export const GridView: React.FC<GridViewProps> = ({
                     <RefreshCw size={14} className={progressiveLoading.backgroundLoading ? 'animate-spin' : ''} />
                     {backgroundSyncLabel}
                     {backgroundLoadError && <span className="font-semibold">{t('ui.retry')}</span>}
+                </button>
+            )}
+
+            {/* 「AI 主题」的换一批。
+                占的是右上同一个位置（后台补页那颗 generic 胶囊对这一屏让开了），两者不并存。
+                重拉会清空列表并从云端随机一处重新开始，所以它是刷新也是换一批。 */}
+            {isCloudThemeCollection && canReloadThisCollection && (
+                <button
+                    type="button"
+                    onClick={reloadOnlineCollection}
+                    disabled={loading}
+                    /* 安全区：与返回按钮同一档 `absolute top-5`。 */
+                    data-folia-safe-top="shift"
+                    className="absolute right-6 top-5 z-[70] flex items-center gap-2 rounded-full px-3 py-2 text-xs tabular-nums backdrop-blur-md disabled:opacity-50"
+                    style={{ backgroundColor: 'color-mix(in srgb, var(--bg-color) 65%, transparent)' }}
+                    title={t('playlist.reloadCloudTheme')}
+                    aria-label={t('playlist.reloadCloudTheme')}
+                >
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                    {loading ? t('playlist.loading') : t('playlist.reloadCloudTheme')}
                 </button>
             )}
 
@@ -2099,14 +2125,14 @@ export const GridView: React.FC<GridViewProps> = ({
                                         {t('localMusic.reimport')}
                                     </button>
                                 )}
-                                {canReloadOnlineCollection && (
+                                {canReloadThisCollection && (
                                     <button
                                         onClick={reloadOnlineCollection}
                                         disabled={loading}
                                         className="w-full py-2.5 rounded-full text-xs font-semibold bg-zinc-800/10 dark:bg-zinc-100/10 hover:bg-zinc-900 hover:text-zinc-100 dark:hover:bg-zinc-100 dark:hover:text-zinc-900 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
                                     >
                                         {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                        {t('playlist.reload')}
+                                        {isCloudThemeCollection ? t('playlist.reloadCloudTheme') : t('playlist.reload')}
                                     </button>
                                 )}
                                 {canEditPlaylist && (

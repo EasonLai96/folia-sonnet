@@ -9,15 +9,21 @@ const UNSUPPORTED: LibraryCapability = { supported: false, enabled: false, pendi
 const isLoadingStatus = (status: CollectionLoadStatus) => status === 'idle' || status === 'loading';
 
 /**
- * 跳过缓存重新拉取：只有能分页的在线集合有这个动作。每日推荐自带刷新，私人 FM 不分页，
- * 本地与 Navidrome 的曲目不来自在线缓存。加载中时可见但不可用。
+ * 跳过缓存重新拉取：在线集合、以及「AI 主题」那一屏。
+ *
+ * AI 主题的 reload 不只是重取一遍 —— 它会清空当前列表并从随机一处重新开始（见
+ * cloudThemeCollectionResource），所以那一颗刷新按钮既是「重来」也是「换一批」。
+ *
+ * 每日推荐自带刷新，私人 FM 不分页，本地与 Navidrome 的曲目不来自在线缓存。
+ * 加载中时可见但不可用。
  */
 export const resolveReloadCapability = (input: {
     kind: CollectionResourceKind;
     status: CollectionLoadStatus;
     collectionType?: string;
 }): LibraryCapability => {
-    if (input.kind !== 'online' || input.collectionType === 'daily_recommendations' || input.collectionType === 'radio') {
+    const reloadable = input.kind === 'online' || input.kind === 'cloud';
+    if (!reloadable || input.collectionType === 'daily_recommendations' || input.collectionType === 'radio') {
         return UNSUPPORTED;
     }
     const pending = isLoadingStatus(input.status);
