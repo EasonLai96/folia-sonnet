@@ -1,7 +1,6 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
 import type { ProviderAvailability, ProviderErrorCode } from '../../../types/onlineMusic';
-import { isYtmNativeAvailable } from '../../../platform/foliaNative';
-import { runYtmInPage } from './ytmInPageRuntime';
+import { isYtmInPageAvailable, runYtmInPage } from './ytmInPageRuntime';
 
 // src/services/onlineMusic/ytm/ytmTransport.ts
 // The IPC boundary to electron/ytm/ytmApiBridge.cjs. Google credentials stay in the main process;
@@ -82,13 +81,14 @@ export const getYtmTransportAvailability = (): ProviderAvailability => {
     if (typeof window !== 'undefined' && typeof window.electron?.ytmRequest === 'function') {
         return { configured: true };
     }
-    if (isYtmNativeAvailable()) return { configured: true };
+    // 安卓 WebView：youtubei.js 跑在页内，不靠原生就能取数（见 ytmInPageRuntime）。
+    if (isYtmInPageAvailable()) return { configured: true };
     return { configured: false, reason: 'runtime-unavailable' };
 };
 
 export async function requestYtm<T = unknown>(operation: YtmOperation, params: YtmParams = {}): Promise<T> {
     // 安卓：协议层就在本页里，直接调。
-    if (isYtmNativeAvailable()) return (await runYtmInPage(operation, params)) as T;
+    if (isYtmInPageAvailable()) return (await runYtmInPage(operation, params)) as T;
     if (!getYtmTransportAvailability().configured) {
         throw new OnlineProviderError('unavailable', 'YouTube Music requires the desktop app', 'ytm');
     }
