@@ -39,24 +39,36 @@ type SegmentsProps<T extends string> = {
     size?: keyof typeof SIZE;
     /** Takes the width of its row; the options share it. */
     fill?: boolean;
+    /**
+     * 竖着排（矮而宽的窗口：页签改成右侧一条竖轨）。
+     *
+     * 横过来的手机纵向只剩一百多像素，底边那一条 48px 的页签几乎占掉三分之一；挪到侧面
+     * 之后它花的是**横向**的余量（那种窗口横向还剩一大半），纵向全留给页签内容。
+     */
+    vertical?: boolean;
 };
 
-export const Segments = <T extends string>({ value, options, onChange, size = 'm', fill }: SegmentsProps<T>): React.ReactElement => {
+export const Segments = <T extends string>({ value, options, onChange, size = 'm', fill, vertical }: SegmentsProps<T>): React.ReactElement => {
     const markId = useId();
     const reduced = useKitReducedMotion();
     const look = SIZE[size];
     // Where some options show only an icon, they share the room and the named ones take what they need.
     const hasIconOnly = options.some(option => option.iconOnly);
+    const box = vertical
+        ? 'flex h-full w-full flex-col rounded-[10px]'
+        : `${fill ? 'flex w-full' : 'inline-flex'} ${look.box}`;
 
     return (
-        <div role="group" className={`${fill ? 'flex w-full' : 'inline-flex'} bg-[var(--st-fill)] p-0.5 ${look.box}`}>
+        <div role="group" className={`${box} bg-[var(--st-fill)] p-0.5`}>
             {options.map((option) => {
                 const selected = option.value === value;
-                const share = !fill
-                    ? `shrink-0${option.iconOnly ? ' w-[30px]' : ''}`
-                    : option.iconOnly
-                        ? 'min-w-0 flex-[1_1_36px]'
-                        : `min-w-0 ${hasIconOnly ? 'flex-[0_1_auto]' : 'flex-[1_1_auto]'}`;
+                const share = vertical
+                    ? 'flex-[1_1_auto]'
+                    : !fill
+                        ? `shrink-0${option.iconOnly ? ' w-[30px]' : ''}`
+                        : option.iconOnly
+                            ? 'min-w-0 flex-[1_1_36px]'
+                            : `min-w-0 ${hasIconOnly ? 'flex-[0_1_auto]' : 'flex-[1_1_auto]'}`;
                 return (
                     <Tooltip key={option.value} text={option.tip ?? (option.iconOnly ? option.label : undefined)} className={`flex ${share}`}>
                         <button

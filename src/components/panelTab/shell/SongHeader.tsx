@@ -5,6 +5,7 @@ import type { SongResult } from '../../../types';
 import { getProviderSongMetadata } from '../../../services/onlineMusic/songMetadata';
 import { getSizedCoverUrl } from '../../../utils/coverUrl';
 import { LikeButton, type SongLike } from './LikeButton';
+import { useIsWideShortViewport } from './panelViewport';
 import { useMeasuredSize } from './useMeasuredSize';
 
 // src/components/panelTab/shell/SongHeader.tsx
@@ -33,13 +34,21 @@ const MIN_COVER = '6rem';
  *
  * 上游没有这一道：窗口一高，封面就一路顶到 336px，手机上几乎占掉一屏。留着它 ——
  * 这就是「手机没那么大」要的那一下。
+ *
+ * 30rem（480px）：封面改成正方形之后，铺满面板内宽（336）那一格自己就要 336 高，
+ * 20.625rem 会把边长压到 200 上下，看着像凭空小了一圈。
  */
-const COVER_TAB_MAX = '20.625rem';
+const COVER_TAB_MAX = '30rem';
 /**
- * 大封面的边长上限。上游取 `100cqw`（整个面板内宽，约 336px），偏大；
- * 现在取内宽的 70%，再封顶（约 208px）。
+ * 大封面的**边长**上限：铺满面板内宽。
+ *
+ * 上游这里写的是高度的 70%（约 208px），宽度却是 100% —— 那一格是个 336×208 的长方形，
+ * 而 `object-cover` 是按格子裁的，方形封面上下各有 60 多像素被切掉：「封面显示不全」
+ * 就是这么来的。改成正方形（宽 = 高），方形封面一格正好放得下整张。
  */
-const COVER_MAX = 'min(70cqw, 13rem)';
+const COVER_MAX = '100cqw';
+/** 矮而宽时封面挪到左边，边长压到这个尺寸：右边还要留出写歌名、摆按钮的地方。 */
+const COMPACT_COVER_MAX = 'min(36cqw, 10rem)';
 
 type SongHeaderProps = {
     /** The cover tab is open: the large form. */
@@ -57,6 +66,11 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
     const { t } = useTranslation();
     const underRef = useRef<HTMLDivElement>(null);
     const under = useMeasuredSize(underRef);
+    // 矮而宽（横过来的手机）：封面挪到左边，文字与按钮排在它右边。竖着叠要占两截高度，
+    // 横着放只占一截 —— 那种窗口缺的正是纵向。
+    // （判定本身不能写成 `isBig && use…`：短路会让这个 hook 在收起态不执行，hooks 的顺序就散了。）
+    const isWideShort = useIsWideShortViewport();
+    const sideBySide = isBig && isWideShort;
     const artists = (currentSong ? getProviderSongMetadata(currentSong).artists : []).map(artist => artist.name).join(' / ');
     /*
      * 回到上游的**两段式**：可用高度（--pn-room）先让出文字块那一截，剩下的全给封面，
@@ -70,20 +84,30 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
      * px 不会 —— 手机上正是这个「各缩各的」把按钮挤到一块的。
      */
     const underPx = `calc(${COVER_GAP} + ${under.height}px)`;
-    const coverHeight = `clamp(${MIN_COVER}, calc(min(var(--pn-room), ${COVER_TAB_MAX}) - ${underPx}), ${COVER_MAX})`;
+    /**
+     * 封面的**边长**（宽 = 高）。
+     *
+     * 并排时它不与文字抢高度，所以不用减掉文字那一截；叠着放才要减。
+     * 两种排法的总高也不同：并排取两者较大的那个，叠着放是相加。
+     */
+    const coverSide = `clamp(${MIN_COVER}, calc(min(var(--pn-room), ${COVER_TAB_MAX})${sideBySide ? '' : ` - ${underPx}`}), ${sideBySide ? COMPACT_COVER_MAX : COVER_MAX})`;
+    const bigHeight = sideBySide ? `max(${coverSide}, ${under.height}px)` : `calc(${coverSide} + ${underPx})`;
 
     return (
         <header
             className="st-t-unfold relative shrink-0 overflow-hidden transition-[height]"
-            style={{ height: isBig ? `calc(${coverHeight} + ${underPx})` : FOLDED_PX }}
+            style={{ height: isBig ? bigHeight : FOLDED_PX }}
         >
             {/* The cover is where the lessons about this panel's song buttons point (data-ponder-panel-artwork). */}
             <div
                 data-ponder-panel-artwork
                 onClick={isBig ? undefined : onShowCover}
-                // 与上游一致：铺满面板内宽，高度按可用高度算（见 coverHeight 的注释）。
-                className={`st-t-unfold absolute left-0 top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig ? 'rounded-[10px]' : 'cursor-pointer rounded-lg'}`}
-                style={isBig ? { width: '100%', height: coverHeight } : { width: FOLDED_PX, height: FOLDED_PX }}
+                // 正方形：宽高同一个数，方形封面才放得下整张（见 COVER_MAX 的注释）。
+                // 叠着放时居中（左右会剩下两条边），并排时贴左。
+                className={`st-t-unfold absolute top-0 grid place-items-center overflow-hidden bg-[var(--st-fill)] transition-[width,height,border-radius] ${isBig
+                    ? `rounded-[10px] ${sideBySide ? 'left-0' : 'left-0 right-0 mx-auto'}`
+                    : 'left-0 cursor-pointer rounded-lg'}`}
+                style={isBig ? { width: coverSide, height: coverSide } : { width: FOLDED_PX, height: FOLDED_PX }}
             >
                 {coverUrl ? (
                     <img src={getSizedCoverUrl(coverUrl, 512)} alt="Art" decoding="async" className="h-full w-full object-cover" />
@@ -110,11 +134,17 @@ const SongHeader: React.FC<SongHeaderProps> = ({ isBig, currentSong, coverUrl, l
             />
 
             <div
-                ref={underRef}
                 inert={!isBig}
-                className={`absolute inset-x-1 bottom-0 transition-[opacity,translate,visibility] ${isBig ? 'st-t-move' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
+                className={`absolute bottom-0 right-1 transition-[opacity,translate,visibility] ${sideBySide ? 'top-0 flex flex-col justify-center' : 'left-1'} ${isBig ? 'st-t-move' : 'st-t-fast invisible translate-y-2 opacity-0'}`}
+                style={sideBySide ? { left: `calc(${coverSide} + ${COVER_GAP})` } : undefined}
             >
-                {children}
+                {/*
+                 * 量的是里面这一层，不是外面那层：并排时外面那层被拉满整个 header 的高度，
+                 * 量它等于量自己撑出来的结果（文字一多就永远量不出来，只会被裁掉）。
+                 */}
+                <div ref={underRef}>
+                    {children}
+                </div>
             </div>
         </header>
     );

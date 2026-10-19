@@ -26,6 +26,7 @@ import { getPlaybackSourceRef } from '../utils/appPlaybackGuards';
 import { canSaveQueueAsLocalPlaylist } from '../utils/queueReorder';
 import { canDislikeCurrentSong, resolveLikeAvailability } from '../utils/playerLikeAvailability';
 import { usePlayerPanelTabShortcut } from '../hooks/usePlayerPanelTabShortcut';
+import { useIsWideShortViewport } from './panelTab/shell/panelViewport';
 import { FOLIUM_PANEL_TAB_PREFIX, FoliumPanelTabBody, useFoliumPanelTabs } from '../mods/folium/registries/playerPanelTabs';
 import { countRender } from '../dev/renderCount';
 import { useAppViewStore } from '../stores/useAppViewStore';
@@ -237,6 +238,9 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
         onToggleDaylight,
     } = account;
 
+    // 矮而宽（横过来的手机）：页签挪到右侧竖轨，把底边那一条让给页签内容（见 PanelShell）。
+    const isWideShort = useIsWideShortViewport();
+
     const isStage = isStageContext || Boolean(currentSong && (currentSong as any).isStage === true);
     const isNavidrome = currentSong && (currentSong as any).isNavidrome === true;
     const isLocal = currentSong && !isNavidrome && (((currentSong as any).isLocal === true) || Boolean((currentSong as any).localRef?.songId));
@@ -354,7 +358,7 @@ const UnifiedPanel: React.FC<UnifiedPanelProps> = ({
                     />
                 </SongHeader>
             )}
-            dock={<TabDock tabs={tabs} currentTab={currentTab} onTabChange={onTabChange} />}
+            dock={<TabDock tabs={tabs} currentTab={currentTab} onTabChange={onTabChange} vertical={isWideShort} />}
             handle={(
                 <PanelHandle
                     isOpen={isOpen}
