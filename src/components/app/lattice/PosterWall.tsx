@@ -74,7 +74,23 @@ const EXPANDED_SIZE = EXPANSION_SPAN.cols * (CELL_SIZE + GAP) - GAP;
 // under the wall's buttons. A section the explore wall is taken to has its heading put there.
 const CAMERA_HOME = { x: 34, y: 80 };
 
-const getScale = (width: number) => width < 640 ? 0.52 : width < 1100 ? 0.64 : 0.76;
+/*
+ * 墙的基准倍率：按视口宽度分档，但**手机横过来那一档要单独看**。
+ *
+ * 只看宽度时，手机横屏的宽（700~900）落进桌面档，倍率从竖屏的 0.52 跳到 0.64 —— 磁贴
+ * 大了 23%。更显眼的是相机能看到的世界范围 = 视口 ÷ 倍率：横屏高度只剩 360，范围一下
+ * 小了一大截，于是「磁贴变大、范围变小、得多拖几下才看全」。
+ *
+ * HDR 投影会强制横屏（画面要经挡风玻璃反射），所以这件事是在开 HDR 时撞上的：本来就横着
+ * 的时候没有这一档跳变，于是「横屏下开 HDR 反而没有放大的迹象」。
+ *
+ * 按短边压一档：桌面窗口再怎么拖，短边也多在 600 以上，不受影响；只有「宽够桌面、高却
+ * 只有手机那一点」的横屏手机会退到 0.52，与它竖屏时一致 —— 转屏不再改变磁贴大小。
+ */
+const getScale = (width: number, height: number) => {
+    const byWidth = width < 640 ? 0.52 : width < 1100 ? 0.64 : 0.76;
+    return Math.min(width, height) < 480 ? Math.min(byWidth, 0.52) : byWidth;
+};
 
 const getWorldBounds = (camera: LatticeCamera, viewport: { width: number; height: number }): Bounds => ({
     left: -camera.x / camera.scale,
@@ -133,7 +149,7 @@ export default function PosterWall({
     const wallZoom = useLatticeSettingsStore(state => state.wallZoom);
     const setWallZoom = useLatticeSettingsStore(state => state.handleSetWallZoom);
     /** 基准档位（只跟视口宽度走）：倍率的上下限是它的倍数，缩放途中读它夹范围。 */
-    const baseScaleRef = useRef(getScale(viewportRef.current.width));
+    const baseScaleRef = useRef(getScale(viewportRef.current.width, viewportRef.current.height));
     const wallZoomRef = useRef(wallZoom);
     wallZoomRef.current = wallZoom;
     const devicePixelRatio = useDevicePixelRatio();
@@ -177,7 +193,7 @@ export default function PosterWall({
         if (!container) return;
         const observer = new ResizeObserver(([entry]) => {
             viewportRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
-            const base = getScale(entry.contentRect.width);
+            const base = getScale(entry.contentRect.width, entry.contentRect.height);
             baseScaleRef.current = base;
             const scale = base * wallZoomRef.current;
             applyCamera({ ...cameraRef.current, scale }, true);
