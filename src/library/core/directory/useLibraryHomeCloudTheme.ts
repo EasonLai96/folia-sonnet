@@ -4,7 +4,8 @@ import { AI_THEME_COLLECTION_ID, type CloudGridViewCollectionDescriptor } from '
 import { collectionKey } from '../collection/collectionIdentity';
 // getActiveGridViewCollection 与导航 store 同住（stores/useCollectionNavigationStore），
 // 不在 collection/collectionNavigation 里 —— 那边只有 push / pop / trail 这些纯判定。
-import { getActiveGridViewCollection, useCollectionNavigationStore } from '../../../stores/useCollectionNavigationStore';
+import { getActiveGridViewCollection, subscribeCollectionPop, useCollectionNavigationStore } from '../../../stores/useCollectionNavigationStore';
+import { useSearchNavigationStore } from '../../../stores/useSearchNavigationStore';
 import { setStatusMessage } from '../../../stores/useStatusMessageStore';
 
 // src/library/core/bindings/useLibraryHomeCloudTheme.ts
@@ -28,6 +29,41 @@ const AI_THEME_KEY = collectionKey({
     id: AI_THEME_COLLECTION_ID,
     type: 'playlist',
 });
+
+/*
+ * 进这一屏之前停在哪个页签：返回时还回去（还没有就回「歌单」）。
+ *
+ * 放在模块层而不是组件的 ref 里，原因与下面那个订阅一样：开这一屏的那个组件在弹栈那一刻
+ * 多半已经不在了，组件里的东西读不到。
+ */
+let lastNonCloudTab: HomeViewTab = 'playlist';
+
+/*
+ * 这一屏被弹掉（应用内返回、浏览器后退）时把首页页签还回去。
+ *
+ * ⭐ 订阅写在**模块层**，不能写在组件的 effect 里：这一屏是「页签 = cloud」时自动开的根集合，
+ * 弹栈那一刻开它的那个组件往往已经不在了（进了集合页首页就卸载了），组件里的订阅根本收不到 ——
+ * 于是页签停在 cloud，首页按 cloud 渲染（那一层本来就是空的），看上去就是「返回按了没用」；
+ * 等首页重挂，栈里又没有这一屏，于是又开一遍、那句「云缓存」的提示也就跟着再出现一次。
+ *
+ * 页签直接写 store 而不是回调给宿主：这条还原必须发生在**没有宿主的时候**（上面那句），
+ * 有回调也无人来接。写 homeViewTab 的那条副带动作（让模组的首页页面让开）本来就在
+ * useFoliumHomeNavigation 里盯着这个字段，不会漏。
+ */
+let popSubscription: (() => void) | null = null;
+
+const subscribeCloudThemePop = (): void => {
+    if (popSubscription) return;
+    popSubscription = subscribeCollectionPop((from, to) => {
+        const active = getActiveGridViewCollection(from);
+        if (!active || collectionKey(active) !== AI_THEME_KEY) return;
+        // 只是从更深的某一层退回这一屏：这一屏还开着，页签当然还要停在 cloud。
+        if (to?.stack.some(collection => collectionKey(collection) === AI_THEME_KEY)) return;
+        const navigation = useSearchNavigationStore.getState();
+        if (navigation.homeViewTab !== 'cloud') return;
+        navigation.setHomeViewTab(lastNonCloudTab);
+    });
+};
 
 /**
  * 切到「AI 主题」页签就打开那一屏，并说一句这一屏是什么。
@@ -65,6 +101,12 @@ export const useLibraryHomeCloudThemeEntry = ({
         setStatusMessage({ type: 'info', text: notice });
         onOpenCollection(buildCloudThemeCollection(label));
     }, [label, notice, onOpenCollection]);
+
+    // 记下「进 cloud 之前停在哪个页签」，并保证弹栈还原的订阅一直在（见模块顶部的说明）。
+    useEffect(() => {
+        subscribeCloudThemePop();
+        if (tab !== 'cloud') lastNonCloudTab = tab;
+    }, [tab]);
 
     useEffect(() => {
         if (tab !== 'cloud') {
