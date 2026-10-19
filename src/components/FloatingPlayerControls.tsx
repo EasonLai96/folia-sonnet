@@ -145,6 +145,17 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     const hitboxRef = useRef<HTMLDivElement | null>(null);
     /** 按下时的指针位置：松手时位移超过阈值就是拖动，不算点击。 */
     const pressOriginRef = useRef<{ x: number; y: number; } | null>(null);
+    /**
+     * 收起态那一下「点开」的尾巴要不要吃掉。
+     *
+     * 展开是在**松手**（pointerup）时做的 —— 收起态几乎整块是进度条那个 range，它会
+     * stopPropagation，click 根本到不了胶囊，只能在 pointerup 上判。于是紧接着浏览器补发的
+     * 那一次 click 落在一个**已经变了**的界面上：展开态的播放键正好顶在手指底下，于是
+     * 「想展开」变成了「展开 + 暂停」。
+     *
+     * 在 pointerdown 上清零（新的一次点按一律重新算），只有「收起态点开」这一条路会置上。
+     */
+    const swallowNextClickRef = useRef(false);
 
     const bottomBarBottomPx = usePlayerBottomBarBottomPx();
     const isPositioning = usePlayerBottomBarLayoutStore(state => state.isPositioning);
@@ -374,9 +385,26 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     };
 
     const handleBarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        // 新的一次点按：上一轮的「尾巴」到这里为止，不能再吃掉这一轮的 click。
+        swallowNextClickRef.current = false;
         pressOriginRef.current = { x: event.clientX, y: event.clientY };
         handlePositionDragStart(event);
     }, [handlePositionDragStart]);
+
+    /**
+     * 吃掉刚被「点开」的那一次 click。
+     *
+     * 捕获阶段就拦：展开态那些按钮是这一层的后代，等冒泡到它们身上再判，播放已经被切了。
+     * （见 swallowNextClickRef 的说明。）
+     */
+    const handleBarClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (!swallowNextClickRef.current) {
+            return;
+        }
+        swallowNextClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+    }, []);
 
     /**
      * 「点了一下」在松手时判，不在 click 上判：进度条那个 range 会 stopPropagation，
@@ -401,6 +429,9 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
             return;
         }
         if (!showExpanded) {
+            // 这一次点按的目的已经达到了（把控件露出来）；补发的 click 落在展开后的按钮上
+            // 会被当成第二次操作，见 handleBarClickCapture。
+            swallowNextClickRef.current = true;
             setAutoExpanded(true);
             scheduleAutoCollapse();
             return;
@@ -487,6 +518,7 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                         onPointerMove={handlePositionDragMove}
                         onPointerUp={handleBarPointerUp}
                         onPointerCancel={handlePositionDragEnd}
+                        onClickCapture={handleBarClickCapture}
                         style={{ touchAction: isPositioning ? 'none' : undefined }}
                         className={`backdrop-blur-xl shadow-2xl overflow-hidden rounded-full relative transition-colors duration-300
                             ${isPositioning ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
