@@ -22,30 +22,27 @@ import { noteAnalyser, noteAudioContext } from '../../../../utils/mediaDiagnosti
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
 /**
- * 输出缓冲要留多大 —— 直接给秒数，不用那三个档位名。
+ * 输出缓冲：**一个都不指定**，由浏览器自己挑（≈ `interactive`）。
  *
- * 档位名（`interactive` / `balanced` / `playback`）落到多少毫秒全看浏览器实现，安卓 WebView
- * 上跟桌面 Chrome 差得远；给秒数是规范里的另一种写法（"首选最大延迟"），量纲是绝对的 ——
- * 改一个数就知道自己要求了什么，真机之间也才有可比性。
+ * 这是 2026-10-19 用掉帧那件事排出来的结论，别再往回改：
  *
- * ⚠️ 这个数**确实**影响掉帧 —— 真机二分实测过：`6116eb11` 把它抬到 0.1s 之后播放页开始卡，
- * 而之前 `f8bed216` 用 `balanced` 时是流畅的。
+ *  · `6116eb11` 指定 0.1s → 卡
+ *  · `44c34ef4` 指定 0.2s → 当时测着流畅，后来同一份代码又报卡
+ *  · **不指定（v0.7.20 那一整版一直这么写）→ 流畅**
  *
- * 但**机制不是当年写在这段注释里的那一条**，两件事必须分开记：
+ * ⚠️ 关键教训：这个参数**不是单调的**，而且**同一个值在不同时候测出来的结论会互相打脸** ——
+ * 「0.2 一度不卡」不代表 0.2 是对的，只是那一次碰巧。别再按「越大越稳」
+ * 或「一定有个最优值」去推，实测出来什么就是什么。
  *
- *  · ~~「缓冲越大，`getByteFrequencyData` 每帧等音频线程等得越久」~~ —— 这条是错的。那个调用的开销
- *    是**在主线程上现算一遍 FFT**（外加一次与音频线程互踢的锁），跟缓冲多大没关系。
- *  · **真机制是音频线程抢占**：缓冲越大，音频线程一次被唤醒要处理的数据块越大、占住实时优先级的
- *    时间越长 → 主线程（含 rAF）被顶掉的机会越多。这条跟频谱怎么取**无关**。
+ * 另一个教训更深：上一轮（`44c34ef4`）我拿一段 Blink 源码断言「缓冲与掉帧无关」，
+ * 据此把 0.1 抬到 0.2，还写下「别指望它治卡顿」。**源码推理推翻不了实测** ——
+ * 源码只能解释机制（说得通的一条是音频线程抢占：缓冲越大，音频线程每次被唤醒要处理的
+ * 数据块越大、占住实时优先级的时间越长，主线程连同 rAF 被顶掉的机会越多），
+ * **但不能否定现象**。现象优先。
  *
- * 教训：我上一轮（`44c34ef4`）拿一段 Blink 源码断言「缓冲与掉帧无关」，据此把 0.1 抬到
- * 0.2，还写下「别指望它治卡顿」。**源码推理推翻不了实测。** 源码只能解释机制，不能否定现象。
- *
- * 现在频谱已经在音频线程上抽（`services/spectrumTap`），主线程每帧那笔 FFT 已经没了 ——
- * 但**抢占那一笔是否随之消失，没有实测过**。所以这个数**就停在 0.2s 不动**：它是当前真机
- * 实测流畅的值，别再拿源码推断去动它。
+ * 顺带澄清一笔：`services/spectrumTap` 把频谱搬到音频线程是对的，它解的是
+ * 「主线程每帧现算 FFT」那一笔，**跟这里无关** —— 别因为调缓冲有效就以为频谱那条无用。
  */
-const AUDIO_OUTPUT_LATENCY_HINT_SEC = 0.2;
 
 type UsePlaybackAudioBridgeParams = {
 
@@ -160,12 +157,16 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            // 放音乐要的是稳，不是浏览器那一小格交互缓冲 —— 用哪个数、为什么是这个数，
-            // 见上面的 AUDIO_OUTPUT_LATENCY_HINT_SEC。别改回 'playback'：那一档会让播放页
-            // 掉帧（真机二分实测），这个值才是当前流畅的那一档。
-            const ctx = new AudioContextClass({ latencyHint: AUDIO_OUTPUT_LATENCY_HINT_SEC });
+            /*
+             * 不传 latencyHint —— 与 v0.7.20 一致：那一版从来不带这个参数，
+             * 规范上等价于 `latencyHint: 'interactive'`。
+             *
+             * 这个值绕了一圈：指定 0.1s（`6116eb11`）卡，改指定 0.2s（`44c34ef4`）
+             * 一度测着流畅、后来又卡，不指定就流畅。**别再给它传值**，理由见上面的注释。
+             */
+            const ctx = new AudioContextClass();
             audioContextRef.current = ctx;
-            noteAudioContext(ctx, AUDIO_OUTPUT_LATENCY_HINT_SEC);
+            noteAudioContext(ctx, 'interactive');
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;
