@@ -1,6 +1,7 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
-import type { ProviderUser } from '../../../types/onlineMusic';
+import type { LoginDiagnosticLine, ProviderUser } from '../../../types/onlineMusic';
 import { isCapacitorAndroid } from '../../../platform/runtime';
+import { diagnosticLine, formatDiagnosticClock } from '../login/loginDiagnosticReport';
 import { isNativeHttpFetchAvailable, createNativeFetch } from '../../../services/nativeHttpFetch';
 import { requestYtmNativeSignIn, type YtmNativeSession } from './ytmNative';
 
@@ -99,19 +100,58 @@ const requireSignIn = (operation: string) => {
  * 于是被当成「有一个账号」，凭空多出一个空账号（真出过一次）。
  * 契约见 src/types/onlineMusic.ts 的 ProviderUser：id / nickname / avatarUrl? / vipType?。
  */
+/*
+ * 最近一次「登录进去的是谁」的结论：登录确认之后账号没读出来（account-refresh-failed）
+ * 时，诊断报告里 YouTube Music 这一段就靠它说出卡在哪。与另一家同一套写法。
+ */
+let lastLoginStatusCheck: LoginDiagnosticLine | null = null;
+const noteLoginStatusCheck = (summary: LoginDiagnosticLine): void => {
+    lastLoginStatusCheck = diagnosticLine`${formatDiagnosticClock(Date.now())} ${summary}`;
+};
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 const readSignedInUser = async (): Promise<ProviderUser | null> => {
-    if (!signedIn) return null;
-    try {
-        const yt: any = await getSession();
-        const info: any = await yt.account.getInfo();
-        const name = String(info?.account_name ?? info?.channel_handle ?? '');
-        if (!name) return null;
-        return { id: String(info?.channel_id ?? name), nickname: name, avatarUrl: info?.account_photo_url ?? undefined };
-    } catch (error) {
-        // 拿不到账号信息就老实说「不知道是谁」—— 返回一个编出来的空账号比不返回更糟。
-        console.warn('[Ytm] Could not read the signed-in account', error);
+    if (!signedIn) {
+        noteLoginStatusCheck(diagnosticLine`no cookie is held: nobody signed in`);
         return null;
     }
+    let info: any;
+    try {
+        const yt: any = await getSession();
+        info = await yt.account.getInfo();
+    } catch (error) {
+        noteLoginStatusCheck(diagnosticLine`account.getInfo failed: ${messageOf(error)}`);
+        console.warn('[Ytm] Could not read the signed-in account', error);
+        /*
+         * 与另一家同一条规矩：只有「平台说这个登录不算数」才等于没人登录，其它错误
+         * 必须抛出去。一律吞成 null 会把一次网络抖动说成「你没登录」，账号当场被清掉。
+         */
+        if (error instanceof OnlineProviderError && error.code === 'auth-required') return null;
+        throw error;
+    }
+    // 拿不到名字就老实说「不知道是谁」—— 返回一个编出来的空账号比不返回更糟。
+    const name = String(info?.account_name ?? info?.channel_handle ?? '');
+    if (!name) {
+        noteLoginStatusCheck(diagnosticLine`account.getInfo named nobody: no account name and no channel handle`);
+        return null;
+    }
+    const user: ProviderUser = {
+        id: String(info?.channel_id ?? name),
+        nickname: name,
+        avatarUrl: info?.account_photo_url ?? undefined,
+    };
+    noteLoginStatusCheck(diagnosticLine`signed in (id ${user.id ? 'present' : 'missing'}, nickname present)`);
+    return user;
+};
+
+/** 登录诊断报告里 YouTube Music 那一段。 */
+export const getYtmLoginDiagnostics = (): LoginDiagnosticLine[] => {
+    const lines: LoginDiagnosticLine[] = [];
+    lines.push(diagnosticLine`cookie: ${signedIn ? 'held' : 'none'}`);
+    lines.push(diagnosticLine`in-page transport: ${isYtmInPageAvailable() ? 'available' : 'not available'}`);
+    if (lastLoginStatusCheck) lines.push(lastLoginStatusCheck);
+    return lines;
 };
 
 /*

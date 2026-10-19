@@ -6,6 +6,7 @@ import { parseLyricsByFormat } from '../../../utils/lyrics/parserCore';
 import { noteYtmAccount, ytmHasPremium } from './ytmAccount';
 import { getYtmTransportAvailability, requestYtm } from './ytmTransport';
 import type { YtmWirePage, YtmWireSong, YtmWireWebLoginState } from './ytmTransport';
+import { getYtmLoginDiagnostics } from './ytmInPageRuntime';
 import { createYtmPager, normalizeYtmCollection, normalizeYtmSong, normalizeYtmUser, requireYtmSong } from './ytmNormalize';
 import { clearYtmCatalogCache, ytmCatalog } from './ytmCatalog';
 import { clearYtmLibraryCache, ytmLibrary } from './ytmLibrary';
@@ -169,6 +170,8 @@ export const ytmProvider: OnlineMusicProvider = {
             return key;
         },
         describeLoginFailure: describeYtmLoginFailure,
+        // 登录确认之后账号没读出来（account-refresh-failed）时，报告里这一段靠它说出卡在哪。
+        getLoginDiagnostics: async () => getYtmLoginDiagnostics(),
         async openLoginPage() { await requestYtm('web_login_open'); },
         // The window of the sign-in is opened by its start, and closing it ends the sign-in.
         opensLoginPageItself: () => true,

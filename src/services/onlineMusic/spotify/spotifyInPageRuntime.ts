@@ -1,6 +1,7 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
-import type { ProviderUser } from '../../../types/onlineMusic';
+import type { LoginDiagnosticLine, ProviderUser } from '../../../types/onlineMusic';
 import { createNativeFetch } from '../../../services/nativeHttpFetch';
+import { diagnosticLine, formatDiagnosticClock } from '../login/loginDiagnosticReport';
 import {
     isSpotifyNativeAvailable,
     refreshSpotifyNativeSession,
@@ -62,8 +63,20 @@ const ensureFreshToken = async (): Promise<string> => {
     return session.accessToken;
 };
 
+/*
+ * 安卓上请求由原生的 OkHttp 发出，而它**默认不带 User-Agent**（OkHttp 不像浏览器那样自己
+ * 补头），httpRequest 也只带上调用方给的那几个。于是公开 API 收到的是一个连 UA 都没有的
+ * 请求 —— 那种请求被当成脚本而拒掉（401 / 403）是常见做法。这里按浏览器的样子补上。
+ */
+const REQUEST_HEADERS = {
+    Accept: 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+} as const;
+
 const call = async (path: string, token: string): Promise<any> => {
-    const response = await createNativeFetch()(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await createNativeFetch()(`${API}${path}`, {
+        headers: { ...REQUEST_HEADERS, Authorization: `Bearer ${token}` },
+    });
     if (response.status === 401) throw new OnlineProviderError('auth-required', 'Spotify said the sign-in is no longer valid', 'spotify');
     if (response.status === 403) throw new OnlineProviderError('not-playable', 'Spotify refused this request', 'spotify');
     if (!response.ok) throw new OnlineProviderError('network', `Spotify answered ${response.status}`, 'spotify');
@@ -161,18 +174,68 @@ export const signOutSpotifyInPage = (): void => {
     session = null;
 };
 
-/** 登录态下这个人是谁。拿不到就老实说「没人」，别编一个空账号（那会被当成已登录）。 */
+/*
+ * 最近一次「登录进去的是谁」的结论。
+ *
+ * 为什么必须有它：登录确认之后读账号那一步失败时（account-refresh-failed），界面只说
+ * 「没读到账号」，而报告里 provider 那一段原来是空的（"(none)"）—— 因为 Spotify 没实现
+ * `auth.getLoginDiagnostics`。另外几家早就靠这一行指出卡在哪的：没存下会话、
+ * 平台不认这个会话、还是请求本身失败了。
+ */
+let lastLoginStatusCheck: LoginDiagnosticLine | null = null;
+const noteLoginStatusCheck = (summary: LoginDiagnosticLine): void => {
+    lastLoginStatusCheck = diagnosticLine`${formatDiagnosticClock(Date.now())} ${summary}`;
+};
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * 登录态下这个人是谁。
+ *
+ * ⚠️ 只有「平台说这个登录不算数」才等于没人登录。**其它错误一律抛出去**，不能吞成 null：
+ * 返回 null 会让读账号那一步把账号直接清掉（"nobody is signed in"），于是网络抖一下
+ * 就变成「刚登进去就被登出」，而真正的报错信息还被这一句 catch 吃掉了。
+ */
 const readSignedInUser = async (): Promise<ProviderUser | null> => {
-    if (!session) return null;
-    try {
-        const me = await call('/me', await ensureFreshToken());
-        const nickname = String(me?.display_name ?? me?.id ?? '');
-        if (!nickname) return null;
-        return { id: String(me?.id ?? nickname), nickname, avatarUrl: me?.images?.[0]?.url ?? undefined };
-    } catch (error) {
-        console.warn('[Spotify] Could not read the signed-in account', error);
+    if (!session) {
+        noteLoginStatusCheck(diagnosticLine`no session is held: the sign-in left none`);
         return null;
     }
+    let me: any;
+    try {
+        me = await call('/me', await ensureFreshToken());
+    } catch (error) {
+        noteLoginStatusCheck(diagnosticLine`GET /me failed: ${messageOf(error)}`);
+        console.warn('[Spotify] Could not read the signed-in account', error);
+        if (error instanceof OnlineProviderError && error.code === 'auth-required') return null;
+        throw error;
+    }
+    const nickname = String(me?.display_name ?? me?.id ?? '');
+    if (!nickname) {
+        noteLoginStatusCheck(diagnosticLine`GET /me named nobody: no display name and no id`);
+        return null;
+    }
+    const user: ProviderUser = {
+        id: String(me?.id ?? nickname),
+        nickname,
+        avatarUrl: me?.images?.[0]?.url ?? undefined,
+    };
+    noteLoginStatusCheck(diagnosticLine`signed in (id ${user.id ? 'present' : 'missing'}, nickname present)`);
+    return user;
+};
+
+/** 登录诊断报告里 Spotify 那一段。 */
+export const getSpotifyLoginDiagnostics = (): LoginDiagnosticLine[] => {
+    const lines: LoginDiagnosticLine[] = [];
+    if (!session) {
+        lines.push(diagnosticLine`session: none`);
+    } else {
+        const leftMs = session.expiresAtMs - Date.now();
+        lines.push(diagnosticLine`session: held, access token valid for ${Math.max(0, Math.round(leftMs / 1000))}s, refresh token ${session.refreshToken ? 'present' : 'missing'}`);
+    }
+    lines.push(diagnosticLine`native OAuth: ${isSpotifyNativeAvailable() ? 'available' : 'not available'}`);
+    if (lastLoginStatusCheck) lines.push(lastLoginStatusCheck);
+    return lines;
 };
 
 export const runSpotifyInPage = async (operation: string, params: Record<string, unknown> = {}): Promise<unknown> => {

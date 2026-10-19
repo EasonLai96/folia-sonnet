@@ -7,6 +7,7 @@ import i18n from '../../../i18n/config';
 import { cacheLimitBytes } from '../../audioCache';
 import { getSpotifyTransportAvailability, querySpotify, requestSpotify } from './spotifyTransport';
 import type { SpotifyWireAudio, SpotifyWireLoginStart, SpotifyWireLyrics } from './spotifyTransport';
+import { getSpotifyLoginDiagnostics } from './spotifyInPageRuntime';
 import {
     normalizeSpotifyCollection, normalizeSpotifySong, normalizeSpotifyUser, present, requireSpotifySong, spotifySongOf, spotifyUri,
 } from './spotifyNormalize';
@@ -188,6 +189,9 @@ export const spotifyProvider: OnlineMusicProvider = {
             return failure ? { ...state, failure } : state;
         },
         describeLoginFailure: describeSpotifyLoginFailure,
+        // 登录确认之后账号没读出来（account-refresh-failed）时，报告里 Spotify 这一段就靠它
+        // 说出卡在哪：会话在不在、读「是谁」那一步成了没有。
+        getLoginDiagnostics: async () => getSpotifyLoginDiagnostics(),
         async cancelLogin(key) {
             if (activeLogin?.key === key) activeLogin = null;
             await requestSpotify('login_cancel', { key });
