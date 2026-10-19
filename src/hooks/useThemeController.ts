@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
 import { notifyStageResolved } from '../services/aiStage';
-import { type AiThemeSongRef, pullCachedThemeByKey, writeLocalAiThemeOverride, readLocalAiThemeOverride } from '../services/aiThemeCloud';
+import {
+    type AiThemeSongRef,
+    pullAiThemeFromCloud,
+    pullCachedThemeByKey,
+    writeLocalAiThemeOverride,
+    readLocalAiThemeOverride,
+} from '../services/aiThemeCloud';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -573,6 +579,21 @@ export function useThemeController({
                 const cached = await pullCachedThemeByKey(cloudKey);
                 if (cached) {
                     applyDualTheme(cached, { respectCustomPreference: false });
+                    return 'cloud-theme' as const;
+                }
+                /*
+                 * 键直取没中，再按**歌名 + 歌手**问一次。
+                 *
+                 * 那一屏的 key 是服务端按歌名 `GROUP BY` 里取 `MAX(cache_key)` 给的，它可能
+                 * 落在一条 stage 上而那条只有动画决策、没有主题那一半（或那条 payload 形状
+                 * 不合规）—— 于是「云端明明有这首歌，播下去主题一点没变」。
+                 *
+                 * 这一路现在是**强制匹配**（services/aiCloudCache）：歌名对得上就用，不再因为
+                 * 高亮词差几个字判成没有。所以它是这一屏点播放最后那道兜底：取不到才轮到生成。
+                 */
+                const byTitle = await pullAiThemeFromCloud(songRefOf(localSong));
+                if (byTitle) {
+                    applyDualTheme(byTitle, { respectCustomPreference: false });
                     return 'cloud-theme' as const;
                 }
             }

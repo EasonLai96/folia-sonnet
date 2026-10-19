@@ -10,6 +10,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 //
 // 第二次机会**不看哈希，看内容**：候选条目标的高亮词都在你手上这段歌词里，那条答案
 // 就是照着这首歌做的。判定留在本机（服务端只回高亮词），歌词正文因此不用上传。
+//
+// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（随机挑一个候选），
+// 不再报「没有」—— 各平台的 LRC 差几个字就该判成另一首歌，这是用户最恼火的那一句
+// 「云端明明有，就是匹配不上」。
 
 const { handlers } = vi.hoisted(() => ({
   handlers: {
@@ -50,6 +54,7 @@ const KEY_H = 'd4e5f6a7'.repeat(4);
 /* 每个用例用自己的键：missCache 会把「刚问过没有」记 5 分钟，复用会当场被挡掉。 */
 const KEY_I = 'e6f7a8b9'.repeat(4);
 const KEY_PUSHED = 'a2b3c4d5'.repeat(4);
+const KEY_J = 'a7b8c9d0'.repeat(4);
 
 const payload = {
   theme: {
@@ -126,10 +131,16 @@ describe('pullAiCloudCache 的第二次机会', () => {
     expect(seen[2]).toContain(KEY_A);
   });
 
-  /* 合规是硬门槛：词对不上就是另一首歌的答案，宁可不命中。 */
-  it('refuses a title match whose words are not in this lyric', async () => {
+  /*
+   * 高亮词只是**挑**的依据，不是门槛：一条都对得上时按它排，一条都对不上时**强制拿一条**。
+   *
+   * 以前这一步是「判不过就当没命中」，用户撞上的是那句最恼火的话 —— 这一屏明明是从云端
+   * 那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变；原因只是各平台的 LRC
+   * 差几个字。词少几个不影响这是不是同一首歌的配色（用户原话「反正没有出现的词也无所谓」）。
+   */
+  it('forces a title match when no candidate fits the lyric', async () => {
     /*
-     * 候选那一键**是给了内容的** —— 这两条要验的是合规判定本身，不是「接口没给」。
+     * 候选那一键**是给了内容的** —— 这两条要验的是判定本身，不是「接口没给」。
      * 少了 `url.includes(KEY_A)` 这一支，测试会因为别的原因通过，把实现改坏也不红。
      */
     handlers.fetch = async (url) => {
@@ -145,31 +156,60 @@ describe('pullAiCloudCache 的第二次机会', () => {
       lyricText: '完全不同的一首歌',
     });
 
-    expect(result.status).toBe('miss');
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.matched).toBe('words');
+      expect(result.sourceKey).toBe(KEY_A);
+      expect(result.payload).toEqual(payload);
+    }
   });
 
-  /*
-   * 没有高亮词的候选一律跳过 —— 否则一条「什么都没标」的条目会命中所有歌，
-   * 命中率是上去了，主题却是乱套的。
-   */
-  it('skips candidates that marked nothing', async () => {
+  /* 一条高亮词都没标的候选：也走强制匹配那条路，不再整条出局。 */
+  it('forces a match even when no candidate marked any word', async () => {
     handlers.fetch = async (url) => {
       if (url.includes('/ai-cache/resolve')) {
         return json({ ok: true, candidates: [{ key: KEY_A, words: [] }] });
       }
-      /* 内容照样给：只有「一个词都没标」该让这条候选出局。 */
+      /* 内容照样给：只有「真取不到内容」才该轮到 miss。 */
       if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
       return json({ hit: false }, false);
     };
 
-    expect(await pullAiCloudCache('stage', KEY_D, { songTitle: '晴天', lyricText: '故事的小黄花' })).toEqual({ status: 'miss' });
+    const result = await pullAiCloudCache('stage', KEY_D, { songTitle: '晴天', lyricText: '故事的小黄花' });
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.sourceKey).toBe(KEY_A);
+    }
   });
 
-  /* 没歌名或没歌词就无从判定，老老实实按没命中走。 */
+  /* 没歌名就无从下手，老老实实按没命中走。 */
   it('gives up quietly when there is nothing to judge against', async () => {
     handlers.fetch = async () => json({ hit: false }, false);
 
     expect(await pullAiCloudCache('stage', KEY_E, { songTitle: '', lyricText: '故事的小黄花' })).toEqual({ status: 'miss' });
+  });
+
+  /*
+   * 没有歌词可判（主题只按「歌名 + 歌手」存的那一路、纯音乐）也**照样**走强制匹配。
+   *
+   * 以前这一支在「没有歌词」时就当场记一次 miss 返回 —— 于是那一路本次会话再也不会问
+   * 第二次，从「AI 主题」那一屏点播放看到的正是「云端明明有，就是匹配不上」。
+   */
+  it('forces a match when there is no lyric to judge against', async () => {
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('theme', KEY_J, { songTitle: '晴天' });
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.sourceKey).toBe(KEY_A);
+      expect(result.payload).toEqual(payload);
+    }
   });
 
   /*

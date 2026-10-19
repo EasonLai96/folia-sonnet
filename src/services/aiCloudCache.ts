@@ -300,6 +300,20 @@ const fetchResolveCandidates = async (
     }
 };
 
+/**
+ * 强制匹配那一批：从**随机**一处开始取前几条。
+ *
+ * 随机是用户要的（「匹配不上就随机选一个作为候选」）—— 一圈近亲里谁都不比谁更「是」这首
+ * 歌，挑第一条反而会让每次都拿到同一条最旧的。多取几条是为了某一条已经被删了时不至于
+ * 空手而归；它们只是候选，取到第一条有内容的就收。
+ */
+const pickRelaxedCandidates = (candidates: readonly ResolveCandidate[]): ResolveCandidate[] => {
+    if (candidates.length === 0) return [];
+    const start = Math.floor(Math.random() * candidates.length);
+    const size = Math.min(MAX_CONCURRENT_ENTRY_FETCHES, candidates.length);
+    return Array.from({ length: size }, (_, at) => candidates[(start + at) % candidates.length]);
+};
+
 export interface AiCloudCachePushMeta {
     songTitle?: string;
     target?: AiCompletionTarget | null;
@@ -341,7 +355,8 @@ const withTimeout = (): AbortSignal => {
  * 键是「歌词 + policy」的 MD5，于是同一首歌换个版本的歌词就是另一个键 —— 翻唱、现场、
  * 平台之间同一首歌的 LRC 本来就不一样。只赌精确键的话，「库里明明躺着答案却取不到」
  * 是常态。所以第二次机会不看哈希，改看内容：候选条目标的高亮词都在你手上这段歌词里，
- * 那条答案就是照着这首歌做的。
+ * 那条答案就是照着这首歌做的。**一条都对不上也不再报没命中** —— 改为强制挑一条
+ * （见下面那段注释）：宁可拿一条近亲的答案，也不要说「云端没有」。
  *
  * 出错一律当「没命中」，调用方照常生成。
  */
@@ -414,13 +429,25 @@ export const pullAiCloudCache = async (
      * 判定留在本机，歌词正文一次都不用上传。
      */
     const songTitle = String(meta.songTitle ?? '').trim();
-    const lyricText = String(meta.lyricText ?? '');
-    if (!songTitle || !lyricText) {
+    if (!songTitle) {
         rememberMiss(kind, key);
         return { status: 'miss' };
     }
 
     const candidates = await fetchResolveCandidates(kind, songTitle);
+    if (candidates.length === 0) {
+        rememberMiss(kind, key);
+        return { status: 'miss' };
+    }
+
+    /*
+     * 有歌词才判合规。
+     *
+     * 没有歌词（主题只按歌名存的那一路、纯音乐）无从判 —— 那就直接走下面那条强制的路，
+     * 而不是像以前那样当场记一次「没命中」：那样这一首本次会话再也不会问第二次，用户
+     * 看到的就是「云端明明有，就是匹配不上」。
+     */
+    const lyricText = String(meta.lyricText ?? '');
 
     /*
      * 合规判定**一次做齐**，再去发请求。
@@ -430,28 +457,40 @@ export const pullAiCloudCache = async (
      * 前面只要有一个慢、或者卡到 12 秒超时，后面明明合规的那条就一直排不上 —— 用户
      * 等的就是这一段。判定是本机字符串比较，零成本，先全筛完再一起问。
      */
-    const eligible = candidates.filter(
-        (candidate) => highlightWordsPresent(candidate.words, lyricText),
-    );
+    const eligible = lyricText
+        ? candidates.filter((candidate) => highlightWordsPresent(candidate.words, lyricText))
+        : [];
 
-    if (eligible.length > 0) {
-        const batch = eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
-        const payloads = await Promise.all(
-            batch.map((candidate) => fetchEntry(kind, candidate.key)),
-        );
-        /*
-         * 取**顺序最靠前**的那个成功的：服务端已经按「歌名完全相等优先、更新时间倒序」
-         * 排过了，所以这里不必再挑，第一个到手的就是最该用的那条。
-         */
-        const index = payloads.findIndex((payload) => payload !== null);
-        if (index >= 0) {
-            return {
-                status: 'hit',
-                payload: payloads[index],
-                matched: 'words',
-                sourceKey: batch[index].key,
-            };
-        }
+    /*
+     * 一条都不合规 → **强制匹配**：随便挑一条就用。
+     *
+     * 以前这一步是「判不过就当没命中」，于是用户撞上的是那句最让人恼火的话：这一屏明明是
+     * 从云端那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变。原因只是各平台
+     * 的 LRC 差几个字 —— 高亮词差一两个，整条候选就被判成「另一首歌」。
+     *
+     * 用户要的就是「反正没有出现的词也无所谓」：词少几个不影响这是不是同一首歌的配色。
+     * 所以这里不再返回 miss，改从候选里随机挑一条。挑到的那一条照样会**回填**到本次这个
+     * 精确键上（matched 仍是 'words'），下次就是精确命中，不会每次都换一个答案。
+     */
+    const batch = eligible.length > 0
+        ? eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES)
+        : pickRelaxedCandidates(candidates);
+
+    const payloads = await Promise.all(
+        batch.map((candidate) => fetchEntry(kind, candidate.key)),
+    );
+    /*
+     * 取**顺序最靠前**的那个成功的：合规那一批服务端已经按「歌名完全相等优先、更新时间
+     * 倒序」排过了，所以这里不必再挑，第一个到手的就是最该用的那条。
+     */
+    const index = payloads.findIndex((payload) => payload !== null);
+    if (index >= 0) {
+        return {
+            status: 'hit',
+            payload: payloads[index],
+            matched: 'words',
+            sourceKey: batch[index].key,
+        };
     }
 
     rememberMiss(kind, key);

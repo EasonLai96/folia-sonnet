@@ -13,11 +13,29 @@ import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 // 反过来（搜到一条往数组里 push 一条）每来一条整张表就重排一次，几百条下来就是一直在抖、
 // 而且屏幕先被撑出一块空白再一路往下长 —— 占位行让列表高度从一开始就是最终高度。
 // 占位行留着歌名，用户看得见「还有哪些在匹配」，而不是一片灰条。
+//
+// ⭐**只铺一批，绝不自动翻下一页。**
+//
+// 以前这里是个 `while` 循环，一页 60 首地往后翻到 `offset >= total`。云端攒了几百上千个
+// 歌名，于是那一屏会**一直**在往里进新歌：每来一页整张列表重排一次，用户刚点开的那张卡
+// 片被挤到别的位置、跟着离中心的远近缩回去 —— 手正按着的播放按钮就这么跑了（用户原话
+// 「每次点开一进新的，它就缩小了，我点不到播放按钮」）。
+//
+// 这一屏本来也不是「把云端翻完」的入口：它给的是一批随机的歌，右上角那颗「换一批看看」
+// 走的正是 reload（重新随机一处开始）。所以取满一屏就收工，想再看一批点那颗按钮。
 
 /** 一次向云端要多少条歌名（约等于一屏多一点，铺满之后才开始搜）。 */
 export const CLOUD_THEME_PAGE_SIZE = 60;
 /** 同时搜几首。搜歌是网络往返，串行太慢；再高就只是把平台那边压得更狠。 */
 const RESOLVE_CONCURRENCY = 2;
+/**
+ * 攒够几条才换一次屏。
+ *
+ * 每搜到一条就提交会让整墙重排一次（那正是「点开的卡片被挤走、播放按钮点不到」的来处，
+ * 见 resolveRange 上的注释）；攒太大又会让前几条迟迟不出来。8 条是「看得见在动」与
+ * 「一屏最多抖几下」之间的那个数。
+ */
+const RESOLVE_FLUSH_SIZE = 8;
 
 export type CloudThemeNameEntry = {
     songTitle: string;
@@ -78,13 +96,33 @@ export const createCloudThemeCollectionResource = (
     };
 
     /**
-     * 把 names 这一段逐条搜出来，每搜到一条就把对应的占位行**原地换掉**。
+     * 搜到一条就把它记下来，攒够一小批（或这一段搜完）才**一起**换上去。
+     *
+     * ⭐**不能搜到一条就整表提交一次。** 一张卡的播放按钮只在它居中时才可点（`--play-pe`
+     * 由网格的 rAF 循环按焦距写），而每一次提交都会让那一墙重新排一次 —— 60 条就是 60 次，
+     * 用户刚点开的那张卡随时可能被排到别处、缩回去，按着的按钮当场变成 `pointer-events:
+     * none`。攒批之后整屏只抖几下，正看着的那一屏不会因为「又回来一条」被重排。
      *
      * 搜不到的不在这里删：删一行会让后面所有行的下标往前挪一位，而别的 worker 正按
      * 下标换自己的那一行 —— 那样会把别人的行换错（甚至换成另一首歌）。所以整段搜完
      * 之后统一清一次剩下的占位行，那时下标不再有人在用。
      */
     const resolveRange = async (names: CloudThemeNameEntry[], from: number, ticket: number): Promise<void> => {
+        /** 待换的行：下标 → 搜到的曲目。 */
+        let pending = new Map<number, SongResult>();
+
+        const flushPending = (): void => {
+            if (pending.size === 0) return;
+            const batch = pending;
+            pending = new Map();
+            const current = state.get().tracks;
+            commitTracks(current.map((track, at) => {
+                const found = batch.get(at);
+                /* 那一行已经不是占位行（列表重来过）就别写，免得把别人的行换掉。 */
+                return found && isCloudThemePendingTrack(track) ? found : track;
+            }));
+        };
+
         let cursor = 0;
         const worker = async (): Promise<void> => {
             while (cursor < names.length) {
@@ -94,14 +132,14 @@ export const createCloudThemeCollectionResource = (
                 const position = from + index;
                 const found = await deps.resolveSong(names[index].songTitle, names[index].key).catch(() => null);
                 if (disposed || ticket !== generation) return;
-                const current = state.get().tracks;
-                const expected = current[position];
-                // 位置已经不是自己那一行（列表重来过）就别写了，免得把别人的行换掉。
-                if (!expected || !isCloudThemePendingTrack(expected) || !found) continue;
-                commitTracks(current.map((track, at) => (at === position ? found : track)));
+                if (!found) continue;
+                pending.set(position, found);
+                if (pending.size >= RESOLVE_FLUSH_SIZE) flushPending();
             }
         };
         await Promise.all(Array.from({ length: Math.max(1, RESOLVE_CONCURRENCY) }, () => worker()));
+        if (disposed || ticket !== generation) return;
+        flushPending();
         if (disposed || ticket !== generation) return;
         // 平台上搜不到（或搜失败）的名字：那一行留着点不动也播不了，整行拿掉。
         const current = state.get().tracks;
@@ -131,26 +169,24 @@ export const createCloudThemeCollectionResource = (
                 }
                 if (disposed || ticket !== generation) return;
             }
-            while (!disposed && ticket === generation) {
-                const page = await deps.readNames({ limit: CLOUD_THEME_PAGE_SIZE, offset: nextOffset });
-                if (disposed || ticket !== generation) return;
-                total = Math.max(total, Number(page.total ?? 0) || 0);
-                if (page.songs.length === 0) break;
+            /*
+             * 只取一批（不再 while 到 total，理由见文件头）。
+             *
+             * 名字的游标仍然按**名字数**推进（不是显示下标）：搜不到的行会被整行拿掉，
+             * 列表比取过的名字短，按下标算偏移会把取过的名字再要一遍（屏幕上出现重复的歌）。
+             * 这一条对 `resumeSync` 依然是硬的 —— 它就是从 `nextOffset` 往下再取一批。
+             */
+            const page = await deps.readNames({ limit: CLOUD_THEME_PAGE_SIZE, offset: nextOffset });
+            if (disposed || ticket !== generation) return;
+            total = Math.max(total, Number(page.total ?? 0) || 0);
 
+            if (page.songs.length > 0) {
                 const from = state.get().tracks.length;
                 appendPage(page.songs, from);
-                /*
-                 * 名字的游标与显示的下标**不是一回事**：搜不到的行会被整行拿掉，
-                 * 列表比取过的名字短。还按下标算偏移就会把取过的名字再要一遍
-                 * （于是屏幕上出现重复的歌）。
-                 */
                 nextOffset += page.songs.length;
-                // 头一页铺完就先把状态放开：用户这时已经能看到满屏的歌名，
-                // 后面几页接着补（右上角那颗转着的胶囊写着进度）。
-                if (state.get().status !== 'ready') state.set({ status: 'ready' }, 'urgent');
+                // 铺完就先把状态放开：用户这时已经能看到满屏的歌名，后面只是逐条填。
+                state.set({ status: 'ready' }, 'urgent');
                 await resolveRange(page.songs, from, ticket);
-                if (disposed || ticket !== generation) return;
-                if (nextOffset >= total) break;
             }
             if (disposed || ticket !== generation) return;
             state.set({ status: 'ready', sync: { status: 'none' }, error: null }, 'urgent');
