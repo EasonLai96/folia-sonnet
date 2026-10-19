@@ -46,7 +46,10 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'electron/stageApi.cjs': { n: { netease: 17 }, kind: 'main', why: 'the stage API: its lyric source type and its search through the local service' },
     'electron/tempDirEnvironment.cjs': { n: { netease: 1 }, kind: 'doc' },
     'src/App.tsx': { n: { netease: 6, kugou: 1 }, kind: 'question', why: 'mounts the hook that hands out one platform\'s account (useNeteaseLibrary); raised by the upstream merge 2026-10-17' },
-    'src/assets/providers/appIcons.ts': { n: { netease: 2, qq: 2, kugou: 2, bodian: 2 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
+    // 这就是「providerId → 图标文件」那张登记表本身，点名平台是它的职责：Spotify 与 YouTube
+    // Music 只在桌面端跑得起来，但登录窗口那一列平台两端都画，没图就只剩一个彩色的字 ——
+    // 所以两家都登记进来。两条注释也算在里面（计数连注释一起算）。
+    'src/assets/providers/appIcons.ts': { n: { netease: 2, qq: 2, kugou: 2, bodian: 2, ytm: 4, spotify: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; the icons of the two desktop-only platforms' },
     'src/components/Carousel3D.tsx': { n: { netease: 2 }, kind: 'doc' },
     'src/components/app/command-palette-context/buildSettingsCommandContext.ts': { n: { netease: 2 }, kind: 'stored', why: 'the stored setting neteaseScrobbleEnabled and its i18n keys' },
     'src/components/app/home/explore/exploreFeedMemory.ts': { n: { ytm: 1 }, kind: 'doc' },
@@ -98,7 +101,9 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/nativeBridge/api/bodian.js': { n: { bodian: 61 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     'src/nativeBridge/api/cookies.js': { n: { netease: 9, qq: 48, kugou: 9 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     'src/nativeBridge/api/eapi.js': { n: { netease: 7 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
-    'src/nativeBridge/api/folia.js': { n: { netease: 9, qq: 121, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
+    // qq 121 → 125：扫码确认后要把会话真正交出去那一次（桥原先返回空 cookie），
+    // 新增取换票那份 cookie 并交出的一行，加说明它的三行注释。
+    'src/nativeBridge/api/folia.js': { n: { netease: 9, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation' },
     'src/nativeBridge/api/kugou.js': { n: { kugou: 244 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     'src/nativeBridge/api/libraryTrace.js': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },
     'src/nativeBridge/api/netease.js': { n: { netease: 64, qq: 14, kugou: 1 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
@@ -145,6 +150,7 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/stores/useAudioSettingsStore.ts': { n: { netease: 11 }, kind: 'stored', why: 'a storage key and the setting kept under it' },
     'src/stores/useExploreFeedStore.ts': { n: { ytm: 2, spotify: 1 }, kind: 'doc' },
     'src/stores/usePersonalFmModeStore.ts': { n: { netease: 1 }, kind: 'doc' },
+    'src/stores/useSearchNavigationStore.ts': { n: { netease: 2 }, kind: 'doc', why: 'two comments on what the round-robin over the buckets avoids, and on which tabs a platform switch keeps its place' },
     'src/types.ts': { n: { netease: 11, qq: 2, ytm: 1 }, kind: 'stored', why: 'the stage API\'s lyric source, a stored song field, the AMLL DB platform' },
     'src/types/localLibrary.ts': { n: { netease: 1, qq: 1, kugou: 1, spotify: 2 }, kind: 'doc' },
     'src/types/onlineMusic.ts': { n: { netease: 4, qq: 4, kugou: 1, bodian: 1, ytm: 5, spotify: 3 }, kind: 'list', why: 'the type of a platform id, and the platform that is active where none was chosen; raised by the upstream merge 2026-10-17' },

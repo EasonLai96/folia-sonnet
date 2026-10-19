@@ -24,6 +24,7 @@ vi.mock('@/services/onlineMusic/qq/qqLyricProvider', () => ({
 
 import { omni } from '@/services/onlineMusic/omni';
 import { resetQqLoginChannelCache } from '@/services/onlineMusic/qq/qqProvider';
+import { loginMethodIcon } from '@/components/login/loginMethodIcons';
 
 describe('QQ login method selection', () => {
     beforeEach(() => {
@@ -225,12 +226,19 @@ describe('QQ login channels declared by the backend', () => {
     it('has an icon file and a label in every language for each method', async () => {
         declare(['qq', 'wechat', 'qqmusic']);
         const methods = await omni.resolveLoginMethods('qq');
-        const { existsSync } = await import('node:fs');
-        const { resolve } = await import('node:path');
         const locales = await Promise.all(['en', 'in', 'zh-CN'].map(name => import(`@/i18n/locales/${name}.ts`)));
 
         for (const method of methods) {
-            expect(existsSync(resolve(process.cwd(), 'src/assets/providers', `${method.iconKey}.svg`))).toBe(true);
+            /*
+             * 图标是按 svg → png → webp 的顺序取的（见 loginMethodIcons），不是只认 .svg ——
+             * 那两颗扫码方式换成真机 App 图标之后，手绘的 .svg 就删掉了，剩下的是 .png
+             * 与 .webp（`#728` 那次）。所以在文件系统里只找 `<iconKey>.svg` 会误报缺图。
+             *
+             * 去问真正取它的那个函数，画面上没有图标时才算是真的缺。
+             */
+            expect(loginMethodIcon(method.iconKey)).toBeTruthy();
+            // 顺带钉住「取不到就是空串」，不是 undefined —— 调用方直接当 src 用。
+            expect(loginMethodIcon(`no-such-icon-${method.iconKey}`)).toBe('');
             const [group, key] = method.labelKey.split('.');
             for (const locale of locales) {
                 const table = locale.default ?? Object.values(locale)[0];
