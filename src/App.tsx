@@ -1723,21 +1723,36 @@ export default function App() {
      * auto-hide 那一档里指针一有动静就被唤回来，而这里要的是一直藏到关掉为止。
      * 关掉时把进 HDR 之前那一档还回去（原来是自动隐藏就还是自动隐藏），
      * 不替用户改掉他的设置。
+     *
+     * ⭐ 光收控件不够 —— 控件那一档只管**播放页**那一层（buildAppOverlaysModel 里
+     * isHidden 还带着 `currentView === 'player'`），首页 / 资料库的头部、页签、侧栏、
+     * 底部播放条都在别的层上，一个都收不掉。而「投到玻璃上」要的是**整屏只剩可视化
+     * 与歌词**：所以进 HDR 时把人带到播放页（本来就在那儿的不动），并把还开着的面板
+     * 收掉（HDR 那颗开关就在控制面板里 —— 不收的话屏上盖着一块面板，看上去就是
+     * 「开了 HDR 什么都没发生」）。
      */
     const chromeModeBeforeHdrRef = useRef<PlayerChromeVisibilityMode | null>(null);
+    /** 进 HDR 那一刻人是不是**本来就在**播放页：不是的话播放页是我们带过去的，关掉时要还回去。 */
+    const enteredHdrOnPlayerRef = useRef(true);
     useEffect(() => {
         if (hdrProjectionActive) {
             if (chromeModeBeforeHdrRef.current === null) {
                 chromeModeBeforeHdrRef.current = playerChromeVisibilityMode;
+                enteredHdrOnPlayerRef.current = currentView === 'player';
             }
             setPlayerChromeVisibilityModeTo('always-hidden', { silent: true });
+            if (isPanelOpen) setIsPanelOpen(false);
+            if (currentView !== 'player') navigateToPlayer();
             return;
         }
-        if (chromeModeBeforeHdrRef.current !== null) {
-            setPlayerChromeVisibilityModeTo(chromeModeBeforeHdrRef.current, { silent: true });
-            chromeModeBeforeHdrRef.current = null;
-        }
-    }, [hdrProjectionActive, playerChromeVisibilityMode, setPlayerChromeVisibilityModeTo]);
+        if (chromeModeBeforeHdrRef.current === null) return;
+        setPlayerChromeVisibilityModeTo(chromeModeBeforeHdrRef.current, { silent: true });
+        chromeModeBeforeHdrRef.current = null;
+        // 进来时不在播放页（是我们自己把人带过去的）：关掉的时候走播放页自己那条返回。
+        // 本来就在播放页的不动 —— 那是他自己待的地方，替他退出去反而莫名。
+        if (!enteredHdrOnPlayerRef.current && currentView === 'player') navigateBackFromPlayer();
+    }, [currentView, hdrProjectionActive, isPanelOpen, navigateBackFromPlayer, navigateToPlayer,
+        playerChromeVisibilityMode, setIsPanelOpen, setPlayerChromeVisibilityModeTo]);
 
     /*
      * 开起来弹一条。这一档下界面是整屏收掉的，屏幕上只剩可视化与提示条 —— 没有这句，
