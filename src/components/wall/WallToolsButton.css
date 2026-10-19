@@ -609,3 +609,46 @@ button.lattice-tools-slider-icon[aria-pressed="true"] { color: var(--text-accent
         );
     }
 }
+
+/*
+ * —— 矮而宽：队列浮岛改放面板**左边**，不再摞在它顶上 ——
+ *
+ * 上下摞两块玻璃（column-reverse）时，矮窗口那三百出头的纵向预算要面板和浮岛分：
+ * 浮岛被 flex-shrink 一路压到「头部 + 一行」（78px），播放列表等于看不见。
+ * 横过来的手机横向还剩一大半 —— 并排放之后两块各拿整条高度，浮岛能显示六七行。
+ *
+ * 只在又矮又宽（min-width 600px：两块 260px 玻璃 + 间距 + 右边距要 540px 才放得下）且浮岛
+ * 真开着时改排法；窄的矮窗口维持上下摞（那边缺的是横向）。
+ *
+ * row-reverse：DOM 里面板在前、浮岛在后（Tab 顺序不变），反着排正好面板贴右、浮岛在左，
+ * 两块玻璃底边对齐（stack 本来就 align-items: flex-end）。
+ */
+@media (max-height: 560px) and (min-width: 600px) {
+    .lattice-tools-stack.has-queue-island {
+        flex-direction: row-reverse;
+        align-items: flex-end;
+    }
+
+    /*
+     * 行内摆放时 flex-shrink 压的是**宽度**，管不到高度；浮岛按行数给的高度又是内联 style
+     * （8 行 = 358px，比矮窗的整条预算还高）。好在样式表里的 max-height 照样钳得住内联 height：
+     * 钳住之后列表跟着缩，浮岛里的 ResizeObserver 会把真实高度报给 react-window，滚动照常。
+     * 两条公式与 stack 自己的预算同源（见上面矮屏那一档）；按钮上方还有定位按钮时再让 52px
+     * （116 = 64 + 40 + 12，见 .has-above）。
+     */
+    .lattice-tools-stack.has-queue-island .lattice-tools-island {
+        max-height: calc(100vh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve));
+        max-height: calc(100dvh - var(--wall-tools-bottom, 12px) - 52px - var(--wall-tools-top-reserve));
+    }
+
+    .lattice-tools.has-above .lattice-tools-stack.has-queue-island .lattice-tools-island {
+        max-height: calc(100vh - var(--wall-tools-bottom, 12px) - 116px - var(--wall-tools-top-reserve));
+        max-height: calc(100dvh - var(--wall-tools-bottom, 12px) - 116px - var(--wall-tools-top-reserve));
+    }
+
+    /* 并排之后浮岛不再占面板头顶的纵向，帮助列表的预算不用再扣它那 112px。 */
+    .lattice-tools-stack.has-queue-island .lattice-tools-panel.has-quick-actions .lattice-tools-help ul {
+        max-height: max(56px, calc(100vh - 360px));
+        max-height: max(56px, calc(100dvh - 360px));
+    }
+}

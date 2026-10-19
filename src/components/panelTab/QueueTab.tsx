@@ -12,6 +12,7 @@ import { getPlaybackSongKey } from '../../utils/appPlaybackGuards';
 import { queueIndexOfKey } from '../../utils/playbackNeighbors';
 import { EmptyState } from './shell/EmptyState';
 import { PanelIconButton } from './shell/PanelIconButton';
+import { useIsWideShortViewport } from './shell/panelViewport';
 
 // src/components/panelTab/QueueTab.tsx
 // The panel's queue tab: a line with the number of songs and the queue's own buttons, then the
@@ -19,6 +20,11 @@ import { PanelIconButton } from './shell/PanelIconButton';
 // of them at most, and lower where the window leaves less (--pn-tab-room, from the panel's frame);
 // while more rows follow it fades at the bottom. A row plays its song; its three actions show
 // under the pointer and when the keyboard reaches them.
+//
+// 矮而宽（横过来的手机）时**一排摆两首**（见 panelViewport / ControlsTab 的两栏）：那种窗口
+// 纵向只放得下三四行，单列一屏看不了几首；横向面板已经摊到 560px，一排两个半行正好把
+// 宽度用掉、可见数量翻一倍。两首并排时次序是「先左后右、再往下一行」，滚动和定位都按
+// **显示行**算，行内的两个下标各自换算回歌在队列里的真下标。
 
 const ROW_PX = 48;
 /** The line above the list. */
@@ -48,6 +54,8 @@ interface QueueTabProps {
 type QueueRowProps = {
     playQueue: SongResult[];
     currentSongKey: string | null;
+    /** 一排摆几首：矮而宽时是 2（见文件头注释），平时是 1。 */
+    columns: number;
     onPlaySong: QueueTabProps['onPlaySong'];
     onMoveSongToNext: QueueTabProps['onMoveSongToNext'];
     onMoveSongToEnd: QueueTabProps['onMoveSongToEnd'];
@@ -60,11 +68,10 @@ type QueueRowProps = {
     };
 };
 
-// Kept outside QueueTab so track changes update row data without remounting hovered action buttons.
-const QueueRow = ({
-    index,
-    style,
-    ariaAttributes,
+/** 一首队列条目：原来整行的样子，现在是一排里的一格（下标是它在队列里的真下标）。 */
+const QueueCell = ({
+    song,
+    songIndex,
     playQueue,
     currentSongKey,
     onPlaySong,
@@ -72,18 +79,25 @@ const QueueRow = ({
     onMoveSongToEnd,
     onRemoveSong,
     labels,
-}: RowComponentProps<QueueRowProps>): React.ReactElement => {
-    const song = playQueue[index];
+}: {
+    song: SongResult;
+    songIndex: number;
+    playQueue: SongResult[];
+    currentSongKey: string | null;
+    onPlaySong: QueueTabProps['onPlaySong'];
+    onMoveSongToNext: QueueTabProps['onMoveSongToNext'];
+    onMoveSongToEnd: QueueTabProps['onMoveSongToEnd'];
+    onRemoveSong: QueueTabProps['onRemoveSong'];
+    labels: QueueRowProps['labels'];
+}) => {
     const isActive = currentSongKey === getPlaybackSongKey(song);
     const isUnavailable = isSongUnavailable(song);
 
     return (
         <div
-            style={style}
             onClick={() => onPlaySong(song, playQueue)}
             data-active={isActive}
-            {...ariaAttributes}
-            className={`st-t-fast group flex cursor-pointer items-center rounded-lg pl-3 pr-1.5 transition-colors ${isActive ? 'bg-[var(--st-fill)]' : 'hover:bg-[var(--st-fill)] focus-within:bg-[var(--st-fill)]'}`}
+            className={`st-t-fast group relative flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-lg pl-3 pr-1.5 transition-colors ${isActive ? 'bg-[var(--st-fill)]' : 'hover:bg-[var(--st-fill)] focus-within:bg-[var(--st-fill)]'}`}
         >
             {isActive && <span aria-hidden className="absolute inset-y-3.5 left-0 w-[3px] rounded-r-sm bg-[var(--st-accent)]" />}
             <div className={`min-w-0 flex-1 ${isUnavailable ? 'opacity-55' : ''}`}>
@@ -113,13 +127,57 @@ const QueueRow = ({
                             if (event.detail > 0) {
                                 event.currentTarget.blur();
                             }
-                            action(index);
+                            action(songIndex);
                         }}
                     >
                         <Icon size={15} />
                     </PanelIconButton>
                 ))}
             </div>
+        </div>
+    );
+};
+
+// Kept outside QueueTab so track changes update row data without remounting hovered action buttons.
+const QueueRow = ({
+    index,
+    style,
+    ariaAttributes,
+    playQueue,
+    columns,
+    currentSongKey,
+    onPlaySong,
+    onMoveSongToNext,
+    onMoveSongToEnd,
+    onRemoveSong,
+    labels,
+}: RowComponentProps<QueueRowProps>): React.ReactElement => {
+    const cells = Array.from({ length: columns }, (_, cell) => {
+        const songIndex = index * columns + cell;
+        const song = playQueue[songIndex];
+        if (!song) return <div key={cell} className="min-w-0 flex-1" />;
+        return (
+            <QueueCell
+                key={songIndex}
+                song={song}
+                songIndex={songIndex}
+                playQueue={playQueue}
+                currentSongKey={currentSongKey}
+                onPlaySong={onPlaySong}
+                onMoveSongToNext={onMoveSongToNext}
+                onMoveSongToEnd={onMoveSongToEnd}
+                onRemoveSong={onRemoveSong}
+                labels={labels}
+            />
+        );
+    });
+    // 一排一首时不套那层 flex/间距：跟原来的单层结构一个样，免得为不存在的第二格平添包装。
+    if (columns === 1) {
+        return <div style={style} {...ariaAttributes}>{cells}</div>;
+    }
+    return (
+        <div style={style} {...ariaAttributes} className="flex items-stretch gap-2">
+            {cells}
         </div>
     );
 };
@@ -142,9 +200,12 @@ const QueueTab: React.FC<QueueTabProps> = ({
     const { t } = useTranslation();
     const reduced = useKitReducedMotion();
     const currentSongKey = currentSong ? getPlaybackSongKey(currentSong) : null;
+    // 矮而宽时一排两首（见文件头注释）；列数变了显示行数跟着变，高度和滚动都按显示行算。
+    const columns = useIsWideShortViewport() ? 2 : 1;
+    const rowCount = Math.ceil(playQueue.length / columns);
     // As tall as its rows up to the most it shows; never under two rows, so in a very low window
     // the tab scrolls instead.
-    const rowsPx = Math.min(playQueue.length * ROW_PX, LIST_MAX_PX);
+    const rowsPx = Math.min(rowCount * ROW_PX, LIST_MAX_PX);
     const listHeight = `clamp(${Math.min(rowsPx, 2 * ROW_PX)}px, calc(var(--pn-tab-room, 100vh) - ${HEAD_PX}px), ${rowsPx}px)`;
 
     const listRef = useListRef(null);
@@ -155,6 +216,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
     const [hasMoreBelow, setHasMoreBelow] = React.useState(false);
     const rowProps = React.useMemo<QueueRowProps>(() => ({
         playQueue,
+        columns,
         currentSongKey,
         onPlaySong,
         onMoveSongToNext,
@@ -167,6 +229,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
             remove: t('queue.remove'),
         },
     }), [
+        columns,
         currentSongKey,
         onMoveSongToEnd,
         onMoveSongToNext,
@@ -185,7 +248,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
             setHasMoreBelow(list.scrollHeight - list.scrollTop - list.clientHeight > 4);
         }
     }, [listRef, queueScrollRef]);
-    React.useLayoutEffect(readHasMoreBelow, [playQueue.length, readHasMoreBelow]);
+    React.useLayoutEffect(readHasMoreBelow, [rowCount, readHasMoreBelow]);
 
     // Reset initial mount state when panel is opened
     React.useEffect(() => {
@@ -212,8 +275,9 @@ const QueueTab: React.FC<QueueTabProps> = ({
                     if (listRef.current) {
                         // The row before the playing one goes to the top: the rows line up with
                         // the list's top edge, and what was just played stays in view.
+                        // 一排两首时列表的「行」是显示行，先换算回去再定位。
                         listRef.current.scrollToRow({
-                            index: Math.max(0, currentIndex - 1),
+                            index: Math.max(0, Math.floor((currentIndex - 1) / columns)),
                             align: 'start',
                             behavior: behavior as 'instant' | 'smooth'
                         });
@@ -223,7 +287,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
                 }, delay);
             }
         }
-    }, [shouldScrollToCurrent, currentSongKey, playQueue, listRef, reduced]);
+    }, [shouldScrollToCurrent, columns, currentSongKey, playQueue, listRef, reduced]);
 
     const handleSavePlaylist = async () => {
         if (!onSaveCurrentQueueAsPlaylist) {
@@ -264,7 +328,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
                 <div ref={queueScrollRef}>
                     <List
                         listRef={listRef}
-                        rowCount={playQueue.length}
+                        rowCount={rowCount}
                         rowHeight={ROW_PX}
                         // The list measures itself after its first frame; until then it takes this height, so that frame has all its rows.
                         defaultHeight={rowsPx}
