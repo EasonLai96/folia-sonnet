@@ -111,8 +111,19 @@ async function eapiJson(path, data, cookie) {
   return body;
 }
 
+/*
+ * 走 weapi（网页端那套）而不是 eapi：下面「探索页」那一组在桌面端的内嵌后端里就是 weapi
+ * （那份后端的同名模块里写的），安卓这边必须答出同样的形状，
+ * 否则会出现「桌面能显示、安卓读不到」。
+ *
+ * 顺手补上 csrf_token —— weapi 这几个接口认它，缺了会答 `{code: 301}` 之类。
+ * 这里**不抛错**：探索页要自己看 code（比如登录失效的 301 是「这一栏不显示」而不是
+ * 整页失败），抛了反而把它变成了读不出来。
+ */
 async function weapiJson(path, data, cookie) {
-  return await weapiRequest(path, data || {}, cookie || '');
+  const cookies = parseCookieString(cookie || '');
+  const payload = Object.assign({}, data, { csrf_token: cookies.__csrf || '' });
+  return await weapiRequest(path, payload, cookie || '');
 }
 
 function profileFromLoginInfo(info) {
@@ -1409,6 +1420,63 @@ export async function handleFoliaApiRequest(input) {
   if (path === '/user/cloud/detail') return { code: 200, data: [], songs: [] };
   if (path === '/cloud/lyric/get') return { code: 200, lyric: '', lrc: { lyric: '' } };
   if (path === '/song/copyright/rcmd') return { code: 200, data: null };
+
+  /*
+   * --- Explore ---
+   *
+   * 探索页那一组。安卓上没有本地后端，请求全走这个桥 —— 而这一组一直没实现，
+   * 于是整个探索页读不出来（日志里就是 `Folia bridge does not implement ...`）。
+   * 目标路径照桌面端内嵌后端那份写（它模块目录下的同名文件），答出来的字段必须对得上
+   * 探索页适配器读的那几个：
+   *   /homepage/block/page → data.blocks
+   *   /recommend/resource  → recommend
+   *   /toplist             → list
+   *   /simi/song           → songs
+   *   /top/song            → data
+   *   /album/new           → albums
+   *   /top/playlist        → playlists
+   */
+  if (path === '/homepage/block/page') {
+    return await weapiJson('/api/homepage/block/page', {
+      refresh: String(firstValue(params.get('refresh'), 'false')) !== 'false',
+      cursor: firstValue(params.get('cursor')),
+    }, cookie);
+  }
+  if (path === '/recommend/resource') {
+    return await weapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
+  }
+  if (path === '/toplist') return await weapiJson('/api/toplist', {}, cookie);
+  if (path === '/simi/song') {
+    return await weapiJson('/api/v1/discovery/simiSong', {
+      songid: numberValue(params.get('id')),
+      limit: numberValue(params.get('limit'), 50),
+      offset: numberValue(params.get('offset')),
+    }, cookie);
+  }
+  // 新歌速递：`type` 是地区（0 全部 / 7 华语 / 96 欧美 / 8 日本 / 16 韩国）。
+  if (path === '/top/song') {
+    return await weapiJson('/api/v1/discovery/new/songs', {
+      areaId: numberValue(params.get('type')),
+      total: true,
+    }, cookie);
+  }
+  if (path === '/album/new') {
+    return await weapiJson('/api/album/new', {
+      limit: numberValue(params.get('limit'), 30),
+      offset: numberValue(params.get('offset')),
+      area: firstValue(params.get('area'), 'ALL'),
+      total: true,
+    }, cookie);
+  }
+  if (path === '/top/playlist') {
+    return await weapiJson('/api/playlist/list', {
+      cat: firstValue(params.get('cat'), '全部'),
+      order: firstValue(params.get('order'), 'hot'),
+      limit: numberValue(params.get('limit'), 30),
+      offset: numberValue(params.get('offset')),
+      total: true,
+    }, cookie);
+  }
 
   return {
     __foliaBridgeError: 'ROUTE_NOT_IMPLEMENTED',
