@@ -73,13 +73,38 @@ const REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
 } as const;
 
+/*
+ * 429 的退避时长只在 `Retry-After` 头里（单位是秒），读不到就不给。
+ *
+ * ⚠️ 这个头**必须读**：2026-10-19 的登录报告里，OAuth 已经成了（access token 有效 3589 秒、
+ * refresh token 也在），紧接着那一次 `GET /me` 被限流回 429；当时没有任何一处读这个头，
+ * 于是限流被当成「读不到账号」，一次成功的登录被整笔丢掉（account-refresh-failed）。
+ */
+const readRetryAfterMs = (response: Response): number | undefined => {
+    const raw = response.headers?.get?.('Retry-After')?.trim();
+    if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return undefined;
+    const ms = Math.round(Number(raw) * 1000);
+    return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
+};
+
 const call = async (path: string, token: string): Promise<any> => {
     const response = await createNativeFetch()(`${API}${path}`, {
         headers: { ...REQUEST_HEADERS, Authorization: `Bearer ${token}` },
     });
     if (response.status === 401) throw new OnlineProviderError('auth-required', 'Spotify said the sign-in is no longer valid', 'spotify');
     if (response.status === 403) throw new OnlineProviderError('not-playable', 'Spotify refused this request', 'spotify');
-    if (!response.ok) throw new OnlineProviderError('network', `Spotify answered ${response.status}`, 'spotify');
+    if (!response.ok) {
+        // 状态与「要等多久」挂在错上：共用的失败规则认的是 `httpStatus` / `retryAfterMs`，
+        // 只看 `code` 的话 429 与真的连不上是同一件事（都是 network）。
+        throw new OnlineProviderError(
+            'network',
+            `Spotify answered ${response.status}`,
+            'spotify',
+            undefined,
+            response.status,
+            readRetryAfterMs(response),
+        );
+    }
     return response.json().catch(() => null);
 };
 
@@ -189,12 +214,72 @@ const noteLoginStatusCheck = (summary: LoginDiagnosticLine): void => {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/** 读 /me 撞上限流或服务抖动时最多问这么几次（含第一次）。 */
+const ME_READ_ATTEMPTS = 3;
+/** 重试前等的时长：平台说了就听它的，但不让人干等几十秒，也不至于立刻又撞上去。 */
+const ME_READ_WAIT_MIN_MS = 1000;
+const ME_READ_WAIT_MAX_MS = 5000;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => { setTimeout(resolve, ms); });
+
+/**
+ * 这个错算不算「等一会儿再问一次就成了」：429（限流）和 5xx（服务端出错）算，回要等多少毫秒。
+ *
+ * ⚠️ 401 不算：那是这个登录真的不算数，再问多少次都一样，而且必须回到 null（见下面
+ * readSignedInUser 的说明）。把限流和它分开，才不会让一次限流把刚登进去的账号整笔丢掉。
+ */
+const meReadWaitMsOf = (error: unknown): number | null => {
+    if (!(error instanceof OnlineProviderError)) return null;
+    const status = error.httpStatus;
+    if (status !== 429 && !(typeof status === 'number' && status >= 500)) return null;
+    const asked = typeof error.retryAfterMs === 'number' && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : 0;
+    return Math.min(ME_READ_WAIT_MAX_MS, Math.max(ME_READ_WAIT_MIN_MS, asked));
+};
+
+const askMe = async (): Promise<any> => {
+    let attempt = 1;
+    for (;;) {
+        try {
+            return await call('/me', await ensureFreshToken());
+        } catch (error) {
+            const waitMs = meReadWaitMsOf(error);
+            if (waitMs === null || attempt >= ME_READ_ATTEMPTS) throw error;
+            const status = error instanceof OnlineProviderError ? error.httpStatus : undefined;
+            noteLoginStatusCheck(diagnosticLine`GET /me answered ${status ?? 'an error'}: waiting ${waitMs}ms and asking again (${attempt} of ${ME_READ_ATTEMPTS - 1} retries)`);
+            console.warn('[Spotify] reading the account was throttled; asking again', error);
+            await sleep(waitMs);
+            attempt += 1;
+        }
+    }
+};
+
+/*
+ * 同时在问 `/me` 的只问一次。
+ *
+ * 登录确认之后「读账号」和别处的登录态检查常常是同一时刻问同一样东西，各自发一次就成了两三个
+ * 一模一样的请求 —— 撞上限流的往往正是这种重复，而重复本身又不带来任何新信息。
+ */
+let pendingMe: Promise<any> | null = null;
+
+const readMe = async (): Promise<any> => {
+    if (pendingMe) return pendingMe;
+    const request = askMe().finally(() => {
+        if (pendingMe === request) pendingMe = null;
+    });
+    pendingMe = request;
+    return request;
+};
+
 /**
  * 登录态下这个人是谁。
  *
  * ⚠️ 只有「平台说这个登录不算数」才等于没人登录。**其它错误一律抛出去**，不能吞成 null：
  * 返回 null 会让读账号那一步把账号直接清掉（"nobody is signed in"），于是网络抖一下
  * 就变成「刚登进去就被登出」，而真正的报错信息还被这一句 catch 吃掉了。
+ *
+ * ⚠️ 反过来，限流也不能当失败：确认之后那一次 `GET /me` 撞上 429 就把整次登录记成
+ * account-refresh-failed，等于白登一次。所以「读」这一步自己在 readMe 里按 Retry-After
+ * 重试几次 —— 只有重试用完还不行才真的抛出去。
  */
 const readSignedInUser = async (): Promise<ProviderUser | null> => {
     if (!session) {
@@ -203,7 +288,7 @@ const readSignedInUser = async (): Promise<ProviderUser | null> => {
     }
     let me: any;
     try {
-        me = await call('/me', await ensureFreshToken());
+        me = await readMe();
     } catch (error) {
         noteLoginStatusCheck(diagnosticLine`GET /me failed: ${messageOf(error)}`);
         console.warn('[Spotify] Could not read the signed-in account', error);
