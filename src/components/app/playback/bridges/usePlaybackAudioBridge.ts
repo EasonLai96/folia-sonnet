@@ -22,23 +22,34 @@ import { noteAnalyser, noteAudioContext } from '../../../../utils/mediaDiagnosti
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
 /**
- * 输出缓冲：**一个都不指定**，由浏览器自己挑（≈ `interactive`）。
+ * 输出缓冲：**`balanced`** —— 掉帧与撕裂是一对矛盾，这一档是唯一两头都站住的落点。
  *
- * 这是 2026-10-19 用掉帧那件事排出来的结论，别再往回改：
+ * ⚠️ **必须两头一起看**：只看掉帧会撞上撕裂，只看撕裂会撞上掉帧。三档都上过真机：
  *
- *  · `6116eb11` 指定 0.1s → 卡
- *  · `44c34ef4` 指定 0.2s → 当时测着流畅，后来同一份代码又报卡
- *  · **不指定（v0.7.20 那一整版一直这么写）→ 流畅**
+ *  · 缓冲**大**（0.1s / 0.2s，`6116eb11` / `44c34ef4`）→ **不撕裂，但播放页掉帧**
+ *  · 缓冲**最小**（不指定 = `interactive`，v0.7.20 那版）→ **不掉帧，但切 app 时撕裂**：
+ *    系统一把 CPU 抢走，音频线程来不及填满那么小的 buffer
+ *  · **`balanced`（这里，当前取值）→ 两头都好**：不掉帧、切 app 也不撕裂（2026-10-19 实测）
  *
  * ⚠️ 关键教训：这个参数**不是单调的**，而且**同一个值在不同时候测出来的结论会互相打脸** ——
  * 「0.2 一度不卡」不代表 0.2 是对的，只是那一次碰巧。别再按「越大越稳」
  * 或「一定有个最优值」去推，实测出来什么就是什么。
  *
- * 另一个教训更深：上一轮（`44c34ef4`）我拿一段 Blink 源码断言「缓冲与掉帧无关」，
- * 据此把 0.1 抬到 0.2，还写下「别指望它治卡顿」。**源码推理推翻不了实测** ——
- * 源码只能解释机制（说得通的一条是音频线程抢占：缓冲越大，音频线程每次被唤醒要处理的
- * 数据块越大、占住实时优先级的时间越长，主线程连同 rAF 被顶掉的机会越多），
- * **但不能否定现象**。现象优先。
+ * 上一轮（`44c34ef4`）我拿一段 Blink 源码断言「缓冲与掉帧无关」，据此把 0.1 抬到 0.2，
+ * 还写下「别指望它治卡顿」。**源码推理推翻不了实测** —— 源码只能解释机制
+ * （说得通的是音频线程抢占：缓冲越大，音频线程每次被唤醒要处理的数据块越大、
+ * 占住实时优先级越久，主线程连同 rAF 被顶掉的机会越多），**但不能否定现象**。现象优先。
+ *
+ * ⚠️ **为什么不做「后台自动拉大」**（很自然会想到，但做不了）：
+ * `latencyHint` 只能在 `new AudioContext()` 时给，**运行时改不了**；要换档就得重建 ctx，
+ * 而 `createMediaElementSource(element)` 对同一个 element **只能调一次**
+ * （见 `services/automix/crossfadeGraph` 的 `connectAutomixDeck`），重建会抛 `InvalidStateError`。
+ * 真要绕，得改用 `element.captureStream()` + `createMediaStreamSource`（每次新建 stream），
+ * 代价大且会带来新的延迟 —— 先不碰。
+ *
+ * ⚠️ **为什么不做「后台停频谱」来省音频线程**：`src/entries/wallpaperSurface.tsx` 那条
+ * 壁纸叠层**没有自己的 AudioContext**，它的频谱是从这边 `payload.spectrum` 传过去的。
+ * 而叠层恰恰要在应用退后台时照常画（画在桌面上），一停就把它一起停了。
  *
  * 顺带澄清一笔：`services/spectrumTap` 把频谱搬到音频线程是对的，它解的是
  * 「主线程每帧现算 FFT」那一笔，**跟这里无关** —— 别因为调缓冲有效就以为频谱那条无用。
@@ -157,16 +168,12 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            /*
-             * 不传 latencyHint —— 与 v0.7.20 一致：那一版从来不带这个参数，
-             * 规范上等价于 `latencyHint: 'interactive'`。
-             *
-             * 这个值绕了一圈：指定 0.1s（`6116eb11`）卡，改指定 0.2s（`44c34ef4`）
-             * 一度测着流畅、后来又卡，不指定就流畅。**别再给它传值**，理由见上面的注释。
-             */
-            const ctx = new AudioContextClass();
+            // 走 'balanced'：不指定（= interactive）不掉帧但切 app 撕裂，指定秒数（0.1 / 0.2）
+            // 不撕裂但掉帧 —— 只有这一档两头都站住（2026-10-19 实测）。为什么这么选、
+            // 以及为什么不做「后台自动拉大」，见上面的注释。
+            const ctx = new AudioContextClass({ latencyHint: 'balanced' });
             audioContextRef.current = ctx;
-            noteAudioContext(ctx, 'interactive');
+            noteAudioContext(ctx, 'balanced');
 
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;
