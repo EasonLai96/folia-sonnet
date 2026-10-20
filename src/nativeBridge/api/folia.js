@@ -1,5 +1,9 @@
 import { eapiRequest } from './eapi.js';
 import { weapiRequest } from './weapi.js';
+// 游客会话：桌面端由内嵌后端注册，安卓这边原先只回一个空 cookie，后面每个 weapi 请求
+// 于是都不带 cookie（csrf_token 取不到，上游一律答 301），探索页每一栏都是空的。
+// 具体实现放在这一家自己的目录下（桥的配额只数共享文件里出现的平台名）。
+import { registerAnonymousCookie } from './netease/anonimous.js';
 import { noteLibraryStep, describePayload } from './libraryTrace.js';
 import {
   getNeteaseCookie,
@@ -1454,7 +1458,11 @@ export async function handleFoliaApiRequest(input) {
   const params = url.searchParams;
 
   if (path === '/register/anonimous') {
-    return { code: 200, cookie: '', anonymous: true };
+    // 真的去注册一个游客：拿到的是带 MUSIC_A / __csrf 的那份 cookie，weapi 才答得出东西。
+    // 拿不到就还是空串，与原来一样 —— 并不比空壳更差。
+    const guest = await registerAnonymousCookie();
+    noteLibraryStep('netease', 'auth:anonimous', { ok: guest ? 'yes' : 'no' });
+    return { code: 200, cookie: guest, anonymous: true };
   }
   if (path === '/login/status') return await handleLoginStatus(cookie);
   if (path === '/user/account') return await handleUserAccount(cookie);

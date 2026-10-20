@@ -103,7 +103,11 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/nativeBridge/api/eapi.js': { n: { netease: 7 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     // qq 121 → 125：扫码确认后要把会话真正交出去那一次（桥原先返回空 cookie），
     // 新增取换票那份 cookie 并交出的一行，加说明它的三行注释。
-    'src/nativeBridge/api/folia.js': { n: { netease: 14, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation; raised by the daily-recommendation fallbacks and the explore route traces 2026-10-20' },
+    // netease 14 → 16：游客会话。原先 /register/anonimous 是个空壳（回空 cookie），
+    // 后面每个 weapi 请求都不带 cookie，csrf_token 取不到、上游一律 301，探索页每一栏都是空的。
+    // 现在真的注册一个游客（实现在 netease/anonimous.js，属那一家自己的目录，不计数）：
+    // 这里多出把它引进来的那一行，与注册结果留痕的那一行。
+    'src/nativeBridge/api/folia.js': { n: { netease: 16, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation; raised by the daily-recommendation fallbacks and the explore route traces 2026-10-20; raised by the guest (anonymous) session 2026-10-21' },
     // 245：歌单的写入搬进 kugou/ 目录后，这里只多出把它转出去的那一行（其余只是从它取常量）。
     'src/nativeBridge/api/kugou.js': { n: { kugou: 245 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the playlist writes 2026-10-19' },
     'src/nativeBridge/api/libraryTrace.js': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },
@@ -152,7 +156,8 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/stores/useAudioSettingsStore.ts': { n: { netease: 11 }, kind: 'stored', why: 'a storage key and the setting kept under it' },
     'src/stores/useExploreFeedStore.ts': { n: { ytm: 2, spotify: 1 }, kind: 'doc' },
     'src/stores/usePersonalFmModeStore.ts': { n: { netease: 1 }, kind: 'doc' },
-    'src/stores/useSearchNavigationStore.ts': { n: { netease: 2 }, kind: 'doc', why: 'two comments on what the round-robin over the buckets avoids, and on which tabs a platform switch keeps its place' },
+    // netease 2 → 1：换页签的那条注释原本提到两家，现在只留一处。
+    'src/stores/useSearchNavigationStore.ts': { n: { netease: 1 }, kind: 'doc', why: 'a comment on which tabs a platform switch keeps its place' },
     'src/types.ts': { n: { netease: 11, qq: 2, ytm: 1 }, kind: 'stored', why: 'the stage API\'s lyric source, a stored song field, the AMLL DB platform' },
     'src/types/localLibrary.ts': { n: { netease: 1, qq: 1, kugou: 1, spotify: 2 }, kind: 'doc' },
     'src/types/onlineMusic.ts': { n: { netease: 4, qq: 4, kugou: 1, bodian: 1, ytm: 5, spotify: 3 }, kind: 'list', why: 'the type of a platform id, and the platform that is active where none was chosen; raised by the upstream merge 2026-10-17' },
