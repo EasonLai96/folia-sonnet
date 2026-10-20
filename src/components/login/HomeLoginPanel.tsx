@@ -29,10 +29,16 @@ const HomeLoginPanel: React.FC<HomeLoginPanelProps> = ({ account }) => {
     const ranOut = active ? rowStatus(active) === 'ran-out' : false;
     const marks = rows.filter(row => rowStatus(row) !== 'off').slice(0, 3);
 
+    // 这一屏只在没有人登录时出现（Grid3D 的 'guest' 视图），所以「登录」就是这一屏唯一该做的事：
+    // 按钮带一圈呼吸的光晕，下面一行说登录是为了什么。登录失效（ranOut）那一路不这样画 ——
+    // 那时的人知道要做什么，按钮上写的是「重新登录」，再引导一次是打扰。
+    const nudge = !ranOut;
+
     return (
         <div
             className="flex w-full flex-1 flex-col items-center justify-center px-4 text-center text-[color:var(--st-t1)]"
             style={{ ...settingsTokens(isDaylight, theme), ...kitMotionTokens(reduced) }}
+            data-login-still={reduced || undefined}
         >
             <h2 className="login-rise text-xl font-semibold leading-7 [text-wrap:balance]">
                 {ranOut ? t('status.loginExpired') : t('home.guestTitle')}
@@ -46,7 +52,7 @@ const HomeLoginPanel: React.FC<HomeLoginPanelProps> = ({ account }) => {
                 type="button"
                 data-ponder="sign-in"
                 onClick={event => openLoginWindow(ranOut ? activeProviderId : null, event.currentTarget)}
-                className="login-rise st-t-fast mt-7 inline-flex h-12 max-w-full items-center gap-2.5 rounded-xl bg-[var(--st-accent)] pl-2.5 pr-[22px] text-[15px] font-semibold text-[color:var(--st-on-accent)] transition-[opacity,transform] hover:opacity-90 active:scale-[0.98]"
+                className={`login-rise st-t-fast mt-7 inline-flex h-12 max-w-full items-center gap-2.5 rounded-xl bg-[var(--st-accent)] pl-2.5 pr-[22px] text-[15px] font-semibold text-[color:var(--st-on-accent)] transition-[opacity,transform] hover:opacity-90 active:scale-[0.98] ${nudge ? 'login-cta' : ''}`}
                 style={{ animationDelay: '80ms', '--login-edge': 'var(--st-accent)' } as React.CSSProperties}
             >
                 <span className="flex shrink-0">
@@ -58,6 +64,14 @@ const HomeLoginPanel: React.FC<HomeLoginPanelProps> = ({ account }) => {
                 </span>
                 <span className="truncate">{ranOut ? t('home.loginBrowserRetry') : t('home.login')}</span>
             </button>
+            {nudge && (
+                <p
+                    className="login-cta-note mt-3 text-[12px] leading-4 text-[color:var(--st-t3)]"
+                    style={{ animationDelay: '160ms' }}
+                >
+                    {t('home.guestCta')}
+                </p>
+            )}
         </div>
     );
 };

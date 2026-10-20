@@ -1690,6 +1690,7 @@ export default {
     "guestTitle": "Try searching a few songs first",
     "guestPrompt": "Sign in to access your playlists, saved albums, and radio.",
     "guestPromptProvider": "Sign in with {{provider}} to access your online music library.",
+    "guestCta": "Sign in to sync your playlists, favorites and radio.",
     "accountlessTitle": "{{provider}} has no library yet",
     "accountlessBody": "Playlists, albums, and radio will come with the full source interface in Folium v2.\nFor now, search for songs to play.",
     "accountlessSearch": "Search songs",

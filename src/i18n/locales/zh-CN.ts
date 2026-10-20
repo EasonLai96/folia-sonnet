@@ -1691,6 +1691,7 @@ export default {
     "guestTitle": "先搜几首喜欢的歌试试看",
     "guestPrompt": "登录在线音乐平台，访问您的歌单、收藏专辑和电台。\n部分歌曲未登录仅能试听30s。",
     "guestPromptProvider": "登录 {{provider}}，访问您的在线音乐库。",
+    "guestCta": "登录后可同步歌单、收藏与电台",
     "accountlessTitle": "{{provider}} 暂不提供曲库",
     "accountlessBody": "歌单、专辑和电台将在 Folium v2 的完整音源接口中支持。\n现在可以搜索歌曲来播放。",
     "accountlessSearch": "搜索歌曲",

@@ -1690,6 +1690,7 @@ export default {
     "guestTitle": "Coba cari beberapa lagu dulu",
     "guestPrompt": "Login untuk mengakses playlist, album tersimpan, dan radio Anda.",
     "guestPromptProvider": "Login dengan {{provider}} untuk mengakses perpustakaan musik online Anda.",
+    "guestCta": "Login untuk menyinkronkan playlist, favorit, dan radio Anda.",
     "accountlessTitle": "{{provider}} belum menyediakan perpustakaan",
     "accountlessBody": "Playlist, album, dan radio akan didukung oleh antarmuka sumber lengkap di Folium v2.\nUntuk saat ini, cari lagu untuk diputar.",
     "accountlessSearch": "Cari lagu",
