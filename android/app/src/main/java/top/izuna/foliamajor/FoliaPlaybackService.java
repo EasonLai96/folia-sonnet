@@ -9,6 +9,8 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -105,6 +107,34 @@ public class FoliaPlaybackService extends android.app.Service {
     /** 最近一次交给系统的通知：promoteToForeground() 重复贴的就是它，省掉重建的开销。 */
     private Notification cachedNotification;
 
+    /**
+     * 「按下播放」之后，等 Web 层确认真的播起来了的宽限期（毫秒）。
+     *
+     * Web 层那条路不一定一步就到：长时间暂停之后，音频上下文要 resume、在线歌的播放地址
+     * 可能已经过期要重新取一次，这两件事在后台都可能挂住（用户原话：暂停很久之后点播放，
+     * 拉不起来，打开应用才瞬间恢复）。而我们在 {@link #onPlay()} 里为了「后台也能让
+     * 壁纸/叠层跟着走」已经把锚点切成在播了 —— 等不到确认的话，壁纸、叠层、状态栏歌词
+     * 会一路往外推，实际一点声音都没有。所以给一个宽限期，到时还没确认就冻回去。
+     */
+    private static final long PLAY_CONFIRM_GRACE_MS = 4000L;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** 有一次「乐观播放」在等确认。 */
+    private boolean playConfirmPending = false;
+    /** 那次乐观播放切的那一刻的位置：冻回去要落在这儿，不能落在已经被推出去的地方。 */
+    private long playConfirmAnchorMs = 0L;
+    private final Runnable playConfirmCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!playConfirmPending) return;
+            playConfirmPending = false;
+            // Web 层已经回过话（无论是 playing 还是 paused）：以它为准，这里什么都不做。
+            if (cachedPlaying) return;
+            top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(playConfirmAnchorMs, false);
+            top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                    .shared(FoliaPlaybackService.this).invalidateOverlay();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -154,13 +184,25 @@ public class FoliaPlaybackService extends android.app.Service {
                  * effect 一个都跑不起来。壁纸那一侧是「锚点 + 墙钟」自己往前推的，
                  * 缺这一次同步，它就一直冻在暂停那个锚点上 —— 表现就是
                  * 「暂停后重新播放，歌词进度不动」（用户原话）。
+                 *
+                 * 但「按下播放」不等于「真的播起来了」：所以同时记下这一刻的位置，并挂一个
+                 * 宽限检查（见 PLAY_CONFIRM_GRACE_MS）。Web 层真起来了会推 playing 回来，
+                 * 那一次就把检查作废；没起来就把锚点冻回去 —— 否则就是用户看到的
+                 * 「状态栏、叠层的进度一直在走，实际一点声音都没有」。
                  */
+                playConfirmAnchorMs = clampedAnchorPosition();
+                playConfirmPending = true;
+                mainHandler.removeCallbacks(playConfirmCheck);
+                mainHandler.postDelayed(playConfirmCheck, PLAY_CONFIRM_GRACE_MS);
                 syncWallpaperAnchor(true);
             }
 
             @Override
             public void onPause() {
                 sendCommand("pause");
+                // 暂停按下就撤回那次乐观播放的确认：方向相反，不需要再等。
+                playConfirmPending = false;
+                mainHandler.removeCallbacks(playConfirmCheck);
                 // 同上，方向相反：不在这里冻结，壁纸会按 playing=true 一路外推到时间轴
                 // 尽头，那一句歌词就永远停在那儿 —— 这时候再点播放也回不来了，
                 // 因为锚点早就飞出去了。
@@ -256,6 +298,18 @@ public class FoliaPlaybackService extends android.app.Service {
      * 再夹进 [0, 时长]：万一已经跑飞了，至少先落回一个合法位置。
      */
     private void syncWallpaperAnchor(boolean playing) {
+        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(clampedAnchorPosition(), playing);
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(this).invalidateOverlay();
+    }
+
+    /**
+     * 壁纸那一侧**此刻自己算出来**的位置，夹进 [0, 时长]。
+     *
+     * 屏幕上正在显示的就是它，接着它走才不会跳；万一已经跑飞了（暂停没同步、被外推到
+     * 时间轴尽头），至少先落回一个合法位置。
+     */
+    private long clampedAnchorPosition() {
         top.izuna.foliamajor.wallpaper.WallpaperLyricsState.Snapshot snapshot =
                 top.izuna.foliamajor.wallpaper.WallpaperLyricsState.get();
         long position = snapshot.positionMs();
@@ -265,9 +319,7 @@ public class FoliaPlaybackService extends android.app.Service {
         if (position < 0L) {
             position = 0L;
         }
-        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(position, playing);
-        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
-                .shared(this).invalidateOverlay();
+        return position;
     }
 
     @Override
@@ -318,6 +370,9 @@ public class FoliaPlaybackService extends android.app.Service {
     @Override
     public void onDestroy() {
         running = false;
+        // 实例要没了：那次等确认的检查也跟着撤掉（它持着 this）。
+        playConfirmPending = false;
+        mainHandler.removeCallbacks(playConfirmCheck);
         // 实例没了，前台状态必须跟着清：它是静态的，进程还在时插件靠它选
         // startService / startForegroundService。留着 true 会让下一次创建的实例跳过
         // startForeground()，而那条路是 startForegroundService 开的 —— 5 秒后就是
@@ -647,6 +702,27 @@ public class FoliaPlaybackService extends android.app.Service {
         cachedPositionMs = positionMs;
         cachedSpeed = speed;
         cachedPlaying = playing;
+        /*
+         * Web 层回过话了：那次「乐观播放」的宽限检查到此为止，不用再猜。
+         *
+         * 但它说「没在播」的时候不能只是撤掉检查 —— onPlay 那一刻已经把锚点切成在播了，
+         * 撤掉就没人把锚点收回来，壁纸、叠层、状态栏歌词继续往外推，实际一点声音都没有
+         * （用户原话）。壁纸那边的心跳指望不上：它是 JS 的 setInterval，后台里不一定跑。
+         * 所以这里就地冻回去，位置用 Web 层报上来的那份（它才知道真实进度），
+         * 没带位置才退回按下播放那一刻记下的。
+         */
+        boolean wasOptimisticPlay = playConfirmPending;
+        playConfirmPending = false;
+        mainHandler.removeCallbacks(playConfirmCheck);
+        if (wasOptimisticPlay && !playing) {
+            long freezeAt = intent.hasExtra(EXTRA_POSITION) ? positionMs : playConfirmAnchorMs;
+            if (freezeAt < 0L) {
+                freezeAt = playConfirmAnchorMs;
+            }
+            top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(freezeAt, false);
+            top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                    .shared(this).invalidateOverlay();
+        }
         publishSnapshot();
         applyPlaybackState();
     }

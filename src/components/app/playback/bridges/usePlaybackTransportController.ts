@@ -14,6 +14,14 @@ import { onlineFailureToast } from '../source/onlineFailureToast';
 
 // src/components/app/playback/bridges/usePlaybackTransportController.ts
 
+/**
+ * 等音频上下文 resume 的上限（毫秒）。
+ *
+ * 这个 Promise **不保证会推进**（与 `audioWorklet.addModule()` 落在 suspended 的 context 上
+ * 是同一类问题）：应用退到后台很久之后再点播放，它可能一直不落地。所以只等这么久。
+ */
+const AUDIO_CONTEXT_RESUME_GRACE_MS = 1200;
+
 type UsePlaybackTransportControllerParams = {
     stageActiveEntryKind: string | null;
     isNowPlayingStageActive: boolean;
@@ -70,9 +78,17 @@ export function usePlaybackTransportController({
     const duration = usePlaybackStore(state => state.duration);
     const transportRevision = useRef(0);
     const wantsPlayback = useRef(false);
+    /**
+     * 在后台按了播放、但音频上下文拉不起来时留下的「回到前台补一次」标记。
+     *
+     * 后台状态下 resume 不该硬撑（见 resumePlayback 里的判断），可用户那一下是按过的，
+     * 不该就这么丢掉 —— 留个标记，等页面重新可见时补发。
+     */
+    const pendingForegroundResumeRef = useRef(false);
     useEffect(() => () => {
         transportRevision.current++;
         wantsPlayback.current = false;
+        pendingForegroundResumeRef.current = false;
     }, []);
 
     const resumePlayback = useCallback(async () => {
@@ -81,6 +97,8 @@ export function usePlaybackTransportController({
         }
         const revision = ++transportRevision.current;
         wantsPlayback.current = true;
+        // 这一次是明确的播放意图，之前排队的「回到前台补一次」就不必再发。
+        pendingForegroundResumeRef.current = false;
 
         if (activePlaybackContext === 'stage' && stageActiveEntryKind === 'lyrics' && !audioSrc) {
             const currentSyntheticTime = getSyntheticStageLyricsTime();
@@ -118,12 +136,44 @@ export function usePlaybackTransportController({
         const shouldAutoplay = () => wantsPlayback.current && isSameSource();
 
         setupAudioAnalyzer();
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        /*
+         * 上下文被挂起就要 resume，但**不能死等**。
+         *
+         * 应用退到后台很久之后再点播放（通知栏 / 锁屏 / 眼镜上的键），这个 Promise 有可能
+         * 一直不落地。原来直接 await 它，整条播放就卡在这一行：没有声音，状态机也没动，
+         * 而原生那边已经被 onPlay 切成在播 —— 状态栏、叠层的歌词照走。
+         * 等回到前台，那句 await 才终于落地，于是「打开应用瞬间恢复」。
+         *
+         * 现在最多等 AUDIO_CONTEXT_RESUME_GRACE_MS，然后按上下文的真实状态决定。
+         */
+        const context = audioContextRef.current;
+        if (context && context.state === 'suspended') {
             try {
-                await audioContextRef.current.resume();
-            } catch (error) {
-                if (!isCurrent()) return;
-                throw error;
+                await Promise.race([
+                    context.resume(),
+                    new Promise<void>(resolve => {
+                        setTimeout(resolve, AUDIO_CONTEXT_RESUME_GRACE_MS);
+                    }),
+                ]);
+            } catch {
+                // resume 被拒（页面被系统挂起、音频焦点被别的应用拿走）不是「不能播」的理由：
+                // 元素本身照样能跑。到底播不播，下面按上下文的真实状态判断。
+            }
+            if (!isCurrent()) return;
+            /*
+             * 还是 suspended、而且现在在后台：这时候硬播只会是「有进度没声音」——
+             * 元素在走，输出走的是那张挂起的音频图。宁可先不播（状态留在暂停，
+             * 原生那边等不到 playing 会把歌词冻回去），回到前台再拉一次（见文件末尾的
+             * visibilitychange）：用户在后台按的那一下不该变成一场假播放。
+             */
+            if (
+                context.state === 'suspended'
+                && typeof document !== 'undefined'
+                && document.visibilityState === 'hidden'
+            ) {
+                pendingForegroundResumeRef.current = true;
+                setPlayerState(PlayerState.PAUSED);
+                return;
             }
         }
         if (!isCurrent()) return;
@@ -199,6 +249,8 @@ export function usePlaybackTransportController({
         }
         transportRevision.current++;
         wantsPlayback.current = false;
+        // 用户自己按了暂停，那一下排队的补播就该作废。
+        pendingForegroundResumeRef.current = false;
 
         if (activePlaybackContext === 'stage' && stageActiveEntryKind === 'lyrics' && !audioSrc) {
             const currentSyntheticTime = getSyntheticStageLyricsTime();
@@ -268,6 +320,26 @@ export function usePlaybackTransportController({
             setPlayerState(PlayerState.PAUSED);
         }
     }, [activePlaybackContext, audioRef, audioSrc, currentTime, duration, getSyntheticStageLyricsTime, getTargetPlaybackVolume, isNowPlayingStageActive, isTransitionAudible, pauseDuringTransition, setPlayerState, stageActiveEntryKind, stageLyricsClockRef, syncOutputGain, syncStageLyricsClock]);
+
+    /*
+     * 回到前台补一次。
+     *
+     * 在后台按播放时音频上下文不一定能被唤醒（页面被挂起、音频焦点在别处），resumePlayback
+     * 那时只留下标记、状态停在暂停 —— 为的是不出现「元素在走、声音没有」的假播放。
+     * 页面重新可见（真的有人在看、系统也把页面放回来了）就把那一下补上。
+     * 标记在 resumePlayback 一开始就会被清掉，所以在里面再设一次也自洽。
+     */
+    useEffect(() => {
+        if (typeof document === 'undefined') return undefined;
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') return;
+            if (!pendingForegroundResumeRef.current) return;
+            pendingForegroundResumeRef.current = false;
+            void resumePlayback();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    }, [resumePlayback]);
 
     return {
         resumePlayback,
