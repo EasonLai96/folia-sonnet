@@ -366,8 +366,21 @@ const TiltLine: React.FC<{
                 return { normal: theme.accentColor || theme.primaryColor, tilt: theme.accentColor || theme.primaryColor };
             case 'primaryAll':
                 return { normal: theme.primaryColor, tilt: theme.primaryColor };
+            /*
+             * default 的正常段用**强调色**，不再是正文色 primaryColor。
+             *
+             * 倾诉的每一行都是「正在唱的这一行」，而全应用别处（classic / cadenza / fume /
+             * 磁贴）给「当前行里没命中关键字的字」兜的都是 accentColor —— 只有这里兜正文色。
+             * 正文色在深色主题下是**近白**的（AI 提示词要求 primaryColor 走 "very bright,
+             * soft tone"），而倾诉是大字号整行地画：一行歌词被拆成两三段时，除了那一段倾斜的，
+             * 其余整段都是近白的正文色，看着就是「一截白字」，和主题的配色完全脱节。
+             *
+             * 于是 default 与 accentAll 同色了 —— 留着那一档是为了不动已存的 tuning 值，
+             * 而不是还有区别。想回到「正文色」那一版的观感，用 primaryAll
+             * （或 swap 里倾斜段的那一档）。
+             */
             default:
-                return { normal: theme.primaryColor, tilt: theme.accentColor || theme.primaryColor };
+                return { normal: theme.accentColor || theme.primaryColor, tilt: theme.accentColor || theme.primaryColor };
         }
     };
 
@@ -379,16 +392,23 @@ const TiltLine: React.FC<{
     );
     let visualIndex = 0;
 
-    // 落在 AI 主题关键字上的字上关键字自己的颜色，其余用这一段的兜底色。
-    // 理由与区间口径见 `tiltWordColors.ts`。
+    /*
+     * 落在 AI 主题关键字上的字上关键字自己的颜色，其余用这一段的兜底色。
+     * 理由与区间口径见 `tiltWordColors.ts`。
+     *
+     * 最后一个参数是「关键字色被判成白」时的去处：用主题的强调色（accentColor），
+     * 而不是这一段的兜底色 —— primaryAll / swap 的倾斜段兜底就是正文色，深色主题下
+     * 那本身就是近白的，退回去等于白字照旧。
+     */
     const graphemeColors = useMemo(
         () => resolveTiltGraphemeColors(
             graphemes,
             segment.charOffset,
             wordColorRanges ?? [],
             segment.isTilt ? colors.tilt : colors.normal,
+            theme.accentColor || theme.primaryColor,
         ),
-        [graphemes, segment.charOffset, segment.isTilt, colors.normal, colors.tilt, wordColorRanges],
+        [graphemes, segment.charOffset, segment.isTilt, colors.normal, colors.tilt, theme.accentColor, theme.primaryColor, wordColorRanges],
     );
 
     const charTimings = useMemo(() => {
