@@ -1032,6 +1032,18 @@ public final class WallpaperOverlay {
                         ? "结论翻成「该显示」"
                         : "结论翻成「不该显示」—— " + describeHideReason());
             }
+            /*
+             * 主题还没落定就先别露面 —— 这是「切歌闪好几次」的源头（见下面「该显示」那一支）。
+             *
+             * 这时候挂上去的窗口手里是「上一首 / 空表」那版 tuning（叠层那份页面只在
+             * 加载时读一次存储），几秒后 AI 主题到了又要整页重载一次：alpha 压回 0、
+             * 等首帧、再淡入 —— 那是看得见的一下。等它稳住（还没挂的窗口加载时自己
+             * 就会读到最新那份，根本不需要重载），用户看到的就是「叠层直接以正确的
+             * 样子出现一次」。
+             *
+             * ⚠️ 已经露出来的不再按住：那会变成「正在看着的叠层突然消失」，
+             * 所以只在窗口还没挂（!added）时等。巡检是常驻的，下一轮会再来问。
+             */
             if (dormantSinceMs > 0L) {
                 // 休眠中（窗口还挂着，只是透明）：又能显示了就在**原页面**上淡回来，
                 // 不再走「销毁 → 重建 → 等首帧」那一整套。
@@ -1040,7 +1052,7 @@ public final class WallpaperOverlay {
                 } else if (SystemClock.elapsedRealtime() - dormantSinceMs >= DORMANT_MAX_MS) {
                     detach("休眠 " + DORMANT_MAX_MS / 1000L + "s 内一直没该显示");
                 }
-            } else if (want) {
+            } else if (want && !(tuningSettling() && !added)) {
                 // 又要显示了：如果正在淡出，立刻改往回收（从当前的不透明度接上，不闪）。
                 if (fadingOut) {
                     startFadeIn();
@@ -1465,6 +1477,12 @@ public final class WallpaperOverlay {
         if (added) return;
         // 挂在锁屏页面上时不需要 SYSTEM_ALERT_WINDOW：那是子窗口，权限跟着宿主 Activity 走。
         if (lockScreenHost == null && !canOverlay(context)) return;
+        /*
+         * 新挂的这份页面加载时会自己读一遍存储，手上就是最新那份 tuning ——
+         * 「等主题落定」的那段到此为止。不清的话，一个早就过去的待定会一直按住这次挂载
+         * （见 watchTask 里 tuningSettling() 那一支）。
+         */
+        tuningPendingSinceMs = 0L;
         webView = new WebView(context);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -2116,6 +2134,39 @@ public final class WallpaperOverlay {
     /** 上一次生效的那份 tuning 本体（见 describeTuningDiff）。 */
     private java.util.Map<String, Float> lastTuningSnapshot = java.util.Collections.emptyMap();
 
+    /** 上一轮**看到**的 tuning（不等于已经生效的那份，见 lastTuningHash）。 */
+    private String lastObservedHash = null;
+
+    /** 见到 tuning 变化的第一个时刻；0 = 当前没有待定的变化（见 reloadOnTuningChange）。 */
+    private long tuningPendingSinceMs = 0L;
+    /** 最近一次「这一轮又变了」的时刻：它停下来才开始算「稳住」（见 lastObservedHash）。 */
+    private long tuningLastChangeAtMs = 0L;
+
+    /**
+     * tuning 停在这个时长以上，才认为「这一轮主题已经落定」。
+     *
+     * 为什么必须等：切歌那一刻主题是**分几批**落下来的 —— 先是空表（流水里那种
+     * "activeScale null→1.2"），AI 主题算完再落一次，`settingsStamp` 往往还要再动一次。
+     * 而 tuning 每变一次就要重载整页（alpha 压回 0 → 等首帧 → 淡入），于是切一次歌
+     * 连着闪好几下（用户原话：「切歌每次都闪好几次」）。等它稳住再重载，一批变化只
+     * 变成一次重载。
+     */
+    private static final long TUNING_SETTLE_MS = 900L;
+
+    /** 等稳住的上限：tuning 一直抖也不能永远不生效（见 TUNING_SETTLE_MS）。 */
+    private static final long TUNING_SETTLE_MAX_MS = 2500L;
+
+    /**
+     * 此刻是不是正等着主题落定（还不能露面 / 还不能重载）。
+     *
+     * 带一道上限是故意的：待定的那段靠「tuning 不再变」结束，万一它一直抖、
+     * 或者这一轮根本不会再有人来清（页面没起来），这道上限保证叠层不会因此永远不出现。
+     */
+    private boolean tuningSettling() {
+        return tuningPendingSinceMs > 0L
+                && SystemClock.elapsedRealtime() - tuningPendingSinceMs < TUNING_SETTLE_MAX_MS + 2000L;
+    }
+
     /**
      * 这次 tuning 跟上次比，到底哪几个字段变了。
      *
@@ -2147,21 +2198,45 @@ public final class WallpaperOverlay {
 
     private void reloadOnTuningChange() {
         if (webView == null) {
+            // 页面还没起来：它加载时会自己读一遍存储，手上就是最新这份 tuning ——
+            // 既不需要重载，也不该卡在「等落定」（没有人会来清这个待定）。
+            tuningPendingSinceMs = 0L;
             return;
         }
         java.util.Map<String, Float> tuning = WallpaperLyricsState.tuning();
         String hash = tuning.toString();
         if (hash.equals(lastTuningHash)) {
+            // 已经对齐：待定的那一次不必再等（页面手上就是这一版）。
+            tuningPendingSinceMs = 0L;
+            lastObservedHash = hash;
             return;
         }
         boolean first = lastTuningHash == null;
         if (first) {
             lastTuningHash = hash;
+            lastObservedHash = hash;
             lastTuningSnapshot = new java.util.HashMap<>(tuning);
             return;
         }
+        long now = SystemClock.elapsedRealtime();
         /*
-         * 节流没通过时**绝不能**把 hash 先记下来。
+         * 只有「这一轮跟上一轮看到的不是同一份」才算一次新的变化。
+         *
+         * ⚠️ 写成「每进来一次就刷新 lastChangeAt」的话，稳定期永远走不完 ——
+         * 这一份 hash 还没生效，于是每轮都进到这里、每轮都把时刻刷成现在，
+         * 稳定的那 900ms 永远攒不出来，最后只能靠上限硬放行（等于每次都等满 2.5 秒）。
+         */
+        if (!hash.equals(lastObservedHash)) {
+            lastObservedHash = hash;
+            tuningLastChangeAtMs = now;
+            if (tuningPendingSinceMs == 0L) {
+                tuningPendingSinceMs = now;
+                noteOverlayEvent("tuning 变了，先等它稳住再重载（最多 " + TUNING_SETTLE_MAX_MS
+                        + "ms）—— 变化的字段：" + describeTuningDiff(tuning));
+            }
+        }
+        /*
+         * ⚠️ 节流没通过时**绝不能**把 hash 先记下来。
          *
          * 记了就等于承认"这版设置已经生效了"，而这一次的重载其实被跳过了 ——
          * 之后 hash 一直对得上，再也不会有人来补这一刀，改动就**永久丢失**。
@@ -2169,12 +2244,18 @@ public final class WallpaperOverlay {
          * 取决于这次改动是不是刚好落在上一次重载之后的 30 秒里。
          * 让 hash 一直"欠着"，下一个窗口就补上。
          */
+        if (now - tuningLastChangeAtMs < TUNING_SETTLE_MS
+                && now - tuningPendingSinceMs < TUNING_SETTLE_MAX_MS) {
+            return;
+        }
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < TUNING_RELOAD_INTERVAL_MS) {
             noteOverlayEvent("tuning 变了但被 3s 节流挡住，欠着下次补 —— 变化的字段："
                     + describeTuningDiff(tuning));
             return;
         }
         lastTuningHash = hash;
+        // 已经落定：待定的那一段到此为止（下面真的重载了）。
+        tuningPendingSinceMs = 0L;
         noteOverlayEvent("tuning 变了 → 整页重载。变化的字段：" + describeTuningDiff(tuning));
         lastTuningSnapshot = new java.util.HashMap<>(tuning);
         /*
