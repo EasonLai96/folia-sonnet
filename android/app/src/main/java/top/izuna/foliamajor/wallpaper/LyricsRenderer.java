@@ -278,6 +278,31 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
     /** 上图时记下位图尺寸，铺满时按它算 cover 比例，别把图拉变形。 */
     private int coverWidth = 0;
     private int coverHeight = 0;
+    /**
+     * 上一张封面：换图时先留着它做交叉淡出，而不是马上删纹理。
+     *
+     * 原来是在 syncCover 里直接 `glDeleteTextures` + 上传新的：那一帧还是旧图、下一帧
+     * 已经是新图，中间没有任何过渡。封面这层虽然只有 0.28 的不透明度，可它是**整屏**
+     * 一层，换歌那一瞬整块底色会硬切一下（用户原话：突然一闪而过）。而同一帧里
+     * 主题色是缓慢插值过去的（见 coverTint），一个渐变一个硬切，看着更突兀。
+     *
+     * 换歌时封面是**两步到位**的：先 publish 一次（cover 为 null，状态里保留上一张），
+     * 等 Web 层把图抓完转成 base64 再 publish 一次 —— 中间隔着几百毫秒，
+     * 所以这一次切换几乎必定发生在「桌面正看着」的时候，过渡必须做。
+     */
+    private int coverPrevTexture = 0;
+    private int coverPrevWidth = 0;
+    private int coverPrevHeight = 0;
+    /** 这次交叉淡出从什么时候开始（System.nanoTime）。 */
+    private long coverFadeStartNanos = 0L;
+    /**
+     * 交叉淡出的时长。
+     *
+     * 700ms：短到换歌时不会有「上一首还挂着」的错觉，长到 30fps 下有二十来帧渐变
+     * （待机 10fps 也有七帧），肉眼看是融化而不是台阶。再长就和「换歌」这个动作脱节了。
+     */
+    private static final float COVER_FADE_SECONDS = 0.7f;
+
     /** 自选背景图。与封面分开存，换歌时不该被顶掉。 */
     private int imageTexture = 0;
     private int imageWidth = 0;
@@ -319,6 +344,16 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         }
     }
 
+    /** 释放正在淡出的那张旧封面（只在 GL 线程里调，且必须在淡完之后）。 */
+    private void releaseCoverPrev() {
+        if (coverPrevTexture != 0) {
+            GLES20.glDeleteTextures(1, new int[] { coverPrevTexture }, 0);
+            coverPrevTexture = 0;
+        }
+        coverPrevWidth = 0;
+        coverPrevHeight = 0;
+    }
+
     private void releaseImage() {
         if (imageTexture != 0) {
             GLES20.glDeleteTextures(1, new int[] { imageTexture }, 0);
@@ -358,6 +393,15 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
          */
         loadedVideoKey = null;
         releaseVideoResources();
+        /*
+         * 封面那几张位图纹理同样没了（旧 id 在新上下文里是非法的，拿去画就是垃圾）。
+         * 置 0 之后下一帧 syncCover 会重新上传 —— key 也一并清掉，否则它会以为图还在。
+         */
+        coverTexture = 0;
+        coverPrevTexture = 0;
+        loadedCoverKey = null;
+        imageTexture = 0;
+        loadedImageKey = null;
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
         GLES20.glEnable(GLES20.GL_BLEND);
         // 位图纹理是预乘 alpha 的（Android Bitmap 的存储格式如此），
@@ -845,7 +889,31 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
     private void drawCover() {
         // 封面那层的浓淡跟着应用侧的背景不透明度走，两边观感才一致。
         float opacity = clamp(tf("wp.backgroundOpacity", 1f), 0f, 1f);
-        drawCoverFitted(coverTexture, coverWidth, coverHeight, 0.28f * opacity);
+        float alpha = 0.28f * opacity;
+        /*
+         * 交叉淡出。
+         *
+         * 旧图按 (1 - t) 淡出、新图按 t 淡入，两层同时画。合起来的浓度仍然是 alpha
+         * （中间只差 alpha²/4，0.28 时不到 2%），所以底色不会在过渡中间发暗或发亮 ——
+         * 如果改成「新图直接从 0 涨到 alpha」，中途会看到整体变淡一下。
+         *
+         * 用墙钟算 t 而不是每帧累加：这一层在非 cover 模式下不画（切到自选图 / 视频），
+         * 累加的话切回来还停在中途；按时间算，切回来时早就淡完了。
+         */
+        float fade = 1f;
+        if (coverFadeStartNanos != 0L) {
+            fade = clamp((System.nanoTime() - coverFadeStartNanos) / (COVER_FADE_SECONDS * 1e9f), 0f, 1f);
+        }
+        if (coverPrevTexture != 0 && fade < 1f) {
+            drawCoverFitted(coverPrevTexture, coverPrevWidth, coverPrevHeight, alpha * (1f - fade));
+        }
+        if (fade > 0f) {
+            drawCoverFitted(coverTexture, coverWidth, coverHeight, alpha * fade);
+        }
+        if (fade >= 1f && coverPrevTexture != 0) {
+            // 淡完了才真正释放旧纹理：早一帧删，那一帧就是空白。
+            releaseCoverPrev();
+        }
     }
 
     /** 自选背景图铺满，再压一层薄薄的暗色蒙版保证歌词可读。 */
@@ -1614,14 +1682,23 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         if (decoded == null) {
             return;
         }
-        if (coverTexture != 0) {
-            GLES20.glDeleteTextures(1, new int[] { coverTexture }, 0);
-            coverTexture = 0;
-        }
         Bitmap blurred = blurredCover(decoded, blurAmount);
-        coverTexture = upload(blurred);
-        coverWidth = blurred.getWidth();
-        coverHeight = blurred.getHeight();
+        // 先上传新的、再挪旧的：上传万一失败，旧图还在画面上，不会黑一下。
+        int next = upload(blurred);
+        if (next != 0) {
+            releaseCoverPrev();
+            coverPrevTexture = coverTexture;
+            coverPrevWidth = coverWidth;
+            coverPrevHeight = coverHeight;
+            coverTexture = next;
+            coverWidth = blurred.getWidth();
+            coverHeight = blurred.getHeight();
+            /*
+             * 从这一帧开始淡。上一张为 0（冷启动第一张、或换到别的背景模式后又切回来）
+             * 就是「从无到有」—— 同一个公式照样成立，只是没有旧图那半层。
+             */
+            coverFadeStartNanos = System.nanoTime();
+        }
         blurred.recycle();
         decoded.recycle();
     }
