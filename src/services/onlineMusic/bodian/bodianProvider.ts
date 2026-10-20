@@ -3,6 +3,7 @@ import { OnlineProviderError } from '../../../types/onlineMusic';
 import { createProviderSongMetadata } from '../../../utils/songMetadata';
 import { parseBodianLyrics } from '../../../utils/lyrics/bodianLyrics';
 import { getBodianTransportAvailability, requestBodian } from './bodianTransport';
+import { proxyNativeRemoteAudioUrl } from '../../nativeRemoteAudio';
 import { describeBodianFailure } from './bodianFailure';
 import { bodianPage, normalizeBodianCollection, normalizeBodianSong, normalizeBodianUser } from './bodianNormalize';
 import { bodianCatalog } from './bodianCatalog';
@@ -80,7 +81,15 @@ export const bodianProvider: OnlineMusicProvider = {
             const { preview, ...audio } = await requestBodian<ProviderAudioSource>('audio', {
                 id: source.mediaId, quality, freeSign: typeof source.providerData?.freeSign === 'string' ? source.providerData.freeSign : '',
             });
-            return preview ? { ...audio, preview: true } : audio;
+            // 波点的直链挂在 Kuwo 的 CDN 上，那个 CDN 根本不下发 Access-Control-Allow-Origin，
+            // 而 <audio> 带的是 crossOrigin="anonymous" —— 直连时字节在最前面就被同源检查挡掉，
+            // 报出来却只是一句毫无特征的 "MEDIA_ELEMENT_ERROR: Format error"
+            // （networkState=3 / error.code=4），看着像音频坏了。真机上换成安卓本地回环服务
+            // 代转（回包带 ACAO、Range 原样透传），别的平台与换不到地址时原样直连 ——
+            // 代理只是为了让"本来能播的"能播，不该因为代理本身出问题就把整首歌判死。
+            const url = await proxyNativeRemoteAudioUrl(audio.url);
+            const resolved = url && url !== audio.url ? { ...audio, url } : audio;
+            return preview ? { ...resolved, preview: true } : resolved;
         },
         // 只有下架信号会给 unavailable / taken-down；播放限制交给运行时。缓存里旧的布尔 `unavailable`
         // 分不清下架还是限制（缓存歌曲在 normalizeBodianSong 原样放行），一律按 unknown。

@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // test/unit/onlineMusic/bodianProvider.test.ts
 
 const request = vi.hoisted(() => vi.fn());
+// 默认原样返回：没有本地服务可代转时直连，这正是别处那些断言直链的用例要的。
+const proxyRemoteAudio = vi.hoisted(() => vi.fn());
 vi.mock('@/services/onlineMusic/bodian/bodianTransport', () => ({
     requestBodian: request, getBodianTransportAvailability: () => ({ configured: true }),
 }));
+vi.mock('@/services/nativeRemoteAudio', () => ({ proxyNativeRemoteAudioUrl: proxyRemoteAudio }));
 import { bodianProvider } from '@/services/onlineMusic/bodian/bodianProvider';
 import { bodianPage, normalizeBodianCollection, normalizeBodianSong, normalizeBodianUser } from '@/services/onlineMusic/bodian/bodianNormalize';
 import { getPlaybackSongKey } from '@/utils/appPlaybackGuards';
@@ -14,7 +17,11 @@ const track = { id: 228908, songName: '测试歌曲 (Live)', name: '测试歌曲
     albumPic: 'https://img4.kuwo.cn/cover.jpg', artist: '测试歌手', artistId: 336,
     artists: [{ id: 336, name: '测试歌手' }], duration: 269 };
 
-beforeEach(() => request.mockReset());
+beforeEach(() => {
+    request.mockReset();
+    proxyRemoteAudio.mockReset();
+    proxyRemoteAudio.mockImplementation(async (url: string) => url);
+});
 
 describe('Bodian provider', () => {
     it.each([
@@ -147,6 +154,28 @@ describe('Bodian provider', () => {
         await expect(bodianProvider.playback!.getAudioSource({ ...normalizeBodianSong(track), sourceRef: { kind: 'online', providerId: 'qq', mediaId: '228908' } }, 'high'))
             .rejects.toMatchObject({ code: 'unsupported' });
         expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    /*
+     * 波点的直链挂在 Kuwo 的 CDN 上，那个 CDN 不下发 Access-Control-Allow-Origin，而
+     * <audio> 带 crossOrigin="anonymous" —— 直连必然是 mediaErrorCode=4 /
+     * "The element has no supported sources"，看着像音频坏了。真机上必须换成安卓本地
+     * 回环服务代转；换不到地址（非安卓、插件没这个方法）就原样直连，代理不该把整首歌判死。
+     */
+    it('plays the stream through the local proxy, and keeps the direct link where there is none', async () => {
+        const direct = 'https://bd-er.kuwo.cn/97ad39f5/resource/30106/trackmedia/M800001.mp3';
+        proxyRemoteAudio.mockResolvedValueOnce('http://127.0.0.1:8787/remote-audio/token');
+        request.mockResolvedValueOnce({ url: direct, quality: 'high', fetchedAt: 3 });
+        await expect(bodianProvider.playback!.getAudioSource(normalizeBodianSong(track), 'high'))
+            .resolves.toEqual({ url: 'http://127.0.0.1:8787/remote-audio/token', quality: 'high', fetchedAt: 3 });
+        // 代转要的是 provider 给的那条直链，不是别的什么。
+        expect(proxyRemoteAudio).toHaveBeenCalledWith(direct);
+
+        // 换不到地址：直连照旧，preview 标记也在。
+        proxyRemoteAudio.mockResolvedValueOnce(direct);
+        request.mockResolvedValueOnce({ url: direct, quality: 'high', fetchedAt: 4, preview: { startTime: 0, endTime: 29 } });
+        await expect(bodianProvider.playback!.getAudioSource(normalizeBodianSong(track), 'high'))
+            .resolves.toEqual({ url: direct, quality: 'high', fetchedAt: 4, preview: true });
     });
 
     it('does not dress a rights-only audition up as an auth problem', async () => {
