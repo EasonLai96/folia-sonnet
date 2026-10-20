@@ -92,13 +92,27 @@ const AnalysisModelRow: React.FC<{ def: SettingsOptionDef; name: DownloadableMod
                     ? t('options.analysisModelChecking')
                     : t('options.analysisModelOff');
 
+    // Absent and failed both take the same press, and both are the states a switch on its own cannot
+    // act on: absent has not been asked for yet, and after a failure the switch is already on, so the
+    // row has to offer another go rather than sit there naming what went wrong. Only the wording
+    // differs - "download" the first time, "try again" after one.
+    const canFetch = entry.phase === 'absent' || entry.phase === 'error';
+
     return (
         <Row option={def} hint={hint}>
             <Toggle checked={wanted} onChange={next => setWanted(name, next)} />
-            {/* A failed download is the one state the switch cannot fix by being switched: it is already
-                on, and the row has to offer another go rather than sit there saying it failed. */}
-            {entry.phase === 'error' && (
-                <Button variant="quiet" onClick={() => setWanted(name, true)}>{t('options.analysisModelRetry')}</Button>
+            {canFetch && (
+                <Button onClick={() => setWanted(name, true)}>
+                    {t(entry.phase === 'error' ? 'options.analysisModelRetry' : 'options.analysisModelDownload')}
+                </Button>
+            )}
+            {entry.phase === 'downloading' && (
+                <Button variant="quiet" disabled>{t('options.analysisModelDownloading', { percent: Math.round(entry.progress * 100) })}</Button>
+            )}
+            {entry.phase === 'ready' && (
+                // Gives the space back without having to find the switch's meaning in a row that
+                // already says it is there.
+                <Button variant="quiet" onClick={() => setWanted(name, false)}>{t('options.analysisModelDelete')}</Button>
             )}
         </Row>
     );

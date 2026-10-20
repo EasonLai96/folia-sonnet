@@ -2004,6 +2004,8 @@ export default {
     "analysisModelOff": "未启用",
     "analysisModelFailed": "下载失败",
     "analysisModelRetry": "重试",
+    "analysisModelDownload": "下载",
+    "analysisModelDelete": "删除",
     "analysisModelsTitle": "启用分析模型？",
     "analysisModelsDesc": "automix 与智能动感模式需要两个分析模型，共约 133MB，不随应用附带 —— 勾选后从 CDN 下载到本机。随时可以在「播放控制」里改。",
     "analysisModelsEnable": "下载并启用",

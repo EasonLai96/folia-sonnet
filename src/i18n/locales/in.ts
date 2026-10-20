@@ -2003,6 +2003,8 @@ export default {
     "analysisModelOff": "Tidak diaktifkan",
     "analysisModelFailed": "Unduhan gagal",
     "analysisModelRetry": "Coba lagi",
+    "analysisModelDownload": "Unduh",
+    "analysisModelDelete": "Hapus",
     "analysisModelsTitle": "Aktifkan model analisis?",
     "analysisModelsDesc": "automix dan 智能动感模式 memerlukan dua model analisis, total sekitar 133MB. Model tidak disertakan dalam aplikasi - centang yang diinginkan dan akan diunduh dari CDN ke perangkat ini. Anda dapat mengubahnya di 播放控制 kapan saja.",
     "analysisModelsEnable": "Unduh dan aktifkan",

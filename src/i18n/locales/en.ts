@@ -2003,6 +2003,8 @@ export default {
     "analysisModelOff": "Not enabled",
     "analysisModelFailed": "Download failed",
     "analysisModelRetry": "Try again",
+    "analysisModelDownload": "Download",
+    "analysisModelDelete": "Delete",
     "analysisModelsTitle": "Enable the analysis models?",
     "analysisModelsDesc": "automix and 智能动感模式 need two analysis models, about 133MB in total. They are not bundled with the app - tick the ones you want and they are downloaded from the CDN to this device. You can change this in 播放控制 at any time.",
     "analysisModelsEnable": "Download and enable",
