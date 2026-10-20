@@ -75,11 +75,9 @@ const GeneralPage: React.FC = () => {
                 <Row option={O.autoJumpToVisualizer} note={t('options.autoJumpToVisualizerOnLaunchDesc')}>
                     <Toggle checked={autoJumpToVisualizer} onChange={setAutoJumpToVisualizer} />
                 </Row>
-                {isElectron && (
-                    <Row option={O.openPlayer} note={t('options.openPlayerOnLaunchDesc')}>
-                        <Toggle checked={openPlayerOnLaunch} onChange={onToggleOpenPlayerOnLaunch} />
-                    </Row>
-                )}
+                <Row option={O.openPlayer} note={t('options.openPlayerOnLaunchDesc')}>
+                    <Toggle checked={openPlayerOnLaunch} onChange={onToggleOpenPlayerOnLaunch} />
+                </Row>
                 <Row option={O.titlebarButtons} hint={t('options.alwaysShowMainWindowTitlebarDesc')}>
                     <Toggle checked={titlebarButtons} onChange={setTitlebarButtons} />
                 </Row>

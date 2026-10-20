@@ -37,7 +37,15 @@ export const O = {
      * 消失 —— store 与恢复播放那条路都还在，所以只要把行放回启动这一组就行。
      */
     autoJumpToVisualizer: option(LAUNCH, 'autoJumpToVisualizerOnLaunch', 'options.autoJumpToVisualizerOnLaunch'),
-    openPlayer: option(LAUNCH, 'openPlayerOnLaunch', 'options.openPlayerOnLaunch', { electronOnly: true }),
+    /*
+     * 启动后直接进入播放界面。
+     *
+     * 上游把它挂在「桌面」那一页，后来搬进启动组时把 `electronOnly` 一起带了过来 —— 于是安卓
+     * 上整行不画。可这一项跟平台没有关系：开关只写 `open_player_on_launch` 这一个 localStorage
+     * 键，启动时 `useAppNavigation` 的 `getStartupView()` 直接读同一个键（也不判平台），
+     * 它跟随的「播放后进入的视图」在安卓上同样有入口。所以这里只去掉标记，别的不动。
+     */
+    openPlayer: option(LAUNCH, 'openPlayerOnLaunch', 'options.openPlayerOnLaunch'),
     titlebarButtons: option(LAUNCH, 'alwaysShowMainWindowTitlebar', 'options.alwaysShowMainWindowTitlebar'),
     updateCheck: option(UPDATE, 'enableUpdateCheck', 'options.enableUpdateCheck'),
     autoUpdate: option(UPDATE, 'enableAutoUpdate', 'options.enableAutoUpdate'),
