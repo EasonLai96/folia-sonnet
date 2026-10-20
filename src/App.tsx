@@ -31,6 +31,7 @@ import { UserGuideModal } from './components/modal/UserGuideModal';
 import ReleaseNotesDialog from './components/modal/ReleaseNotesDialog';
 import FreeSoftwareNoticeModal from './components/modal/FreeSoftwareNoticeModal';
 import LegacyModelsPrompt from './components/modal/LegacyModelsPrompt';
+import AnalysisModelsPrompt from './components/modal/AnalysisModelsPrompt';
 import { PlaybackEntryViewPrompt } from './components/modal/playback-entry-view/PlaybackEntryViewPrompt';
 import { LatticeFmNotice } from './components/modal/playback-entry-view/LatticeFmNotice';
 import AppUpdatePromptDialog from './components/modal/AppUpdatePromptDialog';
@@ -3171,6 +3172,9 @@ export default function App() {
 
             {/* 旧版 automix 模型留在用户自选目录里时，问一次要不要删；没有就什么都不画。 */}
             <LegacyModelsPrompt isDaylight={isDaylight} />
+
+            {/* 分析模型不随包：启动后问一次要不要从 CDN 取。桌面版随包带着的那份还在时不会问。 */}
+            <AnalysisModelsPrompt isDaylight={isDaylight} />
 
             {/* 思索教程。常驻的只有悬停探测和提示胶囊；教程层自己走 React.lazy，
                 animejs 不进 bootstrap chunk。 */}

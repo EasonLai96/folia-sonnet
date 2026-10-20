@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC } from '../../../../services/automix/crossfadePlanner';
 import { modelsPresent, subscribeModelAvailability } from '../../../../services/analysis/modelAvailability';
+import { modelStoreSnapshot, subscribeModelStore, type DownloadableModel } from '../../../../services/analysis/modelStore';
 import { transitionCapabilities } from '../../../../services/automix/stems';
 import { announceTransition, type TransitionRenderer } from '../../../../services/automix/transitionCue';
 import { canAnalyseTracks } from '../../../../services/automix/transitionStrategy';
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
+import { useAnalysisModelStore } from '../../../../stores/useAnalysisModelStore';
 import { useAutomixSettingsStore } from '../../../../stores/useAutomixSettingsStore';
 import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
 import { isCapacitorAndroid } from '../../../../platform/runtime';
@@ -23,6 +25,13 @@ import { useSettingsPage } from './settingsPageContext';
 const TRANSITION: SettingsGroupDef = { id: 'transitionSettings', titleKey: 'options.transitionSettings' };
 const SOUND: SettingsGroupDef = { id: 'audioOutputSettings', titleKey: 'options.settingsHeadingSound' };
 const BEHAVIOR: SettingsGroupDef = { id: 'queueSettings', titleKey: 'options.settingsHeadingPlaybackBehavior' };
+/*
+ * 分析模型：不随包，从 CDN 取，所以这里既是开关也是它唯一的可见状态。
+ *
+ * 两个模型各服务两处（beat_this：automix 的节拍网格 + 智能动感模式的节拍；htdemucs：automix 的
+ * 分轨 + 智能动感模式的鼓点），所以分开给开关 —— 41MB 的节拍不是 92MB 的分轨那种请求。
+ */
+const MODELS: SettingsGroupDef = { id: 'analysisModels', titleKey: 'options.analysisModels' };
 
 const O = {
     transition: option(TRANSITION, 'transitionEnable', 'options.transitionEnable'),
@@ -48,6 +57,8 @@ const O = {
     autoSkipUnplayable: option(BEHAVIOR, 'autoSkipUnplayable', 'options.autoSkipUnplayable'),
     preventSleep: option(BEHAVIOR, 'preventDisplaySleepDuringPlayback', 'options.preventDisplaySleepDuringPlayback', { electronOnly: true }),
     voiceInputPause: option(BEHAVIOR, 'voiceInputPause', 'options.voiceInputPause', { electronOnly: true, available: () => runsOnWindows() }),
+    modelBeatThis: option(MODELS, 'analysisModelBeatThis', 'options.analysisModelBeatThis', { noteKey: 'options.analysisModelBeatThisDesc' }),
+    modelHtdemucs: option(MODELS, 'analysisModelHtdemucs', 'options.analysisModelHtdemucs', { noteKey: 'options.analysisModelHtdemucsDesc' }),
 };
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
@@ -59,6 +70,39 @@ export const OPTIONS: SettingsOptionDef[] = Object.values(O);
 const previewCue = (renderer: TransitionRenderer) => (
     { seconds: 10, crossover: 0.55, periodSec: 0.5, preview: renderer } as const
 );
+
+/**
+ * One model's row: the switch is the listener's wish, and the words under it are what is actually
+ * there - modelStore's answer, read live rather than kept, because a download is still moving while
+ * this page is open.
+ */
+const AnalysisModelRow: React.FC<{ def: SettingsOptionDef; name: DownloadableModel }> = ({ def, name }) => {
+    const { t } = useTranslation();
+    const wanted = useAnalysisModelStore(state => state[name]);
+    const setWanted = useAnalysisModelStore(state => state.handleSetModelWanted);
+    const entry = React.useSyncExternalStore(subscribeModelStore, modelStoreSnapshot)[name];
+
+    const hint = entry.phase === 'ready'
+        ? t('options.analysisModelReady')
+        : entry.phase === 'downloading'
+            ? t('options.analysisModelDownloading', { percent: Math.round(entry.progress * 100) })
+            : entry.phase === 'error'
+                ? entry.error ?? t('options.analysisModelFailed')
+                : entry.phase === 'checking'
+                    ? t('options.analysisModelChecking')
+                    : t('options.analysisModelOff');
+
+    return (
+        <Row option={def} hint={hint}>
+            <Toggle checked={wanted} onChange={next => setWanted(name, next)} />
+            {/* A failed download is the one state the switch cannot fix by being switched: it is already
+                on, and the row has to offer another go rather than sit there saying it failed. */}
+            {entry.phase === 'error' && (
+                <Button variant="quiet" onClick={() => setWanted(name, true)}>{t('options.analysisModelRetry')}</Button>
+            )}
+        </Row>
+    );
+};
 
 const PlaybackPage: React.FC = () => {
     const { t } = useTranslation();
@@ -252,6 +296,11 @@ const PlaybackPage: React.FC = () => {
                         <Toggle checked={voiceInputPause.enabled} onChange={voiceInputPause.onToggle} />
                     </Row>
                 )}
+            </Group>
+
+            <Group def={MODELS} foot={t('options.analysisModelsFoot')}>
+                <AnalysisModelRow def={O.modelBeatThis} name="beat_this" />
+                <AnalysisModelRow def={O.modelHtdemucs} name="htdemucs" />
             </Group>
         </>
     );
