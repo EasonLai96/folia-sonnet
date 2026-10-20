@@ -122,6 +122,9 @@ public class FoliaPlaybackService extends android.app.Service {
     private boolean playConfirmPending = false;
     /** 那次乐观播放切的那一刻的位置：冻回去要落在这儿，不能落在已经被推出去的地方。 */
     private long playConfirmAnchorMs = 0L;
+    /** 一次「按下播放」最多补发几次。补发不是死循环：试过一次还起不来就不再打扰 Web 层。 */
+    private static final int MAX_PLAY_NUDGES = 1;
+    private int playNudges = 0;
     private final Runnable playConfirmCheck = new Runnable() {
         @Override
         public void run() {
@@ -132,6 +135,28 @@ public class FoliaPlaybackService extends android.app.Service {
             top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(playConfirmAnchorMs, false);
             top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
                     .shared(FoliaPlaybackService.this).invalidateOverlay();
+            /*
+             * 补发一次播放命令。
+             *
+             * 这段时间里 Web 层一个字都没回，多半是**卡在某个 await 上**而不是「播不了」：
+             * 最典型的是长时间暂停之后那条「在线地址过期、重新取一次」的网络往返 ——
+             * 后台里它可以一直不落地，于是整条 resume 停在那儿，用户看到的就是
+             * 「按了播放没反应，打开应用才瞬间恢复」。
+             *
+             * 补发为什么有用：第二次 resume 会撞上 `recoverOnlinePlaybackSource` 自己的去重
+             * （同一个 failedSrc 已经登记过就直接返回），于是它跳过这一步、直接
+             * `audio.play()` 现有地址 —— 多数情况下声音这就出来了。
+             *
+             * 为什么必须是原生计时器而不是 JS 的 setTimeout：这个应用退到后台后 JS 定时器
+             * 会被系统挂起（壁纸歌词正是因此才改成「锚点 + 墙钟」），JS 那边根本没有
+             * 可靠的钟可用；而桥本身是通的 —— 命令就是这么送过去的。
+             */
+            if (playNudges < MAX_PLAY_NUDGES) {
+                playNudges++;
+                Log.w(TAG, "Play command never took effect; nudging the web layer ("
+                        + playNudges + "/" + MAX_PLAY_NUDGES + ")");
+                sendCommand("play");
+            }
         }
     };
 
@@ -192,6 +217,8 @@ public class FoliaPlaybackService extends android.app.Service {
                  */
                 playConfirmAnchorMs = clampedAnchorPosition();
                 playConfirmPending = true;
+                // 这是用户新按下的一次播放：允许再补发一次。
+                playNudges = 0;
                 mainHandler.removeCallbacks(playConfirmCheck);
                 mainHandler.postDelayed(playConfirmCheck, PLAY_CONFIRM_GRACE_MS);
                 syncWallpaperAnchor(true);
@@ -200,8 +227,9 @@ public class FoliaPlaybackService extends android.app.Service {
             @Override
             public void onPause() {
                 sendCommand("pause");
-                // 暂停按下就撤回那次乐观播放的确认：方向相反，不需要再等。
+                // 暂停按下就撤回那次乐观播放的确认：方向相反，不需要再等，也不会再补发。
                 playConfirmPending = false;
+                playNudges = 0;
                 mainHandler.removeCallbacks(playConfirmCheck);
                 // 同上，方向相反：不在这里冻结，壁纸会按 playing=true 一路外推到时间轴
                 // 尽头，那一句歌词就永远停在那儿 —— 这时候再点播放也回不来了，
@@ -713,6 +741,8 @@ public class FoliaPlaybackService extends android.app.Service {
          */
         boolean wasOptimisticPlay = playConfirmPending;
         playConfirmPending = false;
+        // Web 层回过话，补发额度也就还回去了：下一次用户真的按下播放才再用。
+        playNudges = 0;
         mainHandler.removeCallbacks(playConfirmCheck);
         if (wasOptimisticPlay && !playing) {
             long freezeAt = intent.hasExtra(EXTRA_POSITION) ? positionMs : playConfirmAnchorMs;

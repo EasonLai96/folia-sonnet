@@ -136,18 +136,39 @@ export function usePlaybackTransportController({
         const shouldAutoplay = () => wantsPlayback.current && isSameSource();
 
         setupAudioAnalyzer();
+        // 后台和前台能做的事不一样：下面两处都要看它（换地址、等 ctx.resume）。
+        const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
         /*
-         * 上下文被挂起就要 resume，但**不能死等**。
+         * 上下文被挂起就要 resume，但**在后台不能等它**。
          *
-         * 应用退到后台很久之后再点播放（通知栏 / 锁屏 / 眼镜上的键），这个 Promise 有可能
-         * 一直不落地。原来直接 await 它，整条播放就卡在这一行：没有声音，状态机也没动，
-         * 而原生那边已经被 onPlay 切成在播 —— 状态栏、叠层的歌词照走。
-         * 等回到前台，那句 await 才终于落地，于是「打开应用瞬间恢复」。
+         * 这个 Promise 不保证推进（与 `audioWorklet.addModule()` 落在 suspended 的 context 上
+         * 是同一类问题）：原来直接 await 它，整条 resume 就卡在这一行 —— 没有声音、
+         * 状态机也没动，而原生那边已经在 onPlay 里把歌词锚点切成在播了。
          *
-         * 现在最多等 AUDIO_CONTEXT_RESUME_GRACE_MS，然后按上下文的真实状态决定。
+         * ⚠️ 也不能用 `Promise.race(resume, setTimeout)` 去给它限时：**这个应用退到后台后
+         * JS 定时器会被系统挂起**（壁纸歌词正是因为这一点才改成「本地锚点 + 墙钟」，见
+         * `FoliaPlaybackService.onPlay` 那条注释）。后台里那个计时器自己也不会按时跑，
+         * 于是 race 变成换个地方继续卡 —— 和原来一样，只是更难看出是卡在哪。
+         *
+         * 所以：前台可以等（计时器正常）；后台只发起、不等待，并按**此刻的真实状态**决定。
          */
         const context = audioContextRef.current;
         if (context && context.state === 'suspended') {
+            if (isHidden) {
+                // 不等：后台里它落地与否都不该拦住这次 resume。
+                void context.resume().catch(() => undefined);
+                /*
+                 * 上下文还挂着，那播了也没声 —— 元素接的是 `createMediaElementSource`，
+                 * 输出整条都走这张音频图，图不跑就是静音（见 services/automix/crossfadeGraph）。
+                 * 这时候硬播只会是「有进度没声音」：状态机显示 PLAYING、歌词也在走，
+                 * 可一点声音都没有。所以先留在暂停（原生那边等不到 playing 会把歌词冻回去），
+                 * 回到前台再补一次（见文件末尾的 visibilitychange）。
+                 */
+                console.warn('[Transport] resume held back: the audio context is suspended while hidden');
+                pendingForegroundResumeRef.current = true;
+                setPlayerState(PlayerState.PAUSED);
+                return;
+            }
             try {
                 await Promise.race([
                     context.resume(),
@@ -156,25 +177,9 @@ export function usePlaybackTransportController({
                     }),
                 ]);
             } catch {
-                // resume 被拒（页面被系统挂起、音频焦点被别的应用拿走）不是「不能播」的理由：
-                // 元素本身照样能跑。到底播不播，下面按上下文的真实状态判断。
+                // resume 被拒（音频焦点在别的应用手上）不是「不能播」的理由：下面照旧试。
             }
             if (!isCurrent()) return;
-            /*
-             * 还是 suspended、而且现在在后台：这时候硬播只会是「有进度没声音」——
-             * 元素在走，输出走的是那张挂起的音频图。宁可先不播（状态留在暂停，
-             * 原生那边等不到 playing 会把歌词冻回去），回到前台再拉一次（见文件末尾的
-             * visibilitychange）：用户在后台按的那一下不该变成一场假播放。
-             */
-            if (
-                context.state === 'suspended'
-                && typeof document !== 'undefined'
-                && document.visibilityState === 'hidden'
-            ) {
-                pendingForegroundResumeRef.current = true;
-                setPlayerState(PlayerState.PAUSED);
-                return;
-            }
         }
         if (!isCurrent()) return;
 
@@ -182,7 +187,21 @@ export function usePlaybackTransportController({
         // A failed refresh of an address that ran out still falls back to the old one below, as before.
         // Its reason is kept so that, should that play fail too, the message names it.
         let refreshFailure: OnlineFailure | undefined;
-        if (shouldRefreshCurrentOnlineAudioSource()) {
+        /*
+         * 「在线地址过期」要不要先换再播，看是不是在后台。
+         *
+         * 这是**长时间暂停之后按播放**特有的那一步：`ONLINE_AUDIO_URL_TTL_MS` 一过
+         * （20 分钟，见 App.tsx），resume 就得先联网换一次地址才播。而这一步在后台是
+         * 一次没有上限的等待 —— 网络慢、或者它走的那条原生桥被占住时，整条 resume
+         * 就停在这儿，用户看到的就是「按了播放没反应，打开应用才瞬间恢复」。
+         *
+         * 后台：直接拿现有地址播。多数平台的地址实际能撑得比 20 分钟久，就算不行，
+         * play() 会失败，下面那个 catch 本来就会换一次地址再试 —— 那一步在前台也躲不掉，
+         * 但在后台「先出声」远比「先保证地址新鲜」重要（而且 JS 这边根本没有一个
+         * 可靠的钟可以给那次联网限时，见上面 ctx.resume 那条注释）。
+         * 前台：照旧先换地址，免得播到一半才发现地址失效。
+         */
+        if (!isHidden && shouldRefreshCurrentOnlineAudioSource()) {
             const refreshed = await recoverOnlinePlaybackSource({
                 failedSrc: audio.currentSrc || audioSrc,
                 resumeAt: audio.currentTime,
