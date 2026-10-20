@@ -84,8 +84,24 @@ describe('highlightWordsPresent', () => {
 
   /* LRC 里多一个空格不该判成「这不是同一个词」。 */
   it('ignores whitespace and case', () => {
-    expect(highlightWordsPresent(['小 黄 花'], '故事的小黄花')).toBe(true);
-    expect(highlightWordsPresent(['Rainbow'], 'some RAINBOW here')).toBe(true);
+    expect(highlightWordsPresent(['小 黄 花', '故事'], '故事的小黄花')).toBe(true);
+    expect(highlightWordsPresent(['Rainbow', 'here'], 'some RAINBOW here')).toBe(true);
+  });
+
+  /*
+   * 一个词定不了「这是照着这首歌做的答案」：一个常见的词几乎在任何一首歌里都在，
+   * 命中它等于没判 —— 歌名相同的近亲里随便一条都能过（用户：「一个高亮词语都可以
+   * 匹配」）。至少两个词，且 80% 以上都在这一段歌词里。
+   */
+  it('needs at least two words to go on', () => {
+    expect(highlightWordsPresent(['小黄花'], lyric)).toBe(false);
+    expect(highlightWordsPresent(['故事'], '故事的小黄花')).toBe(false);
+  });
+
+  /* 五个词里差一个：80%，正好放行。差两个（60%）就是「差得不止一点」了。 */
+  it('lets a word go missing once there are enough of them', () => {
+    expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千', '不在歌词里'], lyric)).toBe(true);
+    expect(highlightWordsPresent(['故事', '小黄花', '童年', '不在', '也不在'], lyric)).toBe(false);
   });
 
   it('is not satisfied when a word is missing', () => {
@@ -225,8 +241,9 @@ describe('pullAiCloudCache 的第二次机会', () => {
         return json({
           ok: true,
           candidates: [
-            { key: KEY_A, words: ['小黄花'] },
-            { key: KEY_H, words: ['荡秋千'] },
+            // 每条至少两个词：一个词定不了「这是照着这首歌做的答案」，见 highlightWordsPresent。
+            { key: KEY_A, words: ['小黄花', '故事'] },
+            { key: KEY_H, words: ['荡秋千', '童年'] },
           ],
         });
       }

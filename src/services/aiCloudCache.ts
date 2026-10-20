@@ -236,15 +236,20 @@ export const highlightWordsCoverage = (words: readonly string[], lyricText: stri
  * 覆盖率会掉得很低，这一层照样拦得住。
  */
 const HIGHLIGHT_WORD_COVERAGE_MIN = 0.8;
-/** 词太少时不按比例放行：两个词里少一个就是 50%，那已经不是「差一点」。 */
-const HIGHLIGHT_WORD_COVERAGE_MIN_WORDS = 3;
+/**
+ * 少于两个词就不算证据。
+ *
+ * 以前 `coverage >= 1` 直接放行，于是模型只挑了一个词的那条答案「命中即合规」——
+ * 而一个常见的词（爱 / 夜 / 心）几乎在任何一首歌里都在，这一层等于没判：歌名相同的
+ * 十几条近亲里随便哪一条都能过，拉回来的是**照着别一首歌挑的高亮词**，于是歌词上该
+ * 亮的一个都亮不起来（用户报「歌曲墙上一个 AI 高亮都没有」，而逐词判定的播放页还能
+ * 靠字面交叠误亮几个）。现在一律按 80% 判，一个词定不了「这是这首的答案」。
+ */
+const HIGHLIGHT_WORD_MIN_EVIDENCE = 2;
 
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
-    const coverage = highlightWordsCoverage(words, lyricText);
-    if (coverage >= 1) return true;
-    if (coverage <= 0) return false;   // 一个都没有：没有任何证据说明它属于这首歌。
-    return words.length >= HIGHLIGHT_WORD_COVERAGE_MIN_WORDS
-        && coverage >= HIGHLIGHT_WORD_COVERAGE_MIN;
+    if (words.length < HIGHLIGHT_WORD_MIN_EVIDENCE) return false;
+    return highlightWordsCoverage(words, lyricText) >= HIGHLIGHT_WORD_COVERAGE_MIN;
 };
 
 /**
