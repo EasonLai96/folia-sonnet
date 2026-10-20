@@ -1590,6 +1590,7 @@ export default {
     "allProviders": "All",
     "allProvidersDetail": "{{count}} providers",
     "allProvidersAction": "Show playlists from every provider",
+    "allProvidersActive": "On — tap again for the current provider only",
     "loadingQr": "Loading QR...",
     "scanQr": "Please scan the QR code",
     "qrExpired": "QR Code expired. Refresh to try again.",

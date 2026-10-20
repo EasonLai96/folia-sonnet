@@ -1,7 +1,13 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search } from 'lucide-react';
+import { Layers, Search } from 'lucide-react';
 import type { OnlineProviderId, ProviderAccountSummary } from '../../../types/onlineMusic';
+import { countMergeableProviders } from '../../../library/core/collection/onlineProviderScope';
+import {
+    ALL_PROVIDERS_ID,
+    selectIsAllProvidersScope,
+    useLibraryOnlineProviderScopeStore,
+} from '../../../library/core/directory/useLibraryOnlineProviderScopeStore';
 import { Tooltip } from '../../modal/settings/kit';
 import { AccountPicture, PlatformMark, platformMarkOf } from '../PlatformMark';
 import { rowStatus, type RowStatus } from '../platformRows';
@@ -12,6 +18,9 @@ import { filterRows } from './loginView';
 // 选中的行左边有一道平台的颜色。一块高亮跟着指针和方向键在行
 // 之间滑。点一行或者在高亮的行上按回车才是选中；方向键只移动高亮，不开始登录。够不着的平台是灰的，
 // 不能选，悬停时说原因。从 12 个平台起上面有搜索框。窗口窄的时候它横在窗口上面，成一排。
+//
+// 最上面还有一行「全部」：它不是一家平台，是首页在线那一屏「看谁的数据」的范围（合起来看各家已登录平台
+// 的歌单），两家以上真有歌单可合时才出现；再点一次回到「跟着当前平台」。点它不开始任何登录。
 
 /** 从这么多个平台起有搜索框。 */
 const SEARCH_FROM = 12;
@@ -61,28 +70,49 @@ type PlatformColumnProps = {
     rows: ProviderAccountSummary[];
     chosenId: OnlineProviderId | null;
     onChoose: (provider: ProviderAccountSummary) => void;
+    /**
+     * 点了最上面那一行「全部」之后要做的事（范围已经切好了，这里通常只是关窗 —— 好去看合并后的首页）。
+     * 不给就不画这一行。
+     */
+    onAllProvidersChosen?: () => void;
     /** 'row'：横着一排，左右滚。 */
     lie: 'column' | 'row';
 };
 
-export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, onChoose, lie }) => {
+export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, onChoose, onAllProvidersChosen, lie }) => {
     const { t } = useTranslation();
     const [query, setQuery] = useState('');
     const shown = rows.length >= SEARCH_FROM ? filterRows(rows, query) : rows;
+    /*
+     * 最上面那一行「全部」：给了回调才画，而且要有两家以上真有歌单可合 —— 只有一家时
+     * 它与直接选那一家没有区别，多一行只是多一处要认的地方。
+     */
+    const mergeableCount = countMergeableProviders(rows);
+    const showAll = Boolean(onAllProvidersChosen) && mergeableCount >= 2;
+    const allScope = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
+    const setScope = useLibraryOnlineProviderScopeStore(state => state.selectScope);
     // 高亮在哪一行：指针或方向键指着的；都没有指着就是选中的那一行。
-    const [pointed, setPointed] = useState<OnlineProviderId | null>(null);
-    const lit = shown.find(row => row.providerId === pointed) ?? shown.find(row => row.providerId === chosenId) ?? null;
+    const [pointed, setPointed] = useState<string | null>(null);
+    const pointedRow = pointed ? shown.find(row => row.providerId === pointed) ?? null : null;
+    /*
+     * 指针没有指着别处、而「全部」正开着：高亮落在它那一行上。选中的那一行仍然是当前平台
+     * （它左边那道颜色还留在那儿）—— 这两件事不是一回事：一个是「登录着谁」，一个是「首页看谁的数据」。
+     */
+    const litAll = showAll && (pointed === ALL_PROVIDERS_ID || (pointed === null && allScope));
+    const lit = pointedRow ?? (litAll ? null : shown.find(row => row.providerId === chosenId) ?? null);
+    /** 高亮这一块此刻量哪一行（「全部」也占一行的 id，好让 rowOf 一样找得到它）。 */
+    const highlightId = lit?.providerId ?? (litAll ? ALL_PROVIDERS_ID : null);
     const listRef = useRef<HTMLDivElement>(null);
     const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     // 列表的哪一头后面还有行：那一头淡出。
     const [more, setMore] = useState({ before: false, after: false });
-    const rowOf = (providerId: OnlineProviderId | null | undefined) => (
-        providerId ? listRef.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(providerId)}"]`) ?? null : null
+    const rowOf = (id: string | null | undefined) => (
+        id ? listRef.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null : null
     );
 
     // 高亮那一块的位置和大小，每次画完从它所在的行量一遍（行的宽度跟着名字、头像和语言变）；数没变就不动。
     useLayoutEffect(() => {
-        const row = rowOf(lit?.providerId);
+        const row = rowOf(highlightId);
         const next = row ? { x: row.offsetLeft, y: row.offsetTop, w: row.offsetWidth, h: row.offsetHeight } : null;
         setBox(current => (current?.x === next?.x && current?.y === next?.y && current?.w === next?.w && current?.h === next?.h ? current : next));
     });
@@ -107,7 +137,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
         const observer = new ResizeObserver(readMore);
         observer.observe(list);
         return () => observer.disconnect();
-    }, [shown.length, lie]);
+    }, [shown.length, showAll, lie]);
 
     // 横着的那一排：竖着滚的滚轮也让它左右走（它没有滚动条）。已经到了那一头就不拦：滚轮照常去滚窗口里的内容。
     useEffect(() => {
@@ -125,30 +155,45 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
     }, [lie]);
 
     const canChoose = (row: ProviderAccountSummary) => rowStatus(row) !== 'off';
+    /** 点了「全部」：切这个范围（再点一次回到「跟着当前平台」），再让外面把窗口收了去看合并后的首页。 */
+    const chooseAll = () => {
+        setScope(allScope ? null : ALL_PROVIDERS_ID);
+        onAllProvidersChosen?.();
+    };
     const handleKeyDown = (event: React.KeyboardEvent) => {
         // 搜索框里左右键、Home、End 和空格是打字用的，不是移动高亮。
         const inField = event.target instanceof HTMLInputElement;
-        const choosable = shown.filter(canChoose);
-        const at = lit ? choosable.findIndex(row => row.providerId === lit.providerId) : -1;
+        // 键盘能到的行：「全部」在最前面，然后是不能选的行以外的平台。
+        const reachable = [
+            ...(showAll ? [ALL_PROVIDERS_ID] : []),
+            ...shown.filter(canChoose).map(row => row.providerId),
+        ];
+        const at = highlightId ? reachable.indexOf(highlightId) : -1;
         const to = event.key === 'ArrowDown' || (!inField && event.key === 'ArrowRight') ? at + 1
             : event.key === 'ArrowUp' || (!inField && event.key === 'ArrowLeft') ? at - 1
-                : inField ? null : event.key === 'Home' ? 0 : event.key === 'End' ? choosable.length - 1 : null;
+                : inField ? null : event.key === 'Home' ? 0 : event.key === 'End' ? reachable.length - 1 : null;
         if (to !== null) {
-            const next = choosable[Math.max(0, Math.min(choosable.length - 1, to))];
+            const next = reachable[Math.max(0, Math.min(reachable.length - 1, to))];
             if (next) {
-                setPointed(next.providerId);
+                setPointed(next);
                 // 键盘移过去的行要看得见。
-                rowOf(next.providerId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                rowOf(next)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
             }
             event.preventDefault();
         } else if (event.key === 'Enter' || (!inField && event.key === ' ')) {
-            const target = lit ?? shown.find(canChoose);
-            if (target && canChoose(target)) onChoose(target);
+            const target = reachable[Math.max(0, at)];
+            if (target === ALL_PROVIDERS_ID) chooseAll();
+            else {
+                const row = shown.find(item => item.providerId === target);
+                if (row && canChoose(row)) onChoose(row);
+            }
             event.preventDefault();
         }
     };
 
     const fade = (more.before || more.after) ? `linear-gradient(${lie === 'column' ? 'to bottom' : 'to right'}, ${more.before ? 'transparent, #000 30px' : '#000'}, ${more.after ? '#000 calc(100% - 30px), transparent' : '#000'})` : undefined;
+    /** 竖着那一列里的一行：横着那一排的行是另一个样子（矮、不换行）。 */
+    const tall = lie === 'column';
     const stateText = (row: ProviderAccountSummary, status: ReturnType<typeof rowStatus>): string | null => (
         status === 'signed-in' ? t('login.rowSignedIn')
             : status === 'ran-out' ? t('login.rowRanOut')
@@ -176,7 +221,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                 role="listbox"
                 tabIndex={0}
                 aria-label={t('home.onlineProvider')}
-                aria-activedescendant={lit ? `login-row-${lit.providerId}` : undefined}
+                aria-activedescendant={highlightId ? `login-row-${highlightId}` : undefined}
                 onKeyDown={handleKeyDown}
                 onScroll={readMore}
                 onMouseLeave={() => setPointed(null)}
@@ -188,13 +233,50 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                     className="st-t-move pointer-events-none absolute left-0 top-0 rounded-lg bg-[var(--st-fill2)] transition-[transform,width,opacity]"
                     style={box ? { width: box.w, height: box.h, transform: `translate(${box.x}px, ${box.y}px)`, opacity: 1 } : { opacity: 0 }}
                 />
+                {showAll && (
+                    <div
+                        id={`login-row-${ALL_PROVIDERS_ID}`}
+                        data-row={ALL_PROVIDERS_ID}
+                        role="option"
+                        aria-selected={allScope}
+                        aria-label={t('home.allProviders')}
+                        onMouseEnter={() => setPointed(ALL_PROVIDERS_ID)}
+                        onClick={chooseAll}
+                        className={`st-t-fast relative flex cursor-pointer items-center rounded-lg transition-colors ${tall ? `${ROW_SIZE} w-full gap-3 px-2.5` : 'h-9 max-w-[168px] shrink-0 gap-2.5 px-2'} ${allScope || pointed === ALL_PROVIDERS_ID ? 'text-[color:var(--st-t1)]' : 'text-[color:var(--st-t2)]'}`}
+                    >
+                        {/* 开着的时候左边这一道和平台那一行那道一个意思：此刻在看的就是它。 */}
+                        {tall && (
+                            <i
+                                aria-hidden
+                                className={`st-t-fast absolute left-0 top-1/2 h-[38%] w-[3px] -translate-y-1/2 rounded-full transition-opacity ${allScope ? 'opacity-100' : 'opacity-0'}`}
+                                style={{ background: 'var(--st-t2)' }}
+                            />
+                        )}
+                        <span
+                            aria-hidden
+                            className="inline-grid shrink-0 place-items-center rounded-full bg-[var(--st-fill2)] text-[color:var(--st-t1)]"
+                            style={{ width: tall ? 30 : 22, height: tall ? 30 : 22 }}
+                        >
+                            <Layers size={tall ? 16 : 14} />
+                        </span>
+                        {tall ? (
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <span className="truncate text-[13px] font-medium leading-[18px]">{t('home.allProviders')}</span>
+                                <span className="truncate text-[11.5px] leading-4 text-[color:var(--st-t3)]">
+                                    {allScope ? t('home.allProvidersActive') : t('home.allProvidersDetail', { count: mergeableCount })}
+                                </span>
+                            </span>
+                        ) : (
+                            <span className="min-w-0 flex-1 truncate text-[13px]">{t('home.allProviders')}</span>
+                        )}
+                    </div>
+                )}
                 {shown.map(row => {
                     const status = rowStatus(row);
                     const state = stateText(row, status);
                     const name = row.shortName || row.displayName;
                     const chosen = row.providerId === chosenId;
                     const bright = chosen || row.providerId === lit?.providerId;
-                    const tall = lie === 'column';
                     const item = (
                         <div
                             id={`login-row-${row.providerId}`}

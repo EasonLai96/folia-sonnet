@@ -111,6 +111,8 @@ const LoginHost: React.FC<LoginHostProps> = ({ account }) => {
             chosen={chosen}
             login={shownLogin}
             onChoose={host.choose}
+            // 列最上面那一行「全部」：范围由那一列自己切（见 window/PlatformColumn），这里只负责收窗 —— 好去看合并后的首页。
+            onAllProvidersChosen={closeLoginWindow}
             onStart={() => void account.retryLogin()}
             onSelectMethod={methodId => void account.selectLoginMethod(methodId)}
             onReopenBrowser={() => void account.openLoginPage()}

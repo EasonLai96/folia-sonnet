@@ -1590,6 +1590,7 @@ export default {
     "allProviders": "Semua",
     "allProvidersDetail": "{{count}} penyedia",
     "allProvidersAction": "Tampilkan playlist dari semua penyedia",
+    "allProvidersActive": "Aktif — ketuk lagi untuk satu penyedia saja",
     "loadingQr": "Memuat QR...",
     "scanQr": "Silakan pindai kode QR",
     "qrExpired": "Kode QR kedaluwarsa. Muat ulang untuk mencoba lagi.",

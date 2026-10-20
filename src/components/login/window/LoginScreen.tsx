@@ -37,6 +37,8 @@ export type LoginScreenProps = {
     /** 选中的这一行的登录（账户 controller 快照里的登录会话）；不在登录、或者还没开始时为 null。 */
     login: LibraryLoginSessionSnapshot | null;
     onChoose: (providerId: OnlineProviderId) => void;
+    /** 平台那一列最上面「全部」那一行：点了切首页在线那一屏的数据范围，之后由 host 收窗。 */
+    onAllProvidersChosen?: () => void;
     /** 开始（浏览器登录的那一下），或者重来，保留选过的登录方式。 */
     onStart: () => void;
     /** 用这种登录方式开始（任何时候都可以换）。 */
@@ -76,7 +78,7 @@ const useReached = (at: number): boolean => {
 };
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
-    isOpen, onClose, rows, activeProviderId, chosen, login, onChoose, onStart, onSelectMethod, onReopenBrowser, onRestartService, onSwitch, onSignOut, onSubmitPassword,
+    isOpen, onClose, rows, activeProviderId, chosen, login, onChoose, onAllProvidersChosen, onStart, onSelectMethod, onReopenBrowser, onRestartService, onSwitch, onSignOut, onSubmitPassword,
     buildReport, origin, done = false, onDoneLeave = nothing, onDoneEnd = nothing,
 }) => {
     const { t } = useTranslation();
@@ -217,7 +219,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     left={narrow ? 24 : 292}
                 />
             )}
-            column={lie => <PlatformColumn rows={rows} chosenId={providerId} onChoose={row => onChoose(row.providerId)} lie={lie} />}
+            column={lie => <PlatformColumn rows={rows} chosenId={providerId} onChoose={row => onChoose(row.providerId)} onAllProvidersChosen={onAllProvidersChosen} lie={lie} />}
             tile={(
                 <LoginTile
                     tileRef={element => { doneParts.current.tile = element; }}

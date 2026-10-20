@@ -1591,6 +1591,7 @@ export default {
     "allProviders": "全部",
     "allProvidersDetail": "{{count}} 个平台",
     "allProvidersAction": "查看全部平台的歌单",
+    "allProvidersActive": "已开启 · 再点一次只看当前平台",
     "loadingQr": "加载二维码...",
     "scanQr": "请扫描二维码",
     "qrExpired": "二维码已过期，请刷新。",
