@@ -69,12 +69,30 @@ function cookieDomainForUrl(baseUrl) {
   return undefined;
 }
 
+/**
+ * cookie 的值只能是可见 ASCII（0x20–0x7E）。
+ *
+ * 之前昵称是原样写进去的：中文昵称会进到 `NickName` 与那个用 `&` 拼起来的整包值里，
+ * 而它落在整站共用的域上，于是这个域下**每一个**请求都带着它。原生侧把 cookie 库里的值
+ * 拼成 Cookie 头时逐个检查字符，遇到范围外的当场抛
+ * `Unexpected char 0x4e1c at 414 in Cookie value` —— 请求连发出去的机会都没有，
+ * 页面侧看到的就是登录第一步立刻失败、错误码还标成 `network`。
+ *
+ * 只把范围外的字符按 UTF-8 百分号编码：token、签名、`;` `=` `&` 这些分隔符一个字节都不动，
+ * 读回来的方向由 decodeKGCookieValue 那一路负责（它本来就在解码）。
+ */
+function encodeCookieValue(value) {
+  const text = String(value == null ? '' : value);
+  if (!/[^\x20-\x7E]/.test(text)) return text;
+  return text.replace(/[^\x20-\x7E]/g, (char) => encodeURIComponent(char));
+}
+
 function buildPersistentCookieSetOptions(baseUrl, name, value) {
   const domain = cookieDomainForUrl(baseUrl);
   return {
     url: baseUrl,
     name,
-    value,
+    value: encodeCookieValue(value),
     path: '/',
     secure: true,
     expirationDate: persistentCookieExpirationDate(),

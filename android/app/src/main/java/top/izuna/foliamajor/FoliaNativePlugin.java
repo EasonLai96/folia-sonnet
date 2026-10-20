@@ -639,6 +639,52 @@ public class FoliaNativePlugin extends Plugin {
         return null;
     }
 
+    private static final char[] HEADER_HEX = "0123456789ABCDEF".toCharArray();
+
+    /**
+     * 把请求头的值压回 HTTP 允许的范围（0x20–0x7E 的可见 ASCII）。
+     *
+     * OkHttp 建请求时会逐个检查头的值，范围外的字符直接抛
+     * `Unexpected char 0x4e1c at 414 in Cookie value` —— 真实踩到过：酷狗登录会把中文昵称
+     * 写进 `KuGoo` / `NickName` 这两个 cookie（`buildKuGooCookieValue` 原样拼进去），
+     * 之后 {@link #httpRequest} 每次都从 CookieManager 把它们带出去，于是**每一个**酷狗请求
+     * 在建头这一步就炸，连发出去的机会都没有。页面侧看到的就是登录第一步
+     * `operation=login_qr_key` 立刻失败、错误码还标成 `network`。
+     *
+     * 范围外的字符按 UTF-8 做百分号编码：本来就是 ASCII 的部分一个字节都不动，
+     * token、签名、分隔符（`;` `=` `&`）照旧，只有那些本就不该出现在头里的字符换个写法。
+     * 读回来的方向不用管 —— JS 的 `decodeKGCookieValue` 本来就做 `decodeURIComponent`。
+     *
+     * 只在这里（发送前）改、不写回 cookie 库：库里留原样，界面上显示昵称的那些路径
+     * 拿到的还是「东」而不是 `%E4%B8%9C`。已经存了坏值的老机器也因此一并自愈。
+     */
+    private static String sanitizeHeaderValue(String value) {
+        if (value == null || value.isEmpty()) return value;
+        StringBuilder out = null;
+        int i = 0;
+        while (i < value.length()) {
+            int codePoint = value.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (codePoint >= 0x20 && codePoint <= 0x7E) {
+                if (out != null) out.append((char) codePoint);
+            } else {
+                if (out == null) {
+                    out = new StringBuilder(value.length() + 16);
+                    out.append(value, 0, i);
+                }
+                // 代理对（emoji 之类）要整块编码，拆成两个 char 各编一半是错的。
+                byte[] bytes = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8);
+                for (byte raw : bytes) {
+                    out.append('%')
+                        .append(HEADER_HEX[(raw >> 4) & 0xF])
+                        .append(HEADER_HEX[raw & 0xF]);
+                }
+            }
+            i += width;
+        }
+        return out == null ? value : out.toString();
+    }
+
     @PluginMethod
     public void httpRequest(PluginCall call) {
         String url = call.getString("url", "");
@@ -660,7 +706,8 @@ public class FoliaNativePlugin extends Plugin {
                     String headerName = headerNames.next();
                     Object headerValue = headers.opt(headerName);
                     if (headerValue != null) {
-                        builder.header(headerName, String.valueOf(headerValue));
+                        // 头的值必须是可见 ASCII，否则 OkHttp 当场抛（见 sanitizeHeaderValue 的说明）。
+                        builder.header(headerName, sanitizeHeaderValue(String.valueOf(headerValue)));
                     }
                 }
             }
@@ -669,7 +716,7 @@ public class FoliaNativePlugin extends Plugin {
             if (headers == null || optHeader(headers, "cookie") == null) {
                 String storedCookies = CookieManager.getInstance().getCookie(url);
                 if (storedCookies != null && !storedCookies.isEmpty()) {
-                    builder.header("Cookie", storedCookies);
+                    builder.header("Cookie", sanitizeHeaderValue(storedCookies));
                 }
             }
 
