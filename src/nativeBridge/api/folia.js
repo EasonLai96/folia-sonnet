@@ -1443,7 +1443,13 @@ export async function handleFoliaApiRequest(input) {
     }
     return await qqMusicRequest(body, await getQQCookie());
   }
-  const cookie = await getNeteaseCookie();
+  // ⚠️ 只认原生 cookie 罐是不够的：登录是渲染层自己存的会话值，罐里可能根本没有 ——
+  // 那这边就等于没登录，weapi 一律答 `{code: 301}`；而 weapiJson 为了让整页不至于失败
+  // 是**不抛错**的，于是每一栏都空着，探索页看上去就是「空的」而不是「读不出来」。
+  // 只有带着登录态的那个才优先：渲染层没登录时会拿匿名 cookie 来，那不能盖住罐里真登录的。
+  // （这一行要在 params 声明之前，直接用 url.searchParams，避免压缩后的 TDZ。）
+  const sent = firstValue(url.searchParams.get('cookie'), body.cookie);
+  const cookie = (sent && hasNeteaseLogin(sent) ? sent : '') || await getNeteaseCookie();
   const path = url.pathname;
   const params = url.searchParams;
 
@@ -1542,11 +1548,15 @@ export async function handleFoliaApiRequest(input) {
    *   /top/playlist        → playlists
    */
   // 探索页这一组走的路由：留痕能看出哪一条被问过（页面空却一条都没有 = 请求根本没到桥）。
-  if (EXPLORE_PATHS.has(path)) noteLibraryStep('netease', 'explore:route', { path });
+  // 顺带记 cookie 的长度：0 就是这次请求压根没带登录态，上游只会答 301。
+  if (EXPLORE_PATHS.has(path)) noteLibraryStep('netease', 'explore:route', { path, cookie: cookie ? cookie.length : 0 });
   if (path === '/homepage/block/page') {
+    // 没有 cursor 时**绝不能带 `cursor: ''`**：首页区块这条带上空游标就答不出 blocks，
+    // 探索页于是只剩每日推荐那一栏（看着就是「页面是空的」）。
+    const cursor = firstValue(params.get('cursor'));
     return await weapiJson('/api/homepage/block/page', {
       refresh: String(firstValue(params.get('refresh'), 'false')) !== 'false',
-      cursor: firstValue(params.get('cursor')),
+      ...(cursor ? { cursor } : {}),
     }, cookie);
   }
   if (path === '/recommend/resource') {
@@ -1574,8 +1584,11 @@ export async function handleFoliaApiRequest(input) {
   }
   // 新歌速递：`type` 是地区（0 全部 / 7 华语 / 96 欧美 / 8 日本 / 16 韩国）。
   if (path === '/top/song') {
+    // 新歌速递要明说一页多少条：不给 limit/offset 时上游只回很少几首，这一栏几乎是空的。
     return await weapiJson('/api/v1/discovery/new/songs', {
       areaId: numberValue(params.get('type')),
+      limit: numberValue(params.get('limit'), 100),
+      offset: numberValue(params.get('offset'), 0),
       total: true,
     }, cookie);
   }
