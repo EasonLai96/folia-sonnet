@@ -10,6 +10,7 @@ import {
     translateHomeMessage,
 } from '../homeSources';
 import { useLibraryHomeOnlineFeeds } from './useLibraryHomeOnlineFeeds';
+import { selectIsAllProvidersScope, useLibraryOnlineProviderScopeStore } from '../../directory/useLibraryOnlineProviderScopeStore';
 import type { LibraryHomeSources } from '../useLibraryHomeSources';
 
 // src/library/core/home/online/useLibraryHomeOnline.ts
@@ -38,13 +39,23 @@ export const useLibraryHomeOnline = (
         userId: online.user?.id ?? null,
         canUseAlbums: online.canUseAlbums,
         canUseRadio: online.canUseRadio,
+        feedOwners: online.feedOwners,
     });
 
-    const playlistCards = useMemo(() => buildOnlinePlaylistCards(online.collections, t), [online.collections, t]);
-    const albumCards = useMemo(() => buildOnlineAlbumCards(favoriteAlbums.data, t), [favoriteAlbums.data, t]);
+    // 「全部」视图里每张卡记住自己来自哪家：封面角标与打开歌单取曲目都靠它（单平台视图不用带）。
+    const allProviders = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
+    const playlistCards = useMemo(
+        () => buildOnlinePlaylistCards(online.collections, t, { markSourceProvider: allProviders }),
+        [allProviders, online.collections, t],
+    );
+    // 专辑与推荐歌单同样要标：它们跟歌单一起合进了同一屏，不标就分不清哪张是哪家的。
+    const albumCards = useMemo(
+        () => buildOnlineAlbumCards(favoriteAlbums.data, t, { markSourceProvider: allProviders }),
+        [allProviders, favoriteAlbums.data, t],
+    );
     const radioCards = useMemo(
-        () => buildOnlineRadioCards(radioFeed.data, { t, personalFmModeLabel }),
-        [personalFmModeLabel, radioFeed.data, t],
+        () => buildOnlineRadioCards(radioFeed.data, { t, personalFmModeLabel, markSourceProvider: allProviders }),
+        [allProviders, personalFmModeLabel, radioFeed.data, t],
     );
 
     const items = tab === 'playlist' ? playlistCards : tab === 'albums' ? albumCards : tab === 'radio' ? radioCards : NO_CARDS;

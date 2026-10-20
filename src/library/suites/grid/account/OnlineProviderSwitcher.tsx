@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, LogIn, LogOut, UserRound } from 'lucide-react';
+import { ChevronRight, Layers, LogIn, LogOut, UserRound } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValueEvent } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { OnlineProviderId, ProviderAccountSummary } from '../../../../types/onlineMusic';
 import { getProviderAppIcon } from '../../../../assets/providers/appIcons';
 import { canSwitchToProviderDirectly } from '../../../core/account/onlineProviderAccountView';
 import { canLogoutProvider } from '../../../core/account/accountRules';
+import { countMergeableProviders } from '../../../core/collection/onlineProviderScope';
+import {
+    ALL_PROVIDERS_ID,
+    selectIsAllProvidersScope,
+    useLibraryOnlineProviderScopeStore,
+} from '../../../core/directory/useLibraryOnlineProviderScopeStore';
 import { playerBottomBarLiveOffset } from '../../../../stores/motionSignals';
 import {
     PLAYER_BOTTOM_BAR_BASE_OFFSET_PX,
@@ -72,6 +78,16 @@ const OnlineProviderSwitcher: React.FC<OnlineProviderSwitcherProps> = ({
     const baseBottomPxRef = useRef(16);
     const previousProviderIdRef = useRef(activeProviderId);
     const visibleProviders = providers.filter(provider => provider.availability.reason !== 'runtime-unavailable');
+    /*
+     * 「全部」：不是一家平台，是「首页这一屏看谁的数据」的范围（见
+     * core/directory/useLibraryOnlineProviderScopeStore）—— 当前平台不变，登录 / 搜索 / 播放
+     * 仍按它走，只有首页歌单那一屏换成各家歌单的合并结果。
+     * 只有两家以上真有歌单可合时才出现：只有一家时「全部」和直接选那家没有区别。
+     */
+    const allScope = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
+    const setScope = useLibraryOnlineProviderScopeStore(state => state.selectScope);
+    const clearScope = useLibraryOnlineProviderScopeStore(state => state.clearScope);
+    const mergeableCount = countMergeableProviders(visibleProviders);
     const activeProvider = visibleProviders.find(provider => provider.providerId === activeProviderId) || visibleProviders[0];
     const surfaceClass = isDaylight ? 'bg-white text-zinc-900' : 'bg-zinc-950 text-white';
 
@@ -163,7 +179,17 @@ const OnlineProviderSwitcher: React.FC<OnlineProviderSwitcherProps> = ({
                     aria-haspopup="menu"
                     aria-expanded={open}
                 >
-                    <ProviderAvatar provider={activeProvider} className="h-9 w-9 shrink-0 rounded-full md:h-10 md:w-10" />
+                    {/*
+                     * 「全部」开着时按钮上也要显示它：否则按钮还是当前平台那一颗头像，
+                     * 而墙里已经是各家合并的结果 —— 光看按钮分不清此刻在看谁的数据。
+                     */}
+                    {allScope ? (
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-600 text-white md:h-10 md:w-10">
+                            <Layers size={18} />
+                        </span>
+                    ) : (
+                        <ProviderAvatar provider={activeProvider} className="h-9 w-9 shrink-0 rounded-full md:h-10 md:w-10" />
+                    )}
                     <AnimatePresence initial={false}>
                         {showProviderLabel && (
                             <motion.span
@@ -173,7 +199,7 @@ const OnlineProviderSwitcher: React.FC<OnlineProviderSwitcherProps> = ({
                                 transition={{ duration: 0.2, ease: 'easeOut' }}
                                 className="hidden max-w-16 overflow-hidden whitespace-nowrap text-xs font-semibold md:block"
                             >
-                                {activeProvider.shortName}
+                                {allScope ? t('home.allProviders') : activeProvider.shortName}
                             </motion.span>
                         )}
                     </AnimatePresence>
@@ -213,6 +239,33 @@ const OnlineProviderSwitcher: React.FC<OnlineProviderSwitcherProps> = ({
                             <ChevronRight size={19} />
                             <span className="text-sm font-semibold">{t('home.backToPlayer')}</span>
                         </button>
+                        {mergeableCount >= 2 && (
+                            <button
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={allScope}
+                                onClick={() => {
+                                    setOpen(false);
+                                    setScope(ALL_PROVIDERS_ID);
+                                }}
+                                className={`mb-1 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${allScope ? (isDaylight ? 'bg-black/5' : 'bg-white/8') : ''} ${isDaylight ? 'hover:bg-black/8' : 'hover:bg-white/12'}`}
+                            >
+                                <span
+                                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 ${allScope
+                                        ? (isDaylight ? 'border-zinc-900' : 'border-white')
+                                        : 'border-transparent'} bg-zinc-600 text-white`}
+                                >
+                                    <Layers size={20} />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-semibold">{t('home.allProviders')}</span>
+                                    <span className="mt-0.5 block truncate text-[11px] opacity-45">
+                                        {t('home.allProvidersDetail', { count: mergeableCount })}
+                                    </span>
+                                    <span className="mt-1 block truncate text-xs opacity-65">{t('home.allProvidersAction')}</span>
+                                </span>
+                            </button>
+                        )}
                         {visibleProviders.map(provider => {
                             const active = provider.providerId === activeProviderId;
                             const configured = provider.availability.configured;
@@ -228,6 +281,9 @@ const OnlineProviderSwitcher: React.FC<OnlineProviderSwitcherProps> = ({
                                         aria-checked={active}
                                         disabled={!configured}
                                         onClick={() => {
+                                            // 选了某一家就退出「全部」：那只是看数据的方式，
+                                            // 不清的话会出现「明明选了这家、墙还是合并的」。
+                                            clearScope();
                                             onSelect(provider);
                                             if (canSwitchToProviderDirectly(provider)) setOpen(false);
                                         }}

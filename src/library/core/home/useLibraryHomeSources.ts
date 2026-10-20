@@ -8,6 +8,11 @@ import type { LibraryAccountController } from '../account/account.contract';
 import { isOnlineHomeTab, resolveHomeOnlineSource, resolveHomeTabs, translateHomeTabs } from './homeSources';
 import { resolveActiveProviderSummary } from '../account/accountRules';
 import { readOnlineProviderCapabilities, readOnlineProviderLabel } from './online/onlineHomeProvider.service';
+import {
+    mergeProviderCollections,
+    mergeProviderFeedOwners,
+} from '../collection/onlineProviderScope';
+import { selectIsAllProvidersScope, useLibraryOnlineProviderScopeStore } from '../directory/useLibraryOnlineProviderScopeStore';
 import { useSearchNavigationStore } from '../../../stores/useSearchNavigationStore';
 import { useHomeLayoutSettingsStore } from '../../../stores/useHomeLayoutSettingsStore';
 import { usePersonalFmModeStore } from '../../../stores/usePersonalFmModeStore';
@@ -63,22 +68,56 @@ export const useLibraryHomeSources = ({
     const personalFmSelection = usePersonalFmModeStore(state => state.selection);
 
     const { providers, activeProviderId: providerId } = useLibraryAccountProviders(account);
+    // 「全部」：只看首页在线这一屏的数据范围（见 core/directory/useLibraryOnlineProviderScopeStore）。
+    const allProviders = useLibraryOnlineProviderScopeStore(selectIsAllProvidersScope);
     const provider = useMemo(() => resolveActiveProviderSummary(providers, providerId), [providerId, providers]);
     const capabilities = readOnlineProviderCapabilities(providerId);
     const { userLibrary, playlists: canListPlaylists, userAlbums, recommendations, personalFmModes, explore } = capabilities;
-    const online = useMemo(() => resolveHomeOnlineSource({
-        providerId,
-        provider,
-        capabilities: { ...capabilities, userLibrary, playlists: canListPlaylists, userAlbums, recommendations, personalFmModes, explore },
-        fallbackLabel: readOnlineProviderLabel(providerId),
-        fallbackUser: user,
-        fallbackPlaylists: playlists,
-        fallbackCloud: cloudPlaylist,
-        platformAvailable: true,
-    }), [
+    const online = useMemo(() => {
+        const base = resolveHomeOnlineSource({
+            providerId,
+            provider,
+            capabilities: { ...capabilities, userLibrary, playlists: canListPlaylists, userAlbums, recommendations, personalFmModes, explore },
+            fallbackLabel: readOnlineProviderLabel(providerId),
+            fallbackUser: user,
+            fallbackPlaylists: playlists,
+            fallbackCloud: cloudPlaylist,
+            platformAvailable: true,
+        });
+        if (!allProviders) return base;
+        /*
+         * 「全部」：当前平台不变（登录、搜索、播放仍按它走），只有首页这一屏的数据换成各家歌单的合并结果。
+         *
+         * 几处要跟着改，否则合并视图是空的：
+         * - `collections` 换成合并结果（原本只给当前平台自己的）；
+         * - `canUsePlaylists` / `canUseAlbums` / `canUseRadio` 按合并结果判：它们原本是**当前平台**
+         *   的能力，当前平台恰好不支持时，页签会显示「该平台不支持」并把合并结果藏掉 —— 而合起来
+         *   明明有东西；
+         * - `accountView` 同理：当前平台没登录时它是 guest，墙会整个空着、只剩登录入口，
+         *   而别的平台是登录着的。合并出东西了就按「有内容」显示（登录入口仍在缝里的账户位上）。
+         */
+        const merged = mergeProviderCollections(providers);
+        /*
+         * 收藏专辑与电台跟歌单一样要合并：只换 collections 的话，这两份数据还按「当前平台」
+         * 去读 —— 当前这家居然不支持（或没登录）时，专辑与电台两个页签就是空的，明明别的平台
+         * 是登录着的。所以这里把各家（已登录、且这项真的支持）算成归属交给两份资源，由它们
+         * 一家一家问过去再合起来。
+         */
+        const feedOwners = mergeProviderFeedOwners(providers, id => readOnlineProviderCapabilities(id));
+        return {
+            ...base,
+            collections: merged,
+            canUsePlaylists: merged.length > 0,
+            canUseAlbums: (feedOwners.albums?.length ?? 0) > 0,
+            canUseRadio: (feedOwners.radio?.length ?? 0) > 0,
+            feedOwners,
+            ...(merged.length > 0 ? { accountView: 'authenticated' as const, providerLabel: t('home.allProviders') } : {}),
+        };
+    }, [
         // capabilities 每次读都是新对象：按用到的几个开关比较。
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        canListPlaylists, cloudPlaylist, explore, personalFmModes, playlists, provider, providerId, recommendations, user, userAlbums, userLibrary,
+        allProviders, canListPlaylists, cloudPlaylist, explore, personalFmModes, playlists, provider, providers, providerId,
+        recommendations, t, user, userAlbums, userLibrary,
     ]);
 
     // The explore tab is gone after a switch to a provider without one, and a stored choice of it
