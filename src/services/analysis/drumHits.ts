@@ -1,6 +1,7 @@
 import { melSpectrogramOffThread } from '../automix/analysisOffThread';
 import { getFromCache, saveToCache } from '../db';
 import { BEAT_THIS_FPS, BEAT_THIS_SAMPLE_RATE, MEL_BANDS, melBandCentresHz, type MelSpectrogram } from './beatThis';
+import { hasWebGpu } from './beatThisGpu';
 import { DRUM_HITS_PREFIX } from './beatGridKeys';
 import { createDrumBandStream, type DrumBands } from './drumHitStream';
 import { separateDrumStem } from './drumStem';
@@ -109,12 +110,11 @@ const quantile = (values: number[], q: number): number => {
     return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 };
 
-/** Whether the GPU drum stem can run here: htdemucs_gpu installed and a WebGPU to run it on. */
+/** Whether the drum stem can run here: the weights are there (whichever copy) and there is a WebGPU to run them on. */
 export const canRunDrumStem = (): boolean =>
     typeof window !== 'undefined'
-    && typeof window.electron?.getHtdemucsGpuWeights === 'function'
-    && typeof navigator !== 'undefined' && 'gpu' in navigator
-    && modelCanRun('htdemucs_gpu');
+    && modelCanRun('htdemucs_gpu')
+    && hasWebGpu();
 
 /** 44.1 kHz mono to the 22.05 kHz beat_this rate, by the browser's own resampler. */
 const resample = async (signal: Float32Array): Promise<Float32Array> => {

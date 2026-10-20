@@ -19,7 +19,8 @@
 // dispatch: the longest is an attention at ~3 ms here, which on a much slower GPU may still outlast
 // a frame.
 //
-// Weights come from the main process (the renderer cannot read the models directory) and are held,
+// Weights come from the main process on the desktop app (the renderer cannot read the models
+// directory) or from this app's own downloaded copy (modelStore.ts) everywhere else, and are held,
 // on the GPU and in the worker, only while in use: two idle minutes and the worker is dropped, the
 // same rhythm as the analysis worker in electron/analysis/host.cjs.
 //
@@ -31,6 +32,8 @@
 // Every failure answers null and the caller runs the chunks on the CPU instead, if it may. A failure to
 // get a device at all is remembered for the session - that is the machine, not the moment - while
 // a lost device or a failed run only drops this worker, and the next track tries a fresh one.
+
+import { readModelWeights } from './modelStore';
 
 const IDLE_MS = 120_000;
 /**
@@ -154,13 +157,28 @@ const spawn = (): Worker | null => {
     return worker;
 };
 
+/**
+ * Where the weights come from: the desktop app's own packed copy when it has one, otherwise the copy
+ * this app downloaded from the CDN (modelStore.ts).
+ *
+ * The second source is the whole reason 智能动感模式 is no longer desktop-only. A build that ships no
+ * weights - every mobile one - used to find neither and say so next to its switch; now it can fetch
+ * them. The packed copy is still asked first, so an install that already has the files does not pull
+ * 133MB it does not need.
+ */
+const loadWeights = async (
+    model: GpuModel,
+): Promise<{ weights: Uint8Array<ArrayBuffer>; manifest: unknown } | null> => {
+    const packed = model === 'htdemucs'
+        ? await window.electron?.getHtdemucsGpuWeights?.()
+        : await window.electron?.getBeatThisGpuWeights?.(model);
+    if (packed) return packed;
+    return readModelWeights(model === 'htdemucs' ? 'htdemucs' : 'beat_this');
+};
+
 const start = async (model: GpuModel): Promise<boolean> => {
-    const fetchWeights = model === 'htdemucs'
-        ? window.electron?.getHtdemucsGpuWeights
-        : window.electron?.getBeatThisGpuWeights && (() => window.electron!.getBeatThisGpuWeights!(model));
-    if (typeof fetchWeights !== 'function') return false;
-    // Not there only in a checkout without the models (both ship in the installer); asked again on the next track.
-    const found = await fetchWeights();
+    const found = await loadWeights(model);
+    // Not there only in a build that ships no weights and has not downloaded them yet; asked again on the next track.
     if (!found || !spawn()) return false;
 
     const reply = await ask({ kind: 'load', model, weights: found.weights, manifest: found.manifest }, [found.weights.buffer]);
@@ -182,6 +200,19 @@ const start = async (model: GpuModel): Promise<boolean> => {
 };
 
 let adapterProbe: Promise<boolean> | null = null;
+
+/**
+ * Whether this renderer can even try the WebGPU path, asked synchronously: `navigator.gpu` is there
+ * and this session has not already proven it useless.
+ *
+ * Weaker than `probeBeatThisGpu` - `navigator.gpu` exists on machines whose adapter is blocklisted -
+ * but a capability question a settings row answers while rendering cannot await an adapter request.
+ * Everything downstream still answers null when the adapter never comes, so claiming true here only
+ * ever costs one failed run.
+ */
+export const hasWebGpu = (): boolean => !unsupported
+    && typeof navigator !== 'undefined'
+    && 'gpu' in navigator;
 
 /**
  * Whether this renderer can run the WebGPU path, as far as can be told without loading the model:

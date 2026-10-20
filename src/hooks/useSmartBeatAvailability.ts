@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { modelCanRun, subscribeModelAvailability } from '../services/analysis/modelAvailability';
 import { probeBeatThisGpu } from '../services/analysis/beatThisGpu';
 
 // src/hooks/useSmartBeatAvailability.ts
@@ -6,12 +7,12 @@ import { probeBeatThisGpu } from '../services/analysis/beatThisGpu';
 // install, for a setting to say so next to its switch. The switch itself stays usable either way - it
 // is a preference - but a switch that is on and silently inert is the failure this is here to prevent.
 //
-// The model (Beat This! final0, shared with automix) ships with the desktop app, so there is no "not downloaded" state: what can be
-// missing is the desktop bridge (the web build) or a GPU that hands out an adapter.
+// Two things have to be true, and they are now separate questions. The weights: either the copy a
+// desktop install ships, or the one this app downloaded from the CDN - so "not downloaded yet" is a
+// real state here, where it used to be impossible. And a GPU: an adapter this renderer can get.
 
-export type SmartBeatAvailability = 'ready' | 'desktopOnly' | 'noGpu';
-
-const hasBeatThisBridge = () => typeof window !== 'undefined' && typeof window.electron?.getBeatThisGpuWeights === 'function';
+/** 'noWeights' - nothing downloaded yet; 'noGpu' - downloaded, but this device cannot run it. */
+export type SmartBeatAvailability = 'ready' | 'noWeights' | 'noGpu';
 
 /**
  * Asked only while `enabled` - the switch is on. Off, nothing is probed (no adapter request) and the
@@ -20,6 +21,8 @@ const hasBeatThisBridge = () => typeof window !== 'undefined' && typeof window.e
 export function useSmartBeatAvailability(enabled: boolean): SmartBeatAvailability {
     // Optimistic until the probe answers: a hint flashing "no GPU" on every open would be worse.
     const [gpu, setGpu] = useState(true);
+    // Subscribed, because downloading the weights has to take this hint away without a relaunch.
+    const weights = useSyncExternalStore(subscribeModelAvailability, () => modelCanRun('beat_this'));
 
     useEffect(() => {
         if (!enabled) return;
@@ -33,6 +36,6 @@ export function useSmartBeatAvailability(enabled: boolean): SmartBeatAvailabilit
     }, [enabled]);
 
     if (!enabled) return 'ready';
-    if (!hasBeatThisBridge()) return 'desktopOnly';
+    if (!weights) return 'noWeights';
     return gpu ? 'ready' : 'noGpu';
 }

@@ -2755,6 +2755,7 @@ export default {
     "smartBeatDesc": "The main switch. On, the beat effects listed in each lyric renderer's own settings drive the picture from the music, each with its own switch and strength; off, every picture keeps its original spectrum response. Beat effects follow the beats beat_this detects, drum effects the drums HTDemucs separates, each analysed only while an effect on screen uses it. A local track is analysed for a few seconds on its first play; an online track from its stream on its first play. Analysed tracks are remembered.",
     "beatFxUnavailable_noGpu": "No usable WebGPU on this device, so beat effects have no effect.",
     "beatFxUnavailable_desktopOnly": "Beat effects are only available in the desktop app.",
+    "beatFxUnavailable_noWeights": "Beat effects need the analysis model (~133MB). Download it under the model settings below and they start working.",
     "beatEffects": "Beat effects",
     "beatEffectsNeedSmartBeat": "Turn on smart beat mode above for these effects to play.",
     "beatEffectStrength": "Strength",

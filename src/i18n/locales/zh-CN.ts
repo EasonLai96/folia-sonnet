@@ -2756,6 +2756,7 @@ export default {
     "smartBeatDesc": "总开关。开启后，各歌词动画自己设置里的「动感效果」按音乐驱动画面，每个效果可以单独开关、调强度；关闭时所有画面保持原来的频谱响应。按节拍的效果用 beat_this 识别节拍，按鼓点的效果用 HTDemucs 分离鼓声，画面上有效果用到时才分析。本地歌曲第一次播放时分析几秒；在线歌曲第一次播放时读取音频流来分析。分析过的歌会被记住。",
     "beatFxUnavailable_noGpu": "此设备没有可用的 WebGPU，节拍效果不会生效。",
     "beatFxUnavailable_desktopOnly": "节拍效果仅在桌面版可用。",
+    "beatFxUnavailable_noWeights": "节拍效果需要分析模型（约 133MB）。在下面的模型设置里下载后即可使用。",
     "beatEffects": "动感效果",
     "beatEffectsNeedSmartBeat": "在上方打开智能动感模式后，这些效果才会生效。",
     "beatEffectStrength": "强度",

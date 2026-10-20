@@ -2862,6 +2862,7 @@ export default {
     "smartBeatDesc": "Sakelar utama. Saat aktif, efek ketukan di pengaturan masing-masing animasi lirik menggerakkan gambar mengikuti musik, masing-masing dengan sakelar dan kekuatannya sendiri; saat nonaktif, semua gambar mempertahankan respons spektrum aslinya. Efek ketukan mengikuti ketukan yang dideteksi beat_this, efek drum mengikuti drum yang dipisahkan HTDemucs, masing-masing dianalisis hanya saat efek di layar memakainya. Lagu lokal dianalisis beberapa detik saat pertama diputar; lagu online dari stream-nya saat pertama diputar. Lagu yang sudah dianalisis akan diingat.",
     "beatFxUnavailable_noGpu": "Tidak ada WebGPU yang dapat digunakan di perangkat ini, jadi efek ketukan tidak berfungsi.",
     "beatFxUnavailable_desktopOnly": "Efek ketukan hanya tersedia di aplikasi desktop.",
+    "beatFxUnavailable_noWeights": "Efek ketukan membutuhkan model analisis (~133MB). Unduh di pengaturan model di bawah agar mulai berfungsi.",
     "beatEffects": "Efek ketukan",
     "beatEffectsNeedSmartBeat": "Aktifkan mode ketukan pintar di atas agar efek ini berjalan.",
     "beatEffectStrength": "Kekuatan",

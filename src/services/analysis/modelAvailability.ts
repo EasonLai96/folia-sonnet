@@ -18,6 +18,10 @@
 //
 // A leaf on purpose - it imports nothing from the app. beatThis.ts and stems.ts both read it, and
 // stems.ts already imports beatThis.ts, so anything shared between them has to sit below both.
+// modelStore.ts is the same kind of leaf (it reads the cache and nothing else), so this can ask it
+// without either of them becoming part of the app's graph.
+
+import { modelStoreSnapshot, refreshModelStore, subscribeModelStore } from './modelStore';
 
 /** htdemucs_gpu: htdemucs' WebGPU export, the drum stem of 智能动感模式 (electron/analysis/modelPaths.cjs). */
 export type AutomixModelName = 'beat_this' | 'htdemucs' | 'htdemucs_gpu';
@@ -70,27 +74,48 @@ export const modelsPresent = (): AutomixModelsPresent => present;
 export const modelCanRun = (name: AutomixModelName): boolean => present[name];
 
 /**
- * Re-asks the main process. Safe to call at any time and from anywhere; failures leave the last
- * answer in place rather than downgrading a working build on one bad round trip.
+ * Re-asks where the weights can be. Safe to call at any time and from anywhere; failures leave the
+ * last answer in place rather than downgrading a working build on one bad round trip.
+ *
+ * Two places hold weights now, and this asks about both:
+ *
+ * - the desktop app's own copy (the installer's models directory), which is what this used to ask
+ *   about and the only one that needs `electron`;
+ * - the copy this app downloaded from the CDN and cached (modelStore.ts), which is how a build that
+ *   ships no weights at all - every mobile one - gets them.
+ *
+ * `htdemucs_gpu` is not a third file: the WebGPU export is the same `htdemucs-wgsl.bin` the CPU stems
+ * read, so wherever that one is, the drum stem of 智能动感模式 can run too.
  */
 export const refreshModelAvailability = async (): Promise<AutomixModelsPresent> => {
+    let beatThis = false;
+    let htdemucs = false;
+    let htdemucsGpu = false;
+
     const ask = typeof window !== 'undefined' ? window.electron?.getAutomixModelsPresent : undefined;
-    if (typeof ask !== 'function') return present;
-
-    let answer: { beat_this: boolean; htdemucs: boolean; htdemucs_gpu?: boolean } | null = null;
-    try {
-        answer = await ask();
-    } catch (error) {
-        console.warn('[Analysis] could not check which models are installed', error);
-        return present;
+    if (typeof ask === 'function') {
+        try {
+            const answer = await ask();
+            if (answer) {
+                beatThis = answer.beat_this === true;
+                htdemucs = answer.htdemucs === true;
+                htdemucsGpu = answer.htdemucs_gpu === true;
+            }
+        } catch (error) {
+            console.warn('[Analysis] could not check which models are installed', error);
+        }
     }
-    if (!answer) return present;
 
-    const next: AutomixModelsPresent = {
-        beat_this: answer.beat_this === true,
-        htdemucs: answer.htdemucs === true,
-        htdemucs_gpu: answer.htdemucs_gpu === true,
-    };
+    // The downloaded copy. Read from the snapshot rather than re-reading the cache: modelStore says
+    // when its answer changes, and this is asked often enough that probing disk each time is waste.
+    const stored = modelStoreSnapshot();
+    const storedBeatThis = stored.beat_this.phase === 'ready';
+    const storedHtdemucs = stored.htdemucs.phase === 'ready';
+    beatThis = beatThis || storedBeatThis;
+    htdemucs = htdemucs || storedHtdemucs;
+    htdemucsGpu = htdemucsGpu || storedHtdemucs;
+
+    const next: AutomixModelsPresent = { beat_this: beatThis, htdemucs, htdemucs_gpu: htdemucsGpu };
     if (next.beat_this === present.beat_this && next.htdemucs === present.htdemucs && next.htdemucs_gpu === present.htdemucs_gpu) return present;
 
     present = Object.freeze(next);
@@ -114,6 +139,15 @@ export const noteModelFailed = async (name: AutomixModelName): Promise<void> => 
         + ' will use it again if they come back');
 };
 
-// Asked once as the module loads, so the answer is usually in hand before anything renders. It is
-// two `existsSync` calls behind one IPC hop; there is nothing to defer.
-void refreshModelAvailability();
+// Asked once as the module loads, so the answer is usually in hand before anything renders. The
+// desktop copy is two `existsSync` calls behind one IPC hop and the downloaded copy is one cache
+// match; there is nothing to defer. It is asked here because a launch that never opens the settings
+// page ran whole sessions believing it had no weights (see useAutomixDecks).
+void refreshModelStore().then(() => refreshModelAvailability());
+
+// A download landing, or the listener deleting one, changes what is on disk - so the answer above has
+// to follow it. One direction only: modelStore never asks this file anything, which is what keeps the
+// two leaves from becoming a cycle.
+if (typeof window !== 'undefined') {
+    subscribeModelStore(() => { void refreshModelAvailability(); });
+}
