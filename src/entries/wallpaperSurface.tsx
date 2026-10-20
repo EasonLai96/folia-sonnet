@@ -435,6 +435,26 @@ const msToSec = (value: number): number => value / 1000;
 const CONTENT_DWELL_MS = 400;
 
 /**
+ * 叠层的内容要**等 payload 安静下来**才画。
+ *
+ * 为什么：切歌不是一次到位，是**分几拍**补齐的 —— 先来歌名（歌词还是空表），
+ * 歌词解析完再来一拍（带整条时间轴），AI 主题往往还要再去云端拉一次 / 打一次模型。
+ * 每一拍都会经桥往这里推一份新 payload，照着画就是肉眼可见地「闪两三下」：
+ * 内容先冒出来，再被下一拍换掉，中间还夹一次配色硬跳（换主题色时尤其明显）。
+ *
+ * 所以反过来：收到数据先**藏着**，等这几拍都到齐、连续这么久没再变，才一次性画出来。
+ * 900ms 跟原生那边 tuning 落定的窗口（TUNING_SETTLE_MS）是同一个量级，
+ * 于是「主题落定 → 整页重载」这一下正好落在藏着的时候，用户看不见。
+ */
+const SURFACE_SETTLE_MS = 900;
+
+/**
+ * 藏着的上限：payload 一直抖（连着自动切歌、歌词反复重解析）也不能让歌词永远不出来。
+ * 到点就照当前这一版画 —— 藏是为了**不闪**，不是为了不显示。
+ */
+const SURFACE_REVEAL_DEADLINE_MS = 2500;
+
+/**
  * 把原生推来的那几行转成渲染器认识的 Line。
  *
  * 原生带了逐字轴就用逐字轴（播放器里的 Line.words 是同一份东西），
@@ -691,6 +711,67 @@ const WallpaperSurface: React.FC = () => {
         payload.accent, payload.backgroundColor, payload.primaryColor, payload.secondaryColor,
         payload.theme, lyricsFontFamily, lyricsFallbackFamilies]);
 
+    /*
+     * 画面上**真正决定观感**的那几项拼成的签名。
+     *
+     * ⚠️ **绝不能**把 positionMs 拼进来：心跳每 500ms 推一次位置，
+     * 把它算进签名的话签名永远在变，「等它稳定」就永远等不到，
+     * 只能次次靠下面的兜底上限硬放行（等于每次都白等 2.5 秒）。
+     *
+     * ⚠️ 四个**颜色**也不进签名：它们在上面是走 `stepColorTowards` 平滑过去的
+     * （约 600ms），换主题色不会硬跳；把它们算进来反而会让「在主题公园里改个色」
+     * 也要先黑一下，而且实验台每次微调都会闪。
+     *
+     * 只留会**整块换掉画面**的那几项：歌名 / 歌手 / 歌词（行数 + 首行），
+     * 以及 AI 主题里没法插值的那两份 —— 指定词上色与可视化图标（它们常常比
+     * 颜色晚到，不等它们的话落地时画面还是要变一次，那一下正是「闪」）。
+     */
+    const surfaceKey = React.useMemo(() => {
+        const incoming = payload.theme;
+        return [
+            payload.title ?? '',
+            payload.artist ?? '',
+            lines.length,
+            lines[0]?.fullText ?? '',
+            incoming?.name ?? '',
+            incoming?.wordColors?.length ?? -1,
+            incoming?.lyricsIcons?.length ?? -1,
+        ].join('|');
+    }, [payload, lines]);
+
+    /*
+     * 藏 / 露：**签名一变就重新藏起来**，安静够 SURFACE_SETTLE_MS 才露。
+     *
+     * 切歌那几拍（歌名 → 歌词 → 主题）每一拍都会改签名，于是每一拍都把内容按回去、
+     * 重新计时 —— 中间那些半成品画面一次都不会画出来。等最后一拍落地、连着 900ms
+     * 没再动，才把真正要显示的那一份放出来。
+     *
+     * 上限那条计时器锚在**第一次变**的时刻（pendingSinceRef），不是最后一次 ——
+     * 否则一直抖的话它也跟着一路往后挪，上限就形同虚设了。
+     */
+    const pendingSinceRef = React.useRef(0);
+    const [settledKey, setSettledKey] = React.useState<string | null>(null);
+    React.useEffect(() => {
+        if (surfaceKey === settledKey) {
+            pendingSinceRef.current = 0;
+            return undefined;
+        }
+        const now = performance.now();
+        if (pendingSinceRef.current === 0) {
+            pendingSinceRef.current = now;
+        }
+        const reveal = () => {
+            pendingSinceRef.current = 0;
+            setSettledKey(surfaceKey);
+        };
+        const settleTimer = window.setTimeout(reveal, SURFACE_SETTLE_MS);
+        const deadlineTimer = window.setTimeout(reveal, Math.max(0, SURFACE_REVEAL_DEADLINE_MS - (now - pendingSinceRef.current)));
+        return () => {
+            window.clearTimeout(settleTimer);
+            window.clearTimeout(deadlineTimer);
+        };
+    }, [surfaceKey, settledKey]);
+
     React.useEffect(() => {
         // 主题跟随系统深浅色，和播放页的判定保持一致。
         const query = window.matchMedia('(prefers-color-scheme: light)');
@@ -796,6 +877,14 @@ const WallpaperSurface: React.FC = () => {
      * 而且用户会以为"参数没生效"。空着至少是干净的（透出壁纸）。
      */
     const hasData = Boolean(payload.title) || (payload.lines?.length ?? 0) > 0;
+    /*
+     * 有数据只是「够画了」，还不代表「该画了」。
+     *
+     * 主界面那边换歌是分几拍补齐的，payload 会连着变好几回；每一回都够画，
+     * 照着画就是「闪两三下」。所以真正放行的条件是签名**稳定住了**
+     * （settledKey === surfaceKey），即主界面这一次加载已经落定。
+     */
+    const surfaceReady = hasData && settledKey === surfaceKey;
 
     /*
      * 「内容真的画出来了」的标记。判据比"有没有画布"严一格：画布 / 第一层内容
@@ -809,9 +898,13 @@ const WallpaperSurface: React.FC = () => {
      * 数据到位之后，等可视化真的画出第一帧，再告诉原生"可以淡入了"。
      * 找不到画布（纯 CSS 模式）时看挂载出来的内容，两者都没有就等到超时上限。
      * 注意：这个 effect 必须在下面那个早返回**之前** —— 有条件的 hook 会让 hook 数量变化。
+     *
+     * 这个「首帧」同样只认**放行之后**（surfaceReady）：藏着的时候画布还没挂，
+     * 提前回报的话原生那层就开始淡入了，等真画出来时窗口早已不透明 ——
+     * 那又是一次「突然出现」。
      */
     React.useEffect(() => {
-        if (!hasData) return undefined;
+        if (!surfaceReady) return undefined;
         let cancelled = false;
         let seenAt = 0;
         const deadline = performance.now() + 4500;
@@ -869,9 +962,9 @@ const WallpaperSurface: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [hasData]);
+    }, [surfaceReady]);
 
-    if (!hasData) {
+    if (!surfaceReady) {
         return null;
     }
 
