@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import {
+    ANALYSIS_MODELS_ENABLED,
     ensureModel,
     modelStoreSnapshot,
     refreshModelStore,
@@ -63,10 +64,16 @@ export const useAnalysisModelStore = create<AnalysisModelState>((set, get) => ({
  * This is not an error path they need to hear about: the cache is the browser's to drop, and a
  * launch that found the switch on with nothing behind it would otherwise leave a feature silently
  * inert - the exact failure the availability hint under 智能动感模式 exists to prevent.
+ *
+ * Skipped while the models are not offered: nothing points at them then, so a fetch here would be
+ * 133MB moving in the background on behalf of a setting nobody can see, and it would keep failing
+ * on whatever it was that failed before.
  */
-void refreshModelStore().then(() => {
-    const state = useAnalysisModelStore.getState();
-    for (const name of Object.keys(WANT_KEY) as DownloadableModel[]) {
-        if (state[name] && modelStoreSnapshot()[name].phase !== 'ready') void ensureModel(name);
-    }
-});
+if (ANALYSIS_MODELS_ENABLED) {
+    void refreshModelStore().then(() => {
+        const state = useAnalysisModelStore.getState();
+        for (const name of Object.keys(WANT_KEY) as DownloadableModel[]) {
+            if (state[name] && modelStoreSnapshot()[name].phase !== 'ready') void ensureModel(name);
+        }
+    });
+}

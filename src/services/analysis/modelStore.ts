@@ -49,6 +49,21 @@ const FILES: Record<DownloadableModel, FileSpec> = {
     },
 };
 
+/**
+ * 分析模型的总开关：现在关着。
+ *
+ * 三处入口都读这一个常量 —— 启动时的询问、设置里那一组、以及启动时把「上次选了」的模型补回来的
+ * 那次自愈；下面取权重、算 sha256、判能力的代码一行不动。要重开，改这一行就够了。
+ *
+ * 关着是因为它在目标机器上还没跑通过：下了也能导入，但手机上的 WebGPU 不是每个 WebView 都有，
+ * 没有它这些一样都跑不起来。一个按下去不会有任何事的开关，比没有这个开关更糟 —— 它先答应，然后
+ * 一直坐在那里。要重开，就拿着真机验过再开，别靠推理。
+ *
+ * 什么都没删：听者选过的保留在设置里，已经下好的权重留在缓存里，所以再打开不是从零开始；桌面端
+ * 随包带的权重与它无关，照样可用。
+ */
+export const ANALYSIS_MODELS_ENABLED = false;
+
 /** What one model is doing, for a setting to draw. */
 export type ModelPhase =
     /** Not downloaded, and nothing is happening. */

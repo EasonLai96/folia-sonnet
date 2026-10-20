@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC } from '../../../../services/automix/crossfadePlanner';
 import { modelsPresent, subscribeModelAvailability } from '../../../../services/analysis/modelAvailability';
-import { modelStoreSnapshot, subscribeModelStore, importModelFile, type DownloadableModel } from '../../../../services/analysis/modelStore';
+import { ANALYSIS_MODELS_ENABLED, modelStoreSnapshot, subscribeModelStore, importModelFile, type DownloadableModel } from '../../../../services/analysis/modelStore';
 import { transitionCapabilities } from '../../../../services/automix/stems';
 import { announceTransition, type TransitionRenderer } from '../../../../services/automix/transitionCue';
 import { canAnalyseTracks } from '../../../../services/automix/transitionStrategy';
@@ -30,8 +30,11 @@ const BEHAVIOR: SettingsGroupDef = { id: 'queueSettings', titleKey: 'options.set
  *
  * 两个模型各服务两处（beat_this：automix 的节拍网格 + 智能动感模式的节拍；htdemucs：automix 的
  * 分轨 + 智能动感模式的鼓点），所以分开给开关 —— 41MB 的节拍不是 92MB 的分轨那种请求。
+ *
+ * available 挂着总开关：整组不画，搜索也不索引这两行（isDrawnHere 会问）。跟着总开关而不是各写
+ * 一遍，是为了关掉的时候不留下「搜得到、点进去什么都没有」的条目。
  */
-const MODELS: SettingsGroupDef = { id: 'analysisModels', titleKey: 'options.analysisModels' };
+const MODELS: SettingsGroupDef = { id: 'analysisModels', titleKey: 'options.analysisModels', available: () => ANALYSIS_MODELS_ENABLED };
 
 const O = {
     transition: option(TRANSITION, 'transitionEnable', 'options.transitionEnable'),
@@ -57,8 +60,8 @@ const O = {
     autoSkipUnplayable: option(BEHAVIOR, 'autoSkipUnplayable', 'options.autoSkipUnplayable'),
     preventSleep: option(BEHAVIOR, 'preventDisplaySleepDuringPlayback', 'options.preventDisplaySleepDuringPlayback', { electronOnly: true }),
     voiceInputPause: option(BEHAVIOR, 'voiceInputPause', 'options.voiceInputPause', { electronOnly: true, available: () => runsOnWindows() }),
-    modelBeatThis: option(MODELS, 'analysisModelBeatThis', 'options.analysisModelBeatThis', { noteKey: 'options.analysisModelBeatThisDesc' }),
-    modelHtdemucs: option(MODELS, 'analysisModelHtdemucs', 'options.analysisModelHtdemucs', { noteKey: 'options.analysisModelHtdemucsDesc' }),
+    modelBeatThis: option(MODELS, 'analysisModelBeatThis', 'options.analysisModelBeatThis', { noteKey: 'options.analysisModelBeatThisDesc', available: () => ANALYSIS_MODELS_ENABLED }),
+    modelHtdemucs: option(MODELS, 'analysisModelHtdemucs', 'options.analysisModelHtdemucs', { noteKey: 'options.analysisModelHtdemucsDesc', available: () => ANALYSIS_MODELS_ENABLED }),
 };
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
@@ -334,10 +337,14 @@ const PlaybackPage: React.FC = () => {
                 )}
             </Group>
 
-            <Group def={MODELS} foot={t('options.analysisModelsFoot')}>
-                <AnalysisModelRow def={O.modelBeatThis} name="beat_this" />
-                <AnalysisModelRow def={O.modelHtdemucs} name="htdemucs" />
-            </Group>
+            {/* The whole group answers to ANALYSIS_MODELS_ENABLED, same as the rows inside it say:
+                while the models are not offered there is nothing here to draw or to offer. */}
+            {ANALYSIS_MODELS_ENABLED && (
+                <Group def={MODELS} foot={t('options.analysisModelsFoot')}>
+                    <AnalysisModelRow def={O.modelBeatThis} name="beat_this" />
+                    <AnalysisModelRow def={O.modelHtdemucs} name="htdemucs" />
+                </Group>
+            )}
         </>
     );
 };

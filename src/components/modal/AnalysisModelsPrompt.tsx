@@ -3,6 +3,7 @@ import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { modelCanRun, subscribeModelAvailability } from '../../services/analysis/modelAvailability';
 import {
+    ANALYSIS_MODELS_ENABLED,
     modelStoreSnapshot,
     subscribeModelStore,
     type DownloadableModel,
@@ -23,6 +24,10 @@ import ThemedDialog from '../shared/ThemedDialog';
 // from 播放控制, which is the point of asking rather than deciding for them.
 //
 // Closing the dialog leaves it for the next launch; "not now" answers it for good.
+//
+// Drawn only while ANALYSIS_MODELS_ENABLED is on. Off, this mounts and draws nothing at all - the
+// question cannot be answered in a way that leads anywhere yet, and asking for 133MB that lands in
+// a state nothing can use is worse than not asking.
 
 /** After startup's own work: nothing about this is urgent, and a download is not a surprise to spring. */
 const CHECK_DELAY_MS = 6000;
@@ -52,8 +57,9 @@ const AnalysisModelsPrompt: React.FC<{ isDaylight: boolean }> = ({ isDaylight })
         };
     }, [asked]);
 
-    // A desktop install that still ships the weights has nothing to fetch.
-    if (asked || weights || !open) return null;
+    // A desktop install that still ships the weights has nothing to fetch. First line is the whole
+    // feature being switched off: the question has to lead somewhere, so it is not asked at all.
+    if (!ANALYSIS_MODELS_ENABLED || asked || weights || !open) return null;
 
     const busy = MODELS.some(name => chosen[name] && entries[name].phase === 'downloading');
 
