@@ -12,6 +12,8 @@ import { useVisualizerRuntime } from '../runtime';
 import VisualizerShell from '../VisualizerShell';
 import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
 import { resolveSubtitleFontSizes } from '../subtitleFontSizes';
+import { buildTiltLineColorRanges, resolveTiltGraphemeColors } from './tiltWordColors';
+import type { WordColorRange } from '../wordColoring';
 
 const CHAR_REF_LENGTH = 20;
 const LOG_OFFSET = 4;
@@ -342,7 +344,9 @@ const TiltLine: React.FC<{
     segmentStartTime?: number;
     segmentEndTime?: number;
     activeLine?: Line | null;
-}> = ({ segment, theme, fontScale, scaleMultiplier, visible, colorScheme = 'default', currentTime, segmentStartTime = 0, segmentEndTime = 0, activeLine = null }) => {
+    /** 整行算好的 AI 关键字上色区间（见 `VisualizerTilt`），没有就整段用兜底色。 */
+    wordColorRanges?: WordColorRange[];
+}> = ({ segment, theme, fontScale, scaleMultiplier, visible, colorScheme = 'default', currentTime, segmentStartTime = 0, segmentEndTime = 0, activeLine = null, wordColorRanges }) => {
     const baseFontScale = fontScale * scaleMultiplier;
     const shortLastBoost = segment.isShortLastLine ? 1.18 : 1;
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
@@ -374,6 +378,18 @@ const TiltLine: React.FC<{
         [segment.text]
     );
     let visualIndex = 0;
+
+    // 落在 AI 主题关键字上的字上关键字自己的颜色，其余用这一段的兜底色。
+    // 理由与区间口径见 `tiltWordColors.ts`。
+    const graphemeColors = useMemo(
+        () => resolveTiltGraphemeColors(
+            graphemes,
+            segment.charOffset,
+            wordColorRanges ?? [],
+            segment.isTilt ? colors.tilt : colors.normal,
+        ),
+        [graphemes, segment.charOffset, segment.isTilt, colors.normal, colors.tilt, wordColorRanges],
+    );
 
     const charTimings = useMemo(() => {
         if (!activeLine) return [];
@@ -468,7 +484,7 @@ const TiltLine: React.FC<{
                             style={{
                                 scale: charScaleMvs.current[ti],
                                 transition: 'transform 0.06s ease-out',
-                                ...(isSpace ? { minWidth: '0.25em' } : {}),
+                                ...(isSpace ? { minWidth: '0.25em' } : { color: graphemeColors[ti] }),
                             }}
                         >
                             {isSpace ? '\u00A0' : seg.segment}
@@ -526,7 +542,7 @@ const TiltLine: React.FC<{
                         style={{
                             scale: charScaleMvs.current[ti],
                             transition: 'transform 0.06s ease-out',
-                            ...(isSpace ? { minWidth: '0.35em' } : {}),
+                            ...(isSpace ? { minWidth: '0.35em' } : { color: graphemeColors[ti] }),
                         }}
                     >
                         {isSpace ? '\u00A0' : seg.segment}
@@ -577,6 +593,11 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
         if (!activeLine?.fullText) return null;
         return buildTiltLayout(activeLine.fullText, activeLine.startTime, tiltTuning, theme, lyricsFontScale);
     }, [activeLine?.fullText, activeLine?.startTime, tiltTuning, theme, lyricsFontScale]);
+
+    const wordColorRanges = useMemo<WordColorRange[]>(
+        () => buildTiltLineColorRanges(activeLine?.fullText ?? '', theme.wordColors),
+        [activeLine?.fullText, theme.wordColors],
+    );
 
     const segmentTimings = useMemo(() => {
         if (!activeLine || !layout) return null;
@@ -659,6 +680,7 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
                                     segmentStartTime={segmentTimings?.[si]?.start ?? 0}
                                     segmentEndTime={segmentTimings?.[si]?.end ?? 0}
                                     activeLine={activeLine}
+                                    wordColorRanges={wordColorRanges}
                                 />
                             ))}
                         </motion.div>
