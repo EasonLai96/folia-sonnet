@@ -4,6 +4,7 @@ import { isCapacitorAndroid } from '../platform/runtime';
 import type { SongResult } from '../types';
 import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../services/onlineMusic/songMetadata';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
+import { fetchCoverBytes } from '../services/coverBytes';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 
@@ -83,9 +84,10 @@ const loadArtworkAsBase64 = async (url: string): Promise<string | null> => {
   if (typeof document === 'undefined') return null;
 
   try {
-    const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) return null;
-    const blob = await response.blob();
+    // 取字节这件事只有 services/coverBytes 那一处知道该怎么取：
+    // 带凭据的那一跳会让「回通配符」的图床直接被浏览器判死，通知栏于是常年没有封面。
+    const blob = await fetchCoverBytes(url);
+    if (!blob) return null;
     if (typeof createImageBitmap !== 'function') return null;
 
     const bitmap = await createImageBitmap(blob);

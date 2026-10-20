@@ -10,6 +10,7 @@ import { useMotionSettingsStore } from '../stores/useMotionSettingsStore';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { useStageSettingsStore } from '../stores/useStageSettingsStore';
 import { findLatestActiveLineIndex } from '../utils/appPlaybackHelpers';
+import { fetchCoverBytes } from '../services/coverBytes';
 import { actuallyPlaying } from '../stores/motionSignals';
 import type { Line, Theme } from '../types';
 
@@ -224,9 +225,8 @@ const MOTION_BY_INTENSITY: Record<string, number> = {
 const loadCoverAsBase64 = async (url: string): Promise<string | null> => {
     if (typeof document === 'undefined') return null;
     try {
-        const response = await fetch(url, { credentials: 'include' });
-        if (!response.ok) return null;
-        const blob = await response.blob();
+        const blob = await fetchCoverBytes(url);
+        if (!blob) return null;
         if (typeof createImageBitmap !== 'function') return null;
         const bitmap = await createImageBitmap(blob);
         const scale = Math.min(1, COVER_EDGE / Math.max(bitmap.width, bitmap.height));
