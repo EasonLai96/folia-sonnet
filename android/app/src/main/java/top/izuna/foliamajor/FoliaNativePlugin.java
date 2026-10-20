@@ -1129,6 +1129,109 @@ public class FoliaNativePlugin extends Plugin {
         }
     }
 
+    /*
+     * 歌词后方「视频层」的本地视频。
+     *
+     * WebView 里没有 File System Access API：`<input type=file>` 挑出来的 File 只能变成
+     * blob: 地址，进程一死就失效 —— 也就是「重启就没了」。所以这一端改成原生拷一份进私有
+     * 目录（VideoLayerFile），Web 侧只拿一个回环地址。地址里带着端口，而端口每次启动都可能
+     * 变（见 localAudioServerPort），所以绝不能存死，每次要用都得回来问一次。
+     */
+
+    /** 打开系统文件选择器挑一个视频。 */
+    @PluginMethod
+    public void pickVideoLayerFile(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(call, intent, "handleVideoLayerPicked");
+    }
+
+    @ActivityCallback
+    private void handleVideoLayerPicked(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        int resultCode = result == null ? Activity.RESULT_CANCELED : result.getResultCode();
+        Intent data = result == null ? null : result.getData();
+        Uri uri = resultCode == Activity.RESULT_OK && data != null ? data.getData() : null;
+        if (uri == null) {
+            resolveVideoLayerPick(call, false, resultCode == Activity.RESULT_OK, null, null);
+            return;
+        }
+        /*
+         * 拷贝是重活（几十 MB 起），必须挪出桥线程：Capacitor 只有一条桥，
+         * 占住它等于让所有别的方法一起排队，别的平台会集体超时。
+         */
+        final Activity activity = getActivity();
+        new Thread(() -> {
+            String storedName = null;
+            String storedUrl = null;
+            try {
+                ContentResolver resolver = getContext().getContentResolver();
+                String displayName = queryDisplayName(resolver, uri);
+                String mimeType = resolver.getType(uri);
+                if (VideoLayerFile.store(getContext(), uri, displayName, mimeType) != null) {
+                    storedName = VideoLayerFile.displayName(getContext());
+                    storedUrl = videoLayerUrl();
+                }
+            } catch (Throwable error) {
+                Log.w(TAG, "Failed to store the chosen video layer file", error);
+            }
+            final String name = storedName;
+            final String url = storedUrl;
+            final boolean picked = name != null && url != null;
+            if (activity != null) {
+                activity.runOnUiThread(() -> resolveVideoLayerPick(call, picked, true, name, url));
+            } else {
+                resolveVideoLayerPick(call, picked, true, name, url);
+            }
+        }, "folia-video-layer").start();
+    }
+
+    private void resolveVideoLayerPick(PluginCall call, boolean picked, boolean rejected, String name, String url) {
+        JSObject out = new JSObject();
+        out.put("picked", picked);
+        // 选了却用不了（太大 / 读不出来）：要和「用户取消」分开，界面才好给提示。
+        out.put("rejected", !picked && rejected);
+        if (name != null) out.put("name", name);
+        if (url != null) out.put("url", url);
+        call.resolve(out);
+    }
+
+    /** 挑过没有、它此刻的回环地址是什么。每次启动都要重问：端口会变。 */
+    @PluginMethod
+    public void getVideoLayerFile(PluginCall call) {
+        JSObject out = new JSObject();
+        String key = VideoLayerFile.key(getContext());
+        boolean has = key != null;
+        out.put("has", has);
+        if (has) {
+            out.put("name", VideoLayerFile.displayName(getContext()));
+            String url = videoLayerUrl();
+            if (url != null) out.put("url", url);
+        }
+        call.resolve(out);
+    }
+
+    /** 用户主动「清除本地视频」：连磁盘上的副本一起删掉。 */
+    @PluginMethod
+    public void clearVideoLayerFile(PluginCall call) {
+        VideoLayerFile.clear(getContext());
+        call.resolve();
+    }
+
+    /** 视频层副本的回环地址；本地服务起不来时为 null。 */
+    private String videoLayerUrl() {
+        try {
+            if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
+            int port = localAudioServer.start();
+            return "http://127.0.0.1:" + port + "/video-layer/current";
+        } catch (Exception error) {
+            Log.w(TAG, "Could not start the local server for the video layer", error);
+            return null;
+        }
+    }
+
     @ActivityCallback
     private void handlePickedAudio(PluginCall call, ActivityResult activityResult) {
         isAudioPickerOpen = false;

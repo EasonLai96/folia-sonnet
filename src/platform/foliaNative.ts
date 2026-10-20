@@ -123,6 +123,23 @@ interface FoliaNativePlugin {
      * 而播放出错（试听限制、登录过期、网络断了）恰恰都在后台发生。
      */
     showToast(options: { text: string; long?: boolean }): Promise<void>;
+    /**
+     * 歌词后方视频层：挑一个本地视频。
+     *
+     * 原生拿到 URI 自己拷进 App 私有目录，这里只拿「成没成」和一个回环地址 ——
+     * 视频动辄几十上百 MB，字节绝不过桥。选了却用不了（太大 / 读不出来）是 `rejected`，
+     * 与用户取消（`picked` 与 `rejected` 都假）分开，界面才好分别给提示。
+     */
+    pickVideoLayerFile(): Promise<{ picked?: boolean; rejected?: boolean; name?: string; url?: string }>;
+    /**
+     * 挑过的那个视频此刻还在不在，地址是什么。
+     *
+     * 地址里带着本地服务的端口，而端口每次启动都可能不同（原生那边是端口 0 由系统分配），
+     * 所以这个地址**不能存死**：每次启动都要重新问一次。
+     */
+    getVideoLayerFile(): Promise<{ has?: boolean; name?: string; url?: string }>;
+    /** 删掉原生那一份视频副本（设置里的「清除本地视频」）。 */
+    clearVideoLayerFile(): Promise<void>;
     addListener(
         eventName: 'updateDownloadProgress',
         listener: (progress: UpdateDownloadProgress) => void,
@@ -261,6 +278,56 @@ export const showNativeToast = async (text: string, options: { long?: boolean } 
         await FoliaNative.showToast({ text, ...(options.long ? { long: true } : {}) });
     } catch (error) {
         console.warn('[FoliaNative] showToast failed', error);
+    }
+};
+
+/** 视频层挑到的那一个：名字是给设置里看的，地址是给 <video> 用的。 */
+export type NativeVideoLayerFile = { name: string; url: string };
+
+/**
+ * 挑一次的结果。'rejected' 是「选了文件却用不了」（太大 / 读不出来），
+ * 与用户取消（'cancelled'）分开 —— 前者要给提示，后者什么都不说。
+ */
+export type NativeVideoLayerPick =
+    | { status: 'applied'; name: string; url: string }
+    | { status: 'rejected' }
+    | { status: 'cancelled' };
+
+/** 挑一个视频当歌词后方的视频层：原生拷进私有目录后回它的回环地址。 */
+export const pickNativeVideoLayerFile = async (): Promise<NativeVideoLayerPick> => {
+    if (!isCapacitorAndroid()) return { status: 'cancelled' };
+    try {
+        const result = await FoliaNative.pickVideoLayerFile();
+        if (result?.picked && result.url) {
+            return { status: 'applied', name: result.name ?? '', url: result.url };
+        }
+        return result?.rejected ? { status: 'rejected' } : { status: 'cancelled' };
+    } catch (error) {
+        console.warn('[FoliaNative] pickVideoLayerFile failed', error);
+        return { status: 'cancelled' };
+    }
+};
+
+/** 上一次挑的那个视频还在不在（重启后靠它把地址重新拿回来）。 */
+export const readNativeVideoLayerFile = async (): Promise<NativeVideoLayerFile | null> => {
+    if (!isCapacitorAndroid()) return null;
+    try {
+        const result = await FoliaNative.getVideoLayerFile();
+        if (!result?.has || !result.url) return null;
+        return { name: result.name ?? '', url: result.url };
+    } catch (error) {
+        console.warn('[FoliaNative] getVideoLayerFile failed', error);
+        return null;
+    }
+};
+
+/** 删掉原生那一份副本。非 Android 没有这一层，静默。 */
+export const clearNativeVideoLayerFile = async (): Promise<void> => {
+    if (!isCapacitorAndroid()) return;
+    try {
+        await FoliaNative.clearVideoLayerFile();
+    } catch (error) {
+        console.warn('[FoliaNative] clearVideoLayerFile failed', error);
     }
 };
 

@@ -36,11 +36,12 @@ import okhttp3.ResponseBody;
 /**
  * 本地音频流服务器。
  *
- * 两种来源：
+ * 三种来源：
  *   /audio/<MediaStore id>          系统媒体库里的文件
  *   /audio/imported-<file name>     通过系统文件管理器挑选后复制进 App 私有目录的文件
+ *   /video-layer/<anything>         歌词后方视频层那一个视频（VideoLayerFile 的私有副本）
  *
- * WebView 的 <audio> 播不了 content:// 这种 URI，也不认 App 私有目录里的路径，
+ * WebView 的 <audio> / <video> 播不了 content:// 这种 URI，也不认 App 私有目录里的路径，
  * 所以原生起一个只监听 127.0.0.1 的小服务，把音频以 http 的形式喂回去。
  * 必须支持 Range：<audio> 拖进度、以及某些格式要先读文件尾部的元数据，都靠它。
  */
@@ -48,6 +49,7 @@ final class LocalAudioServer {
     private static final String TAG = "LocalAudioServer";
     private static final String AUDIO_PATH_PREFIX = "/audio/";
     private static final String REMOTE_AUDIO_PATH_PREFIX = "/remote-audio/";
+    private static final String VIDEO_LAYER_PATH_PREFIX = "/video-layer/";
     private static final String IMPORTED_PREFIX = "imported-";
     /** 直接按绝对路径流原文件的 ref 前缀（文件系统兜底扫描出来的歌，不复制进私有目录）。 */
     private static final String FILE_PREFIX = "file-";
@@ -224,6 +226,10 @@ final class LocalAudioServer {
             }
             if (path.startsWith(REMOTE_AUDIO_PATH_PREFIX)) {
                 streamRemoteAudio(output, requestParts, headers, path.substring(REMOTE_AUDIO_PATH_PREFIX.length()));
+                return;
+            }
+            if (path.startsWith(VIDEO_LAYER_PATH_PREFIX)) {
+                streamVideoLayerFile(output, requestParts, headers);
                 return;
             }
             if (!path.startsWith(AUDIO_PATH_PREFIX)) {
@@ -442,6 +448,34 @@ final class LocalAudioServer {
         } finally {
             upstream.close();
         }
+    }
+
+    /**
+     * 歌词后方视频层那一个视频（私有目录里的副本，见 VideoLayerFile）。
+     *
+     * 不像音频那样拿 URL 里的名字去拼路径：这一层永远只有一份，名字不作数 ——
+     * 这个服务监听在 127.0.0.1 上，设备上任何应用都能连，名字来自 URL 就别拿它拼路径。
+     * <video> 一样吃 Range 与 CORS，所以走的是与音频同一条 writeResponse。
+     */
+    private void streamVideoLayerFile(
+        BufferedOutputStream output,
+        String[] requestParts,
+        Map<String, String> headers
+    ) throws IOException {
+        File target = VideoLayerFile.file(context);
+        if (target == null || !target.isFile() || target.length() <= 0) {
+            Log.w(TAG, "video layer file missing");
+            writeStatus(output, 404, "Not Found");
+            return;
+        }
+        writeResponse(
+            output,
+            requestParts,
+            headers,
+            target.length(),
+            VideoLayerFile.mimeType(context),
+            () -> new FileInputStream(target)
+        );
     }
 
     private interface StreamSupplier {
