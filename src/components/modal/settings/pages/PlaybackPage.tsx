@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC } from '../../../../services/automix/crossfadePlanner';
 import { modelsPresent, subscribeModelAvailability } from '../../../../services/analysis/modelAvailability';
-import { modelStoreSnapshot, subscribeModelStore, type DownloadableModel } from '../../../../services/analysis/modelStore';
+import { modelStoreSnapshot, subscribeModelStore, importModelFile, type DownloadableModel } from '../../../../services/analysis/modelStore';
 import { transitionCapabilities } from '../../../../services/automix/stems';
 import { announceTransition, type TransitionRenderer } from '../../../../services/automix/transitionCue';
 import { canAnalyseTracks } from '../../../../services/automix/transitionStrategy';
@@ -81,6 +81,7 @@ const AnalysisModelRow: React.FC<{ def: SettingsOptionDef; name: DownloadableMod
     const wanted = useAnalysisModelStore(state => state[name]);
     const setWanted = useAnalysisModelStore(state => state.handleSetModelWanted);
     const entry = React.useSyncExternalStore(subscribeModelStore, modelStoreSnapshot)[name];
+    const fileInput = React.useRef<HTMLInputElement>(null);
 
     const hint = entry.phase === 'ready'
         ? t('options.analysisModelReady')
@@ -98,6 +99,21 @@ const AnalysisModelRow: React.FC<{ def: SettingsOptionDef; name: DownloadableMod
     // differs - "download" the first time, "try again" after one.
     const canFetch = entry.phase === 'absent' || entry.phase === 'error';
 
+    /**
+     * Takes the weights from a file the listener picked. For a CDN this build cannot reach, or one
+     * they would rather not wait on: the same file either way, checked the same way.
+     */
+    const takeFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const picked = event.target.files?.[0];
+        // Cleared before the read, so choosing the same file twice in a row still fires a change.
+        event.target.value = '';
+        if (!picked) return;
+        const ok = await importModelFile(name, await picked.arrayBuffer());
+        // The switch has to agree with what is on disk: a file sitting there under a switch that says
+        // it is not wanted is a pair that answers nothing the next time someone asks.
+        if (ok) setWanted(name, true);
+    };
+
     return (
         <Row option={def} hint={hint}>
             <Toggle checked={wanted} onChange={next => setWanted(name, next)} />
@@ -114,6 +130,12 @@ const AnalysisModelRow: React.FC<{ def: SettingsOptionDef; name: DownloadableMod
                 // already says it is there.
                 <Button variant="quiet" onClick={() => setWanted(name, false)}>{t('options.analysisModelDelete')}</Button>
             )}
+            {entry.phase !== 'downloading' && (
+                <Button variant="quiet" onClick={() => fileInput.current?.click()}>{t('options.analysisModelImport')}</Button>
+            )}
+            {/* Not a file picker of our own make: the system's, so it can reach wherever the listener
+                put the file. Hidden, and pressed by the button above. */}
+            <input ref={fileInput} type="file" accept="*/*" className="hidden" onChange={event => void takeFile(event)} />
         </Row>
     );
 };

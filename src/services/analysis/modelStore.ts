@@ -207,6 +207,53 @@ export const readModelWeights = async (
 const inFlight = new Map<DownloadableModel, Promise<boolean>>();
 
 /**
+ * Keeps a file that has already been checked: into the cache, and the entry told it is ready.
+ *
+ * One place because the checks are the expensive part and the writing is not, and because a file
+ * arrives by two routes now - fetched from the CDN, or handed over by the listener - that have to end
+ * up in exactly the same state.
+ */
+const keep = async (name: DownloadableModel, file: Uint8Array): Promise<boolean> => {
+    const cache = await openCache();
+    if (!cache) {
+        patch(name, { phase: 'error', progress: 0, error: '这个环境没有可用的缓存存储' });
+        return false;
+    }
+    await cache.put(urlOf(name), new Response(file, { headers: { 'content-type': 'application/octet-stream' } }));
+    await cache.put(metaUrlOf(name), new Response(JSON.stringify({ bytes: file.byteLength })));
+    patch(name, { phase: 'ready', progress: 1, bytes: file.byteLength, error: undefined });
+    return true;
+};
+
+/**
+ * Takes the weights from a file the listener picked instead of from the CDN.
+ *
+ * Verified in exactly the same way as a download: a file is no more trustworthy for having been
+ * chosen by hand. It may be a different export than this version reads, or half of one, and either
+ * would load and answer confidently and wrongly - the failure this file's hashing exists to prevent.
+ *
+ * True when the file is now the one this app will use.
+ */
+export const importModelFile = async (name: DownloadableModel, bytes: ArrayBuffer): Promise<boolean> => {
+    patch(name, { phase: 'checking', error: undefined });
+    const file = new Uint8Array(bytes);
+    if (file.byteLength !== FILES[name].bytes) {
+        patch(name, { phase: 'error', progress: 0, error: `文件大小不对（${file.byteLength} / ${FILES[name].bytes}）` });
+        return false;
+    }
+    const hash = await sha256Of(file);
+    if (hash === null) {
+        patch(name, { phase: 'error', progress: 0, error: '这个环境无法校验文件（需要 WebCrypto）' });
+        return false;
+    }
+    if (hash !== FILES[name].sha256) {
+        patch(name, { phase: 'error', progress: 0, error: '文件校验不通过，已丢弃' });
+        return false;
+    }
+    return keep(name, file);
+};
+
+/**
  * Makes sure the weights are in the cache, downloading them if they are not.
  *
  * True when they are there afterwards. A failure leaves the entry on 'error' with the reason rather
@@ -273,12 +320,7 @@ export const ensureModel = async (name: DownloadableModel): Promise<boolean> => 
                 return false;
             }
 
-            await cache.put(urlOf(name), new Response(file, {
-                headers: { 'content-type': 'application/octet-stream' },
-            }));
-            await cache.put(metaUrlOf(name), new Response(JSON.stringify({ bytes: file.byteLength })));
-            patch(name, { phase: 'ready', progress: 1, bytes: file.byteLength, error: undefined });
-            return true;
+            return keep(name, file);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             // A fetch the browser refused throws a TypeError carrying no detail whatsoever: "Failed
