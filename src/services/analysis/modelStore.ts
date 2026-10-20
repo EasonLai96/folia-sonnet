@@ -280,7 +280,16 @@ export const ensureModel = async (name: DownloadableModel): Promise<boolean> => 
             patch(name, { phase: 'ready', progress: 1, bytes: file.byteLength, error: undefined });
             return true;
         } catch (error) {
-            patch(name, { phase: 'error', progress: 0, error: `下载失败：${error instanceof Error ? error.message : String(error)}` });
+            const message = error instanceof Error ? error.message : String(error);
+            // A fetch the browser refused throws a TypeError carrying no detail whatsoever: "Failed
+            // to fetch" is all it says, and it says it for a missing CORS header, a dead host and a
+            // rejected certificate alike - three faults with nothing in common but this string. The
+            // header is by far the likeliest of them for a file served from someone's own host, so it
+            // is named here rather than left for the listener to guess at from a bare error.
+            const reason = /failed to fetch|load failed|networkerror/i.test(message)
+                ? `${message}（多半是服务器没给 Access-Control-Allow-Origin 头）`
+                : message;
+            patch(name, { phase: 'error', progress: 0, error: `下载失败：${reason}` });
             return false;
         } finally {
             inFlight.delete(name);
