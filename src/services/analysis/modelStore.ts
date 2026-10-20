@@ -103,12 +103,17 @@ const urlOf = (name: DownloadableModel): string => `${MODEL_CDN_BASE}/${FILES[na
 /**
  * The key its size is cached under, next to the file itself.
  *
+ * A query and NOT a fragment: `cache.put()` and `cache.match()` both drop everything after a '#', so
+ * two URLs differing only in their fragment are the same key here - the meta and the weights would
+ * overwrite each other, and did. The symptom was a model read back as 18 bytes, which is exactly how
+ * long `{"bytes":91838176}` is: the file in the cache was its own size note.
+ *
  * Needed because a cached `Response` will not reliably give its length back: the header is not
  * guaranteed to survive, and asking the body means reading 133MB at every startup to learn a number.
  * So the size is written beside the file and read instead; the file's own presence is still asked
  * from the cache, so a cleared cache takes the entry with it and this says absent.
  */
-const metaUrlOf = (name: DownloadableModel): string => `${urlOf(name)}#size`;
+const metaUrlOf = (name: DownloadableModel): string => `${urlOf(name)}?folia-meta=size`;
 
 const readMeta = async (cache: Cache, name: DownloadableModel): Promise<number> => {
     try {
