@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 第二次机会**不看哈希，看内容**：候选条目标的高亮词都在你手上这段歌词里，那条答案
 // 就是照着这首歌做的。判定留在本机（服务端只回高亮词），歌词正文因此不用上传。
 //
-// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（随机挑一个候选），
+// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（挑最像的那个候选），
 // 不再报「没有」—— 各平台的 LRC 差几个字就该判成另一首歌，这是用户最恼火的那一句
 // 「云端明明有，就是匹配不上」。
 
@@ -176,6 +176,42 @@ describe('pullAiCloudCache 的第二次机会', () => {
     if (result.status === 'hit') {
       expect(result.matched).toBe('words');
       expect(result.sourceKey).toBe(KEY_A);
+      expect(result.payload).toEqual(payload);
+    }
+  });
+
+  /*
+   * 都判不过时挑**最像**的那条（高亮词覆盖率最高），不再随便挑一条。
+   *
+   * 随机等于承认「眼前的十几条近亲跟这首的关系都一样」—— 它们并不一样：覆盖率 0.67 那条
+   * 明显比 0 那条更像这首的答案。而挑到的那条会回填到本次的精确键上，错一次就一直错下去。
+   */
+  it('falls back to the closest candidate, not an arbitrary one', async () => {
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({
+          ok: true,
+          candidates: [
+            { key: KEY_A, words: ['完全不在', '也不在'] },                  // 0/2
+            { key: KEY_H, words: ['小黄花', '不在歌词里'] },                 // 1/2
+            { key: KEY_B, words: ['小黄花', '荡秋千', '不在这段里'] },       // 2/3 —— 最高的那条
+          ],
+        });
+      }
+      if (url.includes(KEY_B)) return json({ hit: true, entry: { payload } });
+      if (url.includes(KEY_A) || url.includes(KEY_H)) return json({ hit: true, entry: { payload: secondPayload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_G, {
+      songTitle: '晴天',
+      lyricText: '故事的小黄花\n童年的荡秋千',
+    });
+
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.matched).toBe('words');
+      expect(result.sourceKey).toBe(KEY_B);
       expect(result.payload).toEqual(payload);
     }
   });
