@@ -1,5 +1,6 @@
 import { qqCookieUin } from '../cookies.js';
 import { qqAuthRequired, qqBridgeFailure, qqMusicuBatch, qqMusicuCall } from '../qq.js';
+import { noteLibraryStep } from '../libraryTrace.js';
 
 // src/nativeBridge/api/qq/explore.js
 //
@@ -331,9 +332,19 @@ export async function readRadar(params, cookieHeader) {
     }
     const data = dictOf(result.data);
     const entries = listOf(data.VecSongs);
-    const songs = entries
-        .map((entry) => dictOf(entry).Track)
-        .filter((track) => typeof dictOf(track).mid === 'string' && dictOf(track).mid.length > 0);
+    /*
+     * 上游把曲目放在 `Track` 里，但不同版本字段名换过（track / TrackInfo / 也有直接平铺的），
+     * 曲目 id 也不一定叫 `mid`。只认 `Track.mid` 会在上游换名时把整栏刷歌模式缩成 0～1 首 ——
+     * 探索页第一页只剩这一栏时，用户看到的就是「页面是空的」。
+     */
+    const songs = entries.map((entry) => {
+        const box = dictOf(entry);
+        const track = dictOf(box.Track || box.track || box.TrackInfo || box.track_info || box);
+        const mid = textOf(track.mid) ?? textOf(track.songmid) ?? textOf(track.songMid);
+        return mid === undefined ? null : { ...track, mid };
+    }).filter(Boolean);
+    // 上游只给 1 首时，报告里要能直接看出是「上游就给了这么点」还是「我们把字段认丢了」。
+    noteLibraryStep('qq', 'radar:decode', { entries: entries.length, songs: songs.length });
     return { code: 0, page, songs, more: data.HasMore === true };
 }
 

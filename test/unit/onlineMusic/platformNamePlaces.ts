@@ -103,7 +103,7 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/nativeBridge/api/eapi.js': { n: { netease: 7 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17' },
     // qq 121 → 125：扫码确认后要把会话真正交出去那一次（桥原先返回空 cookie），
     // 新增取换票那份 cookie 并交出的一行，加说明它的三行注释。
-    'src/nativeBridge/api/folia.js': { n: { netease: 9, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation' },
+    'src/nativeBridge/api/folia.js': { n: { netease: 14, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation; raised by the daily-recommendation fallbacks and the explore route traces 2026-10-20' },
     // 245：歌单的写入搬进 kugou/ 目录后，这里只多出把它转出去的那一行（其余只是从它取常量）。
     'src/nativeBridge/api/kugou.js': { n: { kugou: 245 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the playlist writes 2026-10-19' },
     'src/nativeBridge/api/libraryTrace.js': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },

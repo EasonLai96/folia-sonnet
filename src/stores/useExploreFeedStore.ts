@@ -4,6 +4,7 @@ import { inKeptOrder, noteCollectionSaved, withoutTakenOut } from '../components
 import type { UnifiedSong } from '../types';
 import type { OmniCollection, OmniExploreItem, OmniExploreSection } from '../types/onlineMusic';
 import { errorMessage } from '../utils/errorText';
+import { noteLibraryStep } from '../nativeBridge/api/libraryTrace.js';
 
 // src/stores/useExploreFeedStore.ts
 // The active provider's recommendation page behind the explore tab: its sections, the further
@@ -360,6 +361,16 @@ export const useExploreFeedStore = create<ExploreFeedStore>((set, get) => {
                 const first = arrived(inKeptOrder(key, page.sections));
                 set({ feed: { ...blank('ready', read), ...first, nextCursor: page.nextCursor, pages: 1, ...(page.refreshReadsAnew ? { refreshReadsAnew: true } : {}) } });
                 console.log(`[Explore] Page ${read}: ${first.sections.length} sections`);
+                // 探索页读成功时报告里也留一条：能区分「没打开探索页」和「打开了但内容空」。
+                // 探索页每栏的标题与条数：报告里能直接看出用户说的「每日推荐」是哪个平台、哪一栏、是不是 0 条。
+                const sectionSummary = first.sections
+                    .map(section => `${section.title || '(no-title)'}:${section.items.length}`)
+                    .join(' | ')
+                    .slice(0, 200);
+                noteLibraryStep(String(key).split(':')[0] || 'unknown', 'explore:page', {
+                    sections: first.sections.length,
+                    titles: sectionSummary,
+                });
                 return;
             }
             const next = await exchanged(key, shown, () => read === reads, listened);
@@ -375,6 +386,8 @@ export const useExploreFeedStore = create<ExploreFeedStore>((set, get) => {
             // The listener switched provider meanwhile: nothing failed, and a tab still showing this key asks again.
             if (isOvertaken(error)) { set({ key: null, feed: null }); return; }
             console.warn(`[Explore] The page could not be read: ${wordsOf(error)}`);
+            // 整页失败时把平台与错误原文记进诊断（平台名取 key 的第一段）。
+            noteLibraryStep(String(key).split(':')[0] || 'unknown', 'explore:error', { message: wordsOf(error) });
             // The page as it is now: a card may have been taken off it while the read was under way.
             const current = get().feed;
             set({ feed: shown && current ? { ...current, refreshing: false, refreshFailed: true } : blank('error', read) });
@@ -389,6 +402,8 @@ export const useExploreFeedStore = create<ExploreFeedStore>((set, get) => {
         key: null,
         feed: null,
         show(key, listened) {
+            // 只要有界面要展示探索页就记一条：报告里没有 explore 行 = 界面根本没走到这里。
+            noteLibraryStep(String(key).split(':')[0] || 'unknown', 'explore:show', { key: String(key).slice(0, 60) });
             if (get().key !== key) void load(key, listened);
         },
         refresh(listened) {

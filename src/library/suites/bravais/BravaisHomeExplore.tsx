@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { noteLibraryStep } from '../../../nativeBridge/api/libraryTrace.js';
 import { useTranslation } from 'react-i18next';
 import type { SongResult } from '../../../types';
 import type { OnlineProviderId } from '../../../types/onlineMusic';
@@ -58,7 +59,19 @@ const BravaisHomeExplore: React.FC<{
     const onOpenItem = useCallback((itemKey: string) => {
         const { tiles, onOpenGridView: open, providerId: provider } = latest.current;
         const tile = tiles.find(candidate => candidate.id === itemKey);
-        if (tile?.kind === 'collection') open(createOnlineGridViewCollection(tile.collection, provider));
+        // 探索墙打开集合的入口：先记「找到了没有」，再记交给宿主的集合类型。
+        noteLibraryStep('explore', 'b:open-item', {
+            itemKey: String(itemKey).slice(0, 80),
+            found: Boolean(tile),
+            tileKind: tile ? String(tile.kind) : '',
+        });
+        if (tile?.kind === 'collection') {
+            noteLibraryStep('explore', 'b:open-grid', {
+                type: String(tile.collection.type),
+                id: String(tile.collection.id).slice(0, 40),
+            });
+            open(createOnlineGridViewCollection(tile.collection, provider));
+        }
     }, []);
     const onPlayItem = useCallback((itemKey: string) => {
         const { tiles, onPlaySong: play } = latest.current;
@@ -111,6 +124,20 @@ const BravaisHomeExplore: React.FC<{
             account: accountSeam,
         },
     }), [accountSeam, chrome.onSelectTab, chrome.scan, chrome.search, chrome.tabs, chrome.title, online.providerLabel, status, t, tools]);
+    // 诊断：探索墙到底拿到了多少条目（墙空 = 白框、点了没反应，这份留痕能直接看出来）。
+    useEffect(() => {
+        noteLibraryStep('explore', 'b:layer', {
+            isOn,
+            accountView: online.accountView,
+            canUseExplore: online.canUseExplore,
+            feedStatus: feed ? feed.status : 'none',
+            feedSections: feed ? feed.sections.length : 0,
+            tiles: wall.tiles.length,
+            items: items.length,
+            wallSections: wall.sections.length,
+            emptyText: wall.emptyText ?? '',
+        });
+    }, [isOn, online.accountView, online.canUseExplore, feed, wall.tiles.length, wall.sections.length, items.length, wall.emptyText]);
     const wallRules = useMemo(() => ({ filterKey: 'explore', loading: isOn && items.length === 0 && (!feed || feed.status === 'loading') }), [feed, isOn, items.length]);
     const home = useMemo(() => ({ cycleTab: chrome.cycleTab }), [chrome.cycleTab]);
 

@@ -120,6 +120,18 @@ function parseInput(input) {
   return { url, body, method: String(input?.method || 'GET').toUpperCase() };
 }
 
+// 探索页这一组请求的路径（见下面 --- Explore --- 那段）：留痕用，
+// 页面空的时候先看诊断里有没有这几条。
+const EXPLORE_PATHS = new Set([
+  '/homepage/block/page',
+  '/recommend/resource',
+  '/toplist',
+  '/simi/song',
+  '/top/song',
+  '/album/new',
+  '/top/playlist',
+]);
+
 async function eapiJson(path, data, cookie) {
   const result = await eapiRequest(path, data || {}, cookie || '');
   const body = result?.body || {};
@@ -554,17 +566,31 @@ async function handleLikeCheck(url, cookie) {
 
 async function handleDailyRecommend(url, cookie) {
   const afresh = String(firstValue(url.searchParams.get('afresh'), 'false')) === 'true';
-  const paths = afresh
-    ? ['/api/v3/discovery/recommend/songs', '/api/recommend/songs']
-    : ['/api/v3/discovery/recommend/songs'];
+  const params = { limit: 30, offset: 0, total: true, n: 1000, ...(afresh ? { afresh: true } : {}) };
+  // 每日推荐试两条上游路径、两种签名：不同客户端版本上 v3 eapi 可能被拒（code 400/301），
+  // 旧接口或 weapi 仍能回同一批歌。全部失败才报错，并留痕说明试过哪些。
+  const attempts = [
+    { name: 'eapi-v3', run: () => eapiJson('/api/v3/discovery/recommend/songs', {}, cookie) },
+    { name: 'weapi-v3', run: () => weapiJson('/api/v3/discovery/recommend/songs', params, cookie) },
+    { name: 'eapi-legacy', run: () => eapiJson('/api/recommend/songs', {}, cookie) },
+    { name: 'weapi-legacy', run: () => weapiJson('/api/recommend/songs', params, cookie) },
+  ];
+  const tried = [];
   let lastError = null;
-  for (const path of paths) {
+  for (const attempt of attempts) {
     try {
-      return await eapiJson(path, {}, cookie);
+      const body = await attempt.run();
+      const songs = Array.isArray(body?.data?.dailySongs) ? body.data.dailySongs
+        : Array.isArray(body?.dailySongs) ? body.dailySongs
+          : Array.isArray(body?.songs) ? body.songs : [];
+      noteLibraryStep('netease', 'explore:daily:source', { via: attempt.name, songs: songs.length, code: body?.code });
+      return body;
     } catch (error) {
+      tried.push(attempt.name);
       lastError = error;
     }
   }
+  noteLibraryStep('netease', 'explore:daily:failed', { tried: tried.join(',') });
   throw lastError || new Error('Daily recommendation request failed');
 }
 
@@ -1515,6 +1541,8 @@ export async function handleFoliaApiRequest(input) {
    *   /album/new           → albums
    *   /top/playlist        → playlists
    */
+  // 探索页这一组走的路由：留痕能看出哪一条被问过（页面空却一条都没有 = 请求根本没到桥）。
+  if (EXPLORE_PATHS.has(path)) noteLibraryStep('netease', 'explore:route', { path });
   if (path === '/homepage/block/page') {
     return await weapiJson('/api/homepage/block/page', {
       refresh: String(firstValue(params.get('refresh'), 'false')) !== 'false',
@@ -1522,7 +1550,19 @@ export async function handleFoliaApiRequest(input) {
     }, cookie);
   }
   if (path === '/recommend/resource') {
-    return await weapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
+    // 每日推荐歌单：weapi 这条账号类接口常只答 `{code: 301}`（csrf 对不上或认成未登录），
+    // 而 weapiJson 为了不让整页失败是**不抛错**的 —— 光靠 try/catch 换不了路，这一栏会一直 0 张。
+    // 所以「没答出 recommend 就换 eapi 再问一次」，网络层真抛错时同样换路。
+    try {
+      const answer = await weapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
+      if (Array.isArray(answer?.recommend) || Array.isArray(answer?.data?.recommend)) return answer;
+      noteLibraryStep('netease', 'explore:daily-playlists:fallback', { code: answer?.code });
+    } catch (error) {
+      noteLibraryStep('netease', 'explore:daily-playlists:fallback', {
+        message: error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120),
+      });
+    }
+    return await eapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
   }
   if (path === '/toplist') return await weapiJson('/api/toplist', {}, cookie);
   if (path === '/simi/song') {
