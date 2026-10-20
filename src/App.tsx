@@ -691,6 +691,9 @@ export default function App() {
         themeGenerationSource,
         bgMode,
         isGeneratingTheme,
+        // 「这首歌的 AI 主题还没落定」：正在翻本机改过的那版 / 拉云端 / 问模型。
+        // 壁纸与叠层拿它决定「这一推要不要再等等」（见 useLyricsWallpaperFeed）。
+        themeSettling,
         handleToggleDaylight,
         handleBgModeChange,
         handleResetTheme,
@@ -1544,6 +1547,8 @@ export default function App() {
         // 整份主题：AI 主题的 wordColors / lyricsIcons 这类字段一个都传不过去的话，
         // 叠层画出来就只有配色变了，「AI 主题的效果」一点都没有。
         theme,
+        // 叠层 / 壁纸那一推要等它落定再发：分两次推（先旧主题、再 AI 主题）就是切歌闪两下。
+        themePending: themeSettling,
         animationIntensity: theme?.animationIntensity ?? null,
     });
 

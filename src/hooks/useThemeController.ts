@@ -197,6 +197,18 @@ export function useThemeController({
     const [isGeneratingTheme, setIsGeneratingTheme] = useState(false);
     const activeThemeGenerationCountRef = useRef(0);
     const themeGenerationSongKeysRef = useRef(new Set<string>());
+    /*
+     * 「正在把这首歌的主题找回来」也要算在途（本地改过的那一版 / 云端那条键），
+     * 不只是「正在问模型」。
+     *
+     * 换歌那一刻主题是这样一层层落下来的：先翻本机改过的那版、再按云端键拉，
+     * 都没有才轮到自动生成（还隔着 650ms 那一拍）。中间任何一层落定都会改一次 theme，
+     * 而它们**都不经过 beginThemeGeneration** —— 只认 isGeneratingTheme 的话，
+     * 这一段是「静默」的：外表上主题已经落定，其实等会儿还要再变一次。
+     * 叠层那边一次换主题就是一次重画（闪一下），所以要在外面看得见这段在途。
+     */
+    const [isThemeRestoring, setIsThemeRestoring] = useState(false);
+    const activeThemeRestoreCountRef = useRef(0);
 
     const themeSourceModel = useMemo(() => buildThemeSourceModel({
         bgMode,
@@ -233,6 +245,16 @@ export function useThemeController({
     const endThemeGeneration = () => {
         activeThemeGenerationCountRef.current = Math.max(0, activeThemeGenerationCountRef.current - 1);
         setIsGeneratingTheme(activeThemeGenerationCountRef.current > 0);
+    };
+
+    const beginThemeRestore = () => {
+        activeThemeRestoreCountRef.current += 1;
+        setIsThemeRestoring(true);
+    };
+
+    const endThemeRestore = () => {
+        activeThemeRestoreCountRef.current = Math.max(0, activeThemeRestoreCountRef.current - 1);
+        setIsThemeRestoring(activeThemeRestoreCountRef.current > 0);
     };
 
     useEffect(() => {
@@ -541,7 +563,7 @@ export function useThemeController({
         return 'restored' as const;
     };
 
-    const restoreCachedThemeForSong = async (
+    const restoreCachedThemeForSongInner = async (
         songOrId: ThemeCacheSongKey | SongResult,
         options?: { allowLastUsedFallback?: boolean; preserveCurrentOnMiss?: boolean }
     ) => {
@@ -620,6 +642,26 @@ export function useThemeController({
 
         applyThemeFallback();
         return 'none' as const;
+    };
+
+    /**
+     * 对外的那一层：把「找歌的过程」记成在途（beginThemeRestore / endThemeRestore）。
+     *
+     * 里面每一步都是异步的（读本机改过的那版、拉云端那条键、翻上次用过的），
+     * 而它们**都不碰 isGeneratingTheme** —— 不在这里记一笔的话，
+     * 外面看到的就是「换歌后主题已经定下来了」，跟着推一次，等它真落定时又要再推一次
+     * （叠层每换一次主题就要重画一次，也就是用户说的「闪两下」）。
+     */
+    const restoreCachedThemeForSong = async (
+        songOrId: ThemeCacheSongKey | SongResult,
+        options?: { allowLastUsedFallback?: boolean; preserveCurrentOnMiss?: boolean }
+    ) => {
+        beginThemeRestore();
+        try {
+            return await restoreCachedThemeForSongInner(songOrId, options);
+        } finally {
+            endThemeRestore();
+        }
     };
 
     // Cover-derived theme: the no-AI path. Shared by the "cover" generation source the user can
@@ -827,6 +869,13 @@ export function useThemeController({
         themeGenerationSource,
         bgMode,
         isGeneratingTheme,
+        /**
+         * 「这首歌的主题还没落定」：正在把缓存找回来，或者正在问模型 / 拉云端。
+         *
+         * 只给外面**判断时机**用（比如叠层那一推要不要再等等），不是进度条 ——
+         * 它只说「还要变」，不说变成什么样。
+         */
+        themeSettling: isGeneratingTheme || isThemeRestoring,
         ...actions,
     };
 }

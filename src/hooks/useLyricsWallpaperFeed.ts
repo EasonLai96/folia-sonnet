@@ -85,6 +85,27 @@ const WALLPAPER_DRIFT_TOLERANCE_MS = 900;
  */
 const PREVIEW_RENEW_MS = 15_000;
 
+/*
+ * 换歌那一推要「等一等」再发。
+ *
+ * 切歌为什么会闪两下：这一推是**分几次**到的 —— 先推整条时间轴（那一刻封面还没抓到、
+ * 主题还是上一首的），封面抓到了再推一次，AI 主题落定了再推一次。叠层每收到一次就
+ * 重画一次，于是换一首歌闪两三下。所以换歌这一推按住，等这首歌该有的东西都到齐了
+ * 再一次推到位。
+ *
+ * 按住的三件事：主题还在途、**封面还没到**、以及最短那一拍还没走完 —— 自动生成在换歌后
+ * 还隔着 650ms 那一拍才发起，不等过这一拍的话，它一起动就又是一次推送、又是一闪。
+ */
+/** 最短也要等这一拍（比自动生成的 650ms 多给一点，让它先发起）。 */
+const THEME_SETTLE_MIN_MS = 700;
+/**
+ * 绝不为等主题把歌词拖住更久。
+ *
+ * 生成可能失败、也可能压根没开「跟着歌换主题」，那一刻叠层会一直挂着上一首的歌词 ——
+ * 与其让用户盯着旧歌词，不如照推（代价是这一首还会再闪一次，但只有一次）。
+ */
+const THEME_SETTLE_MAX_MS = 2000;
+
 /** 超过这个长度的字符串值不进签名：那是 base64 图片（.key 本身还是进的）。 */
 const MAX_FINGERPRINT_STRING = 512;
 
@@ -212,6 +233,13 @@ type UseLyricsWallpaperFeedOptions = {
      * 这类字段 —— 整份序列化推过去，叠层拿它打底。
      */
     theme?: Theme | null;
+    /**
+     * App 里这首歌的 AI 主题还没落定（正在翻本机改过的那版 / 拉云端 / 问模型）。
+     *
+     * 为真时换歌那一推先按住（只按到 THEME_SETTLE_MAX_MS），等主题定下来再一次推 ——
+     * 不然就是「先推旧的、再推 AI 主题」，叠层跟着闪两下。
+     */
+    themePending?: boolean;
     animationIntensity?: 'calm' | 'normal' | 'chaotic' | null;
 };
 
@@ -258,6 +286,7 @@ export const useLyricsWallpaperFeed = ({
     primaryColor,
     secondaryColor,
     theme,
+    themePending,
     animationIntensity,
 }: UseLyricsWallpaperFeedOptions): void => {
     const enabled = isCapacitorAndroid();
@@ -436,71 +465,105 @@ export const useLyricsWallpaperFeed = ({
     }, [enabled, backgroundMode, backgroundImage, wallpaperVisualizer, backgroundBlur, showProgress,
         showTranslation, tuning, durationMs]);
 
+    /*
+     * 换歌那一推的闸：记着「现在这首歌是从什么时候开始等的」。
+     *
+     * key 变了就是另一首歌，重新计时；同一首歌内歌词晚到、改设置这些不动它
+     * （那些要当场生效，不该被闸按住）。规则见上面 THEME_SETTLE_* 那两行注释。
+     */
+    const songGateRef = React.useRef({ key: '', since: 0 });
+
     // 换歌（或歌词本身变了）时下发整条时间轴。
     React.useEffect(() => {
         if (!active) return;
         const lines = lyrics?.lines ?? [];
-        void publishLyricsWallpaper({
-            title: title ?? '',
-            artist: artist ?? '',
-            accent: accentColor || DEFAULT_ACCENT,
-            backgroundColor: backgroundColor || '#09090b',
-            primaryColor: primaryColor || undefined,
-            secondaryColor: secondaryColor || undefined,
-            themeJson: themeJson || undefined,
-            motion: MOTION_BY_INTENSITY[animationIntensity ?? 'normal'] ?? 1,
-            cover: wallpaperCover,
-            /*
-             * 封面地址一起下发。
-             *
-             * base64 那份是 App 抓图转出来的，转不成（跨域 / 还没解码好）时原生就不更新，
-             * 叠层会一直挂着上一首的封面 —— 地址短、每首必变，叠层可以直接拿它去加载。
-             */
-            coverUrl: coverUrl || null,
-            background: backgroundMode,
-            image: backgroundImage,
-            visualizer: wallpaperVisualizer,
-            blur: backgroundBlur,
-            progress: showProgress,
-            translation: showTranslation,
-            tuning,
-            durationMs,
-            timeline: lines.map((line) => {
-                const entry: FoliaWallpaperTimelineEntry = {
-                    text: line.fullText,
-                    start: Math.round(line.startTime * 1000),
-                    end: Math.round(line.endTime * 1000),
-                };
-                // 翻译整段不给：原生那边 null 就是「没翻译」，不会为了对齐而画一条空行。
-                const translation = line.translation?.trim();
-                if (translation) {
-                    entry.translation = translation;
-                }
+        const send = () => {
+            void publishLyricsWallpaper({
+                title: title ?? '',
+                artist: artist ?? '',
+                accent: accentColor || DEFAULT_ACCENT,
+                backgroundColor: backgroundColor || '#09090b',
+                primaryColor: primaryColor || undefined,
+                secondaryColor: secondaryColor || undefined,
+                themeJson: themeJson || undefined,
+                motion: MOTION_BY_INTENSITY[animationIntensity ?? 'normal'] ?? 1,
+                cover: wallpaperCover,
                 /*
-                 * 逐字时间轴一起下发。
+                 * 封面地址一起下发。
                  *
-                 * 没有它，叠层只能把整行当成一个「词」渲染：歌词是整一段冒出来的，
-                 * 而 AI 主题的关键词着色会命中这唯一那个 token、把整行都染成高亮色
-                 * —— 两处都和播放页不一样。App 这份 words 即使对普通 LRC 也是有的
-                 * （解析器按字/词把行内时间均分出来的占位），播放页的逐字推进正是靠它。
+                 * base64 那份是 App 抓图转出来的，转不成（跨域 / 还没解码好）时原生就不更新，
+                 * 叠层会一直挂着上一首的封面 —— 地址短、每首必变，叠层可以直接拿它去加载。
                  */
-                if (line.words && line.words.length > 1) {
-                    entry.words = line.words.map(word => ({
-                        text: word.text,
-                        start: Math.max(entry.start, Math.round(word.startTime * 1000)),
-                        end: Math.max(entry.start, Math.round(word.endTime * 1000)),
-                    }));
-                }
-                return entry;
-            }),
-            positionMs: Math.round(getCurrentTime() * 1000),
-            playing,
-        });
+                coverUrl: coverUrl || null,
+                background: backgroundMode,
+                image: backgroundImage,
+                visualizer: wallpaperVisualizer,
+                blur: backgroundBlur,
+                progress: showProgress,
+                translation: showTranslation,
+                tuning,
+                durationMs,
+                timeline: lines.map((line) => {
+                    const entry: FoliaWallpaperTimelineEntry = {
+                        text: line.fullText,
+                        start: Math.round(line.startTime * 1000),
+                        end: Math.round(line.endTime * 1000),
+                    };
+                    // 翻译整段不给：原生那边 null 就是「没翻译」，不会为了对齐而画一条空行。
+                    const translation = line.translation?.trim();
+                    if (translation) {
+                        entry.translation = translation;
+                    }
+                    /*
+                     * 逐字时间轴一起下发。
+                     *
+                     * 没有它，叠层只能把整行当成一个「词」渲染：歌词是整一段冒出来的，
+                     * 而 AI 主题的关键词着色会命中这唯一那个 token、把整行都染成高亮色
+                     * —— 两处都和播放页不一样。App 这份 words 即使对普通 LRC 也是有的
+                     * （解析器按字/词把行内时间均分出来的占位），播放页的逐字推进正是靠它。
+                     */
+                    if (line.words && line.words.length > 1) {
+                        entry.words = line.words.map(word => ({
+                            text: word.text,
+                            start: Math.max(entry.start, Math.round(word.startTime * 1000)),
+                            end: Math.max(entry.start, Math.round(word.endTime * 1000)),
+                        }));
+                    }
+                    return entry;
+                }),
+                positionMs: Math.round(getCurrentTime() * 1000),
+                playing,
+            });
+        };
+        /*
+         * 换歌这一推按住，等主题落定再一次发（原因见 THEME_SETTLE_* 那两行注释）。
+         *
+         * 闸只在「换了一首歌」时开：歌词晚到、改设置这些**不**重开它 ——
+         * 那些本来就该当场生效，按住反而成了「改了半天没反应」。
+         */
+        const songKey = `${title ?? ''}\u0000${artist ?? ''}`;
+        if (songGateRef.current.key !== songKey) songGateRef.current = { key: songKey, since: Date.now() };
+        const since = songGateRef.current.since;
+        const remaining = since + THEME_SETTLE_MAX_MS - Date.now();
+        const waiting = remaining > 0 && (
+            themePending === true
+            // 封面没到就先不发：它和主题是前后脚到的，等它一起，换成一次推送。
+            || (Boolean(coverUrl) && !wallpaperCover)
+            || Date.now() - since < THEME_SETTLE_MIN_MS
+        );
+        if (!waiting) {
+            send();
+            return;
+        }
+        // 到期照推：等不来主题也不能让叠层一直挂着上一首的歌词。
+        const timer = window.setTimeout(send, remaining);
+        return () => window.clearTimeout(timer);
         // getCurrentTime 是稳定的取数函数，不参与依赖比较以外的重算。
-        // wallpaperCover 在依赖里：封面异步到位后再推一次，壁纸才能拿到它和从它取的高亮色。
+        // wallpaperCover 在依赖里：抓到之后（或等主题那一闸放开时）推的才是带封面的那份。
     }, [active, lyrics, title, artist, backgroundMode, backgroundImage, wallpaperVisualizer,
         accentColor, backgroundColor, primaryColor, secondaryColor, themeJson, animationIntensity,
-        backgroundBlur, showProgress, showTranslation, tuning, durationMs, wallpaperCover]);
+        backgroundBlur, showProgress, showTranslation, tuning, durationMs, wallpaperCover,
+        coverUrl, themePending]);
 
     /*
      * 「跟随播放页」：把播放页那个字体的字节托管到原生。
