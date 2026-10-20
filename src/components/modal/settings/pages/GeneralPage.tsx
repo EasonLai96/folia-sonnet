@@ -31,6 +31,8 @@ const GeneralPage: React.FC = () => {
     const setLanguagePreference = useSettingsModalStore(state => state.handleSetAppLanguagePreference);
     const autoPlay = useAudioSettingsStore(state => state.autoPlayOnLaunch);
     const setAutoPlay = useAudioSettingsStore(state => state.handleToggleAutoPlayOnLaunch);
+    const autoJumpToVisualizer = useAudioSettingsStore(state => state.autoJumpToVisualizerOnLaunch);
+    const setAutoJumpToVisualizer = useAudioSettingsStore(state => state.handleToggleAutoJumpToVisualizerOnLaunch);
     const titlebarButtons = usePlayerChromeSettingsStore(state => state.alwaysShowMainWindowTitlebar);
     const setTitlebarButtons = usePlayerChromeSettingsStore(state => state.handleToggleAlwaysShowMainWindowTitlebar);
     const ponder = usePonderStore(useShallow(selectPonderSettingsSnapshot));
@@ -69,6 +71,9 @@ const GeneralPage: React.FC = () => {
             <Group def={LAUNCH}>
                 <Row option={O.autoPlay} hint={t('options.autoPlayOnLaunchDesc')} note={t('options.autoPlayOnLaunchDescSub')}>
                     <Toggle checked={autoPlay} onChange={setAutoPlay} />
+                </Row>
+                <Row option={O.autoJumpToVisualizer} note={t('options.autoJumpToVisualizerOnLaunchDesc')}>
+                    <Toggle checked={autoJumpToVisualizer} onChange={setAutoJumpToVisualizer} />
                 </Row>
                 {isElectron && (
                     <Row option={O.openPlayer} note={t('options.openPlayerOnLaunchDesc')}>

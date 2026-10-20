@@ -31,6 +31,12 @@ export const ANDROID: SettingsGroupDef = {
 export const O = {
     language: option(LANGUAGE, 'appLanguage', 'options.appLanguage'),
     autoPlay: option(LAUNCH, 'autoPlayOnLaunch', 'options.autoPlayOnLaunch'),
+    /*
+     * 起播的同时直接切到歌词页。原来这一行跟在实验室页的「进入应用后自动播放」下面，
+     * 上游重构把实验室那页整个摘掉了（文件还在，但已经没人引用它），两行一起从界面上
+     * 消失 —— store 与恢复播放那条路都还在，所以只要把行放回启动这一组就行。
+     */
+    autoJumpToVisualizer: option(LAUNCH, 'autoJumpToVisualizerOnLaunch', 'options.autoJumpToVisualizerOnLaunch'),
     openPlayer: option(LAUNCH, 'openPlayerOnLaunch', 'options.openPlayerOnLaunch', { electronOnly: true }),
     titlebarButtons: option(LAUNCH, 'alwaysShowMainWindowTitlebar', 'options.alwaysShowMainWindowTitlebar'),
     updateCheck: option(UPDATE, 'enableUpdateCheck', 'options.enableUpdateCheck'),

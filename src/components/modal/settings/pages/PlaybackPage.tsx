@@ -9,6 +9,7 @@ import { canAnalyseTracks } from '../../../../services/automix/transitionStrateg
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { useAutomixSettingsStore } from '../../../../stores/useAutomixSettingsStore';
 import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
+import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { runsOnWindows } from '../../../../utils/platform';
 import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
@@ -35,6 +36,14 @@ const O = {
     replayGain: option(SOUND, 'replayGainSettings', 'options.replayGainMode'),
     fade: option(SOUND, 'playbackFade', 'options.playbackFade'),
     transcode: option(SOUND, 'transcodeFallback', 'options.transcodeFallback', { electronOnly: true }),
+    /*
+     * 后台播放时别的应用一出声，系统就把 WebView 持有的音频焦点收走，Chromium 于是直接
+     * 把 <audio> 暂停 —— 界面显示「正在播」却没声音（用户原话：「无法正常唤醒」）。
+     * 开着这一项，被打断后自动接回去，并让原生那一层给出「同时播放」的焦点策略。
+     *
+     * 只在安卓出现：音频焦点是安卓的概念，桌面端没有对应的开关。
+     */
+    mixWithOtherAudio: option(SOUND, 'mixWithOtherAudio', 'options.mixWithOtherAudio', { available: isCapacitorAndroid }),
     queueBehavior: option(BEHAVIOR, 'queueDefaultBehavior', 'options.queueDefaultBehavior'),
     autoSkipUnplayable: option(BEHAVIOR, 'autoSkipUnplayable', 'options.autoSkipUnplayable'),
     preventSleep: option(BEHAVIOR, 'preventDisplaySleepDuringPlayback', 'options.preventDisplaySleepDuringPlayback', { electronOnly: true }),
@@ -76,11 +85,13 @@ const PlaybackPage: React.FC = () => {
         transcode: state.enableTranscodeFallback,
         queueBehavior: state.queueAddBehavior,
         autoSkipUnplayable: state.autoSkipUnplayable,
+        mixWithOtherAudio: state.mixWithOtherAudio,
         setMediaCache: state.handleToggleMediaCache,
         setFade: state.handleTogglePlaybackFade,
         setTranscode: state.handleToggleTranscodeFallback,
         setQueueBehavior: state.handleSetQueueAddBehavior,
         setAutoSkipUnplayable: state.handleToggleAutoSkipUnplayable,
+        setMixWithOtherAudio: state.handleToggleMixWithOtherAudio,
     })));
     const preventSleep = useDesktopSettingsStore(state => state.preventDisplaySleepDuringPlayback);
     const setPreventSleep = useDesktopSettingsStore(state => state.handleTogglePreventDisplaySleepDuringPlayback);
@@ -207,6 +218,12 @@ const PlaybackPage: React.FC = () => {
                 {window.electron?.requestTranscodeFallback && (
                     <Row option={O.transcode} hint={t('options.transcodeFallbackDesc')}>
                         <Toggle checked={audio.transcode} onChange={audio.setTranscode} />
+                    </Row>
+                )}
+                {/* 安卓的音频焦点那一层才有这件事，桌面端整行不显示（见 O.mixWithOtherAudio）。 */}
+                {isCapacitorAndroid() && (
+                    <Row option={O.mixWithOtherAudio} note={t('options.mixWithOtherAudioDesc')}>
+                        <Toggle checked={audio.mixWithOtherAudio} onChange={audio.setMixWithOtherAudio} />
                     </Row>
                 )}
             </Group>
