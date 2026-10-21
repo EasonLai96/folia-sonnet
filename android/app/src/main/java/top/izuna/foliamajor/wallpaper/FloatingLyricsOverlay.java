@@ -1118,14 +1118,6 @@ public final class FloatingLyricsOverlay {
         private final Paint controlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         /** 逐词下划线专用：绝不能拿 textPaint 去画矩形，它会把颜色和 alpha 留在字上。 */
         private final Paint underlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        /*
-         * 装饰专用的笔：›、键帽、方括号、token id 都用它。
-         *
-         * **不能拿 textPaint 画这些东西** —— 改它的 textSize / typeface 会让后面每一句
-         * `measureText` 全错（整行宽度、扫光位置一起歪）；也不能拿 underlinePaint 画字
-         * （它会把颜色与 alpha 留在字上）。画字的笔必须是独立的一支。
-         */
-        private final Paint decoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         /** 整行文本 → 词区间的缓存：ICU 分词逐帧跑一次太贵，同一行留着。 */
         private String cachedUnderlineText = null;
         private List<FloatingVocab.Segment> cachedUnderlineBounds = null;
@@ -1379,7 +1371,6 @@ public final class FloatingLyricsOverlay {
                 if (showControls) {
                     drawControls(canvas, width, height, appear);
                 }
-                drawKeycap(canvas, width, height, focusSize, appear);
                 /*
                  * 预览且一句歌词都没有（没放歌 / 纯音乐 / 还没解析出来）：
                  * 画一行占位。这时候什么都不画的话，用户面对一片空白只会以为开关坏了 ——
@@ -1431,7 +1422,6 @@ public final class FloatingLyricsOverlay {
             if (showControls) {
                 drawControls(canvas, width, height, appear);
             }
-            drawKeycap(canvas, width, height, focusSize, appear);
 
             // 还在播、或者动画还没走完，就再要一帧。停了就别空转烧 CPU。
             // 限到 ~30fps：这是叠在所有窗口之上的一层，每帧都要系统重新合成一次，
@@ -1531,38 +1521,6 @@ public final class FloatingLyricsOverlay {
                 borderPaint.setStrokeWidth(Math.max(1f, dp(1)));
                 borderPaint.setColor(withAlpha(accentColor, (0.14f + 0.22f * opacity) * appear));
                 canvas.drawRoundRect(frame, radius, radius, borderPaint);
-                drawCornerTicks(canvas, width, height, radius, appear);
-            }
-        }
-
-        /**
-         * 四角定位刻线：播放器里那个「提示词输入框」的样子，四个角各画一横一竖两道短线。
-         *
-         * 这是那套 UI 最认得出来的一笔（去掉之后就只是一块圆角半透明底了），所以悬浮窗
-         * 要「和 app 里一模一样」就得有它。贴安全区那条不画 —— 它只有状态栏那么高，
-         * 四条刻线会把那点地方全占掉。
-         */
-        private void drawCornerTicks(Canvas canvas, int width, int height, float radius, float appear) {
-            float inset = Math.max(dp(3), radius * 0.35f);
-            float tick = Math.min(Math.max(dp(10), Math.min(width, height) * 0.12f),
-                    Math.min(width, height) * 0.22f);
-            float hair = Math.max(1f, dp(1));
-            decoPaint.setStyle(Paint.Style.STROKE);
-            decoPaint.setStrokeWidth(hair);
-            decoPaint.setColor(withAlpha(primaryColor, 0.5f * appear));
-            float[][] corners = {
-                    {inset, inset, 1f, 1f},
-                    {width - inset, inset, -1f, 1f},
-                    {inset, height - inset, 1f, -1f},
-                    {width - inset, height - inset, -1f, -1f},
-            };
-            for (float[] corner : corners) {
-                float x = corner[0];
-                float y = corner[1];
-                float sx = corner[2];
-                float sy = corner[3];
-                canvas.drawLine(x, y, x + sx * tick, y, decoPaint);
-                canvas.drawLine(x, y, x, y + sy * tick, decoPaint);
             }
         }
 
@@ -1602,7 +1560,7 @@ public final class FloatingLyricsOverlay {
         private void drawRow(Canvas canvas, String text, int width, float centerY, float fontSize,
                              int color, float alpha, float progress,
                              WallpaperLyricsState.TimedLine line, long positionMs,
-                             boolean allowScroll, boolean decorate) {
+                             boolean allowScroll, boolean withCaret) {
             if (text == null || text.isEmpty() || alpha <= 0.004f) return;
 
             textPaint.setColor(color);
@@ -1611,20 +1569,12 @@ public final class FloatingLyricsOverlay {
 
             float padX = dp(14);
             /*
-             * 右边那颗 ⏎ 键帽要占一块地方：不预留的话，居中的整句字会从它底下穿过去。
-             * 叠加安全区那一模式不画键帽，于是也不留位置。
-             */
-            float keyW = overSafeArea()
-                    ? 0f
-                    : Math.min(Math.max(dp(14), fontSize * 0.62f),
-                            Math.min(width * 0.16f, getHeight() * 0.62f)) * 1.15f + dp(4);
-            /*
              * 避开区域那一段是**从布局里抽掉**的（字绕过去，不是被裁掉），
              * 所以它占的宽度要从可用宽度里减掉 —— 不然「能不能装下 / 要不要滚」
              * 都是按没洞的宽度算的，右半截会推出屏幕外。
              */
             float holeW = avoidActive ? (avoidRightPx - avoidLeftPx) : 0f;
-            float maxWidth = width - padX * 2f - holeW - keyW;
+            float maxWidth = width - padX * 2f - holeW;
             float measured = textPaint.measureText(text);
             if (measured > maxWidth && measured > 0f) {
                 /*
@@ -1695,7 +1645,7 @@ public final class FloatingLyricsOverlay {
              */
             float visible = measured + holeW;
             float x = measured <= maxWidth
-                    ? Math.max(padX, (width - keyW - visible) / 2f)
+                    ? Math.max(padX, (width - visible) / 2f)
                     : padX - scroll;
             /*
              * 洞的左边缘要落在**字符边界**上。
@@ -1716,12 +1666,12 @@ public final class FloatingLyricsOverlay {
 
             if (!avoidActive) {
                 paintRow(canvas, text, x, baseline, fontSize, color, alpha, progress, line,
-                        positionMs, measured, textAlpha, words, segments, clipTop, clipBottom, decorate);
+                        positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
                 /*
                  * › 与光标**只画一次**，而且要放在裁剪分支之外：跟着 paintRow 走的话，
                  * 有避开区域时那两遍会用两个不同的起点各画一次 —— 一个 › 被劈成两半、光标重影。
                  */
-                if (decorate) {
+                if (withCaret) {
                     drawPromptCaret(canvas, text, x, baseline, fontSize, alpha, progress,
                             words, segments, positionMs, measured);
                 }
@@ -1741,20 +1691,21 @@ public final class FloatingLyricsOverlay {
             canvas.save();
             canvas.clipRect(0f, clipTop, avoidLeftPx, clipBottom);
             paintRow(canvas, text, x, baseline, fontSize, color, alpha, progress, line,
-                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom, decorate);
+                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
             canvas.restore();
 
             canvas.save();
             canvas.clipRect(avoidRightPx, clipTop, width, clipBottom);
             paintRow(canvas, text, x + holeW, baseline, fontSize, color, alpha, progress, line,
-                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom, decorate);
+                    positionMs, measured, textAlpha, words, segments, clipTop, clipBottom);
             canvas.restore();
         }
 
         /**
-         * 播放器里那个输入框的另外两笔：**› 提示符**与**字后光标**。
+         * 字后那根光标。
          *
-         * 它们都属于「框」而不是「字」，所以整行一份 —— 逐词下划线才是每个词一条。
+         * 悬浮窗上要的就是它一个 —— ⏎ 键帽、`›` 提示符、四角刻线、token id 都撤掉了
+         * （用户原话：只要有字和底下那个横杠，光标留着）。
          */
         private void drawPromptCaret(Canvas canvas, String text, float x, float baseline,
                                     float fontSize, float alpha, float progress,
@@ -1765,17 +1716,6 @@ public final class FloatingLyricsOverlay {
             float mid = baseline - fontSize * 0.35f;
             int alpha255 = Math.round(clamp01(alpha) * 255f);
             if (alpha255 <= 0) return;
-
-            // › 提示符：两条线，比字体里那个符号稳。字起点的左边，靠不进窗就不画。
-            float chevron = fontSize * 0.34f;
-            float chevronX = x - fontSize * 0.62f;
-            if (chevronX - chevron * 0.5f >= dp(2)) {
-                decoPaint.setStyle(Paint.Style.STROKE);
-                decoPaint.setStrokeWidth(Math.max(1.2f, fontSize * 0.035f));
-                decoPaint.setColor(withAlpha(primaryColor, alpha255 / 255f * 0.7f));
-                canvas.drawLine(chevronX, mid - chevron * 0.46f, chevronX + chevron * 0.5f, mid, decoPaint);
-                canvas.drawLine(chevronX + chevron * 0.5f, mid, chevronX, mid + chevron * 0.46f, decoPaint);
-            }
 
             /*
              * 光标：跟在唱到的位置后面。
@@ -1789,9 +1729,10 @@ public final class FloatingLyricsOverlay {
             float caretH = fontSize * 0.78f;
             float caretW = Math.max(1.5f, fontSize * 0.045f);
             float caretX = x + sungX + fontSize * 0.06f;
-            decoPaint.setStyle(Paint.Style.FILL);
-            decoPaint.setColor(withAlpha(accentColor, alpha255 / 255f * 0.9f));
-            canvas.drawRect(caretX, mid - caretH * 0.5f, caretX + caretW, mid + caretH * 0.5f, decoPaint);
+            // 光标只是一道实心竖线，和逐词下划线共用那支笔就够了（每次都重设颜色）。
+            underlinePaint.setStyle(Paint.Style.FILL);
+            underlinePaint.setColor(withAlpha(accentColor, alpha255 / 255f * 0.9f));
+            canvas.drawRect(caretX, mid - caretH * 0.5f, caretX + caretW, mid + caretH * 0.5f, underlinePaint);
         }
 
         /**
@@ -1829,7 +1770,7 @@ public final class FloatingLyricsOverlay {
                               float measured, int textAlpha,
                               WallpaperLyricsState.TimedWord[] words,
                               FloatingWordColors.Segment[] segments,
-                              float clipTop, float clipBottom, boolean decorate) {
+                              float clipTop, float clipBottom) {
             /*
              * 没有推进量的那几行（下一句 / 翻译 / 退场中的那一格）：整行照原样画一遍主色。
              *
@@ -1856,7 +1797,7 @@ public final class FloatingLyricsOverlay {
              */
             List<FloatingVocab.Segment> bounds = wordBounds(text);
             float sungX = sungOffsetX(text, measured, progress, words, segments, positionMs);
-            drawUnderlines(canvas, text, x, baseline, fontSize, bounds, sungX, alpha, decorate);
+            drawUnderlines(canvas, text, x, baseline, fontSize, bounds, sungX, alpha);
 
             /*
              * **逐个词画**：唱到一个词，它才淡入并从下方顶上来一点（和播放页同一套动作）。
@@ -1945,7 +1886,7 @@ public final class FloatingLyricsOverlay {
          */
         private void drawUnderlines(Canvas canvas, String text, float x, float baseline,
                                     float fontSize, List<FloatingVocab.Segment> bounds,
-                                    float sungX, float alpha, boolean decorate) {
+                                    float sungX, float alpha) {
             float lineY = baseline + fontSize * 0.30f;
             // 参考画面里这条线是**有点厚度的小横杠**，不是一根发丝：太细了在小窗上根本看不见。
             float hair = Math.max(2f, fontSize * 0.07f);
@@ -1976,30 +1917,6 @@ public final class FloatingLyricsOverlay {
                 // 一律夹在 [0, width] 内 —— 越界的负数宽度会让 drawRect 画出一根反向的线。
                 drawUnderline(canvas, left, lineY, width, clamp(sungX - head - inset, 0f, width),
                         hair, alpha255);
-                if (!decorate) continue;
-                /*
-                 * 方括号（词两端那两道小竖线）：播放器里那个输入框靠它把「词的边界」画出来，
-                 * 光有下划线看不出一句被切成了几个 token。
-                 */
-                float tickH = fontSize * 0.13f;
-                float barW = Math.max(1f, hair * 0.9f);
-                underlinePaint.setColor(withAlpha(primaryColor, alpha255 / 255f * 0.42f));
-                canvas.drawRect(left - barW * 1.2f, lineY - tickH, left, lineY + hair, underlinePaint);
-                canvas.drawRect(left + width, lineY - tickH, left + width + barW * 1.2f, lineY + hair,
-                        underlinePaint);
-                /*
-                 * 每个词底下的 token id：与播放器里同一张表、同一个号（FloatingVocab.idFor）。
-                 * 小窗上字号太小就别画了 —— 5dp 的数字只会糊成一团黑点。
-                 */
-                float idFont = fontSize * 0.2f;
-                if (idFont < dp(7)) continue;
-                String label = String.valueOf(FloatingVocab.idFor(text.substring(start, end)));
-                decoPaint.setStyle(Paint.Style.FILL);
-                decoPaint.setTextSize(idFont);
-                decoPaint.setTextAlign(Paint.Align.CENTER);
-                decoPaint.setTypeface(android.graphics.Typeface.MONOSPACE);
-                decoPaint.setColor(withAlpha(primaryColor, alpha255 / 255f * 0.62f));
-                canvas.drawText(label, left + width / 2f, lineY + hair * 2.6f + idFont, decoPaint);
             }
         }
 
@@ -2061,26 +1978,6 @@ public final class FloatingLyricsOverlay {
          * 它不属于控件（不需要触摸、也不跟锁/把手一起收），所以单独画、常驻。
          * 叠加安全区那一模式不画：窗口只有状态栏那么高，塞进去就把字挤没了。
          */
-        private void drawKeycap(Canvas canvas, int width, int height, float fontSize, float appear) {
-            if (overSafeArea()) return;
-            float size = Math.min(Math.max(dp(14), fontSize * 0.62f), Math.min(width * 0.16f, height * 0.62f));
-            if (size < dp(10)) return;
-            float cx = width - size * 1.05f;
-            float cy = height * 0.5f;
-            controlPaint.setStyle(Paint.Style.STROKE);
-            controlPaint.setStrokeWidth(Math.max(1f, dp(1)));
-            controlPaint.setColor(withAlpha(primaryColor, 0.34f * appear));
-            canvas.drawRect(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f, controlPaint);
-            // ⏎ 的箭头：一横一折，比字体里那个符号稳。
-            float tipX = cx + size * 0.2f;
-            float tipY = cy + size * 0.12f;
-            controlPaint.setColor(withAlpha(primaryColor, 0.46f * appear));
-            canvas.drawLine(tipX, tipY - size * 0.26f, tipX, tipY, controlPaint);
-            canvas.drawLine(tipX, tipY, tipX - size * 0.3f, tipY, controlPaint);
-            canvas.drawLine(tipX - size * 0.3f, tipY, tipX - size * 0.16f, tipY - size * 0.13f, controlPaint);
-            canvas.drawLine(tipX - size * 0.3f, tipY, tipX - size * 0.16f, tipY + size * 0.13f, controlPaint);
-        }
-
         private void drawControls(Canvas canvas, int width, int height, float appear) {
             controlPaint.setStyle(Paint.Style.FILL);
             controlPaint.setStrokeWidth(Math.max(1.5f, dp(1.5f)));
