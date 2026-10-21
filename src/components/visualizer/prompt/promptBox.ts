@@ -1,12 +1,17 @@
 // src/components/visualizer/prompt/promptBox.ts
-// 「提示词输入框」那一套 UI —— 最早那版的样子，但**做成一块小悬浮窗**：
-// 只要两样东西 —— **整个发送框**，和**词底下那条下划线分词**。别的（四角刻线、› 提示符、
-// 投影、一堆数字）全不要：窗本来就只有一行字高，多画一笔就是糊。
+// 「提示词输入框」那一套 UI —— **播放器里**用的是最早那版的全套东西：四角定位刻线、› 提示符、
+// 右上角 ⏎ 键帽、逐词方括号、每个词底下各自一串 token id、卡拉 OK 进度、字后光标。
+// 外面仍然是一块半透明圆角墨底的悬浮窗（窗宽跟着字数收放，不铺满整屏）。
 //
-//   ╭───────────────────────────╮
-//   │  我们 都曾 年少           │   ← 字本身
-//   │  ▁▁▁▁ ▁▁▁▁ ▁▁▁▁           │   ← 每词一条下划线（唱到哪填到哪 = 分词 + 卡拉 OK）
-//   ╰───────────────────────────╯
+//   ╭───────────────────────────────────╮
+//   │ › 我们 都曾 年少             ⏎    │  ← 四角刻线 + › + 键帽
+//   │   ▁▁▁▁  ▁▁▁▁  ▁▁▁▁                │  ← 卡拉 OK（唱到哪填到哪）
+//   │   15082  2279  1188                │  ← 每词一个词表 id（分词看得见）
+//   ╰───────────────────────────────────╯
+//
+// 应用外那个原生悬浮窗（wallpaper/FloatingLyricsOverlay.java）是同一套画法的精简版：
+// 只要框 + 逐词下划线，四角刻线 / › / 键帽 / 一串 id 都不画（窗太小，画了就糊）。
+// 改这一份的时候那边要不要跟着改，得问一句。
 //
 // 下划线是「分词」唯一看得见的地方：一句切成几个 token、唱到第几个，全在这条线上。
 // 正在唱的那个词下面会浮出它在词表里的 id（一次只一个，不糊）。
@@ -37,6 +42,7 @@ export const PROMPT_MONO_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas,
 const colorNumber = (pixi: PixiModule, color: string) => pixi.Color.shared.setValue(color).toNumber();
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
+const easeInCubic = (value: number) => value * value * value;
 const progressOf = (time: number, start: number, end: number) => (
     end <= start ? (time >= end ? 1 : 0) : clamp01((time - start) / (end - start))
 );
@@ -80,9 +86,10 @@ export interface PromptCardView {
     laid: readonly PromptLaidToken[];
     /** 这一套的最终字号（缩过之后的）。 */
     fontPx: number;
-    /** 窗宽 / 内容宽（px），镜头算可移动范围用。 */
+    /** 窗宽 / 内容宽 / 内容区能有多宽（px），镜头算可移动范围用。 */
     windowWidth: number;
     contentWidth: number;
+    contentSpan: number;
     /** 字的竖中线（相对窗中心）。 */
     textY: number;
     /** 每帧：下划线、卡拉 OK、当前词的 id。 */
@@ -120,8 +127,9 @@ export const buildPromptCard = (
         }
     };
 
-    const padX = Math.round(spec.fontPx * 0.7);
-    const available = Math.max(120, spec.maxWidth - padX * 2);
+    const padLeft = Math.round(spec.fontPx * 1.15);
+    const padRight = Math.round(spec.fontPx * 0.9);
+    const available = Math.max(120, spec.maxWidth - padLeft - padRight);
     const gaps = Math.max(0, tokens.length - 1) * spec.fontPx * WORD_GAP;
 
     let natural = gaps;
@@ -139,16 +147,16 @@ export const buildPromptCard = (
         cursor += width + gap;
     });
     const contentWidth = Math.max(1, cursor - (tokens.length > 0 ? gap : 0));
-    const windowWidth = Math.min(spec.maxWidth, contentWidth + padX * 2);
+    const windowWidth = Math.min(spec.maxWidth, contentWidth + padLeft + padRight);
 
-    // ---- 窗：只要一个框。半透明墨底 + 一圈细线，圆角收小一点，像贴上去的一行输入框。
-    const underlineY = fontPx * 0.62;
-    const windowHeight = fontPx * 1.72;
-    const radius = Math.max(8, fontPx * 0.26);
+    // ---- 窗：半透明墨底 + 一圈细线 + 四角刻线 + › + ⏎ 键帽，就是最早那版的输入框。
+    const underlineY = fontPx * 0.72;
+    const windowHeight = fontPx * 2.35;
+    const radius = Math.max(8, fontPx * 0.3);
     const left = -windowWidth / 2;
     const top = -windowHeight / 2;
-    const textY = -fontPx * 0.24;
-    const contentLeft = left + padX;
+    const textY = -fontPx * 0.28;
+    const contentLeft = left + padLeft;
 
     const root = new Container();
     const plate = new Graphics()
@@ -157,6 +165,50 @@ export const buildPromptCard = (
         .roundRect(left, top, windowWidth, windowHeight, radius)
         .stroke({ color: textColor, width: 1, alpha: 0.24 });
     root.addChild(plate);
+
+    // 四角定位刻线（最早那版就有的那一手，去掉就不像那个输入框了）
+    const tick = Math.max(6, fontPx * 0.22);
+    const corner = { color: textColor, width: Math.max(1, fontPx * 0.025), alpha: 0.5 };
+    [[left, top, -1, -1], [left + windowWidth, top, 1, -1],
+        [left, top + windowHeight, -1, 1], [left + windowWidth, top + windowHeight, 1, 1]]
+        .forEach(([x, y, sx, sy]) => {
+            plate.moveTo(x + sx * 4, y).lineTo(x + sx * (4 + tick), y).stroke(corner);
+            plate.moveTo(x, y + sy * 4).lineTo(x, y + sy * (4 + tick)).stroke(corner);
+        });
+
+    // › 提示符：两条线，比字体里那个符号稳
+    const chevronSize = fontPx * 0.34;
+    const chevronX = left + padLeft * 0.46;
+    root.addChild(new Graphics()
+        .moveTo(chevronX, textY - chevronSize * 0.46)
+        .lineTo(chevronX + chevronSize * 0.5, textY)
+        .lineTo(chevronX, textY + chevronSize * 0.46)
+        .stroke({ color: textColor, width: Math.max(1.4, fontPx * 0.035), alpha: 0.7 }));
+
+    /*
+     * ⏎ 键帽：最后一个词开唱之前只是一圈暗轮廓，之后跟着呼吸，整句被抽走时实心闪一下。
+     * 这是最早那版里最像「输入框」的一笔，留着。
+     */
+    const keySize = Math.max(9, fontPx * 0.4);
+    const keyX = left + windowWidth - keySize - fontPx * 0.28;
+    const keycap = new Graphics()
+        .rect(keyX - keySize, -keySize, keySize * 2, keySize * 2)
+        .stroke({ color: textColor, width: Math.max(1, fontPx * 0.022), alpha: 0.35 });
+    const arrowX = keyX + keySize * 0.42;
+    const arrowY = -keySize * 0.42;
+    const arrow = { color: textColor, width: Math.max(1, fontPx * 0.025), alpha: 0.7 };
+    keycap.moveTo(arrowX, arrowY).lineTo(arrowX, arrowY + keySize * 0.34)
+        .lineTo(arrowX - keySize * 0.78, arrowY + keySize * 0.34).stroke(arrow);
+    keycap.moveTo(arrowX - keySize * 0.78 + keySize * 0.3, arrowY + keySize * 0.34 - keySize * 0.28)
+        .lineTo(arrowX - keySize * 0.78, arrowY + keySize * 0.34)
+        .lineTo(arrowX - keySize * 0.78 + keySize * 0.3, arrowY + keySize * 0.34 + keySize * 0.28)
+        .stroke(arrow);
+    root.addChild(keycap);
+    const keyFlash = new Graphics()
+        .rect(keyX - keySize, -keySize, keySize * 2, keySize * 2)
+        .fill({ color: accent, alpha: 1 });
+    keyFlash.alpha = 0;
+    root.addChild(keyFlash);
 
     const textLayer = new Container();
     textLayer.position.set(contentLeft, textY);
@@ -169,7 +221,9 @@ export const buildPromptCard = (
 
     const trackNodes: import('pixi.js').Graphics[] = [];
     const fillNodes: import('pixi.js').Graphics[] = [];
+    const bracketNodes: import('pixi.js').Graphics[] = [];
     const idNodes: import('pixi.js').Text[] = [];
+    const tickH = fontPx * 0.13;
 
     laid.forEach((token, index) => {
         const track = new Graphics()
@@ -181,17 +235,29 @@ export const buildPromptCard = (
             .fill({ color: accent, alpha: 1 });
         fill.position.set(token.left, underlineY);
         fill.scale.x = 0.001;
-        // 正在唱的那个词下面浮出它在词表里的号：一次只有一个，不糊。
+        // 方括号两端那两道竖线：词的边界画出来，「分词」才看得见。
+        const bracket = new Graphics()
+            .rect(token.left - hair * 1.2, underlineY - tickH, hair, tickH + hair)
+            .fill({ color: textColor, alpha: 0.42 })
+            .rect(token.left + token.width, underlineY - tickH, hair, tickH + hair)
+            .fill({ color: textColor, alpha: 0.42 });
+        // 每个词自己在词表里的号：唱过的亮一档。
         const idText = new Text({ text: String(promptVocabIdFor(tokens[index].text)), style: idStyle });
         idText.anchor.set(0.5, 0);
-        idText.position.set(token.left + token.width / 2, underlineY + hair * 1.8);
+        idText.position.set(token.left + token.width / 2, underlineY + hair * 2.6);
         idText.tint = textColor;
-        idText.alpha = 0;
-        root.addChild(track, fill, idText);
+        idText.alpha = 0.3;
+        root.addChild(track, fill, bracket, idText);
+        bracketNodes.push(bracket);
         trackNodes.push(track);
         fillNodes.push(fill);
         idNodes.push(idText);
     });
+
+    const lineStart = tokens.length ? Math.min(...tokens.map(token => token.startTime)) : 0;
+    const lineEnd = tokens.length ? Math.max(...tokens.map(token => token.endTime)) : lineStart + 1;
+    const lastStart = tokens.length ? Math.max(...tokens.map(token => token.startTime)) : lineStart;
+    const exitDuration = clamp(Math.max(0.2, lineEnd - lineStart) * 0.2, 0.24, 0.42);
 
     const update = (time: number, activeIndex: number) => {
         laid.forEach((token, index) => {
@@ -205,9 +271,16 @@ export const buildPromptCard = (
             trackNodes[index].alpha = (0.7 + 0.3 * flash) * settled;
             fillNodes[index].scale.x = Math.max(0.001, token.width * typed);
             fillNodes[index].alpha = (0.85 + 0.15 * flash) * settled;
-            // 当前词的 id：只给正在唱的那个显示（静态模式下也要能看见，所以直接给值、不做渐变）。
-            idNodes[index].alpha = index === activeIndex ? 0.62 : 0;
+            bracketNodes[index].tint = flash > 0.2 || index === activeIndex ? accent : 0xffffff;
+            bracketNodes[index].alpha = (0.5 + 0.5 * flash) * settled;
+            // 每个词的 id 都印着（那才是分词），唱过的亮一档；静态模式下也要看得见，所以直接给值。
+            idNodes[index].alpha = (0.28 + 0.42 * typed) * settled;
         });
+
+        // ⏎ 键帽：最后一个词开口后开始呼吸，整句被抽走时实心闪一下。
+        const armed = time >= lastStart + 0.1 ? 1 : 0;
+        keycap.alpha = (0.4 + 0.6 * armed * (0.6 + 0.4 * Math.cos(time * Math.PI * 4))) * clamp01(1 - keyFlash.alpha);
+        keyFlash.alpha = easeInCubic(progressOf(time, lineEnd - exitDuration, lineEnd - exitDuration * 0.5));
     };
 
     return {
@@ -217,6 +290,7 @@ export const buildPromptCard = (
         fontPx,
         windowWidth,
         contentWidth,
+        contentSpan: available,
         textY,
         update,
     };

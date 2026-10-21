@@ -1,6 +1,7 @@
 import type { Line } from '../../../types';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { segmentLyricWords } from '../../../utils/lyrics/wordSegmentation';
+import { segmentWithVocab } from './promptSegments';
 
 // src/components/visualizer/prompt/promptProgram.ts
 // 歌词 → 节目单：一句一个框。纯函数，不碰 pixi、不碰运行时 —— 所以既是运行时的输入，
@@ -53,7 +54,22 @@ const promptWordsFor = (line: Line): PromptWordPlan[] => {
             endTime: word.endTime,
         }));
     }
-    const segments = segmentLyricWords(line).filter(segment => segment.segment.trim().length > 0);
+    /*
+     * 逐词时间戳没有的时候，靠 `segmentLyricWords` 分词。它优先用 `Intl.Segmenter`，
+     * **而安卓 WebView 上它常常不存在**，掉到逐字切分 —— 中文就变成一个字一个字，
+     * 底下那条逐词下划线也就退化成「逐字」（用户原话：只有中文是这样的）。
+     * 所以切出来全是单字的时候，改用随包那本词表词典再切一遍。
+     */
+    let parts = segmentLyricWords(line);
+    const cjkOnly = parts.filter(part => /^[\u4e00-\u9fff\u3040-\u30ff]$/.test(part.segment));
+    if (cjkOnly.length > 0 && cjkOnly.length === parts.filter(part => part.segment.trim().length > 0).length) {
+        parts = segmentWithVocab(line.fullText ?? '').map(part => ({
+            segment: part.text,
+            index: part.start,
+            isWordLike: part.text.trim().length > 0,
+        }));
+    }
+    const segments = parts.filter(segment => segment.segment.trim().length > 0);
     if (segments.length === 0) return [];
     const start = lineStart(line);
     // 摊的是这一句自己的时间窗；渲染提示（renderHints）里的余量留给框的收尾，不该拖慢字。

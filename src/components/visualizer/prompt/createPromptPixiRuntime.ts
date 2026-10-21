@@ -328,7 +328,7 @@ export class PromptPixiRuntime {
         card.textLayer.addChild(caret);
 
         this.stage.addChild(root);
-        const span = Math.max(1, card.windowWidth - card.fontPx * 1.4);
+        const span = card.contentSpan;
         return {
             root,
             card,
