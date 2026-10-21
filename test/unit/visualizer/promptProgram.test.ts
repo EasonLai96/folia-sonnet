@@ -81,6 +81,31 @@ describe('compilePromptBoxes', () => {
         expect(words[1].endTime).toBeCloseTo(4, 5);
     });
 
+    /*
+     * 英文几乎每句都有词间空格，而词表给的 `text` 不含它 —— 于是「一个词的末尾」正好落在
+     * 区间表留下的洞里，查不到就掉到兜底值（句尾）上，每个词的 end 于是都变成句尾：
+     * 填充、残影、光标全在整句唱完那一刻一起结束、一起飞出去。
+     */
+    it('does not stretch every English word to the end of the line', () => {
+        const line: Line = {
+            id: 'en',
+            startTime: 0,
+            endTime: 4,
+            fullText: 'hello world',
+            words: [
+                { text: 'hello', startTime: 0, endTime: 2 },
+                { text: 'world', startTime: 2, endTime: 4 },
+            ],
+        };
+        const words = compilePromptBoxes([line], 'song')[0].words;
+        expect(words.map(word => word.text)).toEqual(['hello', 'world']);
+        // 第一个词唱完是 2，不是「整句唱完」的 4。
+        expect(words[0].startTime).toBeCloseTo(0, 5);
+        expect(words[0].endTime).toBeCloseTo(2, 5);
+        expect(words[1].startTime).toBeCloseTo(2, 5);
+        expect(words[1].endTime).toBeCloseTo(4, 5);
+    });
+
     it('spreads a line that only has a line-level window over its words', () => {
         const boxes = compilePromptBoxes([plainLine('a', 4, 8, '今天天气真好')], 'song');
         const words = boxes[0].words;

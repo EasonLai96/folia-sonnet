@@ -57,16 +57,41 @@ interface CharSpan {
  */
 const wordCharSpans = (line: Line, full: string): CharSpan[] => {
     const spans: CharSpan[] = [];
+    const push = (start: number, end: number, startTime: number, endTime: number) => {
+        if (end <= start) return;
+        spans.push({ start, end, startTime, endTime });
+    };
+    /*
+     * ⭐词与词之间的**空隙必须补上**（英文几乎每句都有）。
+     *
+     * 词表给的 `text` 一般不含尾随空格，于是 spans 之间会留下洞 —— 而「一个词的末尾」
+     * 正好就落在这个洞里。查不到它属于哪条 word，就会掉到兜底值（句尾）上去，
+     * 于是**每个词的 endTime 都变成句尾**：下划线的填充、残影、光标全都在整句唱完的
+     * 那一刻一起结束、一起飞出去。中文没有词间空格，所以只有英文歌是这副样子。
+     *
+     * 补的那一段继承上一条的结束时间：它本来就是「上一个词唱完到下一个词开口」之间
+     * 的那点空隙，取上一条的结束时间正好。
+     */
+    // 一句词都没有（不少 lrc 只有行级时间窗）：**不要凭空造一条区间** ——
+    // 那会让下面以为「有逐词轴可映射」，于是整句每个词的时间都摊成同一个值。
+    const spoken = (line.words ?? []).filter(word => (word.text ?? '').length > 0);
+    if (spoken.length === 0) return [];
+
+    let carried = Number.isFinite(spoken[0].startTime) ? spoken[0].startTime : lineStart(line);
     let cursor = 0;
-    (line.words ?? []).forEach(word => {
+    spoken.forEach(word => {
         const text = word.text ?? '';
         if (!text) return;
         let start = full.indexOf(text, cursor);
         if (start < 0) start = Math.min(cursor, full.length);
         const end = Math.min(full.length, start + text.length);
-        spans.push({ start, end, startTime: word.startTime, endTime: word.endTime });
+        push(cursor, start, carried, carried);
+        push(start, end, word.startTime, word.endTime);
+        if (Number.isFinite(word.endTime)) carried = word.endTime;
         cursor = end;
     });
+    // 行尾剩下的那点（多半是空格）：同样接到最后一条的结束时间上。
+    push(cursor, full.length, carried, carried);
     return spans;
 };
 
