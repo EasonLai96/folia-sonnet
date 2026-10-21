@@ -3,7 +3,7 @@ import { buildMonetDisplayTokens, splitMonetGraphemes, type MonetDisplayToken } 
 import { resolveThemeFontStack, resolveThemeTranslationFontStack, resolveThemeFontWeight } from '../../../../utils/fontStacks';
 import { buildLineGraphemeTimeline, splitLyricGraphemes } from '../../../../utils/lyrics/graphemeTiming';
 import { getLineRenderEndTime } from '../../../../utils/lyrics/renderHints';
-import { segmentLyricWords } from '../../../../utils/lyrics/wordSegmentation';
+import { segmentLyricWords, segmentTextWords } from '../../../../utils/lyrics/wordSegmentation';
 import type { LatticeLyricInput } from './types';
 import { resolveMonetFillWidth } from '../../../visualizer/monet/monetLyricMotion';
 
@@ -72,19 +72,40 @@ export function wrapLatticeTokens(tokens: MonetDisplayToken[], width: number, fo
 }
 
 /*
- * 没有逐字时间的行（普通 LRC）在 Monet 的 token 化里是「一整行一个 token」，于是整行只能有
- * 一个颜色 —— AI 主题按词标记的高亮色在磁贴墙上一个都落不上，看过去就是整行一个色。
+ * 磁贴墙这一行切成的「词」：**一律自己按分词切，不认 line.words 给的粒度**。
  *
- * 播放页那些样式（classic / cadenza / fume）不是这么切的：它们把行切成词再逐词取色。这里按
- * 同一份分词（segmentLyricWords，认用户手改过的 wordSegments 与 icu-folia 烘上去的
- * autoWordSegments）把整行切成词级 token，时间沿用整行那条逐字时间线按词切片 —— 扫光、
- * 换行都照旧，只是每个词能自己拿一个颜色。
+ * 有的音源的逐字歌词整行只给一个 word（一行一条时间），照它切出来就是「整行一个 token」——
+ * 一个 token 只能拿一个颜色，于是 AI 主题按词标的高亮色在墙上只有两种下场：整行刷成某个
+ * 关键字的颜色（「全部变成整体一行都是同一个颜色」），或者一个都没命中、整行兜主题色
+ * （「没有 AI 高亮」）。播放页那几套样式不受这个影响：它们自己按语义分词（classic 的
+ * buildPostLyricLayoutUnits / cjkSemanticLayout），跟 line.words 的粒度无关 —— 同一份
+ * 高亮词，于是播放页有、磁贴墙一个都没有。
+ *
+ * 时间不受影响：逐字时间线（buildLineGraphemeTimeline）本来就吃 line.words，按词切片只是
+ * 把它切细，扫光逐字照旧。
+ *
+ * 词本身用同一份分词（segmentLyricWords：认用户手改过的 wordSegments 与 icu-folia 烘上去
+ * 的 autoWordSegments）。
  */
-function buildLatticeLineTokens(line: Line): MonetDisplayToken[] {
-    if (line.words.length > 0) {
-        return buildMonetDisplayTokens(line);
-    }
+const LATTICE_DEGENERATE_SPLIT_GRAPHEMES = 6;
 
+const latticeWordSegments = (line: Line, graphemes: string[]) => {
+    const segments = segmentLyricWords(line);
+    /*
+     * 分词只交回「整行一个词」时再让 Intl.Segmenter 试一次：烘上去的那份切分（或 ICU 把整句
+     * 当成一个词）会让长行退化成一个 token，又回到上面那个「整行一个颜色」。
+     * 一行本来就那么短的（不到六个字）不动它 —— 那种行本来就是一个词。
+     */
+    if (segments.length <= 1 && graphemes.length >= LATTICE_DEGENERATE_SPLIT_GRAPHEMES) {
+        const fallback = segmentTextWords(line.fullText);
+        if (fallback.length > 1) {
+            return fallback;
+        }
+    }
+    return segments;
+};
+
+function buildLatticeLineTokens(line: Line): MonetDisplayToken[] {
     const graphemes = splitLyricGraphemes(line.fullText);
     if (graphemes.length === 0) {
         return buildMonetDisplayTokens(line);
@@ -102,7 +123,7 @@ function buildLatticeLineTokens(line: Line): MonetDisplayToken[] {
 
     const timeline = buildLineGraphemeTimeline(line);
     const tokens: MonetDisplayToken[] = [];
-    for (const segment of segmentLyricWords(line)) {
+    for (const segment of latticeWordSegments(line, graphemes)) {
         const endChar = segment.index + segment.segment.length;
         if (endChar <= segment.index) continue;
         const first = graphemeAt[segment.index] ?? 0;
@@ -127,7 +148,7 @@ function buildLatticeLineTokens(line: Line): MonetDisplayToken[] {
     // 与以前「整行一个 token」时 end = getLineRenderEndTime(line) 的行为一致。
     const renderEnd = getLineRenderEndTime(line);
     const tail = tokens[tokens.length - 1];
-    if (renderEnd > tail.endTime) {
+    if (renderEnd > (tail.endTime ?? renderEnd)) {
         tokens[tokens.length - 1] = { ...tail, endTime: renderEnd };
     }
 
