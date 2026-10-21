@@ -454,8 +454,19 @@ async function enrichLoginInfoWithVip(info, cookie) {
 }
 
 export async function getLoginInfo(cookie) {
+  /*
+   * 「有没有人登录」只认 MUSIC_U，**不能**用 hasNeteaseLogin。
+   *
+   * hasNeteaseLogin 连 MUSIC_A / __csrf 也算「有凭据」，而游客会话（/register/anonimous）
+   * 下发的正是 MUSIC_A + __csrf、**没有** MUSIC_U。装好应用第一次碰网易云就会注册游客
+   * （探索页、搜索、歌词都要它，不然 weapi 一律 301），于是 /login/status 拿着游客 cookie
+   * 去问，这里回「已登录：网易云用户」—— 表现就是：
+   *   · 刚装好就凭空多出一个网易云账号；
+   *   · 首页再也不是未登录那一屏（登录入口那圈高亮引导因此一直不出）。
+   * 真登录（扫码 803）存下来的 cookie 里是有 MUSIC_U 的，下面那条兜底同理只认 MUSIC_U。
+   */
   cookie = await ensureNeteaseCookieHeader(cookie);
-  if (!hasNeteaseLogin(cookie) && !(await getNeteaseMusicU())) {
+  if (!hasNeteaseMusicU(cookie)) {
     return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   }
   const endpoints = ['/api/w/nuser/account/get', '/api/nuser/account/get'];
@@ -467,23 +478,25 @@ export async function getLoginInfo(cookie) {
       if (info.loggedIn) return enrichLoginInfoWithVip({ ...info, hasCookie: true }, cookie);
     } catch (_) {}
   }
-  if (hasNeteaseLogin(cookie) || (await getNeteaseMusicU())) {
-    const fallback = {
-      loggedIn: true,
-      pendingProfile: true,
-      nickname: '网易云用户',
-      avatar: '',
-      userId: '',
-      vipType: 0,
-      vipLevel: 'none',
-      isVip: false,
-      isSvip: false,
-      vipLabel: '无VIP',
-      hasCookie: true,
-    };
-    return enrichLoginInfoWithVip(fallback, cookie);
-  }
-  return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+  /*
+   * 走到这里说明手里确实有 MUSIC_U，只是账号接口没给出资料（网关抽风 / 结构变了）。
+   * 有 MUSIC_U 就等于有登录态 —— 这时回「已登录、资料待补」比回未登录稳：回未登录会让
+   * 应用把刚扫码拿到的会话丢掉。`pendingProfile` 由 enrichLoginInfoWithVip 在拿到真昵称时清掉。
+   */
+  const fallback = {
+    loggedIn: true,
+    pendingProfile: true,
+    nickname: '网易云用户',
+    avatar: '',
+    userId: '',
+    vipType: 0,
+    vipLevel: 'none',
+    isVip: false,
+    isSvip: false,
+    vipLabel: '无VIP',
+    hasCookie: true,
+  };
+  return enrichLoginInfoWithVip(fallback, cookie);
 }
 
 export async function handleSearch(keywords, limit, cookie, offset) {
@@ -1283,7 +1296,9 @@ async function resolveFeaturedReviewSeeds(seedSongs, cookie) {
   let songSeeds = (Array.isArray(seedSongs) ? seedSongs : [])
     .map(cloneFeaturedSongSeed)
     .filter((song) => song.id || song.mid);
-  if (!songSeeds.length && hasNeteaseLogin(cookie)) {
+  // 每日推荐只有真登录（MUSIC_U）才有；游客会话去拉不但拿不到东西，还可能拉回那个
+  // 匿名账号的推荐，让首页「精选评论」看起来像是某个已登录用户的口味。
+  if (!songSeeds.length && hasNeteaseMusicU(cookie)) {
     try {
       const raw = await fetchDailyRecommendSongs(cookie);
       songSeeds = raw.slice(0, FEATURED_REVIEW_SONG_LIMIT + 1).map(mapSongRecord).map(cloneFeaturedSongSeed).filter((s) => s.id);
@@ -1339,7 +1354,7 @@ function writeFeaturedReviewsCache(cacheKey, result) {
 
 export async function handleHomeFeaturedReviews(neteaseCookie, qqCookie, seedSongs) {
   const seedKey = JSON.stringify((Array.isArray(seedSongs) ? seedSongs : []).slice(0, 4).map((s) => s && (s.id || s.mid || s.name)));
-  const cacheKey = `${seedKey}|${hasNeteaseLogin(neteaseCookie) ? '1' : '0'}`;
+  const cacheKey = `${seedKey}|${hasNeteaseMusicU(neteaseCookie) ? '1' : '0'}`;
   const now = Date.now();
   if (featuredReviewsCache.key === cacheKey && featuredReviewsCache.data && now - featuredReviewsCache.at < FEATURED_REVIEWS_TTL_MS) {
     const cached = featuredReviewsCache.data;
@@ -1353,7 +1368,7 @@ export async function handleHomeFeaturedReviews(neteaseCookie, qqCookie, seedSon
   }
   const result = {
     reviews: picked,
-    loggedIn: hasNeteaseLogin(neteaseCookie),
+    loggedIn: hasNeteaseMusicU(neteaseCookie),
     updatedAt: now,
   };
   if (picked.length) writeFeaturedReviewsCache(cacheKey, result);
