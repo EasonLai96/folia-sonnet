@@ -105,16 +105,19 @@ export async function qishuiGuardHeaders(credential, path) {
 
 /** 服务端在响应头里下发的 guard 数据（base64 JSON）。 */
 export function readQishuiGuard(raw) {
-    if (typeof raw !== 'string' || !raw || raw.length > 65536) throw new Error('invalid guard response');
+    // 三种失败要分开说：头没到、头不是 base64 JSON、字段不全 —— 真机诊断里
+    // 只有一句 'invalid guard response' 等于没有信息。
+    if (typeof raw !== 'string' || !raw) throw new Error('guard header is missing');
+    if (raw.length > 65536) throw new Error('guard header is too large');
     let json;
     try {
         json = JSON.parse(new TextDecoder().decode(base64ToBytes(raw)));
     } catch (_) {
-        throw new Error('invalid guard response');
+        throw new Error('guard header is not base64 JSON');
     }
     for (const key of ['ticket', 'ts_sign', 'client_cert']) {
         if (typeof json[key] !== 'string' || !json[key] || json[key].length > 16384) {
-            throw new Error('invalid guard response');
+            throw new Error(`guard header field missing or invalid: ${key}`);
         }
     }
     const cert = json.client_cert;

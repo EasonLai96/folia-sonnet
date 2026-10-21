@@ -78,6 +78,23 @@ try {
     check('WebCrypto DER signature verified by node:crypto', verified);
 }
 
+// guard 响应头的三种失败要各说各话：真机诊断里一句 'invalid guard response'
+// 等于没有信息（ticket 那一步就是这样白排查一轮）。
+{
+    const { readQishuiGuard } = await import('./src/car/protocol.js');
+    const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64');
+    const expect = (name, run, needle) => {
+        let message = '';
+        try { run(); } catch (error) { message = String(error.message || error); }
+        check(name, message.includes(needle), `message="${message}" want~"${needle}"`);
+    };
+    expect('guard header missing', () => readQishuiGuard(null), 'guard header is missing');
+    expect('guard header not JSON', () => readQishuiGuard('!!!not-base64!!!'), 'not base64 JSON');
+    expect('guard field missing', () => readQishuiGuard(b64({ ticket: 't', ts_sign: '' })), 'ts_sign');
+    const ok = readQishuiGuard(b64({ ticket: 'T', ts_sign: 'S', client_cert: 'C' }));
+    check('guard header parsed', ok.ticket === 'T' && ok.guardTsSign === 'S' && ok.guardCert === 'C');
+}
+
 // ─── 2. 协议（真网络）─────────────────────────────────────────────────────
 
 // transport：与真机 folia-xhr.js 的 __foliaHttpTransport 同一形状，

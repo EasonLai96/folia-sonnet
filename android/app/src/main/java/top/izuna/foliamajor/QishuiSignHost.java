@@ -95,10 +95,16 @@ final class QishuiSignHost {
 
     private final MainActivity activity;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    // 车机协议（客户端令牌 / ticket-guard）的参考实现用 `redirect: 'error'`：
+    // 请求里带着 access_code 与 CSR，一旦上游回 3xx，跟随跳转后**响应头里的
+    // bd-ticket-guard-server-data 会丢** —— 表现是请求成功（err_no=0）却读不到
+    // guard 数据，登录卡在 ticket 那一拍。所以整座桥都不跟随重定向：协议层所有
+    // 端点都不该跳，跳了就是异常，直接把状态码交回页面判定。
     private final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS)
-            .followRedirects(true)
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build();
 
     private WebView webView;

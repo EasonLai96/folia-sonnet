@@ -221,16 +221,17 @@ ${lines.join("\n")}
     };
   }
   function readQishuiGuard(raw) {
-    if (typeof raw !== "string" || !raw || raw.length > 65536) throw new Error("invalid guard response");
+    if (typeof raw !== "string" || !raw) throw new Error("guard header is missing");
+    if (raw.length > 65536) throw new Error("guard header is too large");
     let json;
     try {
       json = JSON.parse(new TextDecoder().decode(base64ToBytes(raw)));
     } catch (_) {
-      throw new Error("invalid guard response");
+      throw new Error("guard header is not base64 JSON");
     }
     for (const key of ["ticket", "ts_sign", "client_cert"]) {
       if (typeof json[key] !== "string" || !json[key] || json[key].length > 16384) {
-        throw new Error("invalid guard response");
+        throw new Error(`guard header field missing or invalid: ${key}`);
       }
     }
     const cert = json.client_cert;
@@ -521,7 +522,10 @@ ${lines.join("\n")}
       try {
         return await run();
       } catch (error) {
-        const failure = error instanceof QishuiError ? error : new QishuiError("invalid-response", "Qishui sign-in response could not be read");
+        const failure = error instanceof QishuiError ? error : new QishuiError(
+          "invalid-response",
+          String(error?.message || error) || "Qishui sign-in response could not be read"
+        );
         failure.stage ||= stage;
         throw failure;
       }
@@ -546,10 +550,19 @@ ${lines.join("\n")}
           ...guard.csr ? { "bd-ticket-guard-client-csr": guard.csr } : { "bd-ticket-guard-client-cert": guard.guardCert }
         }
       });
+      const guardHeader = response.headers.get("bd-ticket-guard-server-data");
+      let guardData;
+      try {
+        guardData = readQishuiGuard(guardHeader);
+      } catch (error) {
+        const names = typeof response.headers.names === "function" ? response.headers.names() : [];
+        const related = names.filter((name) => /ticket-guard/i.test(String(name)));
+        throw new Error(`readQishuiGuard failed (${String(error?.message || error)}); http=${response.status ?? "?"} headers=[${names.join(" ") || "none"}] guardHeaders=[${related.join(" ") || "none"}] rawLength=${guardHeader ? String(guardHeader.length) : "0"}`);
+      }
       return {
         deviceId,
         guardKey: guard.guardKey,
-        ...readQishuiGuard(response.headers.get("bd-ticket-guard-server-data")),
+        ...guardData,
         accessCode: access.access_code,
         openId: String(access.open_id || access.open_uid || ""),
         expiresAt: qishuiCredentialExpiry(access.expires_time).getTime()
@@ -1211,7 +1224,8 @@ ${lines.join("\n")}
     return {
       ok: Number(native && native.status) >= 200 && Number(native && native.status) < 300,
       status: Number(native && native.status) || 0,
-      headers: { get: (name) => headerLookup(headers, name) },
+      // names() 只给键名不给值：诊断要能看出「头到没到」，但不把凭据带出去。
+      headers: { get: (name) => headerLookup(headers, name), names: () => Object.keys(headers || {}) },
       text: async () => String(native && native.body || ""),
       json: async () => JSON.parse(String(native && native.body || "{}"))
     };

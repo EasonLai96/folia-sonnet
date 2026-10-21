@@ -24,7 +24,8 @@ function wrapResponse(native) {
     return {
         ok: Number(native && native.status) >= 200 && Number(native && native.status) < 300,
         status: Number(native && native.status) || 0,
-        headers: { get: name => headerLookup(headers, name) },
+        // names() 只给键名不给值：诊断要能看出「头到没到」，但不把凭据带出去。
+        headers: { get: name => headerLookup(headers, name), names: () => Object.keys(headers || {}) },
         text: async () => String((native && native.body) || ''),
         json: async () => JSON.parse(String((native && native.body) || '{}')),
     };

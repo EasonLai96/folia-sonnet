@@ -60,8 +60,12 @@ export function createAuth(client, { log = () => {} } = {}) {
     const step = async (stage, run) => {
         try { return await run(); }
         catch (error) {
+            // 保留原始 message：换成一句笼统的「读不出来」会让真机诊断只剩
+            // stage 名，看不出是响应头没到还是内容不对（ticket 那一步踩过）。
             const failure = error instanceof QishuiError
-                ? error : new QishuiError('invalid-response', 'Qishui sign-in response could not be read');
+                ? error
+                : new QishuiError('invalid-response',
+                    String(error?.message || error) || 'Qishui sign-in response could not be read');
             failure.stage ||= stage;
             throw failure;
         }
@@ -89,10 +93,26 @@ export function createAuth(client, { log = () => {} } = {}) {
                 ...(guard.csr ? { 'bd-ticket-guard-client-csr': guard.csr } : { 'bd-ticket-guard-client-cert': guard.guardCert }),
             },
         });
+        // guard 数据只走响应头。这里把它读不到时的现场（状态码 + 头名清单 +
+        // 有没有 guard 相关的头）全部写进错误信息：真机上这一拍失败，除了一份
+        // 诊断文本什么都没有，越具体越好。头的值一律不带（那是凭据）。
+        const guardHeader = response.headers.get('bd-ticket-guard-server-data');
+        let guardData;
+        try {
+            guardData = readQishuiGuard(guardHeader);
+        } catch (error) {
+            const names = typeof response.headers.names === 'function' ? response.headers.names() : [];
+            const related = names.filter(name => /ticket-guard/i.test(String(name)));
+            throw new Error(`readQishuiGuard failed (${String(error?.message || error)})`
+                + `; http=${response.status ?? '?'}`
+                + ` headers=[${names.join(' ') || 'none'}]`
+                + ` guardHeaders=[${related.join(' ') || 'none'}]`
+                + ` rawLength=${guardHeader ? String(guardHeader.length) : '0'}`);
+        }
         return {
             deviceId,
             guardKey: guard.guardKey,
-            ...readQishuiGuard(response.headers.get('bd-ticket-guard-server-data')),
+            ...guardData,
             accessCode: access.access_code,
             openId: String(access.open_id || access.open_uid || ''),
             expiresAt: qishuiCredentialExpiry(access.expires_time).getTime(),
