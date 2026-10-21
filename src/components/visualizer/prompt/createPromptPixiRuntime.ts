@@ -176,20 +176,29 @@ export class PromptPixiRuntime {
 
     /** 把一句歌词量出来：逐词宽度 → 整行宽 → 反解出「刚好装进屏宽」的缩放。 */
     private layoutRow(plan: PromptBoxPlan) {
-        // 一份样式描述，量宽和建 Text 都用它：pixi 会给每个 Text 自己建 TextStyle，
-        // 共用同一个实例的话测量时会互相改。
-        const textStyle = {
+        const { TextStyle } = this.pixi;
+        const styleOptions = {
             fontFamily: PROMPT_MONO_STACK,
             fontWeight: '500',
             fontSize: FONT_BASE,
             fill: PROMPT_PALETTE.bone,
         } as const;
+        /*
+         * 量宽必须拿**真的 TextStyle 实例**。CanvasTextMetrics.measureText 是从 style 上读
+         * `letterSpacing` / `_fontString` / `styleKey` 的：给一个普通对象，letterSpacing 是
+         * undefined，(字数-1) * undefined = NaN，量出来的宽度就是 NaN。而 NaN 会顺着
+         * rowWidth → 框宽 → 每个 token 的 left → 字/括号/光标/底板一路传下去：
+         * 除了不依赖行宽的铁栅栏，**整块框都画不出来**，看着就像「只显示了栅栏」。
+         */
+        const measureStyle = new TextStyle(styleOptions);
         const metricsApi = (this.pixi as unknown as {
             CanvasTextMetrics?: { measureText: (text: string, style: unknown) => { width: number } };
         }).CanvasTextMetrics;
         const measure = (text: string): number => {
             try {
-                return metricsApi?.measureText(text, textStyle).width ?? text.length * FONT_BASE * 0.62;
+                const width = metricsApi?.measureText(text, measureStyle).width;
+                // NaN/0 一律按字数估：宁可字宽估歪，也不能让整块框消失。
+                return Number.isFinite(width) && width > 0 ? width : text.length * FONT_BASE * 0.62;
             } catch {
                 return text.length * FONT_BASE * 0.62;
             }
@@ -217,7 +226,7 @@ export class PromptPixiRuntime {
             });
             cursor += width + WORD_GAP;
         });
-        return { tokens, rowWidth, scale, textStyle };
+        return { tokens, rowWidth, scale, styleOptions };
     }
 
     /** 本首主题自己的高亮词：框上那行提示词优先从这几个里取。 */
@@ -245,7 +254,7 @@ export class PromptPixiRuntime {
 
     private buildBox(plan: PromptBoxPlan): BuiltBox {
         const { Container, Text } = this.pixi;
-        const { tokens, rowWidth, scale, textStyle } = this.layoutRow(plan);
+        const { tokens, rowWidth, scale, styleOptions } = this.layoutRow(plan);
         const root = new Container();
         root.position.set(this.lastWidth / 2, this.lastHeight / 2);
         root.scale.set(scale);
@@ -269,7 +278,8 @@ export class PromptPixiRuntime {
 
         const highlightOf = this.highlighter();
         const words: BuiltWord[] = plan.words.map((word, wordIndex) => {
-            const node = new Text({ text: word.text, style: { ...textStyle } });
+            // Text 自己会把这份描述包成 TextStyle；每个词一份，免得共用一个实例互相改。
+            const node = new Text({ text: word.text, style: { ...styleOptions } });
             node.anchor.set(0, 0.5);
             node.position.set(tokens[wordIndex].left, 0);
             node.visible = false;

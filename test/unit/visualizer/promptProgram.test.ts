@@ -82,13 +82,17 @@ describe('compilePromptBoxes', () => {
         expect(other.map(box => box.termSeed)).not.toEqual(first.map(box => box.termSeed));
     });
 
-    it('puts the bar grate on some boxes and not on others', () => {
-        const lines = Array.from({ length: 8 }, (_, index) => (
+    it('puts the bar grate on a few boxes, never twice in a row', () => {
+        const lines = Array.from({ length: 40 }, (_, index) => (
             wordedLine(`line-${index}`, index * 4, index * 4 + 3, ['word'])
         ));
         const boxes = compilePromptBoxes(lines, 'grate');
-        const withBars = boxes.filter(box => box.withBars).length;
-        expect(withBars).toBeGreaterThan(0);
-        expect(withBars).toBeLessThan(boxes.length);
+        const flags = boxes.map(box => box.withBars);
+        expect(flags.filter(Boolean).length).toBeGreaterThan(0);
+        // 偶发：远不到一半（以前是 1/2，一首歌里十几句都挂满栅栏）。
+        expect(flags.filter(Boolean).length).toBeLessThanOrEqual(boxes.length / 3);
+        flags.forEach((flag, index) => {
+            if (flag) expect(flags[index - 1]).not.toBe(true);
+        });
     });
 });
