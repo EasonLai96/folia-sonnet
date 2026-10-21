@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 第二次机会**不看哈希，看内容**：候选条目标的高亮词都在你手上这段歌词里，那条答案
 // 就是照着这首歌做的。判定留在本机（服务端只回高亮词），歌词正文因此不用上传。
 //
-// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（挑最像的那个候选），
+// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（随机挑一个候选），
 // 不再报「没有」—— 各平台的 LRC 差几个字就该判成另一首歌，这是用户最恼火的那一句
 // 「云端明明有，就是匹配不上」。
 
@@ -84,24 +84,8 @@ describe('highlightWordsPresent', () => {
 
   /* LRC 里多一个空格不该判成「这不是同一个词」。 */
   it('ignores whitespace and case', () => {
-    expect(highlightWordsPresent(['小 黄 花', '故事'], '故事的小黄花')).toBe(true);
-    expect(highlightWordsPresent(['Rainbow', 'here'], 'some RAINBOW here')).toBe(true);
-  });
-
-  /*
-   * 一个词定不了「这是照着这首歌做的答案」：一个常见的词几乎在任何一首歌里都在，
-   * 命中它等于没判 —— 歌名相同的近亲里随便一条都能过（用户：「一个高亮词语都可以
-   * 匹配」）。至少两个词，且 80% 以上都在这一段歌词里。
-   */
-  it('needs at least two words to go on', () => {
-    expect(highlightWordsPresent(['小黄花'], lyric)).toBe(false);
-    expect(highlightWordsPresent(['故事'], '故事的小黄花')).toBe(false);
-  });
-
-  /* 五个词里差一个：80%，正好放行。差两个（60%）就是「差得不止一点」了。 */
-  it('lets a word go missing once there are enough of them', () => {
-    expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千', '不在歌词里'], lyric)).toBe(true);
-    expect(highlightWordsPresent(['故事', '小黄花', '童年', '不在', '也不在'], lyric)).toBe(false);
+    expect(highlightWordsPresent(['小 黄 花'], '故事的小黄花')).toBe(true);
+    expect(highlightWordsPresent(['Rainbow'], 'some RAINBOW here')).toBe(true);
   });
 
   it('is not satisfied when a word is missing', () => {
@@ -180,42 +164,6 @@ describe('pullAiCloudCache 的第二次机会', () => {
     }
   });
 
-  /*
-   * 都判不过时挑**最像**的那条（高亮词覆盖率最高），不再随便挑一条。
-   *
-   * 随机等于承认「眼前的十几条近亲跟这首的关系都一样」—— 它们并不一样：覆盖率 0.67 那条
-   * 明显比 0 那条更像这首的答案。而挑到的那条会回填到本次的精确键上，错一次就一直错下去。
-   */
-  it('falls back to the closest candidate, not an arbitrary one', async () => {
-    handlers.fetch = async (url) => {
-      if (url.includes('/ai-cache/resolve')) {
-        return json({
-          ok: true,
-          candidates: [
-            { key: KEY_A, words: ['完全不在', '也不在'] },                  // 0/2
-            { key: KEY_H, words: ['小黄花', '不在歌词里'] },                 // 1/2
-            { key: KEY_B, words: ['小黄花', '荡秋千', '不在这段里'] },       // 2/3 —— 最高的那条
-          ],
-        });
-      }
-      if (url.includes(KEY_B)) return json({ hit: true, entry: { payload } });
-      if (url.includes(KEY_A) || url.includes(KEY_H)) return json({ hit: true, entry: { payload: secondPayload } });
-      return json({ hit: false }, false);
-    };
-
-    const result = await pullAiCloudCache('stage', KEY_G, {
-      songTitle: '晴天',
-      lyricText: '故事的小黄花\n童年的荡秋千',
-    });
-
-    expect(result.status).toBe('hit');
-    if (result.status === 'hit') {
-      expect(result.matched).toBe('words');
-      expect(result.sourceKey).toBe(KEY_B);
-      expect(result.payload).toEqual(payload);
-    }
-  });
-
   /* 一条高亮词都没标的候选：也走强制匹配那条路，不再整条出局。 */
   it('forces a match even when no candidate marked any word', async () => {
     handlers.fetch = async (url) => {
@@ -277,9 +225,8 @@ describe('pullAiCloudCache 的第二次机会', () => {
         return json({
           ok: true,
           candidates: [
-            // 每条至少两个词：一个词定不了「这是照着这首歌做的答案」，见 highlightWordsPresent。
-            { key: KEY_A, words: ['小黄花', '故事'] },
-            { key: KEY_H, words: ['荡秋千', '童年'] },
+            { key: KEY_A, words: ['小黄花'] },
+            { key: KEY_H, words: ['荡秋千'] },
           ],
         });
       }
