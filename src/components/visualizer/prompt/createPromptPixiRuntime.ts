@@ -1,36 +1,29 @@
 import type { MotionValue } from 'framer-motion';
 import type { Theme } from '../../../types';
+import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
 import { loadPixi } from '../pixi/loadPixi';
 import { makePixiContext } from '../pixi/pixiWebGLContext';
 import { linkPixiPrograms } from '../pixi/pixiProgramLinks';
-import {
-    buildPromptCard,
-    PROMPT_MONO_STACK,
-    PROMPT_PALETTE,
-    type PromptCardView,
-} from './promptBox';
+import { buildPromptCard, PROMPT_MONO_STACK, PROMPT_PALETTE, type PromptCardView } from './promptBox';
 import type { PromptBoxPlan } from './promptProgram';
-import { promptVocabPick } from './promptVocab';
 
 // src/components/visualizer/prompt/createPromptPixiRuntime.ts
 // 「提示词」样式自己的 Pixi 运行时。它不认商籁那套节目单（场景 / 镜头 / 排版），只做三件事：
 //
 //   1. 收下 promptProgram 编译好的节目单（一句一个框）；
-//   2. 按播放时间挑出此刻该在台上的那一句，交给 promptBox 搭出「候选面板 + 桌面歌词悬浮条」；
-//   3. 每个词一个 pixi.Text，唱到才落下；**字号固定**（跟窗高走，不按内容反解），
-//      一行字超出窗宽才横向跟随 —— 这就是「不要强制放大，超过范围才跟随」。
+//   2. 按播放时间挑出此刻该在台上的那一句，交给 promptBox 搭出「一块小悬浮窗 + 逐词下划线」；
+//   3. 驱动**镜头**：整块窗跟着唱到的位置推近、横移 —— 不是让字在窗里自己滚。
 //
-// 坐标：画面 px。root 只把整组摆到画面正中；字在窗内滚动，不做推拉缩放。
+// 字号：基础值只跟屏宽和「歌词字号」那个全局系数走；一句太长按比例缩，**缩到底就不再缩**，
+// 剩下的靠镜头横移。字少的时候**绝不放大**（两个字撑满一屏就是「字少时太难看」）。
 type PixiModule = typeof import('pixi.js');
 
 /** 量宽用的参考字号：先按 100 量出逐词宽度，再按真实字号线性缩放。 */
 const FONT_BASE = 100;
-/** 词间距占字号的比例。 */
-const WORD_GAP_RATIO = 0.34;
 /** 一个词从「没出现」到「全亮」用多久。 */
 const WORD_REVEAL_S = 0.09;
-/** 横向跟随：唱到的字留在窗内这个位置（0.62 = 从左往右 62% 处）。 */
-const FOLLOW_ANCHOR = 0.62;
+/** 镜头：唱到的位置留在窗内这个比例处（0.45 = 正中间偏左），再往右才开始横移。 */
+const PAN_ANCHOR = 0.45;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -70,6 +63,8 @@ export interface PromptSongContext {
     seed: string | number | undefined;
     boxes: PromptBoxPlan[];
     theme: Theme;
+    /** 设置里那个「歌词字号」系数（别的样式都乘它，这里也必须乘）。 */
+    fontScale: number;
 }
 
 export interface PromptRuntimeOptions {
@@ -77,12 +72,11 @@ export interface PromptRuntimeOptions {
     song: PromptSongContext;
     currentTime: MotionValue<number>;
     paused: boolean;
-    /** 减少动感：不做进场位移。 */
+    /** 减少动感：不做镜头推拉。 */
     staticMode: boolean;
     signal?: AbortSignal;
 }
 
-/** 一个词在行里的位置（px，0 = 窗内字的起点）与它被唱到的窗口。 */
 interface WordBox {
     text: string;
     left: number;
@@ -98,16 +92,36 @@ interface BuiltWord {
     color: number | null;
 }
 
+/** 唱完一个词之后飞出去的那个「残影」：位置/速度/出生时间都由这里记着。 */
+interface GhostWord {
+    node: import('pixi.js').Text;
+    originX: number;
+    vx: number;
+    vy: number;
+    born: number;
+    life: number;
+}
+
 interface BuiltBox {
-    /** 画面中心。 */
+    /** 镜头：整块窗挂在它下面，推近/横移都动它。 */
     root: import('pixi.js').Container;
     card: PromptCardView;
     words: BuiltWord[];
     caret: import('pixi.js').Graphics;
     tokens: WordBox[];
     fontPx: number;
-    /** 整行宽（px）：超出窗宽才需要横向跟随。 */
-    rowWidth: number;
+    /** 可横移的余量（内容比窗能装的多出来的部分）。 */
+    overflow: number;
+    /** 内容区宽度：镜头横移的参照系。 */
+    span: number;
+    /** 已经放出去残影的词（一个词只飞一次）。 */
+    spawned: boolean[];
+    ghosts: GhostWord[];
+    /** 造残影用的字样式（和正文同一套，只是换了色/透明度）。 */
+    wordStyle: import('pixi.js').TextStyle;
+    wordPad: number;
+    /** 这一句的种子：残影往哪边飞按它定，不同句子的轨迹不一样。 */
+    seed: number;
     startTime: number;
     endTime: number;
 }
@@ -197,7 +211,7 @@ export class PromptPixiRuntime {
         this.lastWidth = width;
         this.lastHeight = height;
         this.app.renderer.resize(width, height);
-        // 窗宽、字号、遮罩都按屏宽解，尺寸一变就得重搭。
+        // 窗宽、字号、下划线都按屏宽解，尺寸一变就得重搭。
         this.clearBoxes();
         return true;
     }
@@ -225,67 +239,27 @@ export class PromptPixiRuntime {
         };
     }
 
-    /** 窗宽：与屏宽成比例，够宽才像「桌面歌词条」。 */
-    private boxWidth() {
-        return clamp(this.lastWidth * 0.9, 260, 900);
+    /** 歌词字体：跟主题那个字体选项走（不再是写死的等宽）。 */
+    private fontFamily() {
+        return resolveThemeFontStack(this.options.song.theme) || PROMPT_MONO_STACK;
+    }
+
+    private fontWeight() {
+        return resolveThemeFontWeight(this.options.song.theme, 600);
     }
 
     /**
-     * 一句的量宽：按 FONT_BASE 量一次，再按真实字号线性缩放。
-     * **字号不反解** —— 长句不压小字，靠后面的横向跟随解决。
+     * 基础字号：屏宽 × 系数 × 设置里的「歌词字号」。
+     * **不按内容反解**：字少的时候它就是这个值，不会被放大成两屏高；太长由 promptBox 按比例缩。
      */
-    private layoutRow(plan: PromptBoxPlan, fontPx: number) {
-        const { TextStyle } = this.pixi;
-        const measureStyle = new TextStyle({
-            fontFamily: PROMPT_MONO_STACK,
-            fontWeight: '600',
-            fontSize: FONT_BASE,
-        });
-        const metricsApi = (this.pixi as unknown as {
-            CanvasTextMetrics?: { measureText: (text: string, style: unknown) => { width: number } };
-        }).CanvasTextMetrics;
-        /*
-         * 量宽必须拿**真的 TextStyle 实例**。CanvasTextMetrics.measureText 是从 style 上读
-         * `letterSpacing` / `_fontString` / `styleKey` 的：给一个普通对象，letterSpacing 是
-         * undefined，(字数-1) * undefined = NaN，量出来的宽度就是 NaN，整行字和窗一起消失。
-         */
-        const measure = (text: string): number => {
-            try {
-                // 量不到（字体没就绪 / API 不可用）一律按字数估：宁可字宽估歪，不能让整行消失。
-                const width = metricsApi ? metricsApi.measureText(text, measureStyle).width : Number.NaN;
-                return Number.isFinite(width) && width > 0 ? width : text.length * FONT_BASE * 0.62;
-            } catch {
-                return text.length * FONT_BASE * 0.62;
-            }
-        };
-        const scale = fontPx / FONT_BASE;
-        const gap = fontPx * WORD_GAP_RATIO;
-        const tokens: WordBox[] = [];
-        let cursor = 0;
-        plan.words.forEach(word => {
-            const width = measure(word.text) * scale;
-            tokens.push({
-                text: word.text,
-                left: cursor,
-                width,
-                startTime: word.startTime,
-                endTime: word.endTime,
-            });
-            cursor += width + gap;
-        });
-        const last = tokens[tokens.length - 1];
-        return { tokens, rowWidth: last ? last.left + last.width : 0 };
+    private baseFontPx() {
+        const scale = Number.isFinite(this.options.song.fontScale) ? this.options.song.fontScale : 1;
+        return clamp(this.lastWidth * 0.072 * clamp(scale, 0.4, 2.4), 16, 76);
     }
 
-    /** 词 → 高亮色。整行同色会很花，所以只给「被 AI 标过的词」备一份。 */
-    private highlighter() {
-        const byWord = new Map<string, number>();
-        (this.options.song.theme?.wordColors ?? []).forEach(entry => {
-            const word = String(entry?.word ?? '').trim();
-            if (!word) return;
-            byWord.set(word, themeColor(this.pixi, entry?.color, PROMPT_PALETTE.bone, 0.55));
-        });
-        return (text: string): number | null => byWord.get(text.trim()) ?? null;
+    /** 窗最多能有多宽：留出两边的呼吸位，别顶到屏幕边。 */
+    private maxWindowWidth() {
+        return clamp(this.lastWidth * 0.84, 200, 760);
     }
 
     private buildBox(plan: PromptBoxPlan, index: number): BuiltBox {
@@ -296,23 +270,17 @@ export class PromptPixiRuntime {
         const root = new Container();
         root.position.set(this.lastWidth / 2, height / 2);
 
-        /*
-         * 候选面板那三行陪衬：从 30000 词的词表里按这句的种子抽三个中文词。
-         * 槽位从 2 起 —— 0/1 已经被窗底那两个「token id」占了，错开才像同一批候选。
-         */
-        const candidates = [2, 3, 4].map(slot => promptVocabPick(plan.vocabSeed, slot).text);
         const card = buildPromptCard(this.pixi, {
-            width: this.boxWidth(),
+            maxWidth: this.maxWindowWidth(),
+            fontPx: this.baseFontPx(),
             accent: colors.accent,
             textColor: colors.text,
-            seed: plan.vocabSeed,
-            lineIndex: index + 1,
+            fontFamily: this.fontFamily(),
+            fontWeight: this.fontWeight(),
             tokens: plan.words.map(word => ({ text: word.text, startTime: word.startTime, endTime: word.endTime })),
-            candidates,
         });
         root.addChild(card.root);
 
-        const { tokens, rowWidth } = this.layoutRow(plan, card.fontPx);
         /*
          * 字：白色纹理 + tint —— 主题色、AI 高亮色都只是换个 tint，不用重烤纹理。
          * 发光用 dropShadow（canvas 的 shadowBlur，distance 0）烤进同一张纹理，比复制一层字
@@ -320,8 +288,8 @@ export class PromptPixiRuntime {
          */
         const wordPad = Math.round(clamp(card.fontPx * 0.09, 6, 40));
         const wordStyle = new TextStyle({
-            fontFamily: PROMPT_MONO_STACK,
-            fontWeight: '600',
+            fontFamily: this.fontFamily(),
+            fontWeight: this.fontWeight() as never,
             fontSize: card.fontPx,
             fill: '#ffffff',
             padding: wordPad,
@@ -335,6 +303,13 @@ export class PromptPixiRuntime {
         });
 
         const highlightOf = this.highlighter();
+        const tokens: WordBox[] = plan.words.map((word, slot) => ({
+            text: word.text,
+            left: card.laid[slot]?.left ?? 0,
+            width: card.laid[slot]?.width ?? 0,
+            startTime: word.startTime,
+            endTime: word.endTime,
+        }));
         const words: BuiltWord[] = tokens.map(token => {
             // resolution 1：字大到几十上百 px，按设备像素比烤纹理一张就是好几兆；带发光看不出软。
             const node = new Text({ text: token.text, style: wordStyle, resolution: 1 });
@@ -353,6 +328,7 @@ export class PromptPixiRuntime {
         card.textLayer.addChild(caret);
 
         this.stage.addChild(root);
+        const span = Math.max(1, card.windowWidth - card.fontPx * 1.4);
         return {
             root,
             card,
@@ -360,10 +336,60 @@ export class PromptPixiRuntime {
             caret,
             tokens,
             fontPx: card.fontPx,
-            rowWidth,
+            overflow: Math.max(0, card.contentWidth - span),
+            span,
+            spawned: tokens.map(() => false),
+            ghosts: [],
+            wordStyle,
+            wordPad,
+            seed: plan.vocabSeed,
             startTime: plan.startTime,
             endTime: plan.endTime,
         };
+    }
+
+    /**
+     * 唱完一个词，就从它原来的位置放一个「残影」飞出去 —— 参考项目里那些从输入框里飘走的字。
+     * 方向按词的序号左右交替，速度也一样，所以同一句每次重放飞的是同一批轨迹。
+     */
+    private spawnGhost(box: BuiltBox, index: number, time: number) {
+        const token = box.tokens[index];
+        if (!token) return;
+        const { Text } = this.pixi;
+        const node = new Text({ text: token.text, style: box.wordStyle, resolution: 1 });
+        node.anchor.set(0, 0.5);
+        node.position.set(token.left - box.wordPad, 0);
+        node.tint = this.palette().accent;
+        node.alpha = 0.7;
+        box.card.textLayer.addChild(node);
+        // 方向由这一句的种子定：同一句每次重放飞同一条轨迹，不同句子左右不同。
+        const dir = ((box.seed >>> ((index % 8) * 3)) & 1) === 0 ? -1 : 1;
+        box.ghosts.push({
+            node,
+            originX: node.x,
+            vx: dir * (18 + (index % 3) * 14),
+            vy: -(58 + (index % 4) * 12),
+            born: time,
+            life: 0.85,
+        });
+    }
+
+    /** 残影：往斜上飘、边飘边淡、稍微放大一点，飘完就销毁。 */
+    private updateGhosts(box: BuiltBox, time: number) {
+        for (let index = box.ghosts.length - 1; index >= 0; index -= 1) {
+            const ghost = box.ghosts[index];
+            const age = time - ghost.born;
+            const progress = clamp01(age / ghost.life);
+            if (age > ghost.life || age < 0) {
+                ghost.node.destroy();
+                box.ghosts.splice(index, 1);
+                continue;
+            }
+            ghost.node.x = ghost.originX + ghost.vx * age;
+            ghost.node.y = ghost.vy * age * (1 - 0.35 * progress);
+            ghost.node.alpha = 0.7 * (1 - progress) * (1 - progress);
+            ghost.node.scale.set(1 + 0.12 * progress);
+        }
     }
 
     /** 此刻台上是第几句：取「最后一个已经开唱」的；都还没到就是第一句（它自己还在场外，画不出来）。 */
@@ -389,13 +415,24 @@ export class PromptPixiRuntime {
 
     private prune(active: number) {
         this.boxes.forEach((box, index) => {
-            if (Math.abs(index - active) <= 2) return;
+            if (Math.abs(index - active) <= 1) return;
             this.destroyBox(box);
             this.boxes.delete(index);
         });
     }
 
-    /** 一整句的姿势：字的落下与高亮、窗内横向跟随。 */
+    /** 词 → 高亮色。整行同色会很花，所以只给「被 AI 标过的词」备一份。 */
+    private highlighter() {
+        const byWord = new Map<string, number>();
+        (this.options.song.theme?.wordColors ?? []).forEach(entry => {
+            const word = String(entry?.word ?? '').trim();
+            if (!word) return;
+            byWord.set(word, themeColor(this.pixi, entry?.color, PROMPT_PALETTE.bone, 0.55));
+        });
+        return (text: string): number | null => byWord.get(text.trim()) ?? null;
+    }
+
+    /** 一整句的姿势：字的落下与高亮、下划线、以及整块窗的镜头。 */
     private updateBox(box: BuiltBox, time: number, staticMode: boolean) {
         const { startTime, endTime, tokens, fontPx, card } = box;
         // 帧值兜底：时间窗坏了（云端歌词偶尔会有缺 endTime 的行）会算出 NaN，
@@ -414,41 +451,46 @@ export class PromptPixiRuntime {
         // 唱到哪儿：光标位置 = 已落下的词里最靠右的那个；正在唱的那个词，光标在词里按进度走。
         let caretX = tokens[0]?.left ?? 0;
         let activeToken = -1;
+        let lastStart = startTime;
         tokens.forEach((token, index) => {
             if (token.startTime > time) return;
             caretX = token.left + token.width * progressOf(time, token.startTime, token.endTime);
+            lastStart = Math.max(lastStart, token.startTime);
             if (time <= token.endTime + 0.1) activeToken = index;
         });
-        const lastStart = tokens[tokens.length - 1]?.startTime ?? startTime;
+        const sung = clamp01((time - startTime) / span);
 
-        // 整组：进场很轻地往上一浮，退场略微下沉；**不缩放、不推拉**。
+        const colors = this.palette();
         if (staticMode) {
+            box.root.scale.set(1);
             box.root.position.set(this.lastWidth / 2, this.lastHeight / 2);
             box.root.alpha = time >= (tokens[0]?.startTime ?? startTime) - 0.2 ? 1 : 0;
         } else {
+            /*
+             * 镜头：
+             * - dolly 进场 0.955 → 1，一句之内再慢慢推到 1.05（唱得越久越近），退场抽回 0.93；
+             * - 每落一个词顿一下（punch，0.2s 内衰减），像镜头被字顶了一下；
+             * - 横移：整句装不下窗时才跟着唱到的位置走，装得下就只做一点点漂移。
+             */
+            const punch = safe(Math.max(0, 1 - (time - lastStart) / 0.2), 0);
+            const dolly = (0.955 + 0.045 * enter) * (1 + 0.05 * sung) * (1 - 0.07 * exit) + punch * 0.012;
+            const rawPan = box.overflow > 0
+                ? -clamp(caretX - box.span * PAN_ANCHOR, 0, box.overflow)
+                : -(sung - 0.5) * card.windowWidth * 0.02;
+            box.root.scale.set(safe(dolly, 1));
             box.root.position.set(
-                this.lastWidth / 2,
-                this.lastHeight / 2 + safe((1 - enter) * this.lastHeight * 0.03 - exit * this.lastHeight * 0.04, 0),
+                this.lastWidth / 2 + safe(rawPan, 0),
+                this.lastHeight / 2
+                + safe((1 - enter) * this.lastHeight * 0.03 - exit * this.lastHeight * 0.04, 0),
             );
             box.root.alpha = safe(alpha, 0);
         }
         box.root.visible = box.root.alpha > 0.004;
 
         /*
-         * 横向跟随：**只有整行超出窗宽才动**。字装得下就一动不动（这就是「不要强制放大」），
-         * 装不下就把唱到的字钉在窗内 62% 的位置，其余从它两边流过去，像桌面歌词那样滚。
-         */
-        const maxScroll = Math.max(0, box.rowWidth - card.textWidth);
-        const scroll = maxScroll > 0
-            ? clamp(caretX - card.textWidth * FOLLOW_ANCHOR, 0, maxScroll)
-            : 0;
-        card.textLayer.x = card.textOriginX - safe(scroll, 0);
-
-        /*
          * 字：唱到才落下；**唱过的高亮色留着不还回去** —— 一句唱完整行都是亮的。
          * AI 标过色的词用它自己的色，其余用主题强调色。
          */
-        const colors = this.palette();
         box.words.forEach(word => {
             const appear = clamp01((time - word.box.startTime) / WORD_REVEAL_S);
             word.node.visible = appear > 0;
@@ -459,12 +501,22 @@ export class PromptPixiRuntime {
             if (word.node.tint !== tint) word.node.tint = tint;
         });
 
+        // 字飞出框：唱完一个词就放一个残影出去（静态模式不放，那是给省电/截图用的）。
+        if (!staticMode) {
+            box.tokens.forEach((token, index) => {
+                if (box.spawned[index] || time < token.endTime) return;
+                box.spawned[index] = true;
+                this.spawnGhost(box, index, time);
+            });
+            this.updateGhosts(box, time);
+        }
+
         // 光标：唱到哪儿跟到哪儿；句尾之后先亮半秒再闪。
         const blinkOn = time - lastStart < 0.5 || Math.floor(time * 1.6) % 2 === 1;
         box.caret.x = caretX + fontPx * 0.06;
         box.caret.alpha = blinkOn ? 1 : 0.12;
 
-        card.update(time, activeToken, progressOf(time, startTime, endTime));
+        card.update(time, activeToken);
     }
 
     private renderFrame = () => {
@@ -479,7 +531,7 @@ export class PromptPixiRuntime {
         const time = this.options.currentTime.get();
         const active = this.indexAt(time);
         const current = this.ensure(active);
-        // 上一句还在演它的退场（整组在句尾抽走），所以两块一起驱动；它们各自按绝对时间算姿势。
+        // 上一句还在演它的退场（整块窗在句尾抽走），所以两块一起驱动；它们各自按绝对时间算姿势。
         const previous = active > 0 ? this.ensure(active - 1) : null;
         this.prune(active);
 
@@ -498,12 +550,17 @@ export class PromptPixiRuntime {
      * 只要调用方多换几次歌（播放页重算 theme、切字幕开关都会让 song 对象换个引用），画面就永远
      * 停在 alpha≈0 的那一帧 —— 看起来就是「选了提示词，只有背景，什么都没有」。框自己每一句都
      * 有进场，硬切一次比看不见好。
+     *
+     * 字体 / 字号变了也要重搭：字是在搭框时量好并烤进纹理的，不重搭就永远用旧的。
      */
     swapSong(song: PromptSongContext) {
         if (this.destroyed) return;
-        const sameProgram = song.boxes === this.options.song.boxes;
+        const previous = this.options.song;
+        const sameProgram = song.boxes === previous.boxes;
+        const sameLook = song.theme?.fontStyle === previous.theme?.fontStyle
+            && song.fontScale === previous.fontScale;
         this.options.song = song;
-        if (sameProgram) {
+        if (sameProgram && sameLook) {
             if (this.options.paused) this.renderOnce();
             return;
         }

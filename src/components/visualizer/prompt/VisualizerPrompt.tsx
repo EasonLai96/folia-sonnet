@@ -61,15 +61,15 @@ const VisualizerPrompt: React.FC<VisualizerSharedProps> = (props) => {
     );
 
     const songContext = useMemo<PromptSongContext>(
-        () => ({ seed: committedSong.seed, boxes, theme }),
-        [committedSong.seed, boxes, theme],
+        () => ({ seed: committedSong.seed, boxes, theme, fontScale: lyricsFontScale }),
+        [committedSong.seed, boxes, theme, lyricsFontScale],
     );
 
     const runtimeRef = useVisualizerPixiHost<PromptPixiRuntime, PromptSongContext>({
         hostRef,
         label: 'Prompt',
-        // 只有「动感开关」会改变运行时的行为方式，其余都是换歌 / 换主题，走 swap。
-        rebuildKey: [staticMode],
+        // 只有「动感开关」会改变运行时的行为方式；字号变了要重搭（字是在搭框时量好烤进纹理的）。
+        rebuildKey: [staticMode, lyricsFontScale],
         song: songContext,
         create: async (host, song, signal) => {
             const { PromptPixiRuntime } = await import('./createPromptPixiRuntime');
