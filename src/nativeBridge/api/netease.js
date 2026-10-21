@@ -2,6 +2,7 @@ import { weapiRequest, UA } from './weapi.js';
 import { eapiRequest } from './eapi.js';
 import { getNeteaseCookie, hasNeteaseLogin, parseCookieString, saveProviderCookie, setBrowserCookies, getNeteaseMusicU } from './cookies.js';
 import { handleQQSongComments } from './qq.js';
+import { noteLibraryStep } from './libraryTrace.js';
 
 const HOME_FEATURED_REVIEW_FALLBACKS = [
   { provider: 'netease', source: 'netease', type: 'song', id: 190137, name: '七月上', artist: 'Jam' },
@@ -793,7 +794,9 @@ export async function handleSongLikeCheck(ids, cookie) {
   let likedSet = new Set();
   if (numericIds.length) {
     try {
-      const body = await weapiApi('/api/song/like/check', { ids: JSON.stringify(numericIds) }, cookie);
+      // 参数名必须是 `trackIds`：用 `ids` 上游回 code=400「参数错误」，于是这份检查从来没成立过，
+      // 每个 id 都被判成「未收藏」。
+      const body = await weapiApi('/api/song/like/check', { trackIds: JSON.stringify(numericIds) }, cookie);
       const data = body.data || body;
       numericIds.forEach((id) => {
         if (data[id] || data[String(id)] || data[Number(id)]) likedSet.add(String(id));
@@ -819,28 +822,89 @@ export async function handleSongLike(id, like, cookie) {
   if (!info.loggedIn) return { error: 'LOGIN_REQUIRED', loggedIn: false };
   const trackId = Number(id);
   if (!Number.isFinite(trackId) || trackId <= 0) return { error: 'INVALID_ID', loggedIn: true, id: String(id || '') };
-  try {
-    const body = await weapiApi('/api/radio/like', {
-      alg: 'itembased',
-      trackId,
-      like: like !== false,
-      time: '3',
-    }, cookie);
-    const code = Number(body.code);
-    if (code && code !== 200) {
-      return {
-        error: body.msg || body.message || 'LIKE_FAILED',
-        loggedIn: true,
-        id: String(id),
-        liked: false,
-        code,
-        body,
-      };
+  const wanted = like !== false;
+  // 未登录时写入会以匿名身份被服务端丢弃（界面却可能显示成功），先把登录事实记下来。
+  noteLibraryStep('netease', 'like:login', {
+    loggedIn: Boolean(info.loggedIn),
+    hasMusicU: Boolean(parseCookieString(cookie).MUSIC_U),
+    userId: info.userId ? 'present' : 'absent',
+  });
+
+  /**
+   * 现场问题：提示收藏成功，但「我喜欢的音乐」里没有这首歌。
+   *
+   * 原来这里只打 `/api/radio/like`（私人FM 的「喜欢」）并且**完全不校验结果** —— 上游无论有没有
+   * 真的写进收藏库都回 code 200，于是 UI 点亮心形、缓存也把歌记成已收藏。
+   *
+   * 现在按「写完再读确认」来：写之前读一次（已是目标状态就直接返回），写完用
+   * `/api/song/like/check` 复查；没变就换 `/api/radio/like` 再试一次；
+   * 仍然没变就报错 —— 宁可显示失败，也不假报成功。
+   */
+  const readLikedNow = async () => {
+    try {
+      const body = await weapiApi('/api/song/like/check', { trackIds: JSON.stringify([trackId]) }, cookie);
+      const data = (body && (body.data || body)) || {};
+      const value = data[trackId] ?? data[String(trackId)];
+      if (typeof value === 'boolean') return value;
+      const list = Array.isArray(body && body.ids) ? body.ids
+        : (Array.isArray(data.ids) ? data.ids
+          : (Array.isArray(body && body.songs) ? body.songs.map((song) => song && song.id) : null));
+      if (list) return list.map(String).includes(String(trackId));
+      // 形状没认出来：把键名记下来，否则上层只能看到「无法复查」而不知道上游到底回了什么。
+      noteLibraryStep('netease', 'like:check-shape', {
+        code: body && body.code,
+        bodyKeys: Object.keys(body || {}).slice(0, 8).join(','),
+        dataKeys: Object.keys(data).slice(0, 8).join(','),
+      });
+    } catch (error) {
+      noteLibraryStep('netease', 'like:check-error', {
+        message: String((error && error.message) || error).slice(0, 90),
+      });
     }
-    return { loggedIn: true, id: String(id), liked: like !== false, code: code || 200, body };
-  } catch (err) {
-    return { error: err.message || 'LIKE_FAILED', loggedIn: true, id: String(id), liked: false };
+    return null;
+  };
+
+  const before = await readLikedNow();
+  if (before === wanted) return { loggedIn: true, id: String(id), liked: wanted, code: 200, via: 'already' };
+
+  const attempts = [
+    // 先走收藏库那条：`/api/radio/like` 是私人FM 的路子，实测会被风控挡（code=-460 网络环境存在风险）。
+    { path: '/api/song/like', data: { trackId, like: wanted } },
+    { path: '/api/radio/like', data: { alg: 'itembased', trackId, like: wanted, time: '3' } },
+  ];
+  let lastReason = '';
+  for (const attempt of attempts) {
+    try {
+      const body = await weapiApi(attempt.path, attempt.data, cookie);
+      const code = Number(body && body.code);
+      noteLibraryStep('netease', 'like:write', {
+        path: attempt.path,
+        like: wanted,
+        code,
+        bodyKeys: Object.keys(body || {}).slice(0, 8).join(','),
+      });
+      if (code && code !== 200) {
+        lastReason = `${attempt.path} code ${code}`;
+        continue;
+      }
+      const after = await readLikedNow();
+      if (after === wanted) {
+        return { loggedIn: true, id: String(id), liked: wanted, code: 200, via: attempt.path };
+      }
+      lastReason = after === null
+        ? `${attempt.path} 后无法复查`
+        : `${attempt.path} 后关系仍是 ${after}`;
+    } catch (err) {
+      lastReason = `${attempt.path} ${err.message || String(err)}`;
+    }
   }
+  return {
+    error: `LIKE_NOT_APPLIED: ${lastReason}`,
+    loggedIn: true,
+    id: String(id),
+    liked: before === true,
+    code: -1,
+  };
 }
 
 export async function handleArtistDetail(id, limit, cookie) {
