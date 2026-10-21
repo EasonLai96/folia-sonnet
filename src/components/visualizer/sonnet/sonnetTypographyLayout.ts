@@ -18,6 +18,7 @@ import {
     layoutCrossStack,
     layoutEditorialColumn,
     layoutFragmentCollage,
+    layoutPromptField,
     layoutQuietTableau,
     layoutTrackingRibbon,
     resolveSonnetFlowGaps,
@@ -225,6 +226,12 @@ export const resolveSonnetTypographyLayout = ({
                 heroFontScale = 4.4;
                 supportFontScale = 1.15;
                 break;
+            case 'prompt-field':
+                // 输入框里一行字，大小字重全一样：hero 只是时间轴上的一个词，不该被放大。
+                heroFontScale = 1;
+                supportFontScale = 1;
+                vertical = false;
+                break;
             case 'quiet-tableau':
             default:
                 heroFontScale = 3.0;
@@ -238,6 +245,7 @@ export const resolveSonnetTypographyLayout = ({
             : isSemiHero
                 ? Math.max(supportFontScale * 1.35, heroFontScale * 0.72)
                 : supportFontScale;
+        if (shotKind === 'prompt-field') fontScale = 1;
 
         // Non-CJK words use horizontal glyph advances and rotate as a block in vertical compositions.
         // Resolve that writing mode before measuring so packing uses the rendered bounds.
@@ -354,6 +362,13 @@ export const resolveSonnetTypographyLayout = ({
     // scan order; non-poster branches share gap constants and global fit retries.
     const heroBox = boxes[heroIndex];
     if (heroBox) {
+        /*
+         * 输入框里的字全部按 hero 出：support 角色会被加上一段随机的法向偏移
+         * （见 resolveSonnetSegmentNormalOffset），那一行字就会上下抖开，方括号和光标也跟着歪。
+         */
+        if (shotKind === 'prompt-field') {
+            boxes.forEach(box => { box.role = 'hero'; });
+        }
         if (shotKind === 'poster-blocks') {
             layoutSonnetPosterBlocks(boxes, width, height, baseFontSize, posterLayoutSeed);
         } else {
@@ -363,14 +378,15 @@ export const resolveSonnetTypographyLayout = ({
             else if (shotKind === 'tracking-ribbon') layoutTrackingRibbon(flowCtx, ribbonVariant);
             else if (shotKind === 'editorial-column') layoutEditorialColumn(flowCtx, editorialVariant, secondaryHeroIndex);
             else if (shotKind === 'fragment-collage') layoutFragmentCollage(flowCtx, collageVariant);
+            else if (shotKind === 'prompt-field') layoutPromptField(flowCtx);
             else layoutCrossStack(flowCtx);
         }
 
         heroBox.enterX = 0;
-        heroBox.enterY = height * 0.15;
+        heroBox.enterY = shotKind === 'prompt-field' ? 0 : height * 0.15;
 
         const decorations: typeof boxes = [];
-        if (shotKind !== 'quiet-tableau' && shotKind !== 'poster-blocks') {
+        if (shotKind !== 'quiet-tableau' && shotKind !== 'poster-blocks' && shotKind !== 'prompt-field') {
             const allHeroes = boxes.filter(b => b.isHero);
             allHeroes.forEach((hBox, idx) => {
                 decorations.push({

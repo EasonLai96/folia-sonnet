@@ -12,7 +12,8 @@ export type SonnetShotKind =
     | 'tracking-ribbon'
     | 'mask-reveal'
     | 'poster-blocks'
-    | 'quiet-tableau';
+    | 'quiet-tableau'
+    | 'prompt-field';
 export const SONNET_TRANSITION_KINDS = [
     'fast-blur',
     'mono-glitch',

@@ -82,7 +82,12 @@ export const updateSonnetShot = (
 ) => {
     const progress = resolveShotProgress(view.shot, time);
     const motion = tuning.typographyMotion * resolveSonnetAnimationScale(theme) * mod('motionScale');
-    const camera = tuning.cameraIntensity * resolveSonnetAnimationScale(theme) * mod('cameraScale');
+    const camera = tuning.cameraIntensity * resolveSonnetAnimationScale(theme) * mod('cameraScale')
+        /*
+         * prompt-field 的输入框是铺满画面宽度的一整块：镜头只要跟一点，框的两头就被推出画面。
+         * 这一镜头的动感全在「框自己飞进来 / 唱完飞走」和逐字落字上，镜头就钉死。
+         */
+        * (view.shot.kind === 'prompt-field' ? 0 : 1);
     const cameraFrame = resolveShotMotionFrame(view.shot.kind, progress);
 
     // Add a slow continuous pan during the time gap to prevent the scene from looking frozen
@@ -178,6 +183,16 @@ export const updateSonnetShot = (
         // On, but no beats for this track (yet): the original frame, including what an earlier
         // beat FX frame - the previous track's - left on these layers.
         restoreSonnetBeatFxLayers(view);
+    }
+
+    // prompt-field：整个 shot（输入框 + 里面的字）一起飞进来、唱完再飞走。
+    if (view.promptField) {
+        const promptFrame = view.promptField.update(time);
+        view.container.x += promptFrame.offsetX;
+        view.container.y += promptFrame.offsetY;
+        view.container.scale.set(view.container.scale.x * promptFrame.scale);
+        view.container.rotation += promptFrame.rotation;
+        view.container.alpha = promptFrame.alpha;
     }
 
     if (view.mgParticleLayer) {

@@ -19,12 +19,22 @@ import type {
     SonnetSongMetadata,
 } from './createSonnetPixiRuntime';
 import { compileSonnetProgram } from './sonnetProgram';
+import type { SonnetShotKind } from './types';
+import { refreshSonnetPromptTerms } from './sonnetPromptTerms';
 
 // src/components/visualizer/sonnet/VisualizerSonnet.tsx
 // Mounts the lazily loaded Pixi director while React retains shell and subtitle responsibilities.
 const EMPTY_SONNET_LINES: Line[] = [];
 
-const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
+export interface VisualizerSonnetProps extends VisualizerSharedProps {
+    /**
+     * 把整首歌锁成一种镜头。独立样式「提示词」传 'prompt-field'，商籁自己不传 ——
+     * 两者共用同一套 Pixi 运行时，只有节目单的切法不同。
+     */
+    forceShotKind?: SonnetShotKind | null;
+}
+
+const VisualizerSonnet: React.FC<VisualizerSonnetProps> = (props) => {
     const {
         currentTime,
         currentLineIndex,
@@ -37,6 +47,7 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
         staticMode = false,
         paused = false,
         seed = 'sonnet',
+        forceShotKind = null,
         songTitle,
         songArtist,
         songAlbum,
@@ -111,8 +122,8 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
         ? (committedLines.length > 0 ? committedLines : virtualLines)
         : EMPTY_SONNET_LINES;
     const program = useMemo(
-        () => compileSonnetProgram(programLines, committedSeed),
-        [programLines, committedSeed],
+        () => compileSonnetProgram(programLines, committedSeed, forceShotKind),
+        [programLines, committedSeed, forceShotKind],
     );
     const { activeLine, recentCompletedLine, nextLines } = useVisualizerRuntime({
         currentTime,
@@ -201,6 +212,12 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
     useEffect(() => {
         runtimeRef.current?.setModulation(modulation);
     }, [modulation]);
+
+    // 提示词输入框上方那行提示词取自 AI 云缓存（随机几首歌的高亮词）。
+    // 搭镜头是同步的，拿不到网络，所以进到商籁时先挂一次后台抓取，抓到就攒在模块里。
+    useEffect(() => {
+        void refreshSonnetPromptTerms();
+    }, []);
 
     useEffect(() => currentTime.on('change', () => {
         if (paused) runtimeRef.current?.renderOnce();

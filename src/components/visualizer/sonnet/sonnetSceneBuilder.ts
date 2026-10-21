@@ -27,6 +27,11 @@ import { resolveSonnetGeoVariant } from './sonnetSpatialMgGeometry';
 import { resolveSonnetBackgroundMgVariant } from './sonnetBackgroundMgVariants';
 import { resolveSonnetBackgroundDecorVariant } from './sonnetBackgroundDecor';
 import { resolveSonnetFixedGeoVariant } from './sonnetFixedGeoVariants';
+import {
+    applySonnetPromptTheme,
+    buildSonnetPromptField,
+    type SonnetPromptFieldView,
+} from './sonnetPromptField';
 
 // src/components/visualizer/sonnet/sonnetSceneBuilder.ts
 // Builds one bounded paragraph scene; playback-time mutation remains in the runtime controller.
@@ -49,6 +54,8 @@ export interface ShotView {
     mgGeoLayer?: import('pixi.js').Container;
     mgParticleLayer?: import('pixi.js').Container;
     mgFixedGeoLayer?: import('pixi.js').Container;
+    /** prompt-field：输入框本体，逐帧由 sonnetShotFrame 驱动飞入飞出。 */
+    promptField?: SonnetPromptFieldView;
 }
 
 export interface SceneView {
@@ -212,6 +219,10 @@ export const buildSonnetScene = (
             fontWeight: manualFontWeight,
         });
         const shotSeed = sceneSeed + shotIndex * 97;
+        // prompt-field 的字要落在墨色输入框上：换掉主题色，否则深色主题的字看不见。
+        const shotTheme = shot.kind === 'prompt-field'
+            ? applySonnetPromptTheme(options.theme)
+            : options.theme;
         const mgLayer = buildSonnetShotMg(
             pixi,
             shot.kind,
@@ -270,9 +281,11 @@ export const buildSonnetScene = (
                     width,
                     fontFamily,
                     fontWeight: manualFontWeight,
-                    theme: options.theme,
+                    theme: shotTheme,
                     glowEnabled: postProcessProfile.glowStrength > 0,
                     showFixedGeo,
+                    // 输入框自己画逐词方括号，别再套一层逐字开放框。
+                    suppressSegmentDecor: shot.kind === 'prompt-field',
                     guideLayer,
                     haloLayer,
                     textLayer,
@@ -280,6 +293,29 @@ export const buildSonnetScene = (
                 },
             ));
         });
+        /*
+         * prompt-field：输入框本体。框 + 逐词方括号 + token id 垫在字下面，
+         * 光标与框上那行提示词压在字上面。飞入飞出由 sonnetShotFrame 作用在整个 shot 上。
+         */
+        const promptField = shot.kind === 'prompt-field'
+            ? buildSonnetPromptField(pixi, {
+                width,
+                height,
+                seed: shotSeed,
+                shotStartTime: shot.startTime,
+                shotEndTime: shot.endTime,
+                baseFontSize: fontSize,
+                placements,
+                segments,
+                views,
+                theme: options.theme,
+            })
+            : null;
+        if (promptField) {
+            // mgLayer 占着 0 号位：框插在它后面、字前面。
+            shotContainer.addChildAt(promptField.behind, 1);
+            shotContainer.addChild(promptField.front);
+        }
         const bounds = shotContainer.getLocalBounds();
         // `mask-reveal` is revealed by the glyph timeline. A bounds-sized mask would stay
         // static while camera tracking and parallax move the shot, clipping open MG artwork.
@@ -304,18 +340,20 @@ export const buildSonnetScene = (
         });
         
         // Poster blocks start centered before runtime tracking; other templates start on the hero word.
+        // 输入框也按整块居中：hero 在这条镜头里只是「第一个词」，拿它当轴心会把框推出画面。
         const heroPlacement = placements.find(p => p.role === 'hero');
-        const focusX = shot.kind === 'poster-blocks'
+        const centred = shot.kind === 'poster-blocks' || shot.kind === 'prompt-field';
+        const focusX = centred
             ? 0
             : heroPlacement ? heroPlacement.x : (bounds.x + bounds.width / 2);
-        const focusY = shot.kind === 'poster-blocks'
+        const focusY = centred
             ? 0
             : heroPlacement ? heroPlacement.y : (bounds.y + bounds.height / 2);
         
         shotContainer.pivot.set(focusX, focusY);
         shotContainer.position.set(
-            width * (shot.kind === 'poster-blocks' ? 0.5 : 0.5 + shot.camera.x),
-            height * (shot.kind === 'poster-blocks'
+            width * (centred ? 0.5 : 0.5 + shot.camera.x),
+            height * (centred
                 ? 0.5
                 : 0.48 + shot.camera.y + (shotIndex % 2 ? 0.025 : -0.025)),
         );
@@ -336,6 +374,7 @@ export const buildSonnetScene = (
             mgGeoLayer,
             mgParticleLayer,
             mgFixedGeoLayer,
+            promptField: promptField ?? undefined,
         };
     });
 

@@ -31,7 +31,10 @@ export const SONNET_SHOT_KINDS: readonly SonnetShotKind[] = [
     'mask-reveal',
     'poster-blocks',
     'quiet-tableau',
+    'prompt-field',
 ];
+/** 提示词输入框一次只打一行歌词；多行组会换回别的镜头（见 buildShots）。 */
+const PROMPT_FIELD_MAX_WORDS = 16;
 // Optional layout-debug override; null keeps every registered template in the random pool.
 export const SONNET_DEBUG_SHOT_KIND: SonnetShotKind | null = null;
 const resolveSonnetDebugShotKind = (): SonnetShotKind | null => SONNET_DEBUG_SHOT_KIND;
@@ -122,7 +125,7 @@ const buildCues = (lines: SonnetCompiledLine[]): SonnetAnimationCue[] => {
     }));
 };
 
-const groupShotLines = (lines: SonnetCompiledLine[]) => {
+const groupShotLines = (lines: SonnetCompiledLine[], maxLines = 4) => {
     const groups: SonnetCompiledLine[][] = [];
     let currentGroup: SonnetCompiledLine[] = [];
     let groupStartTime = 0;
@@ -135,7 +138,7 @@ const groupShotLines = (lines: SonnetCompiledLine[]) => {
         } else {
             const durationSoFar = line.renderEndTime - groupStartTime;
             // Group up to 4 lines, max 6 seconds total, to reuse background MG
-            if (currentGroup.length < 4 && durationSoFar <= 6.0) {
+            if (currentGroup.length < maxLines && durationSoFar <= 6.0) {
                 currentGroup.push(line);
             } else {
                 groups.push(currentGroup);
@@ -154,25 +157,42 @@ const buildShots = (
     paragraphIndex: number,
     seed: string,
     previousKind: SonnetShotKind | null,
+    forcedKind: SonnetShotKind | null,
+    maxLinesPerShot: number,
 ): SonnetShot[] => {
     let lastKind = previousKind;
-    return groupShotLines(lines).map((group, shotIndex) => {
+    return groupShotLines(lines, maxLinesPerShot).map((group, shotIndex) => {
         const signature = group.map(item => item.line.fullText).join('|');
         const debugShotKind = resolveSonnetDebugShotKind();
-        let shotKind: SonnetShotKind = debugShotKind
+        let shotKind: SonnetShotKind = forcedKind
+            ?? debugShotKind
             ?? chooseWithoutRepeat(SONNET_SHOT_KINDS, `${seed}:${paragraphIndex}:${shotIndex}:${signature}`, lastKind);
         const wordCount = group.reduce((sum, item) => sum + item.segments.filter(s => s.isWordLike).length, 0);
-        if (debugShotKind === null) {
+        if (!forcedKind && debugShotKind === null) {
             if (kind === 'breath' && shotIndex === 0 && wordCount <= 2) shotKind = 'quiet-tableau';
             if (kind === 'chorus' && shotKind === 'quiet-tableau') shotKind = 'type-impact';
+            /*
+             * prompt-field 是一根输入框基线上的单行打字：多行组会把整段挤成一条长行，
+             * 弹窗和方括号也跟着摊平。所以多行组（或词太多）就换回剩下的镜头池。
+             */
+            if (shotKind === 'prompt-field' && (group.length > 1 || wordCount > PROMPT_FIELD_MAX_WORDS)) {
+                shotKind = chooseWithoutRepeat(
+                    SONNET_SHOT_KINDS.filter(item => item !== 'prompt-field'),
+                    `${seed}:${paragraphIndex}:${shotIndex}:${signature}:fallback`,
+                    lastKind,
+                );
+            }
         }
         lastKind = shotKind;
         const random = hashSonnetSeed(`${seed}:${paragraphIndex}:${shotIndex}:camera`);
         const zoomRandom = ((random >>> 16) & 255) / 255;
         // Medium close-up bias: framing should feel intimate with the current word;
-        // only composition-first layouts (poster zones, calm tableau) stay wider.
-        const zoomBase = shotKind === 'poster-blocks' ? 1.02 : shotKind === 'quiet-tableau' ? 1.12 : 1.22;
-        const zoomSpan = shotKind === 'poster-blocks' ? 0.16 : shotKind === 'quiet-tableau' ? 0.2 : 0.26;
+        // only composition-first layouts (poster zones, calm tableau, the prompt field's
+        // full-width plate) stay wider.
+        const zoomBase = shotKind === 'poster-blocks' ? 1.02
+            : shotKind === 'prompt-field' ? 1.0
+                : shotKind === 'quiet-tableau' ? 1.12 : 1.22;
+        const zoomSpan = shotKind === 'poster-blocks' ? 0.16 : shotKind === 'prompt-field' ? 0.04 : shotKind === 'quiet-tableau' ? 0.2 : 0.26;
         return {
             id: `p${paragraphIndex}-s${shotIndex}`,
             kind: shotKind,
@@ -190,7 +210,15 @@ const buildShots = (
     });
 };
 
-export const compileSonnetProgram = (lines: Line[], seed: string | number = 'sonnet'): SonnetProgram => {
+/**
+ * `forcedShotKind` 把整首歌锁成一种镜头（独立的「提示词」样式就走这条）。
+ * 锁定 prompt-field 时一组只放一句词 —— 一个输入框打一行，唱完换下一个框。
+ */
+export const compileSonnetProgram = (
+    lines: Line[],
+    seed: string | number = 'sonnet',
+    forcedShotKind: SonnetShotKind | null = null,
+): SonnetProgram => {
     const compiled = lines.map((line, sourceIndex) => ({
         sourceIndex,
         line,
@@ -226,7 +254,15 @@ export const compileSonnetProgram = (lines: Line[], seed: string | number = 'son
     let previousTransition: SonnetTransitionKind | null = null;
     const paragraphs: SonnetParagraph[] = drafts.map((draft, index) => {
         const kind = classifyParagraph(draft.lines, index, drafts.length);
-        const shots = buildShots(draft.lines, kind, index, resolvedSeed, previousShot);
+        const shots = buildShots(
+            draft.lines,
+            kind,
+            index,
+            resolvedSeed,
+            previousShot,
+            forcedShotKind,
+            forcedShotKind === 'prompt-field' ? 1 : 4,
+        );
         previousShot = shots.at(-1)?.kind ?? previousShot;
         const next = drafts[index + 1];
         const endTime = draft.lines.at(-1)!.renderEndTime;
