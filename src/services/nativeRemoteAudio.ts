@@ -29,7 +29,12 @@ type NativePlugin = {
 };
 
 const getPlugin = (): NativePlugin | null => (
-    (window as any).Capacitor?.Plugins?.FoliaNative ?? null
+    // 这个文件会被没有 window 的环境拉进去跑（波点的取地址那条链在 worker / 单测里也走得到）：
+    // 直接读 window 抛的是 ReferenceError，不是 undefined —— 下面的 `?.` 对它无能为力，
+    // 波点整个取地址就死在这一句上。先问 window 在不在。
+    typeof window === 'undefined'
+        ? null
+        : ((window as any).Capacitor?.Plugins?.FoliaNative ?? null)
 );
 
 /** 已经是本机回环地址了，不用再套一层。 */
