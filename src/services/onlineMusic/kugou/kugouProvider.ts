@@ -13,7 +13,8 @@ import {
     type ProviderUser,
 } from '../../../types/onlineMusic';
 import { getSizedCoverUrl } from '../../../utils/coverUrl';
-import { parseLyricsByFormat } from '../../../utils/lyrics/parserCore';
+import { parseLyricsByFormat, type LyricParseFormat } from '../../../utils/lyrics/parserCore';
+import { detectNonTtmlTimedLyricFormat } from '../../../utils/lyrics/formatDetection';
 import { isPureMusicLyricText } from '../../../utils/lyrics/pureMusic';
 import { hasRenderableLyrics } from '../../../utils/lyrics/validity';
 import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
@@ -790,6 +791,22 @@ const getKugouChorusRanges = async (songId: MediaId): Promise<ChorusRange[]> => 
     return request;
 };
 
+// 解密过的 KRC，行首是 `[开始毫秒,时长毫秒]`（parseKRC 只认这一种）。
+const KG_DECRYPTED_KRC_LINE = /(?:^|\n)\s*\[\d+,\d+\]/;
+
+/**
+ * 桥（`lyric` 这个 operation）下载回来那段歌词，该按什么格式喂给 parseLyricsByFormat。
+ *
+ * 不能写死 'krc'：桥里没有 KRC 解密，downloadKGLyricByCandidate 向 lyrics.kugou.com/download
+ * 要的是 `fmt=lrc`，回来的 base64 解出来就是 LRC（`[00:00.00]…`），而 parseKRC 的行首正则认的是
+ * `[开始,时长]` —— 一行都匹配不上，lines 为 0，于是 hasRenderableLyrics 为假、界面上
+ * 「无可用歌词」，**而且每一首都是**（桥只会给这一种）。
+ * 所以先看它是不是解密过的 KRC（那种有逐字时间），不是就按内容探测（见 formatDetection）。
+ */
+export const resolveKugouLyricFormat = (lyricText: string): LyricParseFormat => (
+    KG_DECRYPTED_KRC_LINE.test(lyricText) ? 'krc' : detectNonTtmlTimedLyricFormat(lyricText)
+);
+
 const getKugouLyricCandidate = async (song: SongResult): Promise<any | null> => {
     const sourceRef = song.sourceRef?.kind === 'online' && song.sourceRef.providerId === 'kugou'
         ? song.sourceRef
@@ -826,11 +843,13 @@ const getKugouLyrics = async (song: SongResult) => {
     if (isPureMusicLyricText(lyricText)) {
         return { lyrics: null, mainText: lyricText, wordByWordText: lyricText, isPureMusic: true, chorusRanges: [] };
     }
-    const parsed = lyricText ? parseLyricsByFormat('krc', lyricText, '') : null;
+    const format = resolveKugouLyricFormat(lyricText);
+    const parsed = lyricText ? parseLyricsByFormat(format, lyricText, '') : null;
     if (!hasRenderableLyrics(parsed)) {
         return { lyrics: null, mainText: lyricText || null, wordByWordText: lyricText || null, isPureMusic: false, chorusRanges: [] };
     }
-    parsed.isWordByWord = true;
+    // 逐字是内容说了算：桥现在给的是 LRC（整行一条时间），不是它的时候就别声称有逐字。
+    parsed.isWordByWord = format === 'krc' || format === 'enhanced-lrc';
     const songId = song.kgHash ?? song.id;
     return {
         lyrics: parsed,
