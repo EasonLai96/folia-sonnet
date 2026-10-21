@@ -236,8 +236,18 @@ export const highlightWordsCoverage = (words: readonly string[], lyricText: stri
  * 覆盖率会掉得很低，这一层照样拦得住。
  */
 const HIGHLIGHT_WORD_COVERAGE_MIN = 0.8;
-/** 词太少时不按比例放行：两个词里少一个就是 50%，那已经不是「差一点」。 */
-const HIGHLIGHT_WORD_COVERAGE_MIN_WORDS = 3;
+/**
+ * 词到了这个数才按比例放行：不足五个词时差一个就是「差得不止一点」，必须**全中**。
+ *
+ * 改成 5 之前这里是 3：模型挑三四个词的那条答案差一个（67% / 75%）也能过，于是拉回来
+ * 的高亮词跟这首的歌词对不上。
+ *
+ * ⚠️ **别把「词少的答案」一刀切否掉**（试过：少于两个词一律不合规）—— 模型常常就只挑
+ * 一两个词，那样一否，十几条近亲**全部**不合规，只好走「强制拿一条」那条路，拿回来的
+ * 是高亮词完全不对的一份，上机的结果是**所有歌**的高亮词显示都错。词少照样放行（全中
+ * 即可），只是不按比例放宽。
+ */
+const HIGHLIGHT_WORD_COVERAGE_MIN_WORDS = 5;
 
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
     const coverage = highlightWordsCoverage(words, lyricText);
@@ -307,11 +317,27 @@ const fetchResolveCandidates = async (
  * 歌，挑第一条反而会让每次都拿到同一条最旧的。多取几条是为了某一条已经被删了时不至于
  * 空手而归；它们只是候选，取到第一条有内容的就收。
  */
-const pickRelaxedCandidates = (candidates: readonly ResolveCandidate[]): ResolveCandidate[] => {
+/**
+ * 一条都不合规时挑**最像**的那几条：按高亮词的覆盖率从高到低取前 N 条。
+ *
+ * 以前这里是**随机**挑一条。随机等于承认「眼前的十几条近亲跟这首的关系都一样」——
+ * 但它们并不一样：覆盖率 0.7 那条明显比 0.1 那条更像这首的答案，随机挑则两条机会
+ * 均等，挑到最不像的那条时拉回来的就是一份照着别一首歌挑的高亮词，歌词上该亮的一
+ * 个都亮不起来（用户报「歌曲墙上一个 AI 高亮都没有」，而这份数据还将回填到本次的
+ * 精确键上，之后每次都是精确命中 —— 错一次就一直错下去）。
+ *
+ * 覆盖率一样时留着服务端给的顺序（歌名全等优先、更新时间倒序），所以排序是稳定的。
+ * 全是 0（比如手上没有歌词）时它退化成「取最靠前那几条」，不会因此变成 miss。
+ */
+const pickBestEffortCandidates = (
+    candidates: readonly ResolveCandidate[],
+    lyricText: string,
+): ResolveCandidate[] => {
     if (candidates.length === 0) return [];
-    const start = Math.floor(Math.random() * candidates.length);
-    const size = Math.min(MAX_CONCURRENT_ENTRY_FETCHES, candidates.length);
-    return Array.from({ length: size }, (_, at) => candidates[(start + at) % candidates.length]);
+    const ranked = candidates
+        .map((candidate, index) => ({ candidate, index, coverage: highlightWordsCoverage(candidate.words, lyricText) }))
+        .sort((a, b) => b.coverage - a.coverage || a.index - b.index);
+    return ranked.slice(0, MAX_CONCURRENT_ENTRY_FETCHES).map(entry => entry.candidate);
 };
 
 export interface AiCloudCachePushMeta {
@@ -462,19 +488,20 @@ export const pullAiCloudCache = async (
         : [];
 
     /*
-     * 一条都不合规 → **强制匹配**：随便挑一条就用。
+     * 一条都不合规 → **强制匹配**：挑最像的那一条用。
      *
      * 以前这一步是「判不过就当没命中」，于是用户撞上的是那句最让人恼火的话：这一屏明明是
      * 从云端那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变。原因只是各平台
      * 的 LRC 差几个字 —— 高亮词差一两个，整条候选就被判成「另一首歌」。
      *
      * 用户要的就是「反正没有出现的词也无所谓」：词少几个不影响这是不是同一首歌的配色。
-     * 所以这里不再返回 miss，改从候选里随机挑一条。挑到的那一条照样会**回填**到本次这个
-     * 精确键上（matched 仍是 'words'），下次就是精确命中，不会每次都换一个答案。
+     * 所以这里不再返回 miss，改从候选里挑**高亮词覆盖率最高**的那条（见
+     * pickBestEffortCandidates）。挑到的那一条照样会**回填**到本次这个精确键上
+     * （matched 仍是 'words'），下次就是精确命中，不会每次都换一个答案。
      */
     const batch = eligible.length > 0
         ? eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES)
-        : pickRelaxedCandidates(candidates);
+        : pickBestEffortCandidates(candidates, lyricText);
 
     const payloads = await Promise.all(
         batch.map((candidate) => fetchEntry(kind, candidate.key)),
