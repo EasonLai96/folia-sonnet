@@ -26,7 +26,12 @@ export function createQishuiCar(options = {}) {
     const fetcher = options.fetch || createFetch(options.transport);
     const sessions = options.sessions || createSessions();
     const client = createClient({ sessions, fetch: fetcher });
-    const auth = createAuth(client, { log: options.log || (() => {}) });
+    // ⚠ 必须在这里绑一个自己的 log：早先它只是**作为参数**传给 createAuth，
+    // 本文件里并没有这个名字，结果 accountTrack 在回退分支里一调 log() 就是
+    // `ReferenceError: log is not defined` —— 而且只在「凭据那条路失败」时才踩到，
+    // 成功路径完全测不出来（那次 audio 与 lyrics 全挂，就是这个）。
+    const log = options.log || (() => {});
+    const auth = createAuth(client, { log });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
     const library = createLibrary(client);

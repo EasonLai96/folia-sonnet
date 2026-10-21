@@ -582,7 +582,7 @@ ${lines.join("\n")}
       }
     };
   }
-  function createAuth(client, { log: log2 = () => {
+  function createAuth(client, { log = () => {
   } } = {}) {
     const pending = /* @__PURE__ */ new Map();
     let generation = 0;
@@ -674,7 +674,7 @@ ${lines.join("\n")}
         if (mine !== generation) throw new QishuiError("unavailable", "Sign-in was cancelled");
         const key = newQrKey();
         pending.set(key, { token: data.token, qr: `data:image/png;base64,${data.qrcode}`, expires: Date.now() + QR_TTL_MS });
-        log2("[Qishui] Sign-in QR created");
+        log("[Qishui] Sign-in QR created");
         return { key, imageUrl: `data:image/png;base64,${data.qrcode}` };
       },
       qr(key) {
@@ -710,7 +710,7 @@ ${lines.join("\n")}
           if (pending.get(key) !== value || sessions.revision !== revision) return { state: "expired" };
           sessions.set({ ...credential, userId: user.id, user });
           pending.delete(key);
-          log2("[Qishui] Sign-in confirmed; account stored");
+          log("[Qishui] Sign-in confirmed; account stored");
           return { state: "confirmed" };
         };
         value.task = run().finally(() => {
@@ -725,7 +725,7 @@ ${lines.join("\n")}
         generation++;
         pending.clear();
         sessions.clear();
-        log2("[Qishui] Signed out");
+        log("[Qishui] Signed out");
       },
       status() {
         if (!refreshing) refreshing = renew().finally(() => {
@@ -1355,8 +1355,9 @@ ${lines.join("\n")}
     const fetcher = options.fetch || createFetch(options.transport);
     const sessions = options.sessions || createSessions();
     const client = createClient({ sessions, fetch: fetcher });
-    const auth = createAuth(client, { log: options.log || (() => {
-    }) });
+    const log = options.log || (() => {
+    });
+    const auth = createAuth(client, { log });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
     const library = createLibrary(client);

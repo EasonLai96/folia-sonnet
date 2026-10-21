@@ -252,11 +252,21 @@ const GUARD_HEADERS = {
         ticket: 'FAKE-TICKET', ts_sign: 'FAKE-TS', client_cert: 'FAKE-CERT',
     }),
 };
+// /media/mget/ 是「账号那条路」的读取（见 api.js 的 accountTrack）：这个开关用来
+// 让它返回坏数据，好把**回退分支**也跑一遍 —— 成功路径测不到那一支。
+let mgetBroken = false;
 const loginTransport = {
     async request(payload) {
         const url = String(payload.url || '');
         const headers = {};
         const send = body => ({ status: 200, headers, body: JSON.stringify(body) });
+        if (url.includes('/media/mget/')) {
+            if (mgetBroken) return send({ err_no: 0, data: {} });
+            return send({ err_no: 0, data: { media_list: [{
+                media_id: 'T-1',
+                track_entity: { base_info: { id: 'T-1', name: '测试曲目', duration_ms: 200000 } },
+            }] } });
+        }
         if (url.includes('/oauth/get_qrcode/')) {
             return send({ err_no: 0, data: { token: 'TOKEN-1', qrcode: 'iVBORw0KGgo=' } });
         }
@@ -337,6 +347,26 @@ if (started) {
             if (store?.deviceIdReused !== true) throw new Error('device id was regenerated on restart');
             if (store?.read !== 'native') throw new Error('store.read=' + store?.read);
             return JSON.stringify(store);
+        });
+        // 带凭据的曲目读取。两条都要跑：accountTrack 只在**失败**那一支里调 log()，
+        // 而 `log` 曾经没在本文件里绑过 → `ReferenceError: log is not defined`，
+        // 一次把 audio 与 lyrics 全打挂，成功路径却完全测不出来。
+        await attempt('song.detail on the account path', async () => {
+            const detail = await loginCar.songDetail('T-1');
+            if (!detail.song?.name) throw new Error('song missing');
+            return detail.song.name;
+        });
+        await attempt('account read failure stays a QishuiError (never a ReferenceError)', async () => {
+            mgetBroken = true;
+            let failure = null;
+            try { await loginCar.songDetail('T-1'); }
+            catch (error) { failure = error; }
+            finally { mgetBroken = false; }
+            if (!failure) throw new Error('expected the account read to fail on the broken payload');
+            if (failure instanceof ReferenceError || /is not defined/.test(String(failure.message))) {
+                throw new Error(`a ReferenceError leaked out: ${failure.message}`);
+            }
+            return `${failure.constructor?.name || 'Error'}: ${failure.message}`;
         });
     }
 }
