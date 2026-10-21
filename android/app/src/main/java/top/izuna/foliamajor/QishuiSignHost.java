@@ -388,12 +388,23 @@ final class QishuiSignHost {
          * 数据目录的状态（系统清理、存储紧张、多进程都会让它丢），表现就是
          * 「登录成功、重启后账号没了」。SharedPreferences 是 App 自己的文件，稳。
          * 页面侧（car/storage.js）仍然双写 localStorage 作为回退。
+         *
+         * ⚠ 必须用 **commit()**（同步落盘）而不是 apply()：凭据是在扫码确认那一刻
+         * 写进来的，用户常常紧接着就把 App 划掉 / 重启。apply() 只是把写盘排进
+         * QueuedWork，进程若在这之前被杀（没走完 onPause，QueuedWork 就不会
+         * waitToFinish），那一次写入就没了 —— 表现为「登录成功，重启后账号没了」。
+         * 一次写入只有几 KB，同步写在这个桥线程上完全付得起。
+         *
+         * 两条都打点：真机上再说「账号丢了」，`adb logcat | grep QishuiSignHost`
+         * 就能看出是**没写进来**还是**读出来是空的**，这是两种完全不同的故障。
          */
         @JavascriptInterface
         public String getStore(String key) {
             if (key == null || key.isEmpty()) return "";
             try {
-                return prefs().getString(STORE_PREFIX + key, "");
+                String value = prefs().getString(STORE_PREFIX + key, "");
+                Log.i(TAG, "getStore " + key + " -> " + (value == null ? "null" : value.length() + " chars"));
+                return value == null ? "" : value;
             } catch (Throwable error) {
                 Log.w(TAG, "getStore failed", error);
                 return "";
@@ -404,8 +415,12 @@ final class QishuiSignHost {
         public void putStore(String key, String value) {
             if (key == null || key.isEmpty()) return;
             try {
-                if (value == null) prefs().edit().remove(STORE_PREFIX + key).apply();
-                else prefs().edit().putString(STORE_PREFIX + key, value).apply();
+                SharedPreferences.Editor editor = prefs().edit();
+                if (value == null) editor.remove(STORE_PREFIX + key);
+                else editor.putString(STORE_PREFIX + key, value);
+                boolean written = editor.commit();
+                Log.i(TAG, "putStore " + key + " -> " + (value == null ? "removed" : value.length() + " chars")
+                        + ", committed=" + written);
             } catch (Throwable error) {
                 Log.w(TAG, "putStore failed", error);
             }

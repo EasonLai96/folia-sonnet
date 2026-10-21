@@ -129,6 +129,11 @@ export const qishuiProvider: OnlineMusicProvider = {
                 + ` libraryReady=${data.libraryReady ? 'yes' : 'no'} userId=${String(data.userId || '-')}`
                 + ` cookieKeys=${String(data.cookieKeys ?? '-')}`
                 + ` loginKeys=${String(data.loginKeys ?? '-')}`
+                // 「重启后账号没了」全靠这两个：storage 是**读档**（native/local/memory/none），
+                // store 再给出会话与设备 ID 各落在哪一档、设备 ID 是不是读回来的
+                // （每次启动都重新生成＝那一档存储根本没读出来）。
+                + ` storage=${String(data.storage ?? '-')}`
+                + (data.store ? ` store=${JSON.stringify(data.store)}` : '')
                 + (data.profileError ? ` profileError=${String(data.profileError)}` : '')
                 + (Array.isArray(data.libraryErrors) && data.libraryErrors.length
                     ? ` libraryErrors=${data.libraryErrors.map((item: unknown) => String(item)).join(' | ')}` : '')

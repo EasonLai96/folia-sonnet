@@ -322,6 +322,19 @@ if (started) {
             if (status.storage !== 'native') throw new Error('storage=' + status.storage);
             return `loggedIn after restart, storage=${status.storage}`;
         });
+        // 诊断必须能一眼分清「没写进来」和「读出来是空的」：真机上再说账号丢了，
+        // 只有这两个字段能指路。deviceIdReused 尤其关键 —— 它每次启动都重新生成，
+        // 就说明那一档存储压根没读出来，凭据自然也读不回来。
+        await attempt('restart diagnostics name the store tiers', async () => {
+            const rebooted = createQishuiCar({ transport: loginTransport });
+            const status = await rebooted.status();
+            const store = status.store;
+            if (store?.session !== 'native') throw new Error('store.session=' + store?.session);
+            if (store?.deviceId !== 'native') throw new Error('store.deviceId=' + store?.deviceId);
+            if (store?.deviceIdReused !== true) throw new Error('device id was regenerated on restart');
+            if (store?.read !== 'native') throw new Error('store.read=' + store?.read);
+            return JSON.stringify(store);
+        });
     }
 }
 

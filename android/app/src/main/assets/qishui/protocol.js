@@ -442,16 +442,41 @@ ${lines.join("\n")}
       return null;
     }
   }
-  var lastMode = "memory";
-  var storageMode = () => lastMode;
+  var lastRead = "none";
+  var lastWrite = "none";
+  var lastParseError = "";
+  var storageMode = () => lastRead;
+  var storageWriteMode = () => lastWrite;
+  var storageParseError = () => lastParseError;
+  function whereIs(key) {
+    const host = native();
+    if (host) {
+      try {
+        if (host.getStore(key)) return "native";
+      } catch (_) {
+      }
+    }
+    const target = local();
+    if (target) {
+      try {
+        if (target.getItem(PREFIX + key) != null) return "local";
+      } catch (_) {
+      }
+    }
+    return memory.has(key) ? "memory" : "none";
+  }
   function readJson(key, fallback = null) {
     const host = native();
     if (host) {
       try {
         const text3 = host.getStore(key);
         if (text3) {
-          lastMode = "native";
-          return JSON.parse(text3);
+          lastRead = "native";
+          try {
+            return JSON.parse(text3);
+          } catch (error) {
+            lastParseError = `native/${key}: ${error?.message || error}`;
+          }
         }
       } catch (_) {
       }
@@ -461,17 +486,21 @@ ${lines.join("\n")}
       try {
         const text3 = target.getItem(PREFIX + key);
         if (text3 != null) {
-          lastMode = "local";
-          return JSON.parse(text3);
+          lastRead = "local";
+          try {
+            return JSON.parse(text3);
+          } catch (error) {
+            lastParseError = `local/${key}: ${error?.message || error}`;
+          }
         }
       } catch (_) {
       }
     }
     if (memory.has(key)) {
-      lastMode = "memory";
+      lastRead = "memory";
       return memory.get(key);
     }
-    lastMode = memory.size ? "memory" : "none";
+    lastRead = "none";
     return fallback;
   }
   function writeJson(key, value) {
@@ -481,7 +510,7 @@ ${lines.join("\n")}
     if (host) {
       try {
         host.putStore(key, text3);
-        lastMode = "native";
+        lastWrite = "native";
       } catch (_) {
       }
     }
@@ -489,9 +518,11 @@ ${lines.join("\n")}
     if (target) {
       try {
         target.setItem(PREFIX + key, text3);
+        if (lastWrite !== "native") lastWrite = "local";
       } catch (_) {
       }
     }
+    if (lastWrite === "none") lastWrite = "memory";
   }
   function remove(key) {
     memory.delete(key);
@@ -517,18 +548,25 @@ ${lines.join("\n")}
   var QR_TTL_MS = 5 * 60 * 1e3;
   function createSessions() {
     let deviceId = readJson(DEVICE_KEY, null);
-    if (typeof deviceId !== "string" || !/^\d{19}$/.test(deviceId)) {
+    const deviceIdReused = typeof deviceId === "string" && /^\d{19}$/.test(deviceId);
+    if (!deviceIdReused) {
       deviceId = randomDigits19();
       writeJson(DEVICE_KEY, deviceId);
     }
     let current = readJson(SESSION_KEY, null);
+    let reread = false;
     let revision = 0;
     return {
       deviceId,
+      deviceIdReused,
       get revision() {
         return revision;
       },
       get() {
+        if (!current && !reread) {
+          reread = true;
+          current = readJson(SESSION_KEY, null) || null;
+        }
         return current;
       },
       set(value) {
@@ -1380,7 +1418,18 @@ ${lines.join("\n")}
           cookieKeys: "(car-protocol)",
           // 凭据落在哪一档存储：真机上「重启后账号没了」先看这个字段
           // （native=SharedPreferences / local=localStorage / memory=只在这个进程）。
+          // ⚠ 这是**读档**：写档几乎恒为 native（设备 ID 每次启动都要写一次），
+          // 混着看会被带到错的方向，所以两个分开给。
           storage: storageMode(),
+          store: {
+            read: storageMode(),
+            write: storageWriteMode(),
+            session: whereIs("session"),
+            deviceId: whereIs("device-id"),
+            // 每次启动都重新生成设备 ID＝这一档存储没读出来，凭据当然也没有。
+            deviceIdReused: sessions.deviceIdReused === true,
+            ...storageParseError() ? { parseError: storageParseError() } : {}
+          },
           loginKeys: credential?.ticket ? "ticket=y" : "ticket=n",
           userId: text2(credential?.userId),
           libraryReady: Boolean(credential?.ticket),

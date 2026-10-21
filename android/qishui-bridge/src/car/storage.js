@@ -36,8 +36,29 @@ function local() {
     }
 }
 
-let lastMode = 'memory';
-export const storageMode = () => lastMode;
+// ⚠ 读档与写档**必须分开记**。设备 ID 在页面一起起来就要写一次（读不到才生成新的），
+// 于是「写档」几乎恒为 native；早先只有一个 lastMode，写入把它盖成 native，
+// 诊断里就永远显示 native —— 而真正的读档可能一路掉到 memory，凭据根本没找回来。
+// 「重启后账号没了」排查时看的就是读档，混在一起会直接把人带到错的方向。
+let lastRead = 'none';
+let lastWrite = 'none';
+let lastParseError = '';
+export const storageMode = () => lastRead;
+export const storageWriteMode = () => lastWrite;
+export const storageParseError = () => lastParseError;
+
+/** 这个键现在落在哪一档（诊断用，不改 storageMode 的读数）。 */
+export function whereIs(key) {
+    const host = native();
+    if (host) {
+        try { if (host.getStore(key)) return 'native'; } catch (_) { /* 继续问下一档 */ }
+    }
+    const target = local();
+    if (target) {
+        try { if (target.getItem(PREFIX + key) != null) return 'local'; } catch (_) { /* 同上 */ }
+    }
+    return memory.has(key) ? 'memory' : 'none';
+}
 
 export function readJson(key, fallback = null) {
     const host = native();
@@ -45,8 +66,8 @@ export function readJson(key, fallback = null) {
         try {
             const text = host.getStore(key);
             if (text) {
-                lastMode = 'native';
-                return JSON.parse(text);
+                lastRead = 'native';
+                try { return JSON.parse(text); } catch (error) { lastParseError = `native/${key}: ${error?.message || error}`; }
             }
         } catch (_) { /* 落到下一档 */ }
     }
@@ -55,16 +76,16 @@ export function readJson(key, fallback = null) {
         try {
             const text = target.getItem(PREFIX + key);
             if (text != null) {
-                lastMode = 'local';
-                return JSON.parse(text);
+                lastRead = 'local';
+                try { return JSON.parse(text); } catch (error) { lastParseError = `local/${key}: ${error?.message || error}`; }
             }
         } catch (_) { /* 同上 */ }
     }
     if (memory.has(key)) {
-        lastMode = 'memory';
+        lastRead = 'memory';
         return memory.get(key);
     }
-    lastMode = memory.size ? 'memory' : 'none';
+    lastRead = 'none';
     return fallback;
 }
 
@@ -75,13 +96,17 @@ export function writeJson(key, value) {
     if (host) {
         try {
             host.putStore(key, text);
-            lastMode = 'native';
+            lastWrite = 'native';
         } catch (_) { /* 继续写 localStorage */ }
     }
     const target = local();
     if (target) {
-        try { target.setItem(PREFIX + key, text); } catch (_) { /* 留在内存兜底 */ }
+        try {
+            target.setItem(PREFIX + key, text);
+            if (lastWrite !== 'native') lastWrite = 'local';
+        } catch (_) { /* 留在内存兜底 */ }
     }
+    if (lastWrite === 'none') lastWrite = 'memory';
 }
 
 export function remove(key) {

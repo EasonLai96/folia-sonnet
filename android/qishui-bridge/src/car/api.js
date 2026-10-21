@@ -14,7 +14,7 @@ import { resolveAudio } from './playback.js';
 import { createFetch } from './transport.js';
 import { coverFromUrlInfo, lyricsFromTrack, toFoliaPlaylists, toFoliaSong, toFoliaSongs } from './shape.js';
 import { QISHUI_QR_SCOPE } from './protocol.js';
-import { storageMode } from './storage.js';
+import { storageMode, storageParseError, storageWriteMode, whereIs } from './storage.js';
 
 // 渲染层用这两个虚拟 id 拉「我的喜欢」与推荐流（见 qishuiCatalog.ts）。
 export const QISHUI_LIKED_ID = 'qishui-liked';
@@ -127,7 +127,18 @@ export function createQishuiCar(options = {}) {
                 cookieKeys: '(car-protocol)',
                 // 凭据落在哪一档存储：真机上「重启后账号没了」先看这个字段
                 // （native=SharedPreferences / local=localStorage / memory=只在这个进程）。
+                // ⚠ 这是**读档**：写档几乎恒为 native（设备 ID 每次启动都要写一次），
+                // 混着看会被带到错的方向，所以两个分开给。
                 storage: storageMode(),
+                store: {
+                    read: storageMode(),
+                    write: storageWriteMode(),
+                    session: whereIs('session'),
+                    deviceId: whereIs('device-id'),
+                    // 每次启动都重新生成设备 ID＝这一档存储没读出来，凭据当然也没有。
+                    deviceIdReused: sessions.deviceIdReused === true,
+                    ...(storageParseError() ? { parseError: storageParseError() } : {}),
+                },
                 loginKeys: credential?.ticket ? 'ticket=y' : 'ticket=n',
                 userId: text(credential?.userId),
                 libraryReady: Boolean(credential?.ticket),

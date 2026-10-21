@@ -21,16 +21,29 @@ const QR_TTL_MS = 5 * 60 * 1000;
 
 export function createSessions() {
     let deviceId = readJson(DEVICE_KEY, null);
-    if (typeof deviceId !== 'string' || !/^\d{19}$/.test(deviceId)) {
+    // 设备 ID 是不是**读回来的**：它是「持久化有没有真的生效」的探针 ——
+    // 每次启动都重新生成一个，说明那一档存储根本没读出来，凭据也一样读不回来。
+    const deviceIdReused = typeof deviceId === 'string' && /^\d{19}$/.test(deviceId);
+    if (!deviceIdReused) {
         deviceId = randomDigits19();
         writeJson(DEVICE_KEY, deviceId);
     }
     let current = readJson(SESSION_KEY, null);
+    let reread = false;
     let revision = 0;
     return {
         deviceId,
+        deviceIdReused,
         get revision() { return revision; },
-        get() { return current; },
+        get() {
+            // 页面刚起来那一刻原生存储万一还没就绪，这里补问一次（只补一次）：
+            // 少了这一手，那一次启动就永久判定为「没登录」，而凭据其实一直在。
+            if (!current && !reread) {
+                reread = true;
+                current = readJson(SESSION_KEY, null) || null;
+            }
+            return current;
+        },
         set(value) {
             current = value;
             revision++;
