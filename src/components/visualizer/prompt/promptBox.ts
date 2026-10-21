@@ -144,8 +144,12 @@ export const buildPromptCard = (
         }
     };
 
-    const padLeft = Math.round(spec.fontPx * 1.15);
-    const padRight = Math.round(spec.fontPx * 0.9);
+    /*
+     * 左右各留一截（左边那截原本是给 › 提示符留的，现在 › 只在悬浮窗那边撤掉了、这边还画，
+     * 顺手再放宽一点）：镜头推近时字两侧有余地，不会显得把整块窗塞满。
+     */
+    const padLeft = Math.round(spec.fontPx * 1.35);
+    const padRight = Math.round(spec.fontPx * 1.1);
     const available = Math.max(120, spec.maxWidth - padLeft - padRight);
     const gaps = Math.max(0, tokens.length - 1) * spec.fontPx * WORD_GAP;
 

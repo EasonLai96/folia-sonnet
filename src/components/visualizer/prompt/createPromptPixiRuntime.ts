@@ -24,13 +24,19 @@ const FONT_BASE = 100;
 const WORD_REVEAL_S = 0.09;
 /**
  * 镜头推近后，**画面里只想留下这一句的这么多**（剩下的在窗里被裁掉，靠横移一路看过去）。
- * 0.62 = 一屏里大约能看见六个词中的四五个。
+ * 0.78 = 一屏里能看到大半句 —— 跟得不那么紧，字也就不会显得那么大。
  */
-const FOCUS_RATIO = 0.62;
+const FOCUS_RATIO = 0.78;
 /** 再怎么推近，一屏里至少也要留下内容区的这么多 —— 不然长句会放大得只剩一两个字。 */
-const MIN_VISIBLE_RATIO = 0.5;
-/** 推近的上限：再大就不是「跟拍」，是贴脸了，而且字会开始发虚。 */
-const MAX_ZOOM = 2;
+const MIN_VISIBLE_RATIO = 0.6;
+/**
+ * 推近的上限，**按屏宽分档**：屏幕越宽，同样的倍率意味着字在物理尺寸上越大。
+ * 手机上 2 倍刚好；手机横屏（屏宽 640+）画面本来就矮，再贴脸字就顶到上下边了；
+ * 平板（1000+）更是要退开一点。
+ */
+const zoomCapFor = (width: number): number => (
+    width >= 1000 ? 1.35 : width >= 640 ? 1.5 : 2
+);
 /**
  * 字的纹理按这个倍数先烤大再缩回去。
  *
@@ -275,12 +281,20 @@ export class PromptPixiRuntime {
      */
     private baseFontPx() {
         const scale = Number.isFinite(this.options.song.fontScale) ? this.options.song.fontScale : 1;
-        return clamp(this.lastWidth * 0.072 * clamp(scale, 0.4, 2.4), 16, 76);
+        /*
+         * ⭐参照的是**较短的那一边**，不是屏宽。
+         *
+         * 按屏宽算的话，横屏一转、平板一上，字号就跟着胀（平板上更是直接顶到上限）——
+         * 而横屏时画面**矮**得多，字一大就顶到上下边。拿 min(宽, 高×1.25) 当参照，
+         * 竖屏（高比宽大得多）取到的还是屏宽、和以前一样；横屏取到的是高度那边，字就收回来了。
+         */
+        const reference = Math.min(this.lastWidth, Math.max(240, this.lastHeight) * 1.25);
+        return clamp(reference * 0.072 * clamp(scale, 0.4, 2.4), 16, 60);
     }
 
-    /** 窗最多能有多宽：留出两边的呼吸位，别顶到屏幕边。 */
+    /** 窗最多能有多宽：留出两边的呼吸位，别顶到屏幕边。平板能宽一点。 */
     private maxWindowWidth() {
-        return clamp(this.lastWidth * 0.84, 200, 760);
+        return clamp(this.lastWidth * 0.86, 200, 900);
     }
 
     private buildBox(plan: PromptBoxPlan, index: number): BuiltBox {
@@ -441,7 +455,7 @@ export class PromptPixiRuntime {
         const want = clamp(box.contentWidth * FOCUS_RATIO, card.contentSpan * MIN_VISIBLE_RATIO, card.contentSpan);
         const byWidth = screenW / Math.max(1, want);
         const byHeight = Math.max(240, this.lastHeight) * 0.92 / Math.max(1, card.windowHeight);
-        return clamp(Math.min(byWidth, byHeight), 1, MAX_ZOOM);
+        return clamp(Math.min(byWidth, byHeight), 1, zoomCapFor(screenW));
     }
 
     /** 句尾「瞬间拉回看清整行」的倍数：整行装得下就是 1，装不下就退到刚好装下的那一档。 */
