@@ -1371,6 +1371,7 @@ public final class FloatingLyricsOverlay {
                 if (showControls) {
                     drawControls(canvas, width, height, appear);
                 }
+                drawKeycap(canvas, width, height, focusSize, appear);
                 /*
                  * 预览且一句歌词都没有（没放歌 / 纯音乐 / 还没解析出来）：
                  * 画一行占位。这时候什么都不画的话，用户面对一片空白只会以为开关坏了 ——
@@ -1422,6 +1423,7 @@ public final class FloatingLyricsOverlay {
             if (showControls) {
                 drawControls(canvas, width, height, appear);
             }
+            drawKeycap(canvas, width, height, focusSize, appear);
 
             // 还在播、或者动画还没走完，就再要一帧。停了就别空转烧 CPU。
             // 限到 ~30fps：这是叠在所有窗口之上的一层，每帧都要系统重新合成一次，
@@ -1569,12 +1571,20 @@ public final class FloatingLyricsOverlay {
 
             float padX = dp(14);
             /*
+             * 右边那颗 ⏎ 键帽要占一块地方：不预留的话，居中的整句字会从它底下穿过去。
+             * 叠加安全区那一模式不画键帽，于是也不留位置。
+             */
+            float keyW = overSafeArea()
+                    ? 0f
+                    : Math.min(Math.max(dp(14), fontSize * 0.62f),
+                            Math.min(width * 0.16f, getHeight() * 0.62f)) * 1.15f + dp(4);
+            /*
              * 避开区域那一段是**从布局里抽掉**的（字绕过去，不是被裁掉），
              * 所以它占的宽度要从可用宽度里减掉 —— 不然「能不能装下 / 要不要滚」
              * 都是按没洞的宽度算的，右半截会推出屏幕外。
              */
             float holeW = avoidActive ? (avoidRightPx - avoidLeftPx) : 0f;
-            float maxWidth = width - padX * 2f - holeW;
+            float maxWidth = width - padX * 2f - holeW - keyW;
             float measured = textPaint.measureText(text);
             if (measured > maxWidth && measured > 0f) {
                 /*
@@ -1630,7 +1640,7 @@ public final class FloatingLyricsOverlay {
              */
             float visible = measured + holeW;
             float x = measured <= maxWidth
-                    ? Math.max(padX, (width - visible) / 2f)
+                    ? Math.max(padX, (width - keyW - visible) / 2f)
                     : padX - scroll;
             /*
              * 洞的左边缘要落在**字符边界**上。
@@ -1792,8 +1802,9 @@ public final class FloatingLyricsOverlay {
                                     float fontSize, float progress, float measured, float alpha,
                                     WallpaperLyricsState.TimedWord[] words,
                                     FloatingWordColors.Segment[] segments, long positionMs) {
-            float lineY = baseline + fontSize * 0.2f;
-            float hair = Math.max(1.5f, fontSize * 0.045f);
+            float lineY = baseline + fontSize * 0.22f;
+            // 参考画面里这条线是**有点厚度的小横杠**，不是一根发丝：太细了在小窗上根本看不见。
+            float hair = Math.max(2f, fontSize * 0.07f);
             int alpha255 = Math.round(clamp01(alpha) * 255f);
             if (alpha255 <= 0) return;
 
@@ -1839,10 +1850,10 @@ public final class FloatingLyricsOverlay {
         private void drawUnderline(Canvas canvas, float left, float y, float width,
                                    float filled, float hair, int alpha255) {
             underlinePaint.setStyle(Paint.Style.FILL);
-            underlinePaint.setColor(withAlpha(baseColor, alpha255 / 255f * 0.28f));
+            underlinePaint.setColor(withAlpha(primaryColor, alpha255 / 255f * 0.22f));
             canvas.drawRect(left, y, left + width, y + hair, underlinePaint);
             if (filled <= 0.5f) return;
-            underlinePaint.setColor(withAlpha(accentColor, alpha255 / 255f * 0.9f));
+            underlinePaint.setColor(withAlpha(accentColor, alpha255 / 255f * 0.95f));
             canvas.drawRect(left, y, left + filled, y + hair, underlinePaint);
         }
 
@@ -1887,6 +1898,33 @@ public final class FloatingLyricsOverlay {
         }
 
         /** 右上角那颗锁（常驻，锁了也能解锁）与右下角的拉伸把手（锁了就不画）。 */
+        /**
+         * 右边那颗 ⏎ 键帽：**这一层的「输入框」身份**全在它身上。
+         *
+         * 参考画面里歌词条右侧就是一个方框 + 一个回车箭头（和播放器里那块提示词窗同一套语言）。
+         * 它不属于控件（不需要触摸、也不跟锁/把手一起收），所以单独画、常驻。
+         * 叠加安全区那一模式不画：窗口只有状态栏那么高，塞进去就把字挤没了。
+         */
+        private void drawKeycap(Canvas canvas, int width, int height, float fontSize, float appear) {
+            if (overSafeArea()) return;
+            float size = Math.min(Math.max(dp(14), fontSize * 0.62f), Math.min(width * 0.16f, height * 0.62f));
+            if (size < dp(10)) return;
+            float cx = width - size * 1.05f;
+            float cy = height * 0.5f;
+            controlPaint.setStyle(Paint.Style.STROKE);
+            controlPaint.setStrokeWidth(Math.max(1f, dp(1)));
+            controlPaint.setColor(withAlpha(primaryColor, 0.34f * appear));
+            canvas.drawRect(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f, controlPaint);
+            // ⏎ 的箭头：一横一折，比字体里那个符号稳。
+            float tipX = cx + size * 0.2f;
+            float tipY = cy + size * 0.12f;
+            controlPaint.setColor(withAlpha(primaryColor, 0.46f * appear));
+            canvas.drawLine(tipX, tipY - size * 0.26f, tipX, tipY, controlPaint);
+            canvas.drawLine(tipX, tipY, tipX - size * 0.3f, tipY, controlPaint);
+            canvas.drawLine(tipX - size * 0.3f, tipY, tipX - size * 0.16f, tipY - size * 0.13f, controlPaint);
+            canvas.drawLine(tipX - size * 0.3f, tipY, tipX - size * 0.16f, tipY + size * 0.13f, controlPaint);
+        }
+
         private void drawControls(Canvas canvas, int width, int height, float appear) {
             controlPaint.setStyle(Paint.Style.FILL);
             controlPaint.setStrokeWidth(Math.max(1.5f, dp(1.5f)));
