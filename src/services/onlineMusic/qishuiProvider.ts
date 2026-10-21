@@ -79,6 +79,7 @@ async function keepQishuiCredential(): Promise<void> {
     } catch (error) {
         // 抄不出来＝下一次重启还是没账号，这是要留在诊断里的。
         lastQishuiSessionKeepNote = error instanceof Error ? error.message : String(error);
+        console.warn(`[Qishui] session: the app could not keep a copy: ${lastQishuiSessionKeepNote}`);
     }
 }
 
@@ -98,6 +99,8 @@ async function restoreQishuiCredential(): Promise<void> {
     } catch (error) {
         lastQishuiSessionNote = `could not be put back: ${error instanceof Error ? error.message : String(error)}`;
     }
+    // 打进日志：真机排查时不用先打开诊断面板，logcat 里直接就有这一行。
+    console.info(`[Qishui] session: ${lastQishuiSessionNote}`);
 }
 
 function qishuiNotOurs(): OnlineProviderError {
