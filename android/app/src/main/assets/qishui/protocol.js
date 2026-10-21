@@ -426,51 +426,88 @@ ${lines.join("\n")}
   // src/car/storage.js
   var PREFIX = "folia:qishui:car:";
   var memory = /* @__PURE__ */ new Map();
-  function store() {
+  function native() {
+    try {
+      const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+      if (!host || typeof host.getStore !== "function" || typeof host.putStore !== "function") return null;
+      return host;
+    } catch (_) {
+      return null;
+    }
+  }
+  function local() {
     try {
       return typeof window !== "undefined" ? window.localStorage : null;
     } catch (_) {
       return null;
     }
   }
+  var lastMode = "memory";
+  var storageMode = () => lastMode;
   function readJson(key, fallback = null) {
-    const full = PREFIX + key;
-    let text3 = memory.has(full) ? memory.get(full) : null;
-    if (text3 == null) {
-      const target = store();
-      if (!target) return fallback;
+    const host = native();
+    if (host) {
       try {
-        text3 = target.getItem(full);
+        const text3 = host.getStore(key);
+        if (text3) {
+          lastMode = "native";
+          return JSON.parse(text3);
+        }
       } catch (_) {
-        text3 = null;
       }
     }
-    if (text3 == null) return fallback;
-    try {
-      return JSON.parse(text3);
-    } catch (_) {
-      return fallback;
+    const target = local();
+    if (target) {
+      try {
+        const text3 = target.getItem(PREFIX + key);
+        if (text3 != null) {
+          lastMode = "local";
+          return JSON.parse(text3);
+        }
+      } catch (_) {
+      }
     }
+    if (memory.has(key)) {
+      lastMode = "memory";
+      return memory.get(key);
+    }
+    lastMode = memory.size ? "memory" : "none";
+    return fallback;
   }
   function writeJson(key, value) {
-    const full = PREFIX + key;
     const text3 = JSON.stringify(value == null ? null : value);
-    memory.set(full, text3);
-    const target = store();
-    if (!target) return;
-    try {
-      target.setItem(full, text3);
-    } catch (_) {
+    memory.set(key, value);
+    const host = native();
+    if (host) {
+      try {
+        host.putStore(key, text3);
+        lastMode = "native";
+      } catch (_) {
+      }
+    }
+    const target = local();
+    if (target) {
+      try {
+        target.setItem(PREFIX + key, text3);
+      } catch (_) {
+      }
     }
   }
   function remove(key) {
-    const full = PREFIX + key;
-    memory.delete(full);
-    const target = store();
-    if (!target) return;
-    try {
-      target.removeItem(full);
-    } catch (_) {
+    memory.delete(key);
+    const host = native();
+    if (host) {
+      try {
+        host.putStore(key, null);
+      } catch (_) {
+      }
+    }
+    const target = local();
+    if (target) {
+      try {
+        target.removeItem(PREFIX + key);
+      } catch (_) {
+      }
     }
   }
   var DEVICE_KEY = "device-id";
@@ -727,7 +764,8 @@ ${lines.join("\n")}
     const id = text(base.id || entity.id);
     if (!id) return null;
     const cover = collectionCover(entity);
-    const trackCount = Number(entity.resource_cnt ?? entity.stats?.count_tracks ?? base.count_tracks ?? 0);
+    const counts = entity.resource_cnt && typeof entity.resource_cnt === "object" ? entity.resource_cnt : {};
+    const trackCount = Number(counts.track_cnt ?? counts.media_count ?? entity.resource_cnt ?? entity.stats?.count_tracks ?? base.count_tracks ?? 0);
     return {
       id,
       name: text(base.title || base.name || entity.title),
@@ -1219,15 +1257,15 @@ ${lines.join("\n")}
     }
     return null;
   }
-  function wrapResponse(native) {
-    const headers = native && native.headers || {};
+  function wrapResponse(native2) {
+    const headers = native2 && native2.headers || {};
     return {
-      ok: Number(native && native.status) >= 200 && Number(native && native.status) < 300,
-      status: Number(native && native.status) || 0,
+      ok: Number(native2 && native2.status) >= 200 && Number(native2 && native2.status) < 300,
+      status: Number(native2 && native2.status) || 0,
       // names() 只给键名不给值：诊断要能看出「头到没到」，但不把凭据带出去。
       headers: { get: (name) => headerLookup(headers, name), names: () => Object.keys(headers || {}) },
-      text: async () => String(native && native.body || ""),
-      json: async () => JSON.parse(String(native && native.body || "{}"))
+      text: async () => String(native2 && native2.body || ""),
+      json: async () => JSON.parse(String(native2 && native2.body || "{}"))
     };
   }
   function createFetch(transport) {
@@ -1246,13 +1284,13 @@ ${lines.join("\n")}
         body: options.body == null ? null : String(options.body),
         timeoutMs: DEFAULT_TIMEOUT_MS
       };
-      let native;
+      let native2;
       try {
-        native = await resolve().request(payload);
+        native2 = await resolve().request(payload);
       } catch (error) {
         throw new Error("network");
       }
-      return wrapResponse(native);
+      return wrapResponse(native2);
     };
   }
 
@@ -1302,6 +1340,9 @@ ${lines.join("\n")}
           protocol: "luna-car",
           scope: QISHUI_QR_SCOPE,
           cookieKeys: "(car-protocol)",
+          // 凭据落在哪一档存储：真机上「重启后账号没了」先看这个字段
+          // （native=SharedPreferences / local=localStorage / memory=只在这个进程）。
+          storage: storageMode(),
           loginKeys: credential?.ticket ? "ticket=y" : "ticket=n",
           userId: text2(credential?.userId),
           libraryReady: Boolean(credential?.ticket),

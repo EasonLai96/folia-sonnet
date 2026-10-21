@@ -27,11 +27,17 @@ globalThis.atob ||= s => Buffer.from(s, 'base64').toString('binary');
 
 // localStorage 模拟：真实持久化不重要，重要的是接口形状。
 const memoryStore = new Map();
+// 原生持久化出口（真机上是 SharedPreferences；见 car/storage.js）。
+const nativeStore = new Map();
 globalThis.window = {
     localStorage: {
         getItem: k => (memoryStore.has(k) ? memoryStore.get(k) : null),
         setItem: (k, v) => memoryStore.set(String(k), String(v)),
         removeItem: k => memoryStore.delete(k),
+    },
+    FoliaQishuiHost: {
+        getStore: k => (nativeStore.has(k) ? nativeStore.get(k) : ''),
+        putStore: (k, v) => { if (v == null) nativeStore.delete(k); else nativeStore.set(String(k), String(v)); },
     },
     // entry.js 用不到；transport 在显式传入时不看 window。
 };
@@ -178,8 +184,11 @@ await attempt('feed', async () => {
 const playlists = await attempt('searchPlaylists 华语', () => car.searchPlaylists('华语', 3, 0));
 if (playlists && playlists.playlists.length) {
     const playlist = playlists.playlists[0];
-    check('playlist shape', Boolean(playlist.id && playlist.name) && typeof playlist.trackCount === 'number',
-        JSON.stringify(playlist).slice(0, 160));
+    // trackCount 曾经恒为 0：resource_cnt 是**对象**（{ track_cnt, ... }），直接
+    // Number() 得 NaN。界面上「0 首」的歌单卡会被当成空歌单 → 入口置灰。
+    check('playlist shape + trackCount > 0',
+        Boolean(playlist.id && playlist.name) && playlist.trackCount > 0,
+        `trackCount=${playlist.trackCount} ${JSON.stringify(playlist).slice(0, 120)}`);
     await attempt('playlistTracks', async () => {
         const page = await car.playlistTracks(playlist.id, 3, 0);
         if (!page.tracks.length) throw new Error('empty tracks');
@@ -276,6 +285,23 @@ if (started) {
             const credential = loginCar.sessions.get();
             if (!credential?.ticket || credential.ticket !== 'FAKE-TICKET') throw new Error('ticket not stored');
             return `loggedIn, user=${status.profile.nickname}, expiresAt=${new Date(credential.expiresAt).toISOString()}`;
+        });
+        // 重启后账号还在不在，就看凭据有没有落到原生那一档（真机 = SharedPreferences）。
+        await attempt('session persisted to native store', async () => {
+            const raw = nativeStore.get('session');
+            if (!raw) throw new Error('native store has no session (would be lost on restart)');
+            const parsed = JSON.parse(raw);
+            if (parsed.ticket !== 'FAKE-TICKET') throw new Error('native session mismatch');
+            if (!nativeStore.get('device-id')) throw new Error('device id not persisted');
+            return 'native session + device-id ok';
+        });
+        // 模拟重启：新起一个 car 实例，只读存储，不做任何登录。
+        await attempt('session survives a restart', async () => {
+            const rebooted = createQishuiCar({ transport: loginTransport });
+            const status = await rebooted.status();
+            if (!status.loggedIn) throw new Error('loggedIn=false after restart');
+            if (status.storage !== 'native') throw new Error('storage=' + status.storage);
+            return `loggedIn after restart, storage=${status.storage}`;
         });
     }
 }

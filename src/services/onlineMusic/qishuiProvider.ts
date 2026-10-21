@@ -48,6 +48,10 @@ export const qishuiProvider: OnlineMusicProvider = {
     getAvailability: getQishuiTransportAvailability,
     capabilities: {
         search: true, playback: true, lyrics: true, wordByWordLyrics: true, auth: true,
+        // ⚠ `playlists` 决定首页「歌单」页签置不置灰（homeSources.ts 的
+        // canUsePlaylists 就是 `userLibrary && playlists`）：漏了它，歌单明明拉得到，
+        // 入口却是灰的。车机协议有 /me/playlist/ 与 /me/collection/mixed/，必须留着。
+        playlists: true,
         // 车机协议没有专辑端点（安卓），桌面旧协议虽有但两端能力声明取交集：
         // 专辑入口在安卓点了只会拿到「不支持」，干脆整平台关掉。
         albums: false, artists: true, recommendations: true,

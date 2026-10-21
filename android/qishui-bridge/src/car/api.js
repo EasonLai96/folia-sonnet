@@ -14,6 +14,7 @@ import { resolveAudio } from './playback.js';
 import { createFetch } from './transport.js';
 import { coverFromUrlInfo, lyricsFromTrack, toFoliaPlaylists, toFoliaSong, toFoliaSongs } from './shape.js';
 import { QISHUI_QR_SCOPE } from './protocol.js';
+import { storageMode } from './storage.js';
 
 // 渲染层用这两个虚拟 id 拉「我的喜欢」与推荐流（见 qishuiCatalog.ts）。
 export const QISHUI_LIKED_ID = 'qishui-liked';
@@ -69,6 +70,9 @@ export function createQishuiCar(options = {}) {
                 protocol: 'luna-car',
                 scope: QISHUI_QR_SCOPE,
                 cookieKeys: '(car-protocol)',
+                // 凭据落在哪一档存储：真机上「重启后账号没了」先看这个字段
+                // （native=SharedPreferences / local=localStorage / memory=只在这个进程）。
+                storage: storageMode(),
                 loginKeys: credential?.ticket ? 'ticket=y' : 'ticket=n',
                 userId: text(credential?.userId),
                 libraryReady: Boolean(credential?.ticket),

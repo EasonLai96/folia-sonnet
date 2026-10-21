@@ -1,6 +1,8 @@
 package top.izuna.foliamajor;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Handler;
@@ -61,6 +63,14 @@ import okhttp3.Response;
  */
 final class QishuiSignHost {
     private static final String TAG = "QishuiSignHost";
+
+    /** 协议层持久化用的 SharedPreferences 名与键前缀（见 HostBridge.getStore）。 */
+    private static final String STORE_PREFS = "folia_qishui";
+    private static final String STORE_PREFIX = "car:";
+
+    private SharedPreferences prefs() {
+        return activity.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE);
+    }
 
     /** 假源：页面挂在这个源下，bdms.js 才会按「在汽水站内」那套规则签名。 */
     static final String PAGE_ORIGIN = "https://www.qishui.com";
@@ -371,6 +381,36 @@ final class QishuiSignHost {
          * 这一步，`getStatus().loggedIn` 永远是 false，表现成「扫码确认了但账号
          * 出不来」。
          */
+        /**
+         * 协议层的持久化出口：设备 ID 与登录凭据存这里。
+         *
+         * WebView 的 localStorage 本来也能持久化，但它依赖 DOM storage 与 WebView
+         * 数据目录的状态（系统清理、存储紧张、多进程都会让它丢），表现就是
+         * 「登录成功、重启后账号没了」。SharedPreferences 是 App 自己的文件，稳。
+         * 页面侧（car/storage.js）仍然双写 localStorage 作为回退。
+         */
+        @JavascriptInterface
+        public String getStore(String key) {
+            if (key == null || key.isEmpty()) return "";
+            try {
+                return prefs().getString(STORE_PREFIX + key, "");
+            } catch (Throwable error) {
+                Log.w(TAG, "getStore failed", error);
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public void putStore(String key, String value) {
+            if (key == null || key.isEmpty()) return;
+            try {
+                if (value == null) prefs().edit().remove(STORE_PREFIX + key).apply();
+                else prefs().edit().putString(STORE_PREFIX + key, value).apply();
+            } catch (Throwable error) {
+                Log.w(TAG, "putStore failed", error);
+            }
+        }
+
         @JavascriptInterface
         public String getCookie(String url) {
             // 拼装逻辑放在外层（QishuiSignHost.cookieHeaderFor）：shouldInterceptRequest

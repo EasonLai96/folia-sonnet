@@ -91,7 +91,11 @@ export function toFoliaPlaylist(raw, options = {}) {
     const id = text(base.id || entity.id);
     if (!id) return null;
     const cover = collectionCover(entity);
-    const trackCount = Number(entity.resource_cnt ?? entity.stats?.count_tracks ?? base.count_tracks ?? 0);
+    // resource_cnt 是**对象**（{ track_cnt, media_count, ... }）不是数字 —— 直接
+    // Number() 会得 NaN 再归零，界面上整张歌单卡就是「0 首」并因此被置灰。
+    const counts = entity.resource_cnt && typeof entity.resource_cnt === 'object' ? entity.resource_cnt : {};
+    const trackCount = Number(counts.track_cnt ?? counts.media_count ?? entity.resource_cnt
+        ?? entity.stats?.count_tracks ?? base.count_tracks ?? 0);
     return {
         id,
         name: text(base.title || base.name || entity.title),
