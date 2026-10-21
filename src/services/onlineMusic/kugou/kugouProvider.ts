@@ -870,8 +870,30 @@ const getKugouUserPlaylistItems = async (userId: MediaId): Promise<any[]> => {
 };
 
 // Loads the raw album metadata needed by KuGou's playlist-based album subscription endpoint.
+/*
+ * 酷狗的回答不抛错：`status: 0` + 非 0 的 `error_code`（例如 20017）就是拒了这次读取，
+ * 而 `listOf()` 只看数组 —— 于是**读不出来**和**真的没有内容**在界面上是同一个样子：
+ * 一张专辑静默变成空列表，用户看到的是「这张专辑没有歌」而不是「读取失败」。
+ * 专辑这两条（详情、曲目）先看状态码：答失败就抛，宁可显示失败也不假报空。
+ */
+const throwIfKugouRefused = (response: unknown, what: string): void => {
+    const raw = response as any;
+    const data = dataOf(raw);
+    const status = Number(raw?.status ?? data?.status);
+    const code = Number(valueOf(raw, 'errcode', 'error_code') ?? valueOf(data, 'errcode', 'error_code') ?? NaN);
+    if (!(Number.isFinite(status) && status === 0 && Number.isFinite(code) && code !== 0)) return;
+    const said = String(valueOf(raw, 'errmsg', 'error_msg', 'msg', 'message') ?? '').trim();
+    throw new OnlineProviderError(
+        'unavailable',
+        said ? `KuGou refused ${what}: ${said} (error_code ${code})` : `KuGou refused ${what} (error_code ${code})`,
+        'kugou',
+        { errorCode: code, status, ...(said ? { message: said } : {}) },
+    );
+};
+
 const getKugouAlbumDetailRaw = async (id: MediaId): Promise<any | null> => {
     const response = await requestKugou('album_detail', { id: String(id) });
+    throwIfKugouRefused(response, 'the album detail');
     const data = dataOf(response);
     const rawAlbum = listOf(response)[0] ?? data?.album ?? data;
     return rawAlbum && typeof rawAlbum === 'object' && !Array.isArray(rawAlbum) ? rawAlbum : null;
@@ -1522,6 +1544,7 @@ export const kugouProvider: OnlineMusicProvider = {
                 page: Math.floor(offset / pageSize) + 1,
                 pagesize: pageSize,
             });
+            throwIfKugouRefused(response, 'the album tracks');
             const items = listOf(response).map(raw => {
                 const song = normalizeKugouSong(raw);
                 if (song.album.name || !collection?.name) return song;

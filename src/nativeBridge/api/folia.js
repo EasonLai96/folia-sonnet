@@ -1369,7 +1369,9 @@ async function handleFoliaKugouRequest(input, url) {
       {},
       { 'x-router': 'openapi.kugou.com', 'kg-tid': '255' },
     );
-    return body || { status: 0, error_code: 20017, data: { info: [], list: [] } };
+    // `kgPostAndroidSigned` 没有 userid / token 时返回 null（这条端点要带账号签名）。
+    // 以前这里拿 20017 的空壳顶上，界面上就成了「这张专辑没有歌」—— 现在把原因写进 errmsg。
+    return body || { status: 0, error_code: 20017, errmsg: 'album detail needs a signed-in account', data: { info: [], list: [] } };
   }
   if (operation === 'album_songs') {
     const id = firstValue(params.id, params.album_id);
@@ -1386,7 +1388,8 @@ async function handleFoliaKugouRequest(input, url) {
       {},
       { 'x-router': 'openapi.kugou.com', 'kg-tid': '255' },
     );
-    return body || { status: 0, error_code: 20017, data: { info: [], list: [], songs: [], total: 0 } };
+    // 同上：签不出名（没登录）就明说，不要伪装成「这张专辑没有歌」。
+    return body || { status: 0, error_code: 20017, errmsg: 'album songs need a signed-in account', data: { info: [], list: [], songs: [], total: 0 } };
   }
   if (operation === 'artist_albums') {
     const id = firstValue(params.id, params.author_id);
