@@ -1400,6 +1400,15 @@ ${lines.join("\n")}
         };
       }
     }
+    async function renewOnce() {
+      try {
+        await auth.status();
+        return Boolean(sessions.get()?.ticket);
+      } catch (error) {
+        log(`[Qishui] renew failed (${error?.code || error?.message || error})`);
+        return false;
+      }
+    }
     async function accountTrack(id) {
       const credential = sessions.get();
       if (!credential) return { track: await catalog.track(id), account: false, accountError: "no-session" };
@@ -1407,7 +1416,17 @@ ${lines.join("\n")}
         return { track: await catalog.track(id, { credential }), account: true };
       } catch (error) {
         const reason = error instanceof QishuiError ? `${error.code}${error.stage ? "/" + error.stage : ""}` : String(error?.code || error?.message || error);
-        log(`[Qishui] account track read failed (${reason}), falling back to the public token`);
+        log(`[Qishui] account track read failed (${reason}), renewing once before giving up`);
+        const renewed = await renewOnce();
+        if (renewed) {
+          try {
+            return { track: await catalog.track(id, { credential: sessions.get() }), account: true, renewed };
+          } catch (retryError) {
+            const retryReason = retryError instanceof QishuiError ? `${retryError.code}${retryError.stage ? "/" + retryError.stage : ""}` : String(retryError?.code || retryError?.message || retryError);
+            log(`[Qishui] the account read still fails after renewing (${retryReason})`);
+            return { track: await catalog.track(id), account: false, accountError: `${reason} → renewed → ${retryReason}` };
+          }
+        }
         return { track: await catalog.track(id), account: false, accountError: reason };
       }
     }
@@ -1586,7 +1605,7 @@ ${lines.join("\n")}
         };
       },
       async audio(id, quality) {
-        const { track, account, accountError } = await accountTrack(id);
+        const { track, account, accountError, renewed } = await accountTrack(id);
         const audio = await resolveAudio(client, track, quality);
         const player = track?.player_info || {};
         return {
@@ -1595,6 +1614,9 @@ ${lines.join("\n")}
           audioMeta: {
             account,
             ...accountError ? { accountError } : {},
+            // 这一首是靠「补一次续期」才走上账号那条路的：说明 status 那一问
+            // 没能在启动阶段把凭据续上（原生侧的排队修复之前，这是常态）。
+            ...renewed ? { renewed } : {},
             playerType: Number.isFinite(Number(player.player_type)) ? Number(player.player_type) : -1,
             fullModel: Boolean(player.full?.video_model_info),
             previewModel: Boolean(player.preview?.video_model_info),

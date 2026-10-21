@@ -108,6 +108,17 @@ export function createQishuiCar(options = {}) {
      * 带上登录凭据优先；没登录或凭据这条路失败（过期 / guard 拒绝）就退回公共令牌，
      * 详情与歌词至少还能看。
      */
+    /** 补一次续期（`auth.status()` 就是 renew）。成功返回 true，续不上返回 false。 */
+    async function renewOnce() {
+        try {
+            await auth.status();
+            return Boolean(sessions.get()?.ticket);
+        } catch (error) {
+            log(`[Qishui] renew failed (${error?.code || error?.message || error})`);
+            return false;
+        }
+    }
+
     async function accountTrack(id) {
         const credential = sessions.get();
         // ⚠「没凭据」与「有凭据但这条路失败了」是两种完全不同的故障，必须分得开：
@@ -121,7 +132,23 @@ export function createQishuiCar(options = {}) {
             const reason = error instanceof QishuiError
                 ? `${error.code}${error.stage ? '/' + error.stage : ''}`
                 : String(error?.code || error?.message || error);
-            log(`[Qishui] account track read failed (${reason}), falling back to the public token`);
+            log(`[Qishui] account track read failed (${reason}), renewing once before giving up`);
+            // ⚠ 凭据过期是最常见的那一种：续期（renew）只在 status 那一问里发生，
+            // 而那一问在冷启动时常常还没跑（甚至被丢单），于是这里拿到的还是旧 ticket，
+            // 上游判 auth-required。直接退回公共令牌，受保护的曲子就只剩试听 ——
+            // 用户看到的就是「有 VIP 也听不了」。先补一次续期再试一遍。
+            const renewed = await renewOnce();
+            if (renewed) {
+                try {
+                    return { track: await catalog.track(id, { credential: sessions.get() }), account: true, renewed };
+                } catch (retryError) {
+                    const retryReason = retryError instanceof QishuiError
+                        ? `${retryError.code}${retryError.stage ? '/' + retryError.stage : ''}`
+                        : String(retryError?.code || retryError?.message || retryError);
+                    log(`[Qishui] the account read still fails after renewing (${retryReason})`);
+                    return { track: await catalog.track(id), account: false, accountError: `${reason} → renewed → ${retryReason}` };
+                }
+            }
             return { track: await catalog.track(id), account: false, accountError: reason };
         }
     }
@@ -317,7 +344,7 @@ export function createQishuiCar(options = {}) {
         },
 
         async audio(id, quality) {
-            const { track, account, accountError } = await accountTrack(id);
+            const { track, account, accountError, renewed } = await accountTrack(id);
             const audio = await resolveAudio(client, track, quality);
             // 这几个字段只为排查「为什么只剩试听」：有没有带凭据（没带的话为什么）、
             // 上游给的是哪一型、full 那套到底有没有下发。渲染层在判成试听时会把它们
@@ -330,6 +357,9 @@ export function createQishuiCar(options = {}) {
                 audioMeta: {
                     account,
                     ...(accountError ? { accountError } : {}),
+                    // 这一首是靠「补一次续期」才走上账号那条路的：说明 status 那一问
+                    // 没能在启动阶段把凭据续上（原生侧的排队修复之前，这是常态）。
+                    ...(renewed ? { renewed } : {}),
                     playerType: Number.isFinite(Number(player.player_type)) ? Number(player.player_type) : -1,
                     fullModel: Boolean(player.full?.video_model_info),
                     previewModel: Boolean(player.preview?.video_model_info),

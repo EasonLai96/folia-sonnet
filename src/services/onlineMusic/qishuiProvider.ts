@@ -162,7 +162,7 @@ export const qishuiProvider: OnlineMusicProvider = {
                     + (meta ? ` (account=${meta.account}${field('accountError', meta.accountError)}`
                         + `${field('playerType', meta.playerType)}`
                         + `${field('fullModel', meta.fullModel)}${field('previewModel', meta.previewModel)}`
-                        + `${field('gotFull', meta.gotFull)})` : ''),
+                        + `${field('gotFull', meta.gotFull)}${field('renewed', meta.renewed)})` : ''),
                     'qishui');
             }
             const url = qishuiText(data?.url);

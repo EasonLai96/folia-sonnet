@@ -122,6 +122,8 @@ final class QishuiSignHost {
     private volatile String failureReason = null;
     private final AtomicInteger ticketSeq = new AtomicInteger(1);
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+    /** 页面就绪之前发来的请求在这里排队（见 request 与 drainWaiting）。 */
+    private final java.util.Queue<Runnable> waiting = new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** 宿主自己要用的 cookie：协议层的「当前会话」就是它。 */
     private volatile String sessionCookie = "";
     /**
@@ -270,6 +272,15 @@ final class QishuiSignHost {
     }
 
     /**
+     * 一个票据最多等这么久。
+     *
+     * 比渲染层 accountRead 的 60 秒兜底（WHO_WAIT_MS）短，这样「桥确实没回」会变成一个
+     * **明确的错误**（渲染层记一条 warn 并保留账号），而不是一句看不出所以然的
+     * "no answer in 60 s"。比 OkHttp 那头的读超时（25 秒）长，正常慢请求不会被误杀。
+     */
+    private static final long RESPONSE_TIMEOUT_MS = 45_000;
+
+    /**
      * 把一个 operation 交给页面里的协议层。
      *
      * 不能走 evaluateJavascript 的返回值：页面里的协议层是异步的，而
@@ -281,14 +292,52 @@ final class QishuiSignHost {
         pending.put(ticket, callback);
         final String script = "window.__foliaQishui && window.__foliaQishui.start("
                 + quote(operation) + "," + paramsJson + "," + quote(ticket) + ")";
-        mainHandler.post(() -> {
+        final Runnable send = () -> {
             if (webView == null) {
                 Pending entry = pending.remove(ticket);
                 if (entry != null) entry.resolve(envelopeJson(false, null, "unavailable", "Signing host is not started"));
                 return;
             }
             webView.evaluateJavascript(script, null);
-        });
+        };
+        // ⚠ 页面没 ready 就发 = **静默丢单**，这是「重启后账号没了」的直接原因。
+        //
+        // 脚本开头那个 `window.__foliaQishui && …` 在 protocol.js 执行完之前是
+        // undefined：整个表达式短路成 undefined，evaluateJavascript 正常返回，
+        // 页面**永远不会**调 resolve(ticket)。这个票据从此没人管，渲染层只能一路
+        // 等到 accountRead 的 60 秒兜底 —— 真机日志里那句
+        // "who is signed in could not be asked … no answer in 60 s" 就是它。
+        // 而 status 那一问正是**续期（renew）的唯一触发点**：它没跑，凭据就一直
+        // 是旧的，账号请求被上游判 auth-required，只能退回公共令牌 → VIP 曲子
+        // 只剩试听。一个丢单，两个现象。
+        if (!ready) {
+            synchronized (waiting) { waiting.add(send); }
+            Log.i(TAG, "request " + operation + " waits for the page (ticket " + ticket + ")");
+        } else {
+            mainHandler.post(send);
+        }
+        // 兜底：无论如何都要给这个票据一个结局，不能让它永远挂着。
+        mainHandler.postDelayed(() -> timeoutTicket(ticket, operation), RESPONSE_TIMEOUT_MS);
+    }
+
+    private void timeoutTicket(String ticket, String operation) {
+        Pending entry = pending.remove(ticket);
+        if (entry == null) return;
+        Log.w(TAG, "request " + operation + " (ticket " + ticket + ") got no answer in "
+                + RESPONSE_TIMEOUT_MS + " ms");
+        entry.resolve(envelopeJson(false, null, "network", "The Qishui signing host did not answer in time"));
+    }
+
+    /** 页面就绪：把排队等着的请求全部发出去（已在主线程）。 */
+    private void drainWaiting() {
+        final java.util.List<Runnable> queued;
+        synchronized (waiting) {
+            if (waiting.isEmpty()) return;
+            queued = new java.util.ArrayList<>(waiting);
+            waiting.clear();
+        }
+        Log.i(TAG, "the page is ready; " + queued.size() + " queued request(s) go out now");
+        for (Runnable send : queued) send.run();
     }
 
     void setSessionCookie(String cookie) {
@@ -314,6 +363,8 @@ final class QishuiSignHost {
             webView = null;
             ready = false;
             audioServer.stop();
+            // 还在排队的那几个票据仍挂在 pending 里，下面这一圈会一并把它们结掉。
+            synchronized (waiting) { waiting.clear(); }
             for (Map.Entry<String, Pending> entry : pending.entrySet()) {
                 entry.getValue().resolve(envelopeJson(false, null, "unavailable", "Signing host was disposed"));
             }
@@ -330,6 +381,8 @@ final class QishuiSignHost {
             failureReason = null;
             if (cookie != null) sessionCookie = cookie;
             Log.i(TAG, "signing host ready");
+            // 排队的请求现在可以发了（@JavascriptInterface 跑在桥线程，派发回主线程）。
+            mainHandler.post(QishuiSignHost.this::drainWaiting);
         }
 
         @JavascriptInterface

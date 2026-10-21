@@ -264,12 +264,20 @@ const GUARD_HEADERS = {
 // /media/mget/ 是「账号那条路」的读取（见 api.js 的 accountTrack）：这个开关用来
 // 让它返回坏数据，好把**回退分支**也跑一遍 —— 成功路径测不到那一支。
 let mgetBroken = false;
+// 让账号那条路先被判一次 auth-required（28001003 是 ticket 无效/过期那个码）：
+// 真机上最常见的就是「启动那一问没跑完，凭据没续上，于是这里拿到的还是旧 ticket」。
+// 只坏一次，用来验证「补一次续期再试一遍」真的会把这一首救回账号那条路。
+let mgetAuthOnce = false;
 const loginTransport = {
     async request(payload) {
         const url = String(payload.url || '');
         const headers = {};
         const send = body => ({ status: 200, headers, body: JSON.stringify(body) });
         if (url.includes('/media/mget/')) {
+            if (mgetAuthOnce) {
+                mgetAuthOnce = false;
+                return send({ err_no: 28001003, status_msg: 'ticket invalid' });
+            }
             if (mgetBroken) return send({ err_no: 0, data: {} });
             return send({ err_no: 0, data: { media_list: [{
                 media_id: 'T-1',
@@ -401,6 +409,19 @@ if (started) {
             const detail = await loginCar.songDetail('T-1');
             if (!detail.song?.name) throw new Error('song missing');
             return detail.song.name;
+        });
+        // 旧 ticket 被拒时不能急着退回公共令牌：那等于把这一首判成「只剩试听」，
+        // 用户看到的就是「有 VIP 也听不了」。补一次续期再试，救得回来就走账号那条路。
+        await attempt('a ticket rejected once is renewed and the track read retried', async () => {
+            mgetAuthOnce = true;
+            let failure = null;
+            let detail = null;
+            try { detail = await loginCar.songDetail('T-1'); }
+            catch (error) { failure = error; }
+            finally { mgetAuthOnce = false; }
+            if (failure) throw new Error('the read gave up instead of renewing: ' + failure.message);
+            if (!detail.song?.name) throw new Error('song missing after the retry');
+            return 'renewed and retried, account path restored';
         });
         await attempt('account read failure stays a QishuiError (never a ReferenceError)', async () => {
             mgetBroken = true;
