@@ -25,6 +25,8 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
 
+import java.util.List;
+
 /**
  * 壁纸样式 = 「精简」时挂的那颗**简易桌面歌词悬浮窗**。
  *
@@ -1114,6 +1116,11 @@ public final class FloatingLyricsOverlay {
         private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint controlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        /** 逐词下划线专用：绝不能拿 textPaint 去画矩形，它会把颜色和 alpha 留在字上。 */
+        private final Paint underlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        /** 整行文本 → 词区间的缓存：ICU 分词逐帧跑一次太贵，同一行留着。 */
+        private String cachedUnderlineText = null;
+        private List<FloatingVocab.Segment> cachedUnderlineBounds = null;
         private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final RectF frame = new RectF();
 
@@ -1714,16 +1721,27 @@ public final class FloatingLyricsOverlay {
 
             if (progress < 0f || line == null) return;
 
+            /*
+             * 逐词下划线：**每一句都在字底下画一排小线，一个词一条**。
+             *
+             * 「分词」在小窗上唯一看得出痕迹的地方就是这条线 —— 有逐词时间戳时按词切，
+             * 没有时按词典 / ICU 切（见 FloatingVocab），再不济也是逐字，
+             * 但逐字正是用户说的「只有中文是这样的」，所以这条路径必须通。
+             */
+            drawUnderlines(canvas, text, x, baseline, fontSize, progress, measured,
+                    alpha, words, segments, positionMs);
+
             if (segments == null) {
                 // 没有逐词轴：整行按进度线性推进（老做法）。
                 float swept = measured * clamp01(progress);
-                if (swept <= 0.5f) return;
-                canvas.save();
-                canvas.clipRect(x - dp(2), clipTop, x + swept + dp(2), clipBottom);
-                textPaint.setColor(accentColor);
-                textPaint.setAlpha(textAlpha);
-                canvas.drawText(text, x, baseline, textPaint);
-                canvas.restore();
+                if (swept > 0.5f) {
+                    canvas.save();
+                    canvas.clipRect(x - dp(2), clipTop, x + swept + dp(2), clipBottom);
+                    textPaint.setColor(accentColor);
+                    textPaint.setAlpha(textAlpha);
+                    canvas.drawText(text, x, baseline, textPaint);
+                    canvas.restore();
+                }
                 return;
             }
 
@@ -1762,6 +1780,84 @@ public final class FloatingLyricsOverlay {
                 canvas.drawText(text, x, baseline, textPaint);
                 canvas.restore();
             }
+        }
+
+        /**
+         * 逐词下划线：一条底线 + 唱到的那一段填色。
+         *
+         * 线的位置与宽度和上面「逐词上色」用的是**同一套区间**，所以字和线是对齐的；
+         * 空格 / 标点那种段不画线（它们只是切分出来的边界，画了就成一排碎线）。
+         */
+        private void drawUnderlines(Canvas canvas, String text, float x, float baseline,
+                                    float fontSize, float progress, float measured, float alpha,
+                                    WallpaperLyricsState.TimedWord[] words,
+                                    FloatingWordColors.Segment[] segments, long positionMs) {
+            float lineY = baseline + fontSize * 0.2f;
+            float hair = Math.max(1.5f, fontSize * 0.045f);
+            int alpha255 = Math.round(clamp01(alpha) * 255f);
+            if (alpha255 <= 0) return;
+
+            /*
+             * 有逐词时间戳：按词切，每个词自己算唱到几成。
+             *
+             * 没有：拿整句进度当「唱到的位置」，按词典 / ICU 切出来的词区间一条条填。
+             * 两种都要夹在 [0, span] 内 —— 越界的负数宽度会让 drawRect 画出一根反向的线。
+             */
+            if (segments != null && words != null) {
+                for (int i = 0; i < words.length; i += 1) {
+                    WallpaperLyricsState.TimedWord word = words[i];
+                    if (word == null) continue;
+                    FloatingWordColors.Segment segment = segments[i];
+                    if (segment == null || segment.endOffset <= segment.startOffset) continue;
+                    int start = Math.min(segment.startOffset, text.length());
+                    int end = Math.min(segment.endOffset, text.length());
+                    if (end <= start) continue;
+                    float head = textPaint.measureText(text, 0, start);
+                    float span = textPaint.measureText(text, start, end);
+                    if (span <= 0f) continue;
+                    float ratio = sungRatio(word, positionMs);
+                    drawUnderline(canvas, x + head, lineY, span, span * clamp01(ratio), hair, alpha255);
+                }
+                return;
+            }
+
+            List<FloatingVocab.Segment> bounds = wordBounds(text);
+            float sung = measured * clamp01(progress);
+            for (int i = 0; i < bounds.size(); i += 1) {
+                FloatingVocab.Segment segment = bounds.get(i);
+                int start = Math.min(segment.start, text.length());
+                int end = Math.min(segment.end, text.length());
+                if (end <= start) continue;
+                if (isBlank(text.charAt(start))) continue;
+                float head = textPaint.measureText(text, 0, start);
+                float span = textPaint.measureText(text, start, end);
+                if (span <= 0f) continue;
+                drawUnderline(canvas, x + head, lineY, span, clamp(sung - head, 0f, span), hair, alpha255);
+            }
+        }
+
+        private void drawUnderline(Canvas canvas, float left, float y, float width,
+                                   float filled, float hair, int alpha255) {
+            underlinePaint.setStyle(Paint.Style.FILL);
+            underlinePaint.setColor(withAlpha(baseColor, alpha255 / 255f * 0.28f));
+            canvas.drawRect(left, y, left + width, y + hair, underlinePaint);
+            if (filled <= 0.5f) return;
+            underlinePaint.setColor(withAlpha(accentColor, alpha255 / 255f * 0.9f));
+            canvas.drawRect(left, y, left + filled, y + hair, underlinePaint);
+        }
+
+        private static boolean isBlank(char c) {
+            return c == ' ' || c == '\t' || c == '\u3000';
+        }
+
+        /** 整行的词区间（缓存：换行的 420ms 里同一行会被画几十帧）。 */
+        private List<FloatingVocab.Segment> wordBounds(String text) {
+            if (cachedUnderlineText == text && cachedUnderlineBounds != null) {
+                return cachedUnderlineBounds;
+            }
+            cachedUnderlineText = text;
+            cachedUnderlineBounds = FloatingVocab.split(text);
+            return cachedUnderlineBounds;
         }
 
         /**
