@@ -66,6 +66,7 @@ import type { AudioBands, Line, Theme, VisualizerMode } from '../types';
 import { syncLyricFlatAttribute, useLyricFlatSettingsStore } from '../stores/useLyricFlatSettingsStore';
 import { applyPushedPhoneInsets } from '../services/phoneInsets';
 import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
+import { loadIcuFolia, segmentIcuFolia } from '../utils/lyrics/icuFolia';
 
 /*
  * 挂「歌词改为纯色扁平」这个开关。
@@ -477,6 +478,23 @@ const SURFACE_REVEAL_DEADLINE_MS = 2500;
 let lastLinesResult: Line[] = NO_LYRIC_LINES;
 let lastLinesKey = '';
 
+/*
+ * ⭐叠层这一页是**另一个 document**，主应用烘在每行上的那份分词（`autoWordSegments`，
+ * icu-folia 切的）过不来 —— payload 只有文本与逐字轴。少了它，`segmentLyricWords`
+ * 只能掉到浏览器的 `Intl.Segmenter`，于是中文切出来的词与播放页 / 状态栏**不是同一套**
+ * （英文两边都按空格切，所以只有中文有事）：AI 主题标的关键字因此常常对不上，
+ * 表现就是「播放页有 AI 高亮，桌面叠层一点没有」。
+ *
+ * icu-folia 是随包的（ICU + 中文 jieba + 日文 BudouX），这一页自己加载一份即可，
+ * 不用把分词也塞进 payload（那要改原生，还得连带落盘那一套）。
+ */
+let icuFoliaReady = false;
+loadIcuFolia().then(ready => {
+    icuFoliaReady = ready;
+    // 分词从「没有」变成「有」：缓存的那一版 lines 要作废，下一推（200ms 内）重算。
+    lastLinesKey = '';
+});
+
 const buildLinesKey = (lines: WallpaperTimedLine[], firstIndex: number): string => {
     const first = lines[0];
     const last = lines[lines.length - 1];
@@ -500,6 +518,9 @@ const toLines = (payload: WallpaperPayload): Line[] => {
         startTime: msToSec(line.start),
         endTime: msToSec(line.end),
         translation: line.translation,
+        // 与主应用同一套分词（icu-folia）。引擎还没加载好时留空：那时
+        // segmentLyricWords 会退回 Intl.Segmenter，行为与改动前一致，不会更差。
+        ...(icuFoliaReady ? { autoWordSegments: segmentIcuFolia(line.text) ?? undefined } : {}),
         words: (line.words && line.words.length > 0 ? line.words : [{
             text: line.text,
             start: line.start,

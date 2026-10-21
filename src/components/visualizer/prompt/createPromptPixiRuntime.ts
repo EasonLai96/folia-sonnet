@@ -4,6 +4,7 @@ import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fo
 import { loadPixi } from '../pixi/loadPixi';
 import { makePixiContext } from '../pixi/pixiWebGLContext';
 import { linkPixiPrograms } from '../pixi/pixiProgramLinks';
+import { resolveWordColor } from '../wordColoring';
 import { buildPromptCard, PROMPT_MONO_STACK, PROMPT_PALETTE, type PromptCardView } from './promptBox';
 import type { PromptBoxPlan } from './promptProgram';
 
@@ -153,8 +154,10 @@ interface BuiltBox {
 
 export class PromptPixiRuntime {
     private readonly boxes = new Map<number, BuiltBox>();
-    /** 高亮色缓存：主题对象没换就直接命中（见 highlightOf）。 */
+    /** 高亮色缓存：主题与 wordColors 都没换就直接命中（见 highlightOf）。 */
     private highlightTheme: Theme | null = null;
+    private highlightColors: Theme['wordColors'] | null = null;
+    private highlightCount = 0;
     private highlightMap = new Map<string, number>();
     private destroyed = false;
     private resizeObserver: ResizeObserver | null = null;
@@ -503,17 +506,37 @@ export class PromptPixiRuntime {
      */
     private highlightOf(text: string): number | null {
         const theme = this.options.song.theme;
-        if (this.highlightTheme !== theme) {
+        const key = text.trim();
+        if (!key) return null;
+        const colors = theme?.wordColors;
+        /*
+         * 缓存失效看三样：主题对象、**wordColors 这份数组**、以及它的长度。
+         *
+         * 只看主题对象是不够的：叠层那一侧主题常常是「先推一份、再补 AI 那份」，
+         * 补的时候可能还在同一个对象上 —— 缓存不失效，先前算出的「没高亮」就
+         * 永远钉在这个词上（AI 那份到得再晚也用不上）。
+         */
+        if (this.highlightTheme !== theme || this.highlightColors !== colors
+            || this.highlightCount !== (colors?.length ?? 0)) {
             this.highlightTheme = theme;
-            const byWord = new Map<string, number>();
-            (theme?.wordColors ?? []).forEach(entry => {
-                const word = String(entry?.word ?? '').trim();
-                if (!word) return;
-                byWord.set(word, themeColor(this.pixi, entry?.color, PROMPT_PALETTE.bone, 0.55));
-            });
-            this.highlightMap = byWord;
+            this.highlightColors = colors;
+            this.highlightCount = colors?.length ?? 0;
+            this.highlightMap = new Map();
         }
-        return this.highlightMap.get(text.trim()) ?? null;
+        const cached = this.highlightMap.get(key);
+        if (cached !== undefined) return cached;
+        /*
+         * ⭐取色必须和商籁 / 卡登萨那几套走**同一条规则**（resolveWordColor）：
+         * 这里早先是拿 AI 标的词建表、再按 token **精确相等**取色，而那几套是
+         * 「AI 标的词包含这个 token」就算命中。中文一切词就不是同一个字符串了
+         * （AI 标「温柔的夜」，切出来是「温柔」「的」「夜」），于是同一份
+         * wordColors 在播放页有高亮、在这一套里一个都不亮。英文两边都按空格切，
+         * 所以只有中文有事。
+         */
+        const resolved = resolveWordColor(key, colors, '');
+        const value = resolved ? themeColor(this.pixi, resolved, PROMPT_PALETTE.bone, 0.55) : null;
+        this.highlightMap.set(key, value);
+        return value;
     }
 
     /** 一整句的姿势：字的落下与高亮、下划线、以及整块窗的镜头。 */
