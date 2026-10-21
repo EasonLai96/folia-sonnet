@@ -332,9 +332,10 @@
 .bravais-account-switcher.is-compact { align-items: center; }
 
 /* 没有人登录时，这颗「连接」图标是墙上唯一该做的事，所以它和 grid 主页的登录按钮（components/login/login.css
-   的 .login-cta）用同一套语言：强调色的光晕在呼吸，1.8s 一拍。光晕挂在圆形徽章上（box-shadow 不会被它自己的
-   overflow: hidden 裁掉），图标与底色同时染成强调色 —— 窄缝只有约 100px 宽，写不下 grid 底下那一行说明
-   （.login-cta-note），「连接在线平台」这几个字就是那句话。
+   的 .login-cta）用同一套语言：强调色的光晕在呼吸，1.8s 一拍，上面还有那句「登录是为了什么」
+   （.is-nudge）。光晕挂在圆形徽章上（box-shadow 不会被它自己的 overflow: hidden 裁掉），图标与底色
+   同时染成强调色 —— 窄缝只有约 100px 宽，所以那句话排在图标**上面**、压到 10px 折行，而不是像 grid
+   那样挂在下面自成一排。
    已登录 / 无需登录的平台不画（根元素没有 is-guest）；登录失效（is-expired）也不画：那时的人知道要做什么，
    再引导一次是打扰 —— 和 HomeLoginPanel 的 nudge 同一个判断。书脊上的 compact 是同一个根元素，一起生效。 */
 @keyframes bravais-account-breath {
@@ -346,6 +347,18 @@
     color: var(--text-accent, currentColor);
     background: color-mix(in srgb, var(--text-accent, currentColor) 16%, transparent);
     animation: bravais-account-breath 1.8s ease-in-out infinite;
+}
+
+/* 图标上面那行提示（home.guestCta，和 grid 登录按钮底下那行是同一句）：窄缝只有约 100px，
+   所以 10px 软墨色、居中、可折行（两行内正好放得下），「连接在线平台」在下、图标在中间。
+   字本身不动 —— 会动的是上面那圈光晕：缝是竖着排的，文字再跟着抖，整条缝都在晃。 */
+.bravais-account-switcher.is-guest:not(.is-expired) .bravais-account-entry .is-nudge {
+    color: var(--bravais-seam-ink-soft);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: center;
+    text-wrap: balance;
 }
 
 /* 降低动态效果：光晕停在一个固定的量上，仍然说「这里」（与 .bravais-wall-breathe 同一个开关）。 */
