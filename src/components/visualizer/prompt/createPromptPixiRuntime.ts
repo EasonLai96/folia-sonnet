@@ -16,12 +16,15 @@ import { samplePromptTerms } from './promptTerms';
 // 「提示词」样式自己的 Pixi 运行时。它不认商籁那套节目单（场景 / 镜头 / 排版），只做四件事：
 //
 //   1. 收下 promptProgram 编译好的节目单（一句一个框）；
-//   2. 按播放时间挑出此刻该在台上的那一句：上方一块概率面板，下方一行巨大的发光歌词；
+//   2. 按播放时间挑出此刻该在台上的那一句：上方一块概率面板，下方一张歌词窗（字是发光的）；
 //   3. 每个词一个 pixi.Text，唱到才落下；正在唱的换成主题强调色，其余用主题字色；
-//   4. 一句之内镜头持续推近并跟着唱到的字平移，退场时抽回去。
+//   4. 一句之内镜头持续推近，并跟着唱到的字平移；退场时抽回去。
+//
+// 形态是精简的悬浮窗（上面概率面板、下面歌词窗），不用出血大字，所以镜头幅度克制：
+// 推近到 1.2 倍、横移只补一部分（FOLLOW），整块界面不会被拖出画面。
 //
 // 坐标：**画面 px**。运行时不再把整层缩放（那是「面板里 9px 的 token id 落到屏上只剩 4px」
-// 的根源），root 只负责摆到画面中心：面板是 HUD 不跟着动，camera 只装大字。
+// 的根源），root 只负责摆到画面中心；camera 是镜头：面板与歌词窗跟着一起推近、一起横移。
 type PixiModule = typeof import('pixi.js');
 
 /** 量宽用的参考字号：先按 100 量出整行宽，再反解出真正要用的字号。 */
@@ -34,6 +37,10 @@ const WORD_GAP_RATIO = 0.34;
 const CARD_PAD_RATIO = 0.03;
 /** 字号上限（占屏高）：短句（一个词那种）不至于把整屏塞满。 */
 const FONT_MAX_RATIO = 0.14;
+/** 一句之内镜头再推近多少（0.2 = 收尾时整块界面放到 1.2 倍）。 */
+const DOLLY_PUSH = 0.2;
+/** 推近的同时跟着唱到的字横移多少：1 = 完全钉住，太大整块窗会被拖出画面。 */
+const FOLLOW = 0.9;
 /** 一个词从「没出现」到「全亮」用多久。 */
 const WORD_REVEAL_S = 0.09;
 
@@ -325,7 +332,7 @@ export class PromptPixiRuntime {
 
         const root = new Container();
         root.position.set(this.lastWidth / 2, height / 2);
-        // 歌词窗装在 camera 里：只为「浮上来」那一下，没有推近也没有跟随。
+        // 面板与歌词窗都装在 camera 里：推近、跟着唱到的字平移，都是一次镜头运动。
         const camera = new Container();
         root.addChild(camera);
 
@@ -340,7 +347,7 @@ export class PromptPixiRuntime {
             terms: samplePromptTerms(this.ownWords(), plan.termSeed, 5),
             tokens: tokens.map(token => ({ text: token.text, startTime: token.startTime, endTime: token.endTime })),
         });
-        root.addChild(panel.root);
+        camera.addChild(panel.root);
 
         /*
          * 大字：字宽用白的，颜色交给 tint —— 主题色、AI 高亮色都只是换个 tint，不用重烤纹理。
@@ -471,43 +478,52 @@ export class PromptPixiRuntime {
 
         // 唱到哪儿：光标位置 = 已落下的词里最靠右的那个；正在唱的那个词，光标在词里按进度走。
         let caretX = tokens[0]?.left ?? 0;
+        let landed = 0;
+        let lastLandedAge = Infinity;
         let activeToken = -1;
         tokens.forEach((token, index) => {
             if (token.startTime > time) return;
             caretX = token.left + token.width * progressOf(time, token.startTime, token.endTime);
+            landed += 1;
+            lastLandedAge = Math.min(lastLandedAge, time - token.startTime);
             if (time <= token.endTime + 0.1) activeToken = index;
         });
         const firstStart = tokens[0]?.startTime ?? startTime;
         const lastStart = tokens[tokens.length - 1]?.startTime ?? firstStart;
-
-        // ---- 面板（HUD）：只做进场，不跟着镜头推拉，字才一直读得清
-        const panelBaseY = box.panel.centerY;
-        if (staticMode) {
-            box.panel.root.position.y = panelBaseY;
-            box.panel.root.alpha = time >= firstStart - 0.2 ? 1 : 0;
-        } else {
-            box.panel.root.position.y = safe(panelBaseY + (1 - enter) * this.lastHeight * 0.05 - exit * this.lastHeight * 0.06, panelBaseY);
-            box.panel.root.alpha = safe(alpha, 0);
-        }
+        // 唱到几成：这一句的第一个字开唱 → 最后一个字开唱。镜头推近的进度靠它。
+        const sung = clamp01(progressOf(time, firstStart, lastStart + 1e-3));
 
         /*
-         * ---- 歌词卡
-         * **没有镜头**：这一套是精简的悬浮窗，字整整齐齐待在窗里，推近 / 跟随 / 旋转全部不要 ——
-         * 只剩一次很轻的「从下面浮上来」，和面板同步，看着像同一块界面在换内容。
+         * ---- 镜头
+         * 面板与歌词窗一起推：进场从 0.94 推到 1，一句之内再缓慢推到 1.2，退场抽回 0.84；
+         * 推近的同时跟着唱到的字横移（被唱的那个词留在原地，其余从它两边流过去）。
          */
         if (staticMode) {
             box.camera.position.set(0, 0);
+            box.camera.scale.set(1);
             box.camera.rotation = 0;
-            box.camera.alpha = box.panel.root.alpha;
+            box.camera.alpha = time >= firstStart - 0.2 ? 1 : 0;
+            box.panel.root.alpha = 1;
         } else {
+            // 落下一个词时镜头轻微一顿，像跟焦追上去了。
+            const punch = landed > 0 && Number.isFinite(lastLandedAge)
+                ? Math.max(0, 1 - lastLandedAge / 0.22)
+                : 0;
+            const dolly = (0.94 + 0.06 * enter)
+                * (1 + DOLLY_PUSH * sung * sung)
+                * (1 - 0.30 * exit)
+                + punch * 0.02;
+            const follow = -caretX * (dolly - 1) * FOLLOW;
             box.camera.position.set(
-                0,
-                safe((1 - enter) * this.lastHeight * 0.03 - exit * this.lastHeight * 0.035, 0),
+                safe(follow, 0),
+                safe((1 - enter) * this.lastHeight * 0.05 - exit * this.lastHeight * 0.07, 0),
             );
+            box.camera.scale.set(safe(dolly, 1));
             box.camera.rotation = 0;
             box.camera.alpha = safe(alpha, 0);
+            box.panel.root.alpha = 1;
         }
-        box.root.visible = box.panel.root.alpha > 0.004 || box.camera.alpha > 0.004;
+        box.root.visible = box.camera.alpha > 0.004;
 
         /*
          * 大字：唱到才落下；**唱过的高亮色留着不还回去** —— 一句唱完，整行都是亮的，
