@@ -10,7 +10,6 @@ import VisualizerShell from '../VisualizerShell';
 import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
 import { compilePromptBoxes } from './promptProgram';
 import type { PromptPixiRuntime, PromptSongContext } from './createPromptPixiRuntime';
-import { refreshPromptTerms } from './promptTerms';
 
 // src/components/visualizer/prompt/VisualizerPrompt.tsx
 // 「提示词」样式的 React 外壳：挂载惰性加载的 Pixi 运行时，自己只管背景、兜底文字和字幕条。
@@ -95,11 +94,8 @@ const VisualizerPrompt: React.FC<VisualizerSharedProps> = (props) => {
         runtimeRef.current?.setPaused(paused);
     }, [paused, runtimeRef]);
 
-    // 框上那行提示词取自 AI 云缓存（随机几首歌的高亮词）。搭框是同步的，拿不到网络，
-    // 所以进来先挂一次后台抓取，攒进模块快照；抓到的晚也没关系，后面每一句搭框时都读最新的。
-    useEffect(() => {
-        void refreshPromptTerms();
-    }, []);
+    // 候选面板里的词来自随包带的 30000 词词表（promptVocab.ts），不需要网络，
+    // 所以这里没有「进来先挂一次抓取」那套了。
 
     useEffect(() => currentTime.on('change', () => {
         if (paused) runtimeRef.current?.renderOnce();

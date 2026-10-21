@@ -22,8 +22,8 @@ export interface PromptBoxPlan {
     startTime: number;
     endTime: number;
     words: PromptWordPlan[];
-    /** 决定这一句取哪几个提示词。同一句每次重搭都取到同一行（seek 安全）。 */
-    termSeed: number;
+    /** 决定这一句从词表里取哪几个词、印哪两个 token id。同一句每次重搭都取同一组（seek 安全）。 */
+    vocabSeed: number;
 }
 
 /** FNV-1a：只用来把种子摊成一个稳定的数，不是密码学用途。 */
@@ -94,7 +94,7 @@ export const compilePromptBoxes = (
             startTime: start,
             endTime: end,
             words,
-            termSeed: hashString(`${seed}:terms:${start.toFixed(2)}`),
+            vocabSeed: hashString(`${seed}:vocab:${start.toFixed(2)}`),
         });
     });
     // 歌词一般是顺序的，但「时间倒挂」的歌词集存在：框的顺序按时间走才追得对。

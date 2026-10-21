@@ -75,10 +75,10 @@ describe('compilePromptBoxes', () => {
         ];
         const first = compilePromptBoxes(lines, 'song');
         const second = compilePromptBoxes(lines, 'song');
-        expect(second.map(box => [box.id, box.termSeed]))
-            .toEqual(first.map(box => [box.id, box.termSeed]));
+        expect(second.map(box => [box.id, box.vocabSeed]))
+            .toEqual(first.map(box => [box.id, box.vocabSeed]));
         // 换个种子就该换一批提示词/采样值 —— 不然「每个框都不一样」是假的。
         const other = compilePromptBoxes(lines, 'another-song');
-        expect(other.map(box => box.termSeed)).not.toEqual(first.map(box => box.termSeed));
+        expect(other.map(box => box.vocabSeed)).not.toEqual(first.map(box => box.vocabSeed));
     });
 });
