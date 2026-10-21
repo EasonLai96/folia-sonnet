@@ -1114,7 +1114,6 @@ public final class FloatingLyricsOverlay {
     private final class LyricsFloatView extends View {
 
         private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint controlPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         /** 逐词下划线专用：绝不能拿 textPaint 去画矩形，它会把颜色和 alpha 留在字上。 */
         private final Paint underlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1509,18 +1508,17 @@ public final class FloatingLyricsOverlay {
              * 它变成了一根横贯屏幕的细线，跟系统状态栏本身抢视觉 —— 用户要的就是
              * **只有字浮在那儿**。非安全区模式下照旧画（那里还要靠它兜住窗口轮廓）。
              */
+            /*
+             * 底之外的**边框一律不画**。
+             *
+             * 原先那条描边的本意是「底色调淡之后还能看见窗口在哪」，但用户要的是小窗
+             * 只剩字和底下那条横杠 —— 一圈边正好是最抢眼的那一笔，留着就不像「浮在
+             * 别人家界面上的一行字」了。
+             */
             if (opacity > 0f) {
                 backgroundPaint.setStyle(Paint.Style.FILL);
                 backgroundPaint.setColor(withAlpha(baseColor, opacity * appear));
                 canvas.drawRoundRect(frame, radius, radius, backgroundPaint);
-            }
-
-            if (!overSafeArea) {
-                // 描边**不跟着一起淡到底**：底色调到很淡时，没有这条边小窗就彻底找不着了。
-                borderPaint.setStyle(Paint.Style.STROKE);
-                borderPaint.setStrokeWidth(Math.max(1f, dp(1)));
-                borderPaint.setColor(withAlpha(accentColor, (0.14f + 0.22f * opacity) * appear));
-                canvas.drawRoundRect(frame, radius, radius, borderPaint);
             }
         }
 
@@ -2103,18 +2101,28 @@ public final class FloatingLyricsOverlay {
         }
 
         /**
-         * 控件是不是「醒着」：锁着（那颗锁是唯一能点的地方，不能收）或者刚被碰过。
+         * 控件是不是「醒着」：**只看最近有没有被碰过**。
+         *
+         * 锁着的时候原本是一律算醒着的（那颗锁是整层穿透之后唯一能点的地方），
+         * 但用户要的是「没焦点就把锁也藏起来」—— 于是锁着也一样会收：
+         * 2.2 秒没动静，主窗上那颗锁就不画了。
+         *
+         * 解锁的路没断：右上角那块（LockChipView）仍然挂着、仍然接触摸，
+         * 第一下把控件叫出来（锁重新画出来），第二下才真解锁 —— 见 LockChipView。
          *
          * 画与命中都用这一个判断 —— 画出来的东西和能点的地方必须一致，
          * 否则就是「看不见却能点中」，这类控件最不能破的规矩。
          */
         private boolean controlsAwake(long now) {
-            return isLocked() || now - controlsTouchedAtMs < CONTROLS_IDLE_MS;
+            return now - controlsTouchedAtMs < CONTROLS_IDLE_MS;
         }
 
         private void wakeControls() {
             controlsTouchedAtMs = android.os.SystemClock.elapsedRealtime();
             removeCallbacks(controlsHideTask);
+            // 唤醒之后要重新排队收起，并立刻重画一帧把控件画出来。
+            scheduleControlsHide();
+            invalidate();
         }
 
         private void scheduleControlsHide() {
@@ -2241,6 +2249,17 @@ public final class FloatingLyricsOverlay {
         public boolean onTouchEvent(MotionEvent event) {
             if (event == null) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                /*
+                 * ⭐**第一下只把控件叫出来，第二下才解锁**。
+                 *
+                 * 锁着的时候整层是 NOT_TOUCHABLE，只有这个 chip 能收到触摸；而按新的口径
+                 * 「锁着且没有焦点」时主窗那颗锁是不画的。直接解锁的话，用户点的是一块自己
+                 * 看不见的地方。所以先唤醒（锁重新画出来），看见之后再点一下才是解锁。
+                 */
+                if (view != null && !view.controlsAwake(android.os.SystemClock.elapsedRealtime())) {
+                    view.wakeControls();
+                    return true;
+                }
                 // 延后一拍再解锁：解锁要把自己这个窗口摘掉，
                 // 在触摸派发的中途 removeView 容易撞上「正在派发的窗口没了」。
                 handler.post(new Runnable() {
