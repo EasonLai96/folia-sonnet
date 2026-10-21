@@ -91,6 +91,29 @@ export function createQishuiCar(options = {}) {
         }
     }
 
+    /**
+     * 曲目详情是**账号级**读取。
+     *
+     * 实测：用公共客户端令牌问 /media/mget/，`player_type=1` 的曲子还给 full
+     * （video_list 全是 cenc 加密，但 full 里带的 url_player_info 能换出一条明文 m4a），
+     * 而 `player_type=2` 的（受版权保护那批）**响应里压根没有 full**，只有 preview ——
+     * 表现就是「每首歌都 only offers a preview for this account」，其实跟账号没关系，
+     * 是这条请求没带凭据。
+     *
+     * 带上登录凭据优先；没登录或凭据这条路失败（过期 / guard 拒绝）就退回公共令牌，
+     * 详情与歌词至少还能看。
+     */
+    async function accountTrack(id) {
+        const credential = sessions.get();
+        if (!credential) return catalog.track(id);
+        try {
+            return await catalog.track(id, { credential });
+        } catch (error) {
+            log(`[Qishui] account track read failed (${error?.code || 'error'}), falling back to the public token`);
+            return catalog.track(id);
+        }
+    }
+
     async function resolveLiked() {
         if (likedReal) return likedReal;
         likedReal = await likedPlaylist(platform);
@@ -224,12 +247,12 @@ export function createQishuiCar(options = {}) {
         },
 
         async songDetail(id) {
-            const track = await catalog.track(id);
+            const track = await accountTrack(id);
             return { provider: 'qishui', song: toFoliaSong(track) };
         },
 
         async lyrics(id) {
-            const track = await catalog.track(id);
+            const track = await accountTrack(id);
             const lyrics = lyricsFromTrack(track);
             return {
                 provider: 'qishui',
@@ -241,7 +264,7 @@ export function createQishuiCar(options = {}) {
         },
 
         async audio(id, quality) {
-            const track = await catalog.track(id);
+            const track = await accountTrack(id);
             const audio = await resolveAudio(client, track, quality);
             return { provider: 'qishui', ...audio };
         },

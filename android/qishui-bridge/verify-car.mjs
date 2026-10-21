@@ -165,9 +165,12 @@ if (trackId) {
         if (!lyrics.yrc && !lyrics.lyric) throw new Error('both lyric and yrc empty');
         return `lyric=${lyrics.lyric.length}b yrc=${lyrics.yrc.length}b`;
     });
-    await attempt('audio url', async () => {
+    await attempt('audio url (full, not the preview clip)', async () => {
         const audio = await car.audio(trackId, 'standard');
         if (!audio.url || !/^https:\/\//.test(audio.url)) throw new Error('no https url');
+        // 回归闸门：/media/mget/ 曾用公共令牌问，受保护的曲子 upstream 连 full 都不给，
+        // 于是「每首歌都 only offers a preview」。现在详情走账号那条路，这里必须是整曲。
+        if (audio.trial) throw new Error('got the preview clip instead of the full track');
         // 直链真拉一次头，确认 200 且是音频（不是签名被拒的错误页）。
         const head = await fetch(audio.url, { method: 'GET', headers: { Range: 'bytes=0-1' } });
         if (head.status !== 200 && head.status !== 206) throw new Error('audio fetch HTTP ' + head.status);

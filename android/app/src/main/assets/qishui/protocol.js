@@ -582,7 +582,7 @@ ${lines.join("\n")}
       }
     };
   }
-  function createAuth(client, { log = () => {
+  function createAuth(client, { log: log2 = () => {
   } } = {}) {
     const pending = /* @__PURE__ */ new Map();
     let generation = 0;
@@ -674,7 +674,7 @@ ${lines.join("\n")}
         if (mine !== generation) throw new QishuiError("unavailable", "Sign-in was cancelled");
         const key = newQrKey();
         pending.set(key, { token: data.token, qr: `data:image/png;base64,${data.qrcode}`, expires: Date.now() + QR_TTL_MS });
-        log("[Qishui] Sign-in QR created");
+        log2("[Qishui] Sign-in QR created");
         return { key, imageUrl: `data:image/png;base64,${data.qrcode}` };
       },
       qr(key) {
@@ -710,7 +710,7 @@ ${lines.join("\n")}
           if (pending.get(key) !== value || sessions.revision !== revision) return { state: "expired" };
           sessions.set({ ...credential, userId: user.id, user });
           pending.delete(key);
-          log("[Qishui] Sign-in confirmed; account stored");
+          log2("[Qishui] Sign-in confirmed; account stored");
           return { state: "confirmed" };
         };
         value.task = run().finally(() => {
@@ -725,7 +725,7 @@ ${lines.join("\n")}
         generation++;
         pending.clear();
         sessions.clear();
-        log("[Qishui] Signed out");
+        log2("[Qishui] Signed out");
       },
       status() {
         if (!refreshing) refreshing = renew().finally(() => {
@@ -959,9 +959,19 @@ ${lines.join("\n")}
     return {
       searchSongs: ({ query, limit, offset }) => search(platform, query, "track", limit, offset),
       searchPlaylists: ({ query, limit, offset }) => search(platform, query, "playlist", limit, offset),
-      /** 完整 track entity（含 player_info，播放要用），不裁剪。 */
-      async track(id) {
-        const data = await platform("/media/mget/", { media_list: [{ id, type: "track" }], card_context: {} });
+      /**
+       * 完整 track entity（含 player_info，播放要用），不裁剪。
+       *
+       * `credential` 传凭据就走账号那条路（ticket-guard 签名）—— 见 api.js 的
+       * `accountTrack`：受版权保护的曲子用公共客户端令牌问，上游**根本不给 full**
+       * （player_info 里只有 preview），表现是「每首歌都 only offers a preview」。
+       */
+      async track(id, options = {}) {
+        const data = await platform(
+          "/media/mget/",
+          { media_list: [{ id, type: "track" }], card_context: {} },
+          options.credential
+        );
         const media = array(data.media_list, "media list").find((item) => String(item.media_id || item.track_entity?.base_info?.id) === id);
         if (!media?.track_entity) throw new QishuiError("not-playable", "Qishui did not return the track");
         return media.track_entity;
@@ -1257,10 +1267,14 @@ ${lines.join("\n")}
         }
       }
       if (!candidates.length && info.url_player_info) {
-        const { data } = await client.http(mediaUrl(info.url_player_info));
-        const list = data.Result?.Data?.PlayInfoList || data.data?.PlayInfoList || data.PlayInfoList;
-        if (!Array.isArray(list)) throw new QishuiError("invalid-response", "Qishui PlayInfoList is missing");
-        for (const item of list) {
+        let list = null;
+        try {
+          const { data } = await client.http(mediaUrl(info.url_player_info));
+          list = data.Result?.Data?.PlayInfoList || data.data?.PlayInfoList || data.PlayInfoList;
+        } catch (_) {
+          list = null;
+        }
+        for (const item of Array.isArray(list) ? list : []) {
           if (encrypted(item) || !item.MainPlayUrl) continue;
           candidates.push({
             url: mediaUrl(item.MainPlayUrl),
@@ -1385,6 +1399,16 @@ ${lines.join("\n")}
         };
       }
     }
+    async function accountTrack(id) {
+      const credential = sessions.get();
+      if (!credential) return catalog.track(id);
+      try {
+        return await catalog.track(id, { credential });
+      } catch (error) {
+        log(`[Qishui] account track read failed (${error?.code || "error"}), falling back to the public token`);
+        return catalog.track(id);
+      }
+    }
     async function resolveLiked() {
       if (likedReal) return likedReal;
       likedReal = await likedPlaylist(platform);
@@ -1507,11 +1531,11 @@ ${lines.join("\n")}
         };
       },
       async songDetail(id) {
-        const track = await catalog.track(id);
+        const track = await accountTrack(id);
         return { provider: "qishui", song: toFoliaSong(track) };
       },
       async lyrics(id) {
-        const track = await catalog.track(id);
+        const track = await accountTrack(id);
         const lyrics = lyricsFromTrack(track);
         return {
           provider: "qishui",
@@ -1522,7 +1546,7 @@ ${lines.join("\n")}
         };
       },
       async audio(id, quality) {
-        const track = await catalog.track(id);
+        const track = await accountTrack(id);
         const audio = await resolveAudio(client, track, quality);
         return { provider: "qishui", ...audio };
       },

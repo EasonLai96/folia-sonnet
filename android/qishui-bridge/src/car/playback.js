@@ -41,11 +41,17 @@ export async function resolveAudio(client, track, requested) {
                 });
             }
         }
+        // 这一拍失败**不能让整首歌挂掉**：full 换不出明文就还有 preview 可以试，
+        // 丢出去的话用户看到的是「没法播放」，而不是至少能听一段。
         if (!candidates.length && info.url_player_info) {
-            const { data } = await client.http(mediaUrl(info.url_player_info));
-            const list = data.Result?.Data?.PlayInfoList || data.data?.PlayInfoList || data.PlayInfoList;
-            if (!Array.isArray(list)) throw new QishuiError('invalid-response', 'Qishui PlayInfoList is missing');
-            for (const item of list) {
+            let list = null;
+            try {
+                const { data } = await client.http(mediaUrl(info.url_player_info));
+                list = data.Result?.Data?.PlayInfoList || data.data?.PlayInfoList || data.PlayInfoList;
+            } catch (_) {
+                list = null;
+            }
+            for (const item of Array.isArray(list) ? list : []) {
                 if (encrypted(item) || !item.MainPlayUrl) continue;
                 candidates.push({
                     url: mediaUrl(item.MainPlayUrl),

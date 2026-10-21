@@ -102,9 +102,16 @@ export function createCatalog({ platform }) {
         searchSongs: ({ query, limit, offset }) => search(platform, query, 'track', limit, offset),
         searchPlaylists: ({ query, limit, offset }) => search(platform, query, 'playlist', limit, offset),
 
-        /** 完整 track entity（含 player_info，播放要用），不裁剪。 */
-        async track(id) {
-            const data = await platform('/media/mget/', { media_list: [{ id, type: 'track' }], card_context: {} });
+        /**
+         * 完整 track entity（含 player_info，播放要用），不裁剪。
+         *
+         * `credential` 传凭据就走账号那条路（ticket-guard 签名）—— 见 api.js 的
+         * `accountTrack`：受版权保护的曲子用公共客户端令牌问，上游**根本不给 full**
+         * （player_info 里只有 preview），表现是「每首歌都 only offers a preview」。
+         */
+        async track(id, options = {}) {
+            const data = await platform('/media/mget/', { media_list: [{ id, type: 'track' }], card_context: {} },
+                options.credential);
             const media = array(data.media_list, 'media list')
                 .find(item => String(item.media_id || item.track_entity?.base_info?.id) === id);
             if (!media?.track_entity) throw new QishuiError('not-playable', 'Qishui did not return the track');
