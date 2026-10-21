@@ -55,6 +55,32 @@ describe('compilePromptBoxes', () => {
         expect(boxes[0].endTime).toBeGreaterThanOrEqual(boxes[0].words[1].endTime);
     });
 
+    /*
+     * 中文的 `line.words` 多数是**逐字**的（一个字一条时间）。照它原样用就是「一个字一个词」：
+     * 下划线一根一个字，AI 标的高亮色也匹配不上（`wordColors` 里存的是「大家」，
+     * 切开了只剩「大」「家」）。这里要的是合并回词，时间从字符区间上取。
+     */
+    it('merges per-character Chinese timings back into whole words', () => {
+        const line: Line = {
+            id: 'zh',
+            startTime: 0,
+            endTime: 4,
+            fullText: '大家天空',
+            words: ['大', '家', '天', '空'].map((text, index) => ({
+                text,
+                startTime: index,
+                endTime: index + 1,
+            })),
+        };
+        const words = compilePromptBoxes([line], 'song')[0].words;
+        expect(words.map(word => word.text)).toEqual(['大家', '天空']);
+        // 「大家」= 前两个字的时间（0→2），「天空」= 后两个字（2→4）。
+        expect(words[0].startTime).toBeCloseTo(0, 5);
+        expect(words[0].endTime).toBeCloseTo(2, 5);
+        expect(words[1].startTime).toBeCloseTo(2, 5);
+        expect(words[1].endTime).toBeCloseTo(4, 5);
+    });
+
     it('spreads a line that only has a line-level window over its words', () => {
         const boxes = compilePromptBoxes([plainLine('a', 4, 8, '今天天气真好')], 'song');
         const words = boxes[0].words;

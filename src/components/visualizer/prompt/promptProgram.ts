@@ -39,46 +39,119 @@ const hashString = (value: string): number => {
 
 const lineStart = (line: Line) => (Number.isFinite(line.startTime) ? line.startTime : 0);
 
+/** 一个「单字的汉字 / 假名 / 谚文」段 —— 连续一串这种段就是没被切开的中文。 */
+const CJK_SINGLE = /^[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]$/;
+
+interface CharSpan {
+    start: number;
+    end: number;
+    startTime: number;
+    endTime: number;
+}
+
+/**
+ * 把 `line.words` 对到整行文本的字符区间上。
+ *
+ * 词表里的 `text` 拼起来应当就是这一行，按游标 `indexOf` 找（找得到就从那儿开始，找不到
+ * 就退到游标处 —— 错位总比越界好）。有逐词时间戳时它是**唯一的时间来源**。
+ */
+const wordCharSpans = (line: Line, full: string): CharSpan[] => {
+    const spans: CharSpan[] = [];
+    let cursor = 0;
+    (line.words ?? []).forEach(word => {
+        const text = word.text ?? '';
+        if (!text) return;
+        let start = full.indexOf(text, cursor);
+        if (start < 0) start = Math.min(cursor, full.length);
+        const end = Math.min(full.length, start + text.length);
+        spans.push({ start, end, startTime: word.startTime, endTime: word.endTime });
+        cursor = end;
+    });
+    return spans;
+};
+
+/** 某个字符位置落在哪个区间里，就把那个区间的时间按字符比例插值给它。 */
+const timeAt = (spans: readonly CharSpan[], offset: number, fallback: number): number => {
+    for (let index = 0; index < spans.length; index += 1) {
+        const span = spans[index];
+        if (offset < span.start || offset >= span.end) continue;
+        const width = span.end - span.start;
+        const ratio = width > 0 ? (offset - span.start) / width : 0;
+        return span.startTime + (span.endTime - span.startTime) * ratio;
+    }
+    return fallback;
+};
+
+/**
+ * 整行切成**词**（含它们在这一行里的字符区间）。
+ *
+ * `segmentLyricWords` 优先用 `Intl.Segmenter`，**安卓 WebView 上它常常不存在** → 掉到逐字
+ * → 中文就变成一个字一个字（用户原话：只有中文是这样的）。所以切出来是连续单字的地方，
+ * 再拿随包那本词表词典做最长匹配合并一遍 —— 和原生悬浮窗那边（FloatingVocab）同一套策略，
+ * 于是两边看到的词是一致的。
+ */
+const splitWords = (line: Line, full: string): { text: string; start: number; end: number }[] => {
+    const parts = segmentLyricWords(line);
+    const out: { text: string; start: number; end: number }[] = [];
+    let index = 0;
+    while (index < parts.length) {
+        const part = parts[index];
+        if (!CJK_SINGLE.test(part.segment)) {
+            if (part.segment.trim().length > 0) {
+                out.push({ text: part.segment, start: part.index, end: part.index + part.segment.length });
+            }
+            index += 1;
+            continue;
+        }
+        let last = index;
+        while (last + 1 < parts.length && CJK_SINGLE.test(parts[last + 1].segment)) last += 1;
+        const from = part.index;
+        const to = parts[last].index + parts[last].segment.length;
+        segmentWithVocab(full.slice(from, to)).forEach(sub => {
+            if (sub.text.trim().length === 0) return;
+            out.push({ text: sub.text, start: from + sub.start, end: from + sub.end });
+        });
+        index = last + 1;
+    }
+    return out;
+};
+
 /**
  * 一句的词与时间窗。
  *
- * 有逐词时间的音源直接用；整行只给一个时间窗的（不少 lrc）按语义分词，再把这一句的时长按
- * 字数摊开 —— 和磁贴墙同一个切法，所以框里的词与墙上看到的是同一套切分。
+ * ⭐**有逐词时间戳也要重新分词**：中文的 `line.words` 多数是逐字的（一个字一条时间），
+ * 照它原样用就是「一个字一个词」—— 下划线一根一个字、AI 标的高亮色也匹配不上整词
+ * （`wordColors` 里存的是「年少」，切开了就只剩「年」「少」）。
+ * 现在一律按 `splitWords` 的词走，时间从**字符区间**映射到词上：词的起止分别取它首字符
+ * 与末字符所在的那条 word 时间（区间内按字符比例插值）。
+ *
+ * 整行只给一个时间窗的（不少 lrc）没有 words 可映射，就按字数把这一句的时长摊开 ——
+ * 和磁贴墙同一个切法，所以框里的词与墙上看到的是同一套切分。
  */
 const promptWordsFor = (line: Line): PromptWordPlan[] => {
-    const spoken = line.words?.filter(word => word.text.trim().length > 0) ?? [];
-    if (spoken.length > 0) {
-        return spoken.map(word => ({
-            text: word.text,
-            startTime: word.startTime,
-            endTime: word.endTime,
-        }));
+    const full = line.fullText ?? '';
+    const parts = splitWords(line, full).filter(part => part.text.length > 0);
+    if (parts.length === 0) return [];
+
+    const spans = wordCharSpans(line, full);
+    if (spans.length > 0) {
+        const firstStart = spans[0].startTime;
+        const lastEnd = spans[spans.length - 1].endTime;
+        return parts.map(part => {
+            const startTime = timeAt(spans, part.start, firstStart);
+            const endTime = Math.max(startTime, timeAt(spans, part.end, lastEnd));
+            return { text: part.text, startTime, endTime };
+        });
     }
-    /*
-     * 逐词时间戳没有的时候，靠 `segmentLyricWords` 分词。它优先用 `Intl.Segmenter`，
-     * **而安卓 WebView 上它常常不存在**，掉到逐字切分 —— 中文就变成一个字一个字，
-     * 底下那条逐词下划线也就退化成「逐字」（用户原话：只有中文是这样的）。
-     * 所以切出来全是单字的时候，改用随包那本词表词典再切一遍。
-     */
-    let parts = segmentLyricWords(line);
-    const cjkOnly = parts.filter(part => /^[\u4e00-\u9fff\u3040-\u30ff]$/.test(part.segment));
-    if (cjkOnly.length > 0 && cjkOnly.length === parts.filter(part => part.segment.trim().length > 0).length) {
-        parts = segmentWithVocab(line.fullText ?? '').map(part => ({
-            segment: part.text,
-            index: part.start,
-            isWordLike: part.text.trim().length > 0,
-        }));
-    }
-    const segments = parts.filter(segment => segment.segment.trim().length > 0);
-    if (segments.length === 0) return [];
+
     const start = lineStart(line);
     // 摊的是这一句自己的时间窗；渲染提示（renderHints）里的余量留给框的收尾，不该拖慢字。
     const sung = Math.max(Number.isFinite(line.endTime) ? line.endTime : 0, start + 0.5);
-    const total = segments.reduce((sum, segment) => sum + segment.segment.length, 0) || 1;
+    const total = parts.reduce((sum, part) => sum + part.text.length, 0) || 1;
     let cursor = start;
-    return segments.map(segment => {
-        const span = (sung - start) * (segment.segment.length / total);
-        const word = { text: segment.segment, startTime: cursor, endTime: cursor + span };
+    return parts.map(part => {
+        const span = (sung - start) * (part.text.length / total);
+        const word = { text: part.text, startTime: cursor, endTime: cursor + span };
         cursor += span;
         return word;
     });
