@@ -4,7 +4,7 @@ import type { Line } from '@/types';
 
 // test/unit/visualizer/promptProgram.test.ts
 // 「提示词」样式的节目单：一句一个框、顺序按时间、没有逐词时间时怎么摊，以及
-// 「编译是确定性的」（同一首歌重搭框不换面孔 —— 铁栅栏与提示词都靠这个稳定）。
+// 「编译是确定性的」（同一首歌重搭框不换面孔 —— 面板里那串 token id 与采样值都靠这个稳定）。
 
 const wordedLine = (id: string, start: number, end: number, words: string[]): Line => ({
     id,
@@ -75,24 +75,10 @@ describe('compilePromptBoxes', () => {
         ];
         const first = compilePromptBoxes(lines, 'song');
         const second = compilePromptBoxes(lines, 'song');
-        expect(second.map(box => [box.id, box.termSeed, box.withBars]))
-            .toEqual(first.map(box => [box.id, box.termSeed, box.withBars]));
-        // 换个种子就该换一批提示词/栅栏 —— 不然「每个框都不一样」是假的。
+        expect(second.map(box => [box.id, box.termSeed]))
+            .toEqual(first.map(box => [box.id, box.termSeed]));
+        // 换个种子就该换一批提示词/采样值 —— 不然「每个框都不一样」是假的。
         const other = compilePromptBoxes(lines, 'another-song');
         expect(other.map(box => box.termSeed)).not.toEqual(first.map(box => box.termSeed));
-    });
-
-    it('puts the bar grate on a few boxes, never twice in a row', () => {
-        const lines = Array.from({ length: 40 }, (_, index) => (
-            wordedLine(`line-${index}`, index * 4, index * 4 + 3, ['word'])
-        ));
-        const boxes = compilePromptBoxes(lines, 'grate');
-        const flags = boxes.map(box => box.withBars);
-        expect(flags.filter(Boolean).length).toBeGreaterThan(0);
-        // 偶发：远不到一半（以前是 1/2，一首歌里十几句都挂满栅栏）。
-        expect(flags.filter(Boolean).length).toBeLessThanOrEqual(boxes.length / 3);
-        flags.forEach((flag, index) => {
-            if (flag) expect(flags[index - 1]).not.toBe(true);
-        });
     });
 });

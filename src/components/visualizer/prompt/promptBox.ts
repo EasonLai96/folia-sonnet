@@ -1,17 +1,18 @@
 // src/components/visualizer/prompt/promptBox.ts
-// 「提示词输入框」这个对话框本身：墨底框、四角定位刻线、左侧 › 提示符、右侧 ⏎ 键帽、
-// 逐词方括号 + 随机 token id + 卡拉 OK 进度、字后光标、框上那行提示词，以及半随机出现的
-// 铁栅栏（prompt2 那层）。**只认几何与时间**，不认歌词引擎：独立的「提示词」样式
-// （createPromptPixiRuntime）用它搭自己的运行时。
+// 「提示词」那张概率面板：墨底、四角定位刻线、表头 `p( next | context ) … sampled`、
+// 高亮行（▶ + 正在唱的那个 token + 采样条 + 概率）、下面一行 token id 与它的采样值，
+// 面板底缘再挂一条 `› 提示词 · 提示词` 的细带。**只认几何与时间**，不认歌词引擎：
+// 独立的「提示词」样式（createPromptPixiRuntime）用它搭自己的运行时。
 //
 // 商籁里那一种 prompt-field 镜头用的是 sonnet/sonnetPromptField.ts —— 同一套画法，但它直接吃
 // 商籁自己的逐字排版（placements/segments/views），所以没有共用这一份。改画法要两边一起改。
 //
-// 坐标系：局部 (0,0) 是那一行字的中心；框、括号、光标都相对它画。
+// 单位是**画面 px**（运行时不再整层缩放）：字号直接就是屏上的字号，所以这里写的 13 就是 13px。
+// 以前整层按「字号 100 的自然单位」再缩到屏宽，面板里 9px 的 token id 落到屏上只剩 4px，看不清。
 
 type PixiModule = typeof import('pixi.js');
 
-/** pdoom-video 的调色板：墨底、骨白细线、信号橙。 */
+/** pdoom-video 的调色板：墨底、骨白细线、信号橙。主题色由调用方覆盖。 */
 export const PROMPT_PALETTE = {
     ink: '#0A0A0B',
     ink2: '#151517',
@@ -29,342 +30,281 @@ const clamp01 = (value: number) => clamp(value, 0, 1);
 const progressOf = (time: number, start: number, end: number) => (
     end <= start ? (time >= end ? 1 : 0) : clamp01((time - start) / (end - start))
 );
-const easeOutExpo = (value: number) => (value >= 1 ? 1 : 1 - Math.pow(2, -10 * value));
-const easeInCubic = (value: number) => value * value * value;
 
-/** 一个词在行里的位置与它被唱到的时间窗。 */
-export interface PromptBoxToken {
-    /** 相对行首（行最左）的偏移。 */
-    left: number;
-    width: number;
+/** 面板里一行要用的东西：词本身 + 它被唱到的时间窗。 */
+export interface PromptPanelToken {
+    text: string;
     startTime: number;
     endTime: number;
 }
 
-export interface PromptBoxOptions {
-    tokens: readonly PromptBoxToken[];
-    /** 这一行字的总宽（不含左右内边距）。 */
-    rowWidth: number;
-    /** 字高：内边距、键帽、光标高度都按它推。 */
-    rowHeight: number;
-    /** 这一句的时间窗，飞入飞出按它算。 */
-    startTime: number;
+export interface PromptPanelSpec {
+    /** 面板宽度（px）。高度按它推（≈ 0.25 倍宽）。 */
+    width: number;
+    /** 面板中心相对画面中心的纵向偏移（px，负数在上）。 */
+    centerY: number;
+    /** 主题色：高亮行、采样条、三角、光标。 */
+    accent: number;
+    /** 主题的「字」色：token id 与提示词细带用它。 */
+    textColor: number;
+    /** 这一句的种子：token id 与两个采样值都从它推，重搭不换面孔。 */
+    seed: number;
     endTime: number;
-    /** 框上那行提示词（AI 云缓存里随机几首歌的高亮标记）。 */
+    /** 面板底缘那条细带的词（AI 云缓存里随机几首的高亮标记）。 */
     terms: readonly string[];
-    /** UI 缩放：按画面宽度算好的系数。 */
-    uiScale: number;
-    /** 画面尺寸：铁栅栏要铺满整屏。 */
-    width: number;
+    tokens: readonly PromptPanelToken[];
+}
+
+export interface PromptPanelView {
+    root: import('pixi.js').Container;
+    /** 面板总高（px）。 */
     height: number;
-    /** 是否带那层铁栅栏（由调用方随机决定）。 */
-    withBars: boolean;
+    /** 面板中心的纵向偏移（px）：运行时做进场位移时要在它上面加减。 */
+    centerY: number;
+    /** 每帧：行内容与采样条跟着「正在唱的词」走；alpha 由调用方给（进场淡入）。 */
+    update: (time: number, activeWord: number, alpha: number) => void;
 }
 
-export interface PromptBoxFrame {
-    /** 整个 shot / 整个框的位移（场景 px）。 */
-    offsetX: number;
-    offsetY: number;
-    scale: number;
-    rotation: number;
-    alpha: number;
-    /** 这一帧「正在唱」的那个词的序号；-1 表示没有（唱完或还没开口）。 */
-    activeToken: number;
-}
-
-export interface PromptBoxView {
-    /** 框体 + 逐词方括号 + token id + 键帽：垫在字下面。 */
-    behind: import('pixi.js').Container;
-    /** 光标 + 框上提示词 + 铁栅栏：压在字上面。 */
-    front: import('pixi.js').Container;
-    tokens: readonly PromptBoxToken[];
-    update: (time: number) => PromptBoxFrame;
-}
-
-/**
- * 框的外廓尺寸随行宽/字高走的那几个常数。运行时在搭框之前就要知道框有多大（拿它解字号：
- * 框宽必须装进屏宽，所以字号得反过来求），所以这组算式单独提出来，两边共用一份 ——
- * 改内边距不会只改到一边。
- */
-export interface PromptFieldMetrics {
-    keySize: number;
-    padLeft: number;
-    padRight: number;
-    width: number;
-    height: number;
-}
-
-export const promptFieldMetrics = (rowWidth: number, rowHeight: number): PromptFieldMetrics => {
-    const keySize = Math.max(9, rowHeight * 0.4);
-    const padLeft = Math.max(20, rowHeight * 0.62);
-    const padRight = keySize * 2 + Math.max(16, rowHeight * 0.34);
-    return {
-        keySize,
-        padLeft,
-        padRight,
-        width: rowWidth + padLeft + padRight,
-        // 框比那一行字高出近一倍：下面要留出方括号和 token id 的位置（pdoom 里是 60 → 128）。
-        height: rowHeight * 2.05,
-    };
+/** 两个整数摊成好用的伪随机数（token id / 采样值），只求稳定，不求随机质量。 */
+const mix = (seed: number, index: number): number => {
+    let hash = (Math.imul((seed | 0) ^ 0x9e3779b9, 16777619) ^ Math.imul(index + 0x85ebca6b, 2246822519)) >>> 0;
+    hash ^= hash >>> 13;
+    hash = Math.imul(hash, 0x5bd1e995) >>> 0;
+    hash ^= hash >>> 15;
+    return hash >>> 0;
 };
 
-export const buildPromptBox = (
+export const buildPromptPanel = (
     pixi: PixiModule,
-    options: PromptBoxOptions,
-): PromptBoxView => {
+    spec: PromptPanelSpec,
+): PromptPanelView => {
     const { Container, Graphics, Text, TextStyle } = pixi;
-    const { tokens, rowWidth, rowHeight, startTime, endTime, width, height } = options;
-    const u = options.uiScale;
-    const bone = colorNumber(pixi, PROMPT_PALETTE.bone);
-    const ash = colorNumber(pixi, PROMPT_PALETTE.ash);
+    const { width, terms, tokens } = spec;
+    const height = Math.round(width * 0.25);
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+
     const ink = colorNumber(pixi, PROMPT_PALETTE.ink);
-    const ink2 = colorNumber(pixi, PROMPT_PALETTE.ink2);
-    const signal = colorNumber(pixi, PROMPT_PALETTE.signal);
+    const graphite = colorNumber(pixi, PROMPT_PALETTE.graphite);
+    const ash = colorNumber(pixi, PROMPT_PALETTE.ash);
+    const bone = colorNumber(pixi, PROMPT_PALETTE.bone);
+    const accent = spec.accent;
+    const textColor = spec.textColor;
 
-    const behind = new Container();
-    const front = new Container();
+    const root = new Container();
+    root.position.set(0, spec.centerY);
 
-    const rowLeft = tokens.length ? Math.min(...tokens.map(token => token.left)) : -rowWidth / 2;
-    const rowRight = tokens.length ? Math.max(...tokens.map(token => token.left + token.width)) : rowWidth / 2;
-
-    const metrics = promptFieldMetrics(rowRight - rowLeft, rowHeight);
-    const { keySize, padLeft, width: fieldWidth, height: fieldHeight } = metrics;
-    const left = -fieldWidth / 2;
-    const top = -fieldHeight / 2;
-    const keyX = left + fieldWidth - keySize - Math.max(12, rowHeight * 0.26);
-
-    const shape = new Graphics();
-    // 墨底：字后面那一块「刻进画面」的槽。
-    shape.rect(left, top, fieldWidth, fieldHeight).fill({ color: ink, alpha: 0.9 });
-    shape.rect(left, top, fieldWidth, fieldHeight).stroke({ color: bone, width: 1, alpha: 0.42 });
-    // 四角定位刻线
-    const tick = Math.round(12 * u);
-    const cornerStroke = { color: bone, width: 1, alpha: 0.6 };
-    [[left, top, -1, -1], [left + fieldWidth, top, 1, -1], [left, top + fieldHeight, -1, 1], [left + fieldWidth, top + fieldHeight, 1, 1]]
-        .forEach(([x, y, sx, sy]) => {
-            shape.moveTo(x + sx * 5, y).lineTo(x + sx * (5 + tick), y).stroke(cornerStroke);
-            shape.moveTo(x, y + sy * 5).lineTo(x, y + sy * (5 + tick)).stroke(cornerStroke);
-        });
-    // 提示符 ›：两条线，比字体里那个符号稳
-    const promptSize = rowHeight * 0.42;
-    const chevronX = left + padLeft * 0.52;
-    shape.moveTo(chevronX, -promptSize * 0.42).lineTo(chevronX + promptSize * 0.48, 0)
-        .lineTo(chevronX, promptSize * 0.42)
-        .stroke({ color: ash, width: Math.max(1.4, 1.8 * u), alpha: 0.8 });
-    behind.addChild(shape);
-
-    // ⏎ 键帽：最后一个词开唱之前只是暗着的轮廓，之后呼吸，框被抽走时实心闪一下。
-    const keycap = new Graphics();
-    keycap.rect(keyX - keySize, -keySize, keySize * 2, keySize * 2)
-        .stroke({ color: bone, width: Math.max(1, 1.4 * u), alpha: 0.35 });
-    const arrowX = keyX + keySize * 0.42;
-    const arrowY = -keySize * 0.42;
-    const arrowStroke = { color: bone, width: Math.max(1, 1.6 * u), alpha: 0.7 };
-    keycap.moveTo(arrowX, arrowY).lineTo(arrowX, arrowY + keySize * 0.34)
-        .lineTo(arrowX - keySize * 0.78, arrowY + keySize * 0.34)
-        .stroke(arrowStroke);
-    keycap.moveTo(arrowX - keySize * 0.78 + keySize * 0.3, arrowY + keySize * 0.34 - keySize * 0.28)
-        .lineTo(arrowX - keySize * 0.78, arrowY + keySize * 0.34)
-        .lineTo(arrowX - keySize * 0.78 + keySize * 0.3, arrowY + keySize * 0.34 + keySize * 0.28)
-        .stroke(arrowStroke);
-    behind.addChild(keycap);
-    const keyFlash = new Graphics()
-        .rect(keyX - keySize, -keySize, keySize * 2, keySize * 2)
-        .fill({ color: signal, alpha: 1 });
-    keyFlash.alpha = 0;
-    behind.addChild(keyFlash);
-
-    // 逐词方括号 + 随机 token id + 卡拉 OK 进度：括号压在字下面，进度条沿括号走。
-    const bracketY = rowHeight * 0.66;
-    const hair = Math.max(1, 1.1 * u);
-    const idFontSize = Math.max(8, Math.round(9 * u));
-    const brackets: import('pixi.js').Graphics[] = [];
-    const bracketNodes: import('pixi.js').Container[] = [];
-    const idTexts: import('pixi.js').Text[] = [];
-    const progressBars: import('pixi.js').Graphics[] = [];
-    tokens.forEach(token => {
-        const bracket = new Graphics()
-            .rect(token.left, bracketY, token.width, hair).fill({ color: bone, alpha: 0.4 })
-            .rect(token.left, bracketY - 5 * u, hair, 5 * u).fill({ color: bone, alpha: 0.4 })
-            .rect(token.left + token.width - hair, bracketY - 5 * u, hair, 5 * u).fill({ color: bone, alpha: 0.4 });
-        bracket.alpha = 0;
-        const bracketNode = new Container();
-        bracketNode.addChild(bracket);
-
-        // pdoom 里每个 token 底下那串数字是「词表里的位置」，这里直接随机。
-        const idText = new Text({
-            text: String(Math.floor(1000 + Math.random() * 98000)),
-            style: new TextStyle({ fontFamily: PROMPT_MONO_STACK, fontSize: idFontSize, fill: PROMPT_PALETTE.ash }),
-        });
-        idText.position.set(token.left + 1, bracketY + 4 * u);
-        idText.alpha = 0;
-
-        const bar = new Graphics()
-            .rect(0, 0, 1, Math.max(2, 2.6 * u))
-            .fill({ color: signal, alpha: 1 });
-        bar.position.set(token.left, bracketY - 1);
-        bar.scale.x = 0.001;
-        bar.alpha = 0;
-
-        brackets.push(bracket);
-        bracketNodes.push(bracketNode);
-        idTexts.push(idText);
-        progressBars.push(bar);
-        behind.addChild(bracketNode, idText, bar);
-    });
-
-    // ---- 框上那行「提示词」
-    const promptFontSize = Math.max(9, Math.round(11 * u));
-    const promptLine = new Text({
-        text: '›',
-        style: new TextStyle({
-            fontFamily: PROMPT_MONO_STACK,
-            fontWeight: '500',
-            fontSize: promptFontSize,
-            fill: PROMPT_PALETTE.bone,
-            letterSpacing: 1.2,
-        }),
-    });
-    const metricsApi = (pixi as unknown as { CanvasTextMetrics?: { measureText: (text: string, style: unknown) => { width: number } } }).CanvasTextMetrics;
-    const measurePrompt = (text: string): number => {
-        try {
-            return metricsApi?.measureText(text, promptLine.style).width ?? text.length * promptFontSize * 0.62;
-        } catch {
-            return text.length * promptFontSize * 0.62;
-        }
-    };
-    const promptPrefix = '› ';
-    const promptLimit = fieldWidth * 0.92;
-    let promptText = promptPrefix;
-    options.terms.forEach(term => {
-        const next = promptText === promptPrefix ? `${promptPrefix}${term}` : `${promptText}  ·  ${term}`;
-        if (measurePrompt(next) > promptLimit) return;
-        promptText = next;
-    });
-    promptLine.text = promptText;
-    promptLine.anchor.set(0, 1);
-    promptLine.position.set(left + Math.max(4, 6 * u), top - Math.max(6, 8 * u));
-    promptLine.alpha = 0;
-    front.addChild(promptLine);
-
-    // 提示词末尾那个方块光标：和输入框里的光标一个节奏地闪。
-    const promptCaret = new Graphics()
-        .rect(0, 0, promptFontSize * 0.5, promptFontSize * 1.05)
-        .fill({ color: signal, alpha: 1 });
-    promptCaret.position.set(
-        promptLine.position.x + promptLine.width + promptFontSize * 0.36,
-        promptLine.position.y - promptFontSize * 1.05,
-    );
-    promptCaret.alpha = 0;
-    front.addChild(promptCaret);
-
-    // ---- 输入框里的光标
-    const caret = new Graphics()
-        .rect(0, 0, Math.max(2, 2.6 * u), rowHeight * 0.68)
-        .fill({ color: signal, alpha: 1 });
-    caret.y = -rowHeight * 0.36;
-    caret.alpha = 0;
-    front.addChild(caret);
+    const padX = Math.round(width * 0.035);
+    const headerH = Math.round(height * 0.27);
+    const row1H = Math.round(height * 0.43);
+    const row2H = height - headerH - row1H;
+    const innerLeft = -halfWidth + padX;
+    const innerRight = halfWidth - padX;
+    const headerY = -halfHeight + headerH * 0.58;
+    const row1Y = -halfHeight + headerH + row1H / 2;
+    const row2Y = -halfHeight + headerH + row1H + row2H / 2;
 
     /*
-     * prompt2 那层铁栅栏：一排前景竖栅栏，间距一路收窄（像一节拍逼近一格），
-     * 收尾时每根柱子横向撑开，把最后一道缝也合死。
+     * ---- 底板：一张圆角浮窗，墨底 + 一圈很淡的细线。
+     * 精简样式：四角定位刻线、键帽、方括号那些「终端感」的装饰全部不要，只留表头 + 两行数。
      */
-    let barsLayer: import('pixi.js').Container | null = null;
-    const grateBars: import('pixi.js').Graphics[] = [];
-    const barWidth = width * 0.0105;
-    if (options.withBars) {
-        const coverHeight = Math.hypot(width, height) * 1.15;
-        barsLayer = new Container();
-        const barCount = Math.ceil((width * 1.5) / (width * 0.075)) + 8;
-        for (let index = 0; index < barCount; index += 1) {
-            const bar = new Graphics();
-            // 铸铁柱：暗身子 + 左缘高光 + 右侧一道反光。
-            bar.rect(-barWidth / 2, -coverHeight / 2, barWidth, coverHeight)
-                .fill({ color: ink2, alpha: 0.94 });
-            bar.rect(-barWidth / 2, -coverHeight / 2, barWidth * 0.22, coverHeight)
-                .fill({ color: bone, alpha: 0.1 });
-            bar.rect(barWidth * 0.14, -coverHeight / 2, Math.max(1, barWidth * 0.09), coverHeight)
-                .fill({ color: bone, alpha: 0.2 });
-            bar.visible = false;
-            grateBars.push(bar);
-            barsLayer.addChild(bar);
+    const plate = new Graphics();
+    const radius = Math.max(10, Math.round(height * 0.1));
+    plate.roundRect(-halfWidth, -halfHeight, width, height, radius).fill({ color: ink, alpha: 0.9 });
+    plate.roundRect(-halfWidth, -halfHeight, width, height, radius).stroke({ color: bone, width: 1, alpha: 0.26 });
+    // 高亮行：整条贯穿到左右边缘，像表格里被选中的那一行。
+    plate.rect(-halfWidth, row1Y - row1H / 2, width, row1H).fill({ color: accent, alpha: 0.14 });
+    plate.rect(-halfWidth, row1Y - row1H / 2, width, 1).fill({ color: accent, alpha: 0.5 });
+    plate.rect(-halfWidth, row1Y + row1H / 2 - 1, width, 1).fill({ color: accent, alpha: 0.3 });
+    root.addChild(plate);
+
+    const headerFont = Math.max(10, Math.round(headerH * 0.4));
+    const tokenFont = Math.max(14, Math.round(row1H * 0.46));
+    const idFont = Math.max(11, Math.round(row2H * 0.4));
+
+    // ---- 表头：左 p( next | context )，右 sampled
+    const headerStyle = new TextStyle({
+        fontFamily: PROMPT_MONO_STACK,
+        fontSize: headerFont,
+        fill: PROMPT_PALETTE.ash,
+        letterSpacing: 0.6,
+    });
+    const headerLeft = new Text({ text: 'p( next | context )', style: headerStyle });
+    headerLeft.anchor.set(0, 0.5);
+    headerLeft.position.set(innerLeft, headerY);
+    const headerRight = new Text({ text: 'sampled', style: headerStyle });
+    headerRight.anchor.set(1, 0.5);
+    headerRight.position.set(innerRight, headerY);
+    root.addChild(headerLeft, headerRight);
+
+    // ---- 高亮行：▶ + token + 采样条 + 概率
+    const tri = new Graphics()
+        .poly([0, 0, 0, row1H * 0.2, row1H * 0.17, row1H * 0.1])
+        .fill({ color: accent, alpha: 1 });
+    tri.position.set(innerLeft, row1Y);
+    root.addChild(tri);
+
+    const tokenText = new Text({
+        text: '',
+        style: new TextStyle({
+            fontFamily: PROMPT_MONO_STACK,
+            fontWeight: '600',
+            fontSize: tokenFont,
+            fill: '#ffffff',
+        }),
+    });
+    tokenText.anchor.set(0, 0.5);
+    tokenText.position.set(innerLeft + row1H * 0.26, row1Y);
+    root.addChild(tokenText);
+
+    const probText = new Text({
+        text: '',
+        style: new TextStyle({
+            fontFamily: PROMPT_MONO_STACK,
+            fontWeight: '600',
+            fontSize: tokenFont * 0.92,
+            fill: '#ffffff',
+        }),
+    });
+    probText.anchor.set(1, 0.5);
+    probText.position.set(innerRight, row1Y);
+    root.addChild(probText);
+
+    // 采样条：一条暗底 + 一条按进度长的亮条（左端跟着 token 的字宽走，右端顶到概率前面）
+    const barTrack = new Graphics()
+        .rect(0, -row1H * 0.055, 1, row1H * 0.11)
+        .fill({ color: graphite, alpha: 0.5 });
+    const barFill = new Graphics()
+        .rect(0, -row1H * 0.08, 1, row1H * 0.16)
+        .fill({ color: accent, alpha: 1 });
+    barTrack.pivot.set(0, 0);
+    barFill.pivot.set(0, 0);
+    root.addChild(barTrack, barFill);
+
+    // ---- 第二行：token id …… 采样值
+    const idText = new Text({
+        text: '',
+        style: new TextStyle({ fontFamily: PROMPT_MONO_STACK, fontSize: idFont, fill: '#ffffff' }),
+    });
+    idText.anchor.set(0, 0.5);
+    idText.position.set(innerLeft, row2Y);
+    root.addChild(idText);
+
+    const pipe = new Graphics()
+        .rect(0, -row2H * 0.24, Math.max(1, Math.round(row2H * 0.03)), row2H * 0.48)
+        .fill({ color: graphite, alpha: 0.9 });
+    pipe.position.set(innerLeft + width * 0.2, row2Y);
+    root.addChild(pipe);
+
+    const prob2Text = new Text({
+        text: '',
+        style: new TextStyle({ fontFamily: PROMPT_MONO_STACK, fontSize: idFont * 0.92, fill: '#ffffff' }),
+    });
+    prob2Text.anchor.set(1, 0.5);
+    prob2Text.position.set(innerRight, row2Y);
+    root.addChild(prob2Text);
+
+    // ---- 面板底缘那条细带：`› 词 · 词 · 词`（AI 云缓存里随机几首的高亮标记）
+    const stripFont = Math.max(9, Math.round(idFont * 0.82));
+    const strip = new Text({
+        text: '',
+        style: new TextStyle({
+            fontFamily: PROMPT_MONO_STACK,
+            fontSize: stripFont,
+            fill: '#ffffff',
+            letterSpacing: 0.8,
+        }),
+    });
+    strip.anchor.set(0, 0);
+    strip.position.set(innerLeft, halfHeight + Math.max(6, stripFont * 0.7));
+    strip.alpha = 0.62;
+    // 面板是墨底、背景不一定暗：细带本身要能读，所以按主题字色给。
+    strip.tint = textColor;
+    root.addChild(strip);
+
+    const metricsApi = (pixi as unknown as {
+        CanvasTextMetrics?: { measureText: (text: string, style: unknown) => { width: number } };
+    }).CanvasTextMetrics;
+    const measure = (text: string, style: TextStyle, fallback: number): number => {
+        try {
+            const value = metricsApi?.measureText(text, style).width;
+            return Number.isFinite(value) && (value as number) > 0 ? (value as number) : text.length * fallback;
+        } catch {
+            return text.length * fallback;
         }
-        front.addChild(barsLayer);
-    }
+    };
+    const stripLimit = width * 0.94;
+    let stripText = '›';
+    terms.forEach(term => {
+        const next = stripText === '›' ? `› ${term}` : `${stripText}  ·  ${term}`;
+        if (measure(next, strip.style, stripFont * 0.62) > stripLimit) return;
+        stripText = next;
+    });
+    strip.text = stripText;
 
-    const lastStart = tokens.length ? tokens[tokens.length - 1].startTime : startTime;
-    const enterDuration = clamp((endTime - startTime) * 0.2, 0.26, 0.5);
-    const exitDuration = clamp((endTime - startTime) * 0.2, 0.24, 0.42);
-    const exitStart = endTime - exitDuration;
+    // 每个词自己的 id 与两个采样值：按种子算好，同一个词永远同一组数。
+    const stats = tokens.map((token, index) => {
+        const idHash = mix(spec.seed, index);
+        const valueHash = mix(spec.seed ^ 0x5f356495, index);
+        return {
+            id: `T-${100 + (idHash % 8900)}`,
+            sampled: 0.9 + (valueHash % 100) / 1000,
+            raw: 0.001 + (idHash % 90) / 1000,
+        };
+    });
 
-    const update = (time: number): PromptBoxFrame => {
-        // 飞入：从下方压上来，边飞边摊平；飞出：最后往左上抽走，和下一个框的入场接得上。
-        const enter = easeOutExpo(progressOf(time, startTime, startTime + enterDuration));
-        const exit = easeInCubic(progressOf(time, exitStart, endTime));
-        const offsetY = (1 - enter) * rowHeight * 1.9 - exit * rowHeight * 2.6;
-        const offsetX = (1 - enter) * -fieldWidth * 0.06 - exit * fieldWidth * 0.05;
-        const scale = (0.9 + 0.1 * enter) * (1 - 0.08 * exit);
-        const rotation = (1 - enter) * -0.05 + exit * 0.05;
-        const fadeIn = clamp01(progressOf(time, startTime, startTime + enterDuration * 0.7));
-        const alpha = fadeIn * (1 - clamp01(progressOf(time, exitStart + exitDuration * 0.32, endTime)));
+    let shownWord = -2;
+    /** 采样条这一帧要走多长（跟着 token 字宽变，所以每次换词重算一次）。 */
+    let barSpan = 0;
+    const update = (time: number, activeWord: number, alpha: number) => {
+        const index = activeWord >= 0 && activeWord < tokens.length ? activeWord : -1;
+        const token = index >= 0 ? tokens[index] : null;
+        const stat = index >= 0 ? stats[index] : null;
 
-        promptLine.alpha = 0.62 * fadeIn * (1 - exit);
-        promptCaret.alpha = promptLine.alpha * (Math.floor(time * 1.6) % 2 === 0 ? 1 : 0.15);
-
-        // 光标位置 = 已落下的词里最靠右的那个；正在唱的那个词，光标在词里按进度走。
-        let caretX = rowLeft;
-        let landed = 0;
-        let lastLandedStart = -Infinity;
-        let activeToken = -1;
-        tokens.forEach((token, index) => {
-            if (token.startTime > time) return;
-            const typed = progressOf(time, token.startTime, token.endTime);
-            caretX = token.left + token.width * typed;
-            landed += 1;
-            lastLandedStart = Math.max(lastLandedStart, token.startTime);
-            if (time <= token.endTime + 0.08) activeToken = index;
-
-            const age = time - token.startTime;
-            const flash = age < 0.18 ? 1 - age / 0.18 : 0;
-            const decorAlpha = (0.55 + 0.45 * flash)
-                * (1 - 0.35 * progressOf(time, token.endTime, token.endTime + 1.6));
-            brackets[index].tint = flash > 0.25 ? signal : 0xffffff;
-            bracketNodes[index].alpha = decorAlpha;
-            idTexts[index].alpha = decorAlpha * 0.8;
-            progressBars[index].scale.x = Math.max(0.001, token.width * typed);
-            progressBars[index].alpha = (1 - 0.7 * progressOf(time, token.endTime, token.endTime + 1.2)) * fadeIn;
-        });
-
-        // 句尾之后光标停一会儿再熄灭，别跟着最后一个词一起瞬间消失。
-        const caretOn = landed === 0 || time - lastLandedStart < 0.5 || Math.floor(time * 1.6) % 2 === 1;
-        caret.x = caretX + Math.max(2, 2 * u);
-        caret.alpha = fadeIn * (1 - exit) * (caretOn ? 1 : 0.12);
-
-        // ⏎ 键帽：最后一个词开唱后亮起，框被抽走时按下。
-        const armed = time >= lastStart + 0.1 ? 1 : 0;
-        keycap.alpha = (0.45 + 0.55 * armed * (0.6 + 0.4 * Math.cos(time * Math.PI * 4))) * fadeIn;
-        keyFlash.alpha = exit > 0 ? easeInCubic(progressOf(time, exitStart, exitStart + exitDuration * 0.5)) : 0;
-
-        // 铁栅栏：越唱越挤，收尾时柱子横向撑开把缝隙合死。
-        if (barsLayer) {
-            const closeT = Math.pow(clamp01(progressOf(time, startTime + enterDuration * 0.6, endTime)), 0.85);
-            const span = width * (0.30 - 0.215 * closeT);
-            const shut = easeInCubic(progressOf(time, exitStart, exitStart + exitDuration * 0.55));
-            const widen = shut * Math.max(0, (span / barWidth) * 1.02 - 1);
-            const half = (grateBars.length - 1) / 2;
-            grateBars.forEach((bar, index) => {
-                const x = (index - half) * span;
-                bar.x = x;
-                bar.visible = Math.abs(x) < width * 0.75;
-                bar.scale.x = 1 + widen;
-            });
-            const openIn = clamp01(progressOf(time, startTime, startTime + enterDuration));
-            barsLayer.alpha = (0.32 + 0.68 * openIn) * (1 - exit * 0.25);
+        if (index !== shownWord) {
+            shownWord = index;
+            tokenText.text = token?.text ?? '';
+            probText.text = stat ? stat.sampled.toFixed(2) : '–.––';
+            idText.text = stat?.id ?? 'T-000';
+            idText.tint = textColor;
+            prob2Text.text = stat ? stat.raw.toFixed(3) : '0.000';
+            prob2Text.tint = ash;
+            /*
+             * 采样条起点跟着 token 字宽走：不同长度的词，条子都紧跟在字后面。
+             * 宽度用 CanvasTextMetrics 现量，不读 `node.width` —— v8 里 Text 的纹理会
+             * 延到渲染管道里才更新，刚换完 text 读 width 可能还是上一个词的。
+             */
+            const wordWidth = measure(token?.text ?? '', tokenText.style, tokenFont * 0.6);
+            const probWidth = measure(stat ? stat.sampled.toFixed(2) : '', probText.style, tokenFont * 0.6);
+            const barLeft = innerLeft + row1H * 0.26 + wordWidth + row1H * 0.24;
+            const barRight = innerRight - probWidth - row1H * 0.28;
+            barSpan = Math.max(8, barRight - barLeft);
+            barTrack.position.set(barLeft, row1Y);
+            barTrack.scale.x = barSpan;
+            barFill.position.set(barLeft, row1Y);
+            barFill.visible = barRight > barLeft;
         }
 
-        return { offsetX, offsetY, scale, rotation, alpha, activeToken };
+        // 采样条按「这个词唱到几成」长：唱过就留满。
+        const progress = token ? progressOf(time, token.startTime, token.endTime) : 0;
+        barFill.scale.x = Math.max(0.001, barSpan * progress);
+
+        // 唱到就亮、唱过就暗下去；闪烁交给采样条与三角。
+        const sung = token ? clamp01((time - token.startTime) / 0.16) : 0;
+        tri.alpha = (0.55 + 0.45 * (1 - sung)) * alpha;
+        tokenText.alpha = alpha;
+        probText.alpha = alpha;
+        idText.alpha = alpha * 0.92;
+        prob2Text.alpha = alpha * 0.85;
+        pipe.alpha = alpha * 0.8;
+        barTrack.alpha = alpha * 0.9;
+        barFill.alpha = alpha;
+        headerLeft.alpha = alpha * 0.8;
+        headerRight.alpha = alpha * 0.8;
+        strip.alpha = alpha * 0.62;
+        // 三角与概率随词变动闪一下，像面板在重新采样。
+        tri.scale.set(1 + 0.18 * (1 - sung), 1 + 0.18 * (1 - sung));
     };
 
-    return { behind, front, tokens, update };
+    return { root, height, centerY: spec.centerY, update };
 };

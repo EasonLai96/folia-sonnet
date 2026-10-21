@@ -56,6 +56,9 @@ const unique = (values: string[]): string[] => {
 /**
  * 去云端抓一把别的歌的高亮词。失败、未开启、离线一律静默 —— 这只是装饰。
  * 同一个 TTL 内只抓一次；正在抓的时候重入直接复用那一次。
+ *
+ * **歌名本身也算词**：缓存里那屏本来就是一串歌名，光把它们拆开就够铺满一条提示词带了，
+ * 不必指望每首都存过主题（很多首没有 wordColors）。所以先拿歌名，再去取几首的主题补一补。
  */
 export const refreshPromptTerms = async (): Promise<void> => {
     if (inflight) return inflight;
@@ -64,17 +67,22 @@ export const refreshPromptTerms = async (): Promise<void> => {
         try {
             const page = await listAiCloudCacheSongs({ limit: 24 });
             const keys = page.songs.map(song => song.key).filter(Boolean);
-            if (keys.length === 0) return;
-            // 「随机一首」：起点随机，然后顺序取，尽量取到不同的歌。
-            const start = Math.floor(Math.random() * keys.length);
+            const titles = page.songs
+                // 歌名常写成「歌名 - 歌手」「歌名 / 另一个名字」，拆开才像词。
+                .flatMap(song => String(song.songTitle ?? '').split(/[-–—·、/|]/))
+                .map(title => title.trim())
+                .filter(title => title.length > 0 && title.length <= MAX_TERM_LENGTH);
             const picked: string[] = [];
-            for (let index = 0; index < keys.length && picked.length < SAMPLE_SONGS; index += 1) {
-                const key = keys[(start + index) % keys.length];
-                if (!picked.includes(key)) picked.push(key);
+            if (keys.length > 0) {
+                // 「随机几首」：起点随机，然后顺序取，尽量取到不同的歌。
+                const start = Math.floor(Math.random() * keys.length);
+                for (let index = 0; index < keys.length && picked.length < SAMPLE_SONGS; index += 1) {
+                    const key = keys[(start + index) % keys.length];
+                    if (!picked.includes(key)) picked.push(key);
+                }
             }
             const entries = await Promise.all(picked.map(key => fetchEntry('theme', key).catch(() => null)));
-            const words = unique(entries.flatMap(entry => collectWords(entry)))
-                .filter(word => word.length <= MAX_TERM_LENGTH);
+            const words = unique([...titles, ...entries.flatMap(entry => collectWords(entry))]);
             if (words.length === 0) return;
             pool = words.slice(0, MAX_POOL);
             lastFetchAt = Date.now();
@@ -88,9 +96,9 @@ export const refreshPromptTerms = async (): Promise<void> => {
 };
 
 /**
- * 同步取一行提示词。`own` 是本首主题自己的高亮词（排在前面，至少这一首是准的）。
- * 种子决定取哪几个，所以同一句每次重绘都取到同一行（seek 安全），换一句就换一批 ——
- * 也就是每个新飞进来的框，提示词都不一样。
+ * 同步取一行提示词。**云端那批排在前面**：这条带子要的是「别的歌里冒出来的词」，
+ * 本首自己的高亮词只用来补位（云端没开 / 没网 / 还没抓回来）。
+ * 种子决定取哪几个，所以同一句每次重绘都取到同一行（seek 安全），换一句就换一批。
  */
 export const samplePromptTerms = (
     own: readonly string[],
@@ -100,7 +108,7 @@ export const samplePromptTerms = (
     const local = own
         .map(word => String(word ?? '').trim())
         .filter(word => word.length > 0 && word.length <= MAX_TERM_LENGTH);
-    const source = unique([...local, ...pool]);
+    const source = unique([...pool, ...local]);
     const base = source.length > 0 ? source : FALLBACK_TERMS;
     if (base.length <= count) return base;
     const start = Math.abs(Math.trunc(seed)) % base.length;

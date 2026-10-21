@@ -7,7 +7,7 @@ import { segmentLyricWords } from '../../../utils/lyrics/wordSegmentation';
 // 也能单独测（「一句一框」「顺序按时间」「时长倒挂的歌词」「没有逐词时间那一档」）。
 //
 // 这里**不许出现 Math.random()**：运行时随时重绘、换尺寸会重搭框，随机只能在编译这一次发生，
-// 否则同一个框每次重搭都换一副面孔（铁栅栏忽有忽无、提示词每次都不一样）。
+// 否则同一个框每次重搭都换一副面孔（面板里的 token id 与采样值每次都不一样）。
 
 /** 一个词在框里的内容与它被唱到的时间窗。 */
 export interface PromptWordPlan {
@@ -24,8 +24,6 @@ export interface PromptBoxPlan {
     words: PromptWordPlan[];
     /** 决定这一句取哪几个提示词。同一句每次重搭都取到同一行（seek 安全）。 */
     termSeed: number;
-    /** 是否带 prompt2 那层铁栅栏：按种子半随机。 */
-    withBars: boolean;
 }
 
 /** FNV-1a：只用来把种子摊成一个稳定的数，不是密码学用途。 */
@@ -37,12 +35,6 @@ const hashString = (value: string): number => {
     }
     return hash >>> 0;
 };
-
-/**
- * 铁栅栏出现的概率。prompt2 里那层是「偶尔来一下」的东西，不是每隔一句就落一次 ——
- * 之前按 1/2 随机，一首三十句的歌里十几句都挂满竖栅栏，看着像坏掉了。
- */
-const BARS_CHANCE = 0.2;
 
 const lineStart = (line: Line) => (Number.isFinite(line.startTime) ? line.startTime : 0);
 
@@ -88,8 +80,6 @@ export const compilePromptBoxes = (
     seed: string | number,
 ): PromptBoxPlan[] => {
     const plans: PromptBoxPlan[] = [];
-    // 连着两句都挂栅栏更扎眼，所以上一句有、这一句就一定没有。
-    let previousWithBars = false;
     lines.forEach((line, index) => {
         const words = promptWordsFor(line);
         if (words.length === 0) return;
@@ -99,16 +89,12 @@ export const compilePromptBoxes = (
             words[words.length - 1].endTime,
             start + 0.6,
         );
-        const roll = (hashString(`${seed}:bars:${start.toFixed(2)}`) % 1000) / 1000;
-        const withBars = !previousWithBars && roll < BARS_CHANCE;
-        previousWithBars = withBars;
         plans.push({
             id: line.id ?? `prompt-line-${index}-${start.toFixed(2)}`,
             startTime: start,
             endTime: end,
             words,
             termSeed: hashString(`${seed}:terms:${start.toFixed(2)}`),
-            withBars,
         });
     });
     // 歌词一般是顺序的，但「时间倒挂」的歌词集存在：框的顺序按时间走才追得对。
