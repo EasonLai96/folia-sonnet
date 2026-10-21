@@ -1,14 +1,17 @@
 // android/qishui-bridge/build.mjs
 //
-// 把汽水协议层打包成签名宿主页面能跑的产物，并装配进
+// 把汽水协议层（车机协议版）打包成签名宿主页面能跑的产物，并装配进
 // android/app/src/main/assets/qishui/：
 //
-//   protocol.js    entry.js（协议层 + 裁剪版签名层 + Node shims）的 esbuild 产物
-//   folia-xhr.js   假 XHR + 原生 http 桥（源文件直拷，无打包需求）
-//   bootstrap.html security_host.html 改造版：最前插 folia-xhr.js、最后插 protocol.js
-//   react/react-dom/sdk-glue/bdms.js   上游 qishui-auth-v6 的原版脚本
+//   protocol.js    entry.js（车机协议 + WebCrypto 签名）的 esbuild 产物
+//   folia-xhr.js   原生 http 桥（源文件直拷，无打包需求）
+//   bootstrap.html 签名宿主页面：只剩上面两个脚本
 //
-// 产物需要提交进仓库（安卓构建不跑 node），改了 src/ 或上游脚本后要重跑：
+// 旧版从 electron/qishui/qishui-auth-v6/security_host.html 生成页面并携带
+// sdk-glue / bdms / react —— 那一套是给 passport a_bogus 签名用的，车机协议
+// （/api/luna/v1/platform + bd-ticket-guard WebCrypto）不再需要，整体移除。
+//
+// 产物需要提交进仓库（安卓构建不跑 node），改了 src/ 后要重跑：
 //   node android/qishui-bridge/build.mjs
 
 import { execSync } from 'node:child_process';
@@ -19,20 +22,6 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
 const assetsDir = join(repoRoot, 'android', 'app', 'src', 'main', 'assets', 'qishui');
-const upstreamDir = join(repoRoot, 'electron', 'qishui', 'qishui-auth-v6');
-const upstreamQrLogin = join(repoRoot, 'electron', 'qishui', 'qishui-qr-login.js');
-const generatedQrLogin = join(here, 'src', 'generated', 'qishui-qr-login.cjs');
-
-// 桌面端签名层用 bdms.node 做加速，服务端校验的关键是 bdms.js 固定在 1.0.0.41。
-// 上游用 session hook 把官方 CDN 的 bdms.js 重定向到本地这份；安卓在
-// QishuiSignHost.shouldInterceptRequest 里对同一个 URL 直接回本地资产。
-const OFFICIAL_BDMS_URL =
-    'https://lf-headquarters-speed.yhgfb-cn-static.com/obj/rc-client-security/web/stable/1.0.0.41/bdms.js';
-
-// 协议层在加载期读取的环境变量（桌面端由 qishuiApiBridge.cjs 写进 process.env）
-// 定义在 src/shims/globals.js 的 __foliaProcessEnv：esbuild 的 --define 指向这个
-// inject 符号，避开 Windows cmd 对 --define JSON 字面量的引号处理。
-// 路径只是 localStorage 键的一部分，见 shims/fs.js。
 
 function esbuild(args) {
     // npx 只在首次需要下载，之后走本地缓存；不往 package.json 里加 devDependency。
@@ -61,45 +50,25 @@ function copy(src, dest) {
 }
 
 function buildBootstrap() {
-    const source = readFileSync(join(upstreamDir, 'security_host.html'), 'utf8');
-    // folia-xhr.js 必须排在所有脚本之前：msToken 预置要先于 bdms 初始化，
-    // 全局 XMLHttpRequest 替换要先于 sdk-glue 的原型 hook。
-    const xhrTag = '    <script src="folia-xhr.js"></script>\n';
-    const firstScript = source.indexOf('    <script>');
-    if (firstScript < 0) throw new Error('security_host.html 的第一个内联脚本没找到');
-    let html = source.slice(0, firstScript) + xhrTag + source.slice(firstScript);
-    // protocol.js 排最后：页面 API（__qishuiRequest 等）与 sdk-glue 都已就绪。
-    const headClose = html.indexOf('  </head>');
-    if (headClose < 0) throw new Error('security_host.html 缺少 </head>');
-    html = html.slice(0, headClose)
-        + '    <script src="protocol.js"></script>\n'
-        + html.slice(headClose);
-    // 与上游的差异点留在注释里，方便日后同步。
-    html = html.replace(
-        '<meta name="viewport" content="width=device-width,initial-scale=1">',
-        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        + '    <!-- Folia Android：由 android/qishui-bridge/build.mjs 从 security_host.html 生成，\n'
-        + '         差异仅在首尾各插一个 script（folia-xhr.js / protocol.js）。改上游时重新构建。 -->',
-    );
-    return html;
+    // 极简宿主页：挂在假源 https://www.qishui.com/__folia/bootstrap.html 下加载
+    // （QishuiSignHost.shouldInterceptRequest 按这个路径回本文件），协议层需要的
+    // 全局只有 FoliaQishuiHost（原生注入）与 __foliaHttpTransport（folia-xhr.js）。
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Folia Qishui Car Protocol</title>
+<!-- Folia Android：由 android/qishui-bridge/build.mjs 生成。
+     车机协议版：不再加载 sdk-glue / bdms / react（那是旧 passport a_bogus
+     签名的依赖），只保留原生 http 桥与协议层两个脚本。改 src/ 后重新构建。 -->
+<script src="folia-xhr.js"></script>
+<script src="protocol.js"></script>
+</head>
+<body></body>
+</html>
+`;
 }
-
-function buildGeneratedQrLogin() {
-    // esbuild 的 alias 不接受相对路径，而 qishui-qr-login.js 里恰有一行
-    // require('./qishui-auth-v6') 要改指向裁剪版。构建时生成一个 vendored
-    // 副本（.cjs：根 package.json 是 type: module，.js 会被当成 ESM），
-    // 其余内容一字不动；源文件结构变了就让构建失败（人工核对）。
-    // 注意 require 的相对路径基准是 generated/ 所在目录。
-    const source = readFileSync(upstreamQrLogin, 'utf8');
-    const needle = "require('./qishui-auth-v6')";
-    if (!source.includes(needle)) {
-        throw new Error('qishui-qr-login.js 不再包含 ' + needle + '，请人工核对后更新 build.mjs');
-    }
-    mkdirSync(dirname(generatedQrLogin), { recursive: true });
-    writeFileSync(generatedQrLogin, source.split(needle).join("require('../qishui-auth-android.js')"));
-}
-
-buildGeneratedQrLogin();
 
 rmSync(assetsDir, { recursive: true, force: true });
 mkdirSync(assetsDir, { recursive: true });
@@ -113,31 +82,16 @@ esbuild([
     '--charset=utf8',
     '--legal-comments=none',
     '--outfile=' + join(assetsDir, 'protocol.js'),
-    '--inject:' + join(here, 'src', 'shims', 'globals.js'),
-    '--define:process.env=__foliaProcessEnv',
-    // Node 内建变量在浏览器里没有：协议层用它们拼配置文件路径（见 globals.js 注释）。
-    // 走注入的标识符而不是字符串字面量，避开 Windows cmd 对引号的处理。
-    '--define:__dirname=__foliaDirname',
-    '--define:__filename=__foliaFilename',
-    '--alias:fs=./src/shims/fs.js',
-    '--alias:os=./src/shims/os.js',
-    '--alias:path=./src/shims/path.js',
-    '--alias:crypto=./src/shims/crypto.js',
-    '--alias:http=./src/shims/http.js',
-    '--alias:https=./src/shims/https.js',
-    '--alias:electron=./src/shims/electron.js',
 ]);
 
 copy(join(here, 'src', 'folia-xhr.js'), join(assetsDir, 'folia-xhr.js'));
-for (const name of ['react.js', 'react-dom.js', 'sdk-glue.js', 'bdms.js']) {
-    copy(join(upstreamDir, name), join(assetsDir, name));
-}
 writeFileSync(join(assetsDir, 'bootstrap.html'), buildBootstrap());
 
-// 把官方 bdms URL 写进一个清单，QishuiSignHost 读它做重定向（见 Java 侧注释）。
+// 旧版清单里的 officialBdmsUrl 只服务 bdms.js 重定向；车机协议不加载 bdms，
+// 保留 manifest 但去掉该字段，QishuiSignHost 里对它的引用已经不存在了。
 writeFileSync(join(assetsDir, 'manifest.json'), JSON.stringify({
-    officialBdmsUrl: OFFICIAL_BDMS_URL,
-    version: 1,
+    protocol: 'luna-car',
+    version: 2,
 }, null, 2));
 
 const produced = readdirSync(assetsDir);

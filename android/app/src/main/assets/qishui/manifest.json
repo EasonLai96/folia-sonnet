@@ -1,4 +1,4 @@
 {
-  "officialBdmsUrl": "https://lf-headquarters-speed.yhgfb-cn-static.com/obj/rc-client-security/web/stable/1.0.0.41/bdms.js",
-  "version": 1
+  "protocol": "luna-car",
+  "version": 2
 }

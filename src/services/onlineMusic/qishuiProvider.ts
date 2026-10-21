@@ -25,8 +25,7 @@ const qrSessions = new Map<string, string>();
 let qrTtlMs = QISHUI_QR_TTL_MS;
 
 // 最近一次登录态检查的结论。扫码确认后账户没加载出来（account-refresh-failed）
-// 时，诊断报告靠它说明卡在哪：是 status 就没认下这个会话，还是会话认了但
-// /luna 那一路签名拿不到东西（安卓没有 bdms.node，见 useQishuiLibrary 的注释）。
+// 时，诊断报告靠它说明卡在哪：是 status 就没认下这个会话，还是续期那一拍出了问题。
 let lastQishuiLoginStatus: string | null = null;
 /** refresh 的失败出口单独记一行：与 status 详情互不覆盖，诊断才看得全。 */
 let lastQishuiRefreshNote: string | null = null;
@@ -49,7 +48,9 @@ export const qishuiProvider: OnlineMusicProvider = {
     getAvailability: getQishuiTransportAvailability,
     capabilities: {
         search: true, playback: true, lyrics: true, wordByWordLyrics: true, auth: true,
-        playlists: true, albums: true, artists: true, recommendations: true,
+        // 车机协议没有专辑端点（安卓），桌面旧协议虽有但两端能力声明取交集：
+        // 专辑入口在安卓点了只会拿到「不支持」，干脆整平台关掉。
+        albums: false, artists: true, recommendations: true,
         userLibrary: true, likes: true, mutations: true, playlistTrackMutations: true,
     },
     normalizeSong: normalizeQishuiSong, normalizeUser: normalizeQishuiUser, normalizeCollection: normalizeQishuiCollection,
@@ -215,9 +216,10 @@ export const qishuiProvider: OnlineMusicProvider = {
                 line(`last qr: ${lastQishuiQrNote ?? 'none'}`),
                 line(`last check: ${lastQishuiCheckNote ?? 'none'}`),
                 line(`last refresh: ${lastQishuiRefreshNote ?? 'none'}`),
-                // 安卓没有 bdms.node（Windows x64 原生模块），/luna 那一路只能
-                // 回退 a_bogus —— 这条说明让「歌单/播放拿不到」有据可查。
-                line('signed requests: passport=a_bogus (verified), luna=a_bogus fallback (bdms.node is Windows-only)'),
+                // 安卓端协议层已换成车机协议（/api/luna/v1/platform）：签名是
+                // WebView 自带的 WebCrypto ECDSA P-256（bd-ticket-guard），不再
+                // 依赖 bdms.node，旧「a_bogus 回退」那行说明已过时。
+                line('signed requests: android=luna-car protocol (bd-ticket-guard via WebCrypto); desktop=passport cookies'),
             ];
         },
     },
