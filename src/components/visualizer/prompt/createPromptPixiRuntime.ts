@@ -22,8 +22,22 @@ type PixiModule = typeof import('pixi.js');
 const FONT_BASE = 100;
 /** 一个词从「没出现」到「全亮」用多久。 */
 const WORD_REVEAL_S = 0.09;
-/** 镜头：唱到的位置留在窗内这个比例处（0.45 = 正中间偏左），再往右才开始横移。 */
-const PAN_ANCHOR = 0.45;
+/**
+ * 镜头推近后，**画面里只想留下这一句的这么多**（剩下的在窗里被裁掉，靠横移一路看过去）。
+ * 0.62 = 一屏里大约能看见六个词中的四五个。
+ */
+const FOCUS_RATIO = 0.62;
+/** 再怎么推近，一屏里至少也要留下内容区的这么多 —— 不然长句会放大得只剩一两个字。 */
+const MIN_VISIBLE_RATIO = 0.5;
+/** 推近的上限：再大就不是「跟拍」，是贴脸了，而且字会开始发虚。 */
+const MAX_ZOOM = 2;
+/**
+ * 字的纹理按这个倍数先烤大再缩回去。
+ *
+ * 镜头会把整块窗放大到 2 倍，而 Text 是 resolution 1 烤的 —— 拿原尺寸的纹理放大就是
+ * 一张糊字。所以字按 2 倍字号烤、节点再 scale 回 1/2：屏幕上放大到 2 倍时正好用满纹理。
+ */
+const BAKE_ZOOM = 2;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -114,6 +128,8 @@ interface BuiltBox {
     overflow: number;
     /** 内容区宽度：镜头横移的参照系。 */
     span: number;
+    /** 内容实际占多宽（可能大于 span —— 那就是被裁在窗外的部分）。 */
+    contentWidth: number;
     /** 已经放出去残影的词（一个词只飞一次）。 */
     spawned: boolean[];
     ghosts: GhostWord[];
@@ -290,13 +306,13 @@ export class PromptPixiRuntime {
         const wordStyle = new TextStyle({
             fontFamily: this.fontFamily(),
             fontWeight: this.fontWeight() as never,
-            fontSize: card.fontPx,
+            fontSize: card.fontPx * BAKE_ZOOM,
             fill: '#ffffff',
-            padding: wordPad,
+            padding: wordPad * BAKE_ZOOM,
             dropShadow: {
                 color: '#ffffff',
                 alpha: 0.7,
-                blur: Math.max(6, card.fontPx * 0.055),
+                blur: Math.max(6, card.fontPx * 0.055) * BAKE_ZOOM,
                 distance: 0,
                 angle: 0,
             },
@@ -315,6 +331,8 @@ export class PromptPixiRuntime {
             const node = new Text({ text: token.text, style: wordStyle, resolution: 1 });
             node.anchor.set(0, 0.5);
             node.position.set(token.left - wordPad, 0);
+            // 纹理是按 BAKE_ZOOM 倍字号烤的，缩回去才是设计字号；镜头推近时才有像素可用。
+            node.scale.set(1 / BAKE_ZOOM);
             node.visible = false;
             return { node, box: token, color: highlightOf(token.text) };
         });
@@ -338,6 +356,7 @@ export class PromptPixiRuntime {
             fontPx: card.fontPx,
             overflow: Math.max(0, card.contentWidth - span),
             span,
+            contentWidth: card.contentWidth,
             spawned: tokens.map(() => false),
             ghosts: [],
             wordStyle,
@@ -359,9 +378,11 @@ export class PromptPixiRuntime {
         const node = new Text({ text: token.text, style: box.wordStyle, resolution: 1 });
         node.anchor.set(0, 0.5);
         node.position.set(token.left - box.wordPad, 0);
+        node.scale.set(1 / BAKE_ZOOM);
         node.tint = this.palette().accent;
         node.alpha = 0.7;
-        box.card.textLayer.addChild(node);
+        // 残影挂 ghostLayer（不裁在窗里）—— 它本来就是要飘到框外面去的。
+        box.card.ghostLayer.addChild(node);
         // 方向由这一句的种子定：同一句每次重放飞同一条轨迹，不同句子左右不同。
         const dir = ((box.seed >>> ((index % 8) * 3)) & 1) === 0 ? -1 : 1;
         box.ghosts.push({
@@ -388,8 +409,30 @@ export class PromptPixiRuntime {
             ghost.node.x = ghost.originX + ghost.vx * age;
             ghost.node.y = ghost.vy * age * (1 - 0.35 * progress);
             ghost.node.alpha = 0.7 * (1 - progress) * (1 - progress);
-            ghost.node.scale.set(1 + 0.12 * progress);
+            ghost.node.scale.set((1 + 0.12 * progress) / BAKE_ZOOM);
         }
+    }
+
+    /**
+     * 推近的倍数：按「一屏里想留下多少歌词」反解。
+     *
+     * 窗放大 zoom 倍之后，屏幕上能看到窗内的宽度 = 屏宽 / zoom（窗坐标）。
+     * 想让这一句在镜头里只露出 FOCUS_RATIO 那么多（剩下的靠横移一路看过去），
+     * zoom 就等于 屏宽 / 想露出的宽度。
+     *
+     * 竖屏太矮时再按高度夹一道：整块窗放大后高过屏幕的话上下会被切掉。
+     */
+    private zoomFor(box: BuiltBox, card: PromptCardView) {
+        const screenW = Math.max(320, this.lastWidth);
+        const want = clamp(box.contentWidth * FOCUS_RATIO, card.contentSpan * MIN_VISIBLE_RATIO, card.contentSpan);
+        const byWidth = screenW / Math.max(1, want);
+        const byHeight = Math.max(240, this.lastHeight) * 0.92 / Math.max(1, card.windowHeight);
+        return clamp(Math.min(byWidth, byHeight), 1, MAX_ZOOM);
+    }
+
+    /** 句尾「瞬间拉回看清整行」的倍数：整行装得下就是 1，装不下就退到刚好装下的那一档。 */
+    private zoomOutFor(box: BuiltBox, card: PromptCardView) {
+        return clamp(card.contentSpan / Math.max(1, box.contentWidth), 0.5, 1);
     }
 
     /** 此刻台上是第几句：取「最后一个已经开唱」的；都还没到就是第一句（它自己还在场外，画不出来）。 */
@@ -458,8 +501,6 @@ export class PromptPixiRuntime {
             lastStart = Math.max(lastStart, token.startTime);
             if (time <= token.endTime + 0.1) activeToken = index;
         });
-        const sung = clamp01((time - startTime) / span);
-
         const colors = this.palette();
         if (staticMode) {
             box.root.scale.set(1);
@@ -467,17 +508,36 @@ export class PromptPixiRuntime {
             box.root.alpha = time >= (tokens[0]?.startTime ?? startTime) - 0.2 ? 1 : 0;
         } else {
             /*
-             * 镜头：
-             * - dolly 进场 0.955 → 1，一句之内再慢慢推到 1.05（唱得越久越近），退场抽回 0.93；
-             * - 每落一个词顿一下（punch，0.2s 内衰减），像镜头被字顶了一下；
-             * - 横移：整句装不下窗时才跟着唱到的位置走，装得下就只做一点点漂移。
+             * 镜头（用户要的那条节奏）：
+             *   1. 进场这段把镜头**直接推近**到 zoomIn（一屏里只留下大半句，左右两边被推出画面）；
+             *   2. 唱到哪横移到哪，让正在唱的那一段留在画面正中；
+             *   3. 整句唱完 → **瞬间**（硬切，不做缓动）拉回看清整行；
+             *   4. 整行淡出消失，下一句再从推近开始。
+             *
+             * 第 3 步必须是硬切：缓动的话会先「退回去」再淡出，看着像镜头自己飘了一下，
+             * 而参考项目里那是咔的一下切回全景。
              */
             const punch = safe(Math.max(0, 1 - (time - lastStart) / 0.2), 0);
-            const dolly = (0.955 + 0.045 * enter) * (1 + 0.05 * sung) * (1 - 0.07 * exit) + punch * 0.012;
-            const rawPan = box.overflow > 0
-                ? -clamp(caretX - box.span * PAN_ANCHOR, 0, box.overflow)
-                : -(sung - 0.5) * card.windowWidth * 0.02;
-            box.root.scale.set(safe(dolly, 1));
+            const following = time < exitStart;
+            const zoom = following
+                ? (1 + (this.zoomFor(box, card) - 1) * enter) * (1 + punch * 0.02)
+                : this.zoomOutFor(box, card);
+
+            /*
+             * 横移：把「正在唱的那个位置」挪到画面正中。
+             *
+             * 直接 -focus * zoom 会露馅 —— 窗比画面大的时候，移过头就会看见窗外的空白。
+             * 所以焦点要夹在「离窗边缘还有半个画面」的区间里（装不下整窗时才有这个区间）。
+             */
+            const half = Math.max(1, this.lastWidth) / (2 * Math.max(1e-3, zoom));
+            const minFocus = card.left + half;
+            const maxFocus = card.left + card.windowWidth - half;
+            const focus = maxFocus > minFocus
+                ? clamp(card.contentLeft + caretX, minFocus, maxFocus)
+                : 0;
+            const rawPan = following ? -focus * zoom : 0;
+
+            box.root.scale.set(safe(zoom, 1));
             box.root.position.set(
                 this.lastWidth / 2 + safe(rawPan, 0),
                 this.lastHeight / 2

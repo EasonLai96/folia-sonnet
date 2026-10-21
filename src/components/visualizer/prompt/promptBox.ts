@@ -82,6 +82,11 @@ export interface PromptCardView {
     root: import('pixi.js').Container;
     /** 歌词层：运行时把逐词 Text 加进来，坐标 0 就是「第一个词的左边」。 */
     textLayer: import('pixi.js').Container;
+    /**
+     * 残影层：与 textLayer 同一套坐标，但**不在裁剪范围内** —— 唱完飞出去的字要能飘到框外面。
+     * 正文那层是被 mask 裁在窗里的，放这里才不会被一起裁掉。
+     */
+    ghostLayer: import('pixi.js').Container;
     /** 每个词量出来的位置与宽度（与 spec.tokens 同序）。 */
     laid: readonly PromptLaidToken[];
     /** 这一套的最终字号（缩过之后的）。 */
@@ -90,6 +95,12 @@ export interface PromptCardView {
     windowWidth: number;
     contentWidth: number;
     contentSpan: number;
+    /** 窗的矩形（相对窗中心）：镜头放大后要靠它算「还能往哪边移才不露出窗外」。 */
+    left: number;
+    top: number;
+    windowHeight: number;
+    /** 内容区左边界（窗坐标，等于第一个词的左边）。 */
+    contentLeft: number;
     /** 字的竖中线（相对窗中心）。 */
     textY: number;
     /** 每帧：下划线、卡拉 OK、当前词的 id。 */
@@ -212,7 +223,33 @@ export const buildPromptCard = (
 
     const textLayer = new Container();
     textLayer.position.set(contentLeft, textY);
-    root.addChild(textLayer);
+    /*
+     * 装饰层：下划线 / 方括号 / token id 全挂这层。
+     *
+     * 它们和字用的是**同一套坐标**（0 = 第一个词的左边），而字那层有 (contentLeft, textY) 的
+     * 偏移 —— 直接挂在 root 上就会整排往左偏掉一个 contentLeft（播放页之前就是这个样子）。
+     */
+    const decoLayer = new Container();
+    decoLayer.position.set(contentLeft, textY);
+
+    /*
+     * 字与装饰塞进 contentLayer 并**裁在窗里**：一句太长时 promptBox 只把字号缩到 MIN_SHRINK
+     * 就不再缩了，超出的部分会画到框外面去（小窗就更明显）。裁掉之后交给镜头横移去补。
+     */
+    const contentLayer = new Container();
+    contentLayer.addChild(textLayer, decoLayer);
+    root.addChild(contentLayer);
+
+    // 残影层不进 contentLayer：字要飞出框外才像那个参考项目。
+    const ghostLayer = new Container();
+    ghostLayer.position.set(contentLeft, textY);
+    root.addChild(ghostLayer);
+
+    const clip = new Graphics()
+        .roundRect(left, top, windowWidth, windowHeight, radius)
+        .fill({ color: 0xffffff, alpha: 1 });
+    root.addChild(clip);
+    contentLayer.mask = clip;
 
     // ---- 逐词下划线（底 + 唱到的填充色）与「当前词」的 id
     const hair = Math.max(1.5, fontPx * 0.045);
@@ -247,7 +284,7 @@ export const buildPromptCard = (
         idText.position.set(token.left + token.width / 2, underlineY + hair * 2.6);
         idText.tint = textColor;
         idText.alpha = 0.3;
-        root.addChild(track, fill, bracket, idText);
+        decoLayer.addChild(track, fill, bracket, idText);
         bracketNodes.push(bracket);
         trackNodes.push(track);
         fillNodes.push(fill);
@@ -286,11 +323,16 @@ export const buildPromptCard = (
     return {
         root,
         textLayer,
+        ghostLayer,
         laid,
         fontPx,
         windowWidth,
         contentWidth,
         contentSpan: available,
+        left,
+        top,
+        windowHeight,
+        contentLeft,
         textY,
         update,
     };
