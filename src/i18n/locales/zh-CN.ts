@@ -930,6 +930,7 @@ export default {
     "visualizerSonnet": "商籁",
     "visualizerTempera": "凝彩",
     "visualizerLumiere": "绘光",
+    "visualizerPrompt": "提示词",
     "cadenzeTuning": "心象参数",
     "resetVisualizerTuning": "重置歌词动画参数",
     "cadenzeOnly": "仅心象",

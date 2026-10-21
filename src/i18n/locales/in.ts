@@ -929,6 +929,7 @@ export default {
     "visualizerSonnet": "Sonnet",
     "visualizerTempera": "Tempera",
     "visualizerLumiere": "Lumiere",
+    "visualizerPrompt": "Prompt",
     "cadenzeTuning": "Penyetelan Mindscape",
     "resetVisualizerTuning": "Reset Penyetelan Animasi Lirik",
     "cadenzeOnly": "Hanya Mindscape",

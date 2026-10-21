@@ -929,6 +929,7 @@ export default {
     "visualizerSonnet": "Sonnet",
     "visualizerTempera": "Tempera",
     "visualizerLumiere": "Lumiere",
+    "visualizerPrompt": "Prompt",
     "cadenzeTuning": "Mindscape Tuning",
     "resetVisualizerTuning": "Reset Lyrics Animation Tuning",
     "cadenzeOnly": "Mindscape only",
