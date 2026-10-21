@@ -49,7 +49,12 @@ const { pemFromBytes } = await import('./src/car/bytes.js');
 import('./src/car/bytes.js');
 
 const guard = await createGuard();
-const csrPem = pemFromBytes('CERTIFICATE REQUEST', Uint8Array.from(atob(guard.csr), c => c.charCodeAt(0)));
+// 上游要的是「PEM 文本再 base64」：解码后必须是一份带 BEGIN/END 的 PEM 文本，
+// 不能是裸 DER —— 早先发 DER base64，扫码确认后 ticket 那一步直接回 10001。
+const { base64ToBytes } = await import('./src/car/bytes.js');
+const csrPem = new TextDecoder().decode(base64ToBytes(guard.csr));
+check('CSR is base64(PEM text), not base64(DER)', csrPem.startsWith('-----BEGIN CERTIFICATE REQUEST-----'),
+    csrPem.slice(0, 40));
 const { writeFileSync } = await import('node:fs');
 writeFileSync('.verify-csr.pem', csrPem);
 

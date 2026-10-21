@@ -33,8 +33,16 @@ function checked(data) {
     }
     const code = Number(data.err_no ?? data.data?.error_code ?? 0);
     if (code) {
+        // 带上服务端自己给的说明：光有错误码（例如 ticket 那一步的 10001）在诊断里
+        // 什么都看不出来，是 CSR 不被认还是 access_code 过期全靠猜。
+        const nested = data.data && typeof data.data === 'object' ? data.data : null;
+        const detail = [data.status_msg, data.message, data.description,
+            nested?.description, nested?.message, nested?.status_msg]
+            .map(value => (typeof value === 'string' ? value.trim() : ''))
+            .find(Boolean) || '';
         throw new QishuiError(AUTH_CODES.includes(code) ? 'auth-required' : 'unavailable',
-            'Qishui rejected the request', String(code));
+            detail ? `Qishui rejected the request: ${detail.slice(0, 200)}` : 'Qishui rejected the request',
+            String(code));
     }
     return data;
 }

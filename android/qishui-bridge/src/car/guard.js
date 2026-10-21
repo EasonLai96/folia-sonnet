@@ -113,9 +113,13 @@ export async function createGuard() {
         info,
     ));
     const request = der(0x30, info, algorithm, der(0x03, new Uint8Array([0]), rawSignatureToDer(signature)));
+    // 上游要的是「**PEM 文本**再 base64」而不是 DER 的 base64 —— 同一个接口族里
+    // 服务端下发的 client_cert 也是这个形态（见 protocol.readQishuiGuard 对
+    // `-----BEGIN` 的判断）。发 DER base64 会被拒：/passport/open/get_access_ticket/
+    // 回 10001，表现成「扫码确认了却登录失败」。
     return {
         privateKey,
         guardKey: await exportPrivateKeyPem(privateKey),
-        csr: bytesToBase64(request),
+        csr: bytesToBase64(utf8Bytes(pemFromBytes('CERTIFICATE REQUEST', request))),
     };
 }

@@ -137,7 +137,7 @@ ${lines.join("\n")}
     return {
       privateKey,
       guardKey: await exportPrivateKeyPem(privateKey),
-      csr: bytesToBase64(request2)
+      csr: bytesToBase64(utf8Bytes(pemFromBytes("CERTIFICATE REQUEST", request2)))
     };
   }
 
@@ -277,9 +277,18 @@ ${lines.join("\n")}
     }
     const code = Number(data.err_no ?? data.data?.error_code ?? 0);
     if (code) {
+      const nested = data.data && typeof data.data === "object" ? data.data : null;
+      const detail = [
+        data.status_msg,
+        data.message,
+        data.description,
+        nested?.description,
+        nested?.message,
+        nested?.status_msg
+      ].map((value) => typeof value === "string" ? value.trim() : "").find(Boolean) || "";
       throw new QishuiError(
         AUTH_CODES.includes(code) ? "auth-required" : "unavailable",
-        "Qishui rejected the request",
+        detail ? `Qishui rejected the request: ${detail.slice(0, 200)}` : "Qishui rejected the request",
         String(code)
       );
     }
