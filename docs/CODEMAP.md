@@ -252,6 +252,7 @@
 - `src/components/visualizer/monet/entry.tsx`
 - `src/components/visualizer/partita/entry.tsx`
 - `src/components/visualizer/pendolo/entry.tsx`
+- `src/components/visualizer/prompt/entry.tsx`
 - `src/components/visualizer/sonnet/entry.tsx`
 - `src/components/visualizer/still/entry.tsx`
 - `src/components/visualizer/tempera/entry.tsx`
