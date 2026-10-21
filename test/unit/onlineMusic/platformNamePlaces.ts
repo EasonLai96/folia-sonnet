@@ -107,7 +107,7 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     // 后面每个 weapi 请求都不带 cookie，csrf_token 取不到、上游一律 301，探索页每一栏都是空的。
     // 现在真的注册一个游客（实现在 netease/anonimous.js，属那一家自己的目录，不计数）：
     // 这里多出把它引进来的那一行，与注册结果留痕的那一行。
-    'src/nativeBridge/api/folia.js': { n: { netease: 16, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation; raised by the daily-recommendation fallbacks and the explore route traces 2026-10-20; raised by the guest (anonymous) session 2026-10-21' },
+    'src/nativeBridge/api/folia.js': { n: { netease: 17, qq: 125, kugou: 15, bodian: 3 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the cookie hand-off after a QR confirmation; raised by the daily-recommendation fallbacks and the explore route traces 2026-10-20; raised by the guest (anonymous) session 2026-10-21; raised by the trace of which gateway answered 2026-10-21' },
     // 245：歌单的写入搬进 kugou/ 目录后，这里只多出把它转出去的那一行（其余只是从它取常量）。
     'src/nativeBridge/api/kugou.js': { n: { kugou: 245 }, kind: 'question', why: 'raised by the upstream merge 2026-10-17; raised by the playlist writes 2026-10-19' },
     'src/nativeBridge/api/libraryTrace.js': { n: { netease: 1, qq: 1, kugou: 1 }, kind: 'doc' },

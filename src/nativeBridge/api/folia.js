@@ -1,5 +1,5 @@
 import { eapiRequest } from './eapi.js';
-import { weapiRequest } from './weapi.js';
+import { weapiRequest, UA } from './weapi.js';
 // 游客会话：桌面端由内嵌后端注册，安卓这边原先只回一个空 cookie，后面每个 weapi 请求
 // 于是都不带 cookie（csrf_token 取不到，上游一律答 301），探索页每一栏都是空的。
 // 具体实现放在这一家自己的目录下（桥的配额只数共享文件里出现的平台名）。
@@ -154,6 +154,66 @@ async function eapiJson(path, data, cookie) {
  * 这里**不抛错**：探索页要自己看 code（比如登录失效的 301 是「这一栏不显示」而不是
  * 整页失败），抛了反而把它变成了读不出来。
  */
+/*
+ * 未加密的 /api/ 网关：同一条路径，参数挂在 query 上，cookie 走请求头。
+ *
+ * 为什么还需要它：`/weapi/` 那条现在一律答 **200 + 空 body**（实测 2026-10-21：换 UA、
+ * 加 Referer/Origin/Sec-Fetch、带与不带 cookie、绕开代理都一样；`toplist`、
+ * `homepage/block/page`、`cloudsearch/get/web` 无一例外），而 weapi 本身是不抛错的 ——
+ * 于是「网关没了」和「这一栏本来就没内容」在页面上是同一个样子：整页空着。
+ * 未加密这条老网关还在（`toplist`、`homepage/block/page`、`album/new`、
+ * `v1/discovery/new/songs`、`v1/discovery/recommend/resource` 都实测答得出东西），
+ * 所以 weapi 答不出内容时改问它一次。
+ */
+async function plainApiJson(path, data, cookie) {
+  const query = new URLSearchParams();
+  Object.entries(data || {}).forEach(([key, value]) => {
+    // csrf_token 是 weapi 那套自己要的，放到 query 上只是噪声。
+    if (value == null || value === '' || key === 'csrf_token') return;
+    query.set(key, String(value));
+  });
+  const search = query.toString();
+  let body = {};
+  try {
+    const resp = await fetch(`https://music.163.com${path}${search ? `?${search}` : ''}`, {
+      method: 'GET',
+      headers: {
+        'User-Agent': UA,
+        Referer: 'https://music.163.com/',
+        Cookie: cookie || '',
+        Accept: 'application/json',
+      },
+    });
+    try {
+      body = await resp.json();
+    } catch (_) {
+      body = {};
+    }
+  } catch (_) {
+    body = {};
+  }
+  return body;
+}
+
+/** 什么都没答（空 body、非 JSON）＝网关这条路径没了，不是「没有内容」。 */
+const isBlankAnswer = (answer) => !answer || typeof answer !== 'object' || Object.keys(answer).length === 0;
+
+/**
+ * 读一条：先走 weapi，答不出内容或会话不被认时改走未加密的 /api/。
+ *
+ * 只用于**读**（下面探索页那一组都是读）：写操作的路径不能靠 GET 兜底。兜底那条答不出
+ * 内容时仍把 weapi 的原答案交回去 —— 于是最坏的情况与现在一样，不会更差。
+ * 走了哪条路会留痕：线上再整页空着时，一眼看出是「网关没了」还是「会话没带」。
+ */
+async function readJson(path, data, cookie) {
+  const answer = await weapiJson(path, data, cookie);
+  if (!isBlankAnswer(answer) && answer.code !== 301 && answer.code !== 401 && answer.code !== 403) return answer;
+  const plain = await plainApiJson(path, data, cookie);
+  if (isBlankAnswer(plain)) return answer;
+  noteLibraryStep('netease', 'api:fallback', { path, source: 'plain', code: answer?.code ?? null });
+  return plain;
+}
+
 async function weapiJson(path, data, cookie) {
   const cookies = parseCookieString(cookie || '');
   const payload = Object.assign({}, data, { csrf_token: cookies.__csrf || '' });
@@ -1562,7 +1622,7 @@ export async function handleFoliaApiRequest(input) {
     // 没有 cursor 时**绝不能带 `cursor: ''`**：首页区块这条带上空游标就答不出 blocks，
     // 探索页于是只剩每日推荐那一栏（看着就是「页面是空的」）。
     const cursor = firstValue(params.get('cursor'));
-    return await weapiJson('/api/homepage/block/page', {
+    return await readJson('/api/homepage/block/page', {
       refresh: String(firstValue(params.get('refresh'), 'false')) !== 'false',
       ...(cursor ? { cursor } : {}),
     }, cookie);
@@ -1572,7 +1632,7 @@ export async function handleFoliaApiRequest(input) {
     // 而 weapiJson 为了不让整页失败是**不抛错**的 —— 光靠 try/catch 换不了路，这一栏会一直 0 张。
     // 所以「没答出 recommend 就换 eapi 再问一次」，网络层真抛错时同样换路。
     try {
-      const answer = await weapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
+      const answer = await readJson('/api/v1/discovery/recommend/resource', {}, cookie);
       if (Array.isArray(answer?.recommend) || Array.isArray(answer?.data?.recommend)) return answer;
       noteLibraryStep('netease', 'explore:daily-playlists:fallback', { code: answer?.code });
     } catch (error) {
@@ -1582,9 +1642,9 @@ export async function handleFoliaApiRequest(input) {
     }
     return await eapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
   }
-  if (path === '/toplist') return await weapiJson('/api/toplist', {}, cookie);
+  if (path === '/toplist') return await readJson('/api/toplist', {}, cookie);
   if (path === '/simi/song') {
-    return await weapiJson('/api/v1/discovery/simiSong', {
+    return await readJson('/api/v1/discovery/simiSong', {
       songid: numberValue(params.get('id')),
       limit: numberValue(params.get('limit'), 50),
       offset: numberValue(params.get('offset')),
@@ -1593,7 +1653,7 @@ export async function handleFoliaApiRequest(input) {
   // 新歌速递：`type` 是地区（0 全部 / 7 华语 / 96 欧美 / 8 日本 / 16 韩国）。
   if (path === '/top/song') {
     // 新歌速递要明说一页多少条：不给 limit/offset 时上游只回很少几首，这一栏几乎是空的。
-    return await weapiJson('/api/v1/discovery/new/songs', {
+    return await readJson('/api/v1/discovery/new/songs', {
       areaId: numberValue(params.get('type')),
       limit: numberValue(params.get('limit'), 100),
       offset: numberValue(params.get('offset'), 0),
@@ -1601,7 +1661,7 @@ export async function handleFoliaApiRequest(input) {
     }, cookie);
   }
   if (path === '/album/new') {
-    return await weapiJson('/api/album/new', {
+    return await readJson('/api/album/new', {
       limit: numberValue(params.get('limit'), 30),
       offset: numberValue(params.get('offset')),
       area: firstValue(params.get('area'), 'ALL'),
@@ -1609,7 +1669,7 @@ export async function handleFoliaApiRequest(input) {
     }, cookie);
   }
   if (path === '/top/playlist') {
-    return await weapiJson('/api/playlist/list', {
+    return await readJson('/api/playlist/list', {
       cat: firstValue(params.get('cat'), '全部'),
       order: firstValue(params.get('order'), 'hot'),
       limit: numberValue(params.get('limit'), 30),

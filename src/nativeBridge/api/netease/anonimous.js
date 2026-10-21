@@ -123,9 +123,12 @@ async function byEapi(username) {
 export async function registerAnonymousCookie() {
     const id = deviceId();
     const username = base64(`${id} ${encodeId(id)}`);
+    // eapi 在前：实测 2026-10-21，weapi 那条 `/weapi/register/anonimous` 一律答 200 + 空 body
+    // （没有 Set-Cookie），只有 eapi 这条还下发 MUSIC_A / __csrf / NMTID。weapi 留在后面只是
+    // 万一 eapi 哪天也换路 —— 顺序反过来的代价是每个会话多一次注定白跑的请求。
     const routes = [
-        { name: 'weapi', ask: byWeapi },
         { name: 'eapi', ask: byEapi },
+        { name: 'weapi', ask: byWeapi },
     ];
     for (const route of routes) {
         try {
