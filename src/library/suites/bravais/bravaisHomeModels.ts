@@ -109,6 +109,11 @@ export type BravaisHomeAccount = {
      * 已登录时是头像 + 昵称的按钮。两种都打开登录窗口。
      */
     guest: boolean;
+    /**
+     * 未登录是「登录失效」那一路（当前平台报 auth-required）：入口照旧能点，但不再引导 ——
+     * 和 grid 主页的 HomeLoginPanel 同一个判断（那里的 nudge）。缝里的光晕只画在「真的没人登录」上。
+     */
+    expired: boolean;
     /** fb3：未登录时的入口按钮文案（「连接在线平台」）。 */
     connectLabel: string;
     /** 入口按钮的标题（「切换在线音乐平台」）。 */

@@ -28,6 +28,9 @@ export const useBravaisHomeAccount = (account: LibraryAccountController, online:
     const nickname = current?.availability.configured && current.requiresAccount !== false ? current.user?.nickname || null : null;
     const avatarUrl = nickname ? current?.user?.avatarUrl || null : null;
     const guest = online.accountView === 'guest';
+    // grid 的 HomeLoginPanel 把「登录失效」和「真的没人登录」分开画：失效那一路不引导（那时的人知道要做什么）。
+    // 缝里的光晕也按这个走，所以入口要把两种未登录分开带出去。
+    const expired = guest && online.needsRelogin;
     const opensOn = guest ? null : activeProviderId;
     const onOpen = useCallback((pressed: Element | null) => openLoginWindow(opensOn, pressed), [opensOn]);
     return useMemo<BravaisHomeAccount>(() => ({
@@ -37,8 +40,9 @@ export const useBravaisHomeAccount = (account: LibraryAccountController, online:
         nickname,
         avatarUrl,
         guest,
+        expired,
         connectLabel: t('libraryBravaisHome.connect'),
         toggleLabel: t('home.switchOnlineProvider'),
         onOpen,
-    }), [avatarUrl, detail, guest, nickname, onOpen, online.providerId, online.providerLabel, t]);
+    }), [avatarUrl, detail, expired, guest, nickname, onOpen, online.providerId, online.providerLabel, t]);
 };

@@ -330,3 +330,26 @@
 
 /* 书脊上只留一个图标按钮：点它打开登录窗口。 */
 .bravais-account-switcher.is-compact { align-items: center; }
+
+/* 没有人登录时，这颗「连接」图标是墙上唯一该做的事，所以它和 grid 主页的登录按钮（components/login/login.css
+   的 .login-cta）用同一套语言：强调色的光晕在呼吸，1.8s 一拍。光晕挂在圆形徽章上（box-shadow 不会被它自己的
+   overflow: hidden 裁掉），图标与底色同时染成强调色 —— 窄缝只有约 100px 宽，写不下 grid 底下那一行说明
+   （.login-cta-note），「连接在线平台」这几个字就是那句话。
+   已登录 / 无需登录的平台不画（根元素没有 is-guest）；登录失效（is-expired）也不画：那时的人知道要做什么，
+   再引导一次是打扰 —— 和 HomeLoginPanel 的 nudge 同一个判断。书脊上的 compact 是同一个根元素，一起生效。 */
+@keyframes bravais-account-breath {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-accent, currentColor) 50%, transparent); }
+    50% { box-shadow: 0 0 14px 4px color-mix(in srgb, var(--text-accent, currentColor) 26%, transparent); }
+}
+
+.bravais-account-switcher.is-guest:not(.is-expired) .bravais-account-avatar.is-connect {
+    color: var(--text-accent, currentColor);
+    background: color-mix(in srgb, var(--text-accent, currentColor) 16%, transparent);
+    animation: bravais-account-breath 1.8s ease-in-out infinite;
+}
+
+/* 降低动态效果：光晕停在一个固定的量上，仍然说「这里」（与 .bravais-wall-breathe 同一个开关）。 */
+:root[data-reduce-motion~='lattice'] .bravais-account-switcher.is-guest:not(.is-expired) .bravais-account-avatar.is-connect {
+    animation: none;
+    box-shadow: 0 0 12px 3px color-mix(in srgb, var(--text-accent, currentColor) 22%, transparent);
+}
