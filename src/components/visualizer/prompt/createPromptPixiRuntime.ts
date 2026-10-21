@@ -380,9 +380,18 @@ export class PromptPixiRuntime {
         const token = box.tokens[index];
         if (!token) return;
         const { Text } = this.pixi;
+        /*
+         * 起点要**夹在窗的内容区里**。
+         *
+         * 残影那层不裁（它就是要飘出框外的），但它的起点是词本来的位置 —— 一句装不下时
+         * 后面的词本来就在窗外（正文被 mask 裁掉，所以看不见），残影却照原位置生成，
+         * 于是凭空在窗外、甚至屏幕外冒出一行字（英文歌最明显：词又多又宽）。
+         * 夹回内容区之后，残影一律从框里飞出去，这才是要的效果。
+         */
+        const startX = clamp(token.left, 0, Math.max(0, box.span));
         const node = new Text({ text: token.text, style: box.wordStyle, resolution: 1 });
         node.anchor.set(0, 0.5);
-        node.position.set(token.left - box.wordPad, 0);
+        node.position.set(startX - box.wordPad, 0);
         node.scale.set(1 / BAKE_ZOOM);
         node.tint = this.palette().accent;
         node.alpha = 0.7;
