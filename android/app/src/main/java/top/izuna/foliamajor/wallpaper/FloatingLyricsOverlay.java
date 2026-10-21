@@ -1125,6 +1125,17 @@ public final class FloatingLyricsOverlay {
         private static final float LINE_BREATH = 0.05f;
         /** 整层淡入（挂上窗口那一刻）。 */
         private static final long APPEAR_MS = 220L;
+        /**
+         * 小窗上那两颗控件（右上角的锁、右下角的拉伸把手）在「没人碰它」多久之后收起来。
+         *
+         * 这是一层叠在所有应用之上的桌面歌词：锁和把手一直亮着，就等于在别人家的界面上
+         * 常驻两个半透明圆点。所以只有手指落在窗上（或刚拖过、刚要上锁）的时候才画，
+         * 过了这段时间就隐掉，窗干净的只剩歌词。
+         *
+         * **锁着的时候例外**：那颗锁是整层穿透之后唯一还能点的地方（见 syncLockChip），
+         * 收起来就再也解不开了。见 `controlsAwake()`。
+         */
+        private static final long CONTROLS_IDLE_MS = 2200L;
         /** 次行的字号比例（下一行）与翻译行的字号比例。 */
         private static final float NEXT_FONT_RATIO = 0.86f;
         private static final float TRANSLATION_FONT_RATIO = 0.62f;
@@ -1210,6 +1221,13 @@ public final class FloatingLyricsOverlay {
         private boolean moved = false;
         private long lastFrameAtMs = 0L;
         private boolean framePending = false;
+        /**
+         * 最后一次「碰这个窗」的时刻（按下 / 拖动都算）。
+         *
+         * 只看它决定锁和拉伸把手画不画 —— 触摸焦点不在小窗上时，那两颗就不该常驻
+         * （这块是叠在别人界面之上的一层，见 CONTROLS_IDLE_MS）。
+         */
+        private long controlsTouchedAtMs = 0L;
         /** 当前生效的字体 key（null = 系统默认）。变了就重新 load，见 syncFont。 */
         private String loadedFontKey = null;
 
@@ -1308,7 +1326,7 @@ public final class FloatingLyricsOverlay {
              * 并压在歌词上。而这个模式本来也不需要拖 / 改大小 / 上锁 ——
              * 左右位置和宽度都在设置里调，手势在这里反而是负担。
              */
-            boolean showControls = !overSafeArea();
+            boolean showControls = !overSafeArea() && controlsAwake(now);
 
             // 避开区域每帧算一次（两根滑条一帧内不会变，而 drawRow 一帧要跑两趟）。
             updateAvoidZone(width);
@@ -1830,7 +1848,16 @@ public final class FloatingLyricsOverlay {
                     startRawY = event.getRawY();
                     downAtMs = android.os.SystemClock.elapsedRealtime();
                     moved = false;
+                    /*
+                     * 先判命中、再唤醒控件。
+                     *
+                     * 顺序不能反：控件收起时那一小块不该能点中（否则就是「看不见却上了锁」），
+                     * 所以这一按按「按下去之前」的状态算 —— 收着的时候第一下只负责把控件叫出来。
+                     */
                     touchMode = hitTest(event.getX(), event.getY());
+                    // 指头一落到窗上就算「焦点在小窗」：锁和把手立刻画出来（见 controlsAwake）。
+                    wakeControls();
+                    invalidate();
                     if (params != null) {
                         startWinX = params.x;
                         startWinY = params.y;
@@ -1843,6 +1870,7 @@ public final class FloatingLyricsOverlay {
                     float dy = event.getRawY() - startRawY;
                     if (!moved && Math.abs(dx) + Math.abs(dy) > dp(4)) {
                         moved = true;
+                        wakeControls();
                     }
                     if (!moved) return true;
                     if (touchMode == MODE_RESIZE) {
@@ -1878,12 +1906,42 @@ public final class FloatingLyricsOverlay {
                      * 尤其叠加在安全区上时，那一条就压在别的应用顶上，误触更是直接打断人家。
                      * 现在单击什么都不做：要动它靠拖（MODE_MOVE），要上锁点右上角那颗锁。
                      */
+                    // 手抬起来之后过一会儿把控件收回去（触摸焦点已经不在这块窗上了）。
+                    scheduleControlsHide();
                     touchMode = MODE_NONE;
                     return true;
                 default:
                     return false;
             }
         }
+
+        /**
+         * 控件是不是「醒着」：锁着（那颗锁是唯一能点的地方，不能收）或者刚被碰过。
+         *
+         * 画与命中都用这一个判断 —— 画出来的东西和能点的地方必须一致，
+         * 否则就是「看不见却能点中」，这类控件最不能破的规矩。
+         */
+        private boolean controlsAwake(long now) {
+            return isLocked() || now - controlsTouchedAtMs < CONTROLS_IDLE_MS;
+        }
+
+        private void wakeControls() {
+            controlsTouchedAtMs = android.os.SystemClock.elapsedRealtime();
+            removeCallbacks(controlsHideTask);
+        }
+
+        private void scheduleControlsHide() {
+            removeCallbacks(controlsHideTask);
+            postDelayed(controlsHideTask, CONTROLS_IDLE_MS + 80L);
+        }
+
+        /** 空闲到点：重画一帧，让 onDraw 里的 controlsAwake 把控件收掉。 */
+        private final Runnable controlsHideTask = new Runnable() {
+            @Override
+            public void run() {
+                invalidate();
+            }
+        };
 
         private int hitTest(float x, float y) {
             int width = getWidth();
@@ -1913,6 +1971,8 @@ public final class FloatingLyricsOverlay {
                  */
                 return MODE_MOVE;
             }
+            // 控件收起来了（没人碰、也没锁）：整窗一律按拖动，别让看不见的地方能点中。
+            if (!controlsAwake(android.os.SystemClock.elapsedRealtime())) return MODE_MOVE;
             // 锁（右上角，命中区比画出来的大一圈：手指没那么准）
             if (x >= width - dp(26) && y <= dp(26)) return MODE_LOCK;
             // 拉伸（右下角）
