@@ -15,6 +15,32 @@ export const isCapacitorAndroid = (): boolean => (
   && Capacitor.getPlatform() === 'android'
 );
 
+/**
+ * 是不是跑在安卓 App 壳里 —— **不依赖 Capacitor 的桥有没有初始化完**。
+ *
+ * `Capacitor.isNativePlatform()` 读的是原生注入的 `window.CapacitorPlatform`，
+ * 它要等桥起来才有值；在那之前一律 false（真机日志里那句
+ * "deviceready has not fired after 5 seconds" 就是这段时间）。
+ *
+ * 凡是把「此刻是不是原生」当成「这个功能在不在」的判断，在启动头几秒都会答错，
+ * 而答错的那一侧恰好是**破坏性**的那一侧：accountRead 把「不可用」当成
+ * 「这个平台没有账号」，会顺手把已经存着的账号从界面上抹掉，而且不打日志
+ * （见 accountRead.ts 里 readWhole 开头那句 clearAccount）。
+ * 表现就是「登录成功，重启后账号没了」—— 凭据其实一直都在。
+ */
+export const isAndroidAppShell = (): boolean => {
+  if (isCapacitorAndroid()) return true;
+  if (typeof window === 'undefined') return false;
+  // 页面由 Capacitor 自己发出来（server.hostname=localhost、androidScheme=https），
+  // 加上安卓 WebView 的 UA：真机上这两条同时成立，手机浏览器访问真实站点不成立。
+  const href = typeof window.location?.href === 'string' ? window.location.href : '';
+  const ua = typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '';
+  if (!/Android/i.test(ua)) return false;
+  // 两条都对得上才算：UA 带 WebView 标记（`; wv)`），或页面确实是 Capacitor 自己
+  // 从 https://localhost 发出来的。手机 Chrome 访问真站点两条都不成立。
+  return /;\s*wv\)/i.test(ua) || /^https?:\/\/localhost(?:[:/]|$)/.test(href);
+};
+
 export const getRuntimeEnvironment = (): RuntimeEnvironment => {
   if (hasElectronBridge()) return 'electron';
   if (isCapacitorAndroid()) return 'capacitor-android';

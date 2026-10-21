@@ -1,6 +1,7 @@
 import type { ProviderAvailability, ProviderErrorCode } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
 import { isQishuiNativeAvailable, requestQishuiNative } from '../../platform/foliaNative';
+import { isAndroidAppShell, isCapacitorAndroid } from '../../platform/runtime';
 
 // src/services/onlineMusic/qishuiTransport.ts
 
@@ -52,7 +53,46 @@ const hasDesktopBridge = () => (
 export const getQishuiTransportAvailability = (): ProviderAvailability => {
     if (hasDesktopBridge()) return { configured: true };
     if (isQishuiNativeAvailable()) return { configured: true };
+    // ⚠ 在 App 壳里就当可用，哪怕桥这会儿还没起来。
+    //
+    // 这条分支的后果不是「这一项灰掉」，而是**把账号从界面上抹掉**：
+    // accountRead 的 readWhole 在 `!availability.configured` 时直接
+    // `store().clearAccount(providerId, reason)` 然后 return —— 不打任何日志。
+    // 而 `isQishuiNativeAvailable()` 依赖 `Capacitor.isNativePlatform()`，
+    // 启动头几秒原生还没把桥注入进来，它是 false（真机日志里那句
+    // "deviceready has not fired after 5 seconds" 就是这段时间）。
+    // 于是每次冷启动都静默清一次 → 「登录成功，重启后账号没了」，
+    // 而凭据好端端地躺在 SharedPreferences 里。
+    // 真正要等桥的是发请求那一步（见 requestQishui 里的 waitForNativeBridge），
+    // 不是「这个平台在不在」。
+    if (isAndroidAppShell()) return { configured: true };
     return { configured: false, reason: 'runtime-unavailable' };
+};
+
+/**
+ * 桥起来之前最多等这么久；等不到再报不可用。
+ *
+ * 给得比较宽（真机上 deviceready 那句警告是 5 秒才报的）：这一路只在**确实是 App 壳**
+ * 时才走，桥迟早会起来，等得久一点没有副作用 —— 而账号读那一侧有 60 秒的兜底
+ * （accountRead 的 WHO_WAIT_MS），20 秒远在里面。
+ */
+const NATIVE_BRIDGE_WAIT_MS = 20_000;
+let bridgeWaitNoted = false;
+let bridgeProbeNoted = false;
+
+/** 安卓上等 Capacitor 把桥注入进来（轮询，最多 NATIVE_BRIDGE_WAIT_MS）。 */
+const waitForNativeBridge = async (): Promise<boolean> => {
+    const startedAt = Date.now();
+    while (!isQishuiNativeAvailable()) {
+        if (Date.now() - startedAt >= NATIVE_BRIDGE_WAIT_MS) return false;
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    if (!bridgeWaitNoted) {
+        bridgeWaitNoted = true;
+        // 这一条是「账号为什么每次启动都要重新出现一遍」的唯一现场证据。
+        console.info(`[Qishui] the native bridge came up ${Date.now() - startedAt} ms after the start`);
+    }
+    return true;
 };
 
 const PROVIDER_ERROR_CODES = new Set<ProviderErrorCode>([
@@ -82,6 +122,19 @@ export const toQishuiErrorCode = (code: unknown): ProviderErrorCode => {
 };
 
 export async function requestQishui<T = unknown>(operation: QishuiOperation, params: QishuiParams = {}): Promise<T> {
+    // 第一次发请求时把「此刻到底认不认得出这是原生」记一行。
+    // `native=false shell=true` 就是「桥还没起来」—— accountRead 会据此把账号抹掉，
+    // 这就是「重启后账号没了」的现场证据。
+    if (!bridgeProbeNoted) {
+        bridgeProbeNoted = true;
+        console.info(`[Qishui] runtime: nativeBridge=${isQishuiNativeAvailable()}`
+            + ` capacitorAndroid=${isCapacitorAndroid()} androidShell=${isAndroidAppShell()}`
+            + ` desktop=${hasDesktopBridge()}`);
+    }
+    // 在 App 壳里、但桥还没注入完：等它起来再走原生那条路。
+    // 不等的话这一句立刻抛「不可用」，而 accountRead 会把「问不出来」当成
+    // 「这个平台没账号」—— 又是同一个「重启后账号没了」的坑。
+    if (!isQishuiNativeAvailable() && isAndroidAppShell()) await waitForNativeBridge();
     // 安卓：协议层在原生那个隐藏 WebView 里，信封与桌面端一致，只是走插件。
     if (isQishuiNativeAvailable()) {
         const result = await requestQishuiNative(operation, params);
