@@ -46,6 +46,11 @@ const progressOf = (time: number, start: number, end: number) => (
 );
 const easeOutExpo = (value: number) => (value >= 1 ? 1 : 1 - Math.pow(2, -10 * value));
 const easeInCubic = (value: number) => value * value * value;
+const easeInOutCubic = (value: number) => (
+    value <= 0 ? 0 : value >= 1 ? 1
+        : value < 0.5 ? 4 * value * value * value
+            : 1 - Math.pow(-2 * value + 2, 3) / 2
+);
 
 /**
  * 主题色 → pixi 色号。**必须提亮到看得见**：AI 主题的 primaryColor 常常是近黑的深色，
@@ -511,23 +516,27 @@ export class PromptPixiRuntime {
              * 镜头（用户要的那条节奏）：
              *   1. 进场这段把镜头**直接推近**到 zoomIn（一屏里只留下大半句，左右两边被推出画面）；
              *   2. 唱到哪横移到哪，让正在唱的那一段留在画面正中；
-             *   3. 整句唱完 → **瞬间**（硬切，不做缓动）拉回看清整行；
+             *   3. 唱到这行的**最后一点**时慢慢拉回，退回能看见整个整行的那一档；
              *   4. 整行淡出消失，下一句再从推近开始。
              *
-             * 第 3 步必须是硬切：缓动的话会先「退回去」再淡出，看着像镜头自己飘了一下，
-             * 而参考项目里那是咔的一下切回全景。
+             * 第 3 步是**缓动**不是硬切：硬切的话画面咔一下跳回全景，看着像镜头故障。
+             * 拉回要赶在淡出**之前**走完 —— 先看清整行，再让它消失。
              */
             const punch = safe(Math.max(0, 1 - (time - lastStart) / 0.2), 0);
-            const following = time < exitStart;
-            const zoom = following
-                ? (1 + (this.zoomFor(box, card) - 1) * enter) * (1 + punch * 0.02)
-                : this.zoomOutFor(box, card);
+            const pullDuration = clamp(span * 0.25, 0.4, 0.8);
+            const pullStart = Math.max(startTime + enterDuration, exitStart - pullDuration);
+            const pull = easeInOutCubic(progressOf(time, pullStart, Math.max(pullStart + 0.01, exitStart)));
+
+            const near = (1 + (this.zoomFor(box, card) - 1) * enter) * (1 + punch * 0.02);
+            const far = this.zoomOutFor(box, card);
+            const zoom = near + (far - near) * pull;
 
             /*
              * 横移：把「正在唱的那个位置」挪到画面正中。
              *
              * 直接 -focus * zoom 会露馅 —— 窗比画面大的时候，移过头就会看见窗外的空白。
              * 所以焦点要夹在「离窗边缘还有半个画面」的区间里（装不下整窗时才有这个区间）。
+             * 拉回的那一段里 zoom 一直在变，焦点每帧跟着重算，退出去时正好回到正中。
              */
             const half = Math.max(1, this.lastWidth) / (2 * Math.max(1e-3, zoom));
             const minFocus = card.left + half;
@@ -535,7 +544,7 @@ export class PromptPixiRuntime {
             const focus = maxFocus > minFocus
                 ? clamp(card.contentLeft + caretX, minFocus, maxFocus)
                 : 0;
-            const rawPan = following ? -focus * zoom : 0;
+            const rawPan = -focus * zoom * (1 - pull);
 
             box.root.scale.set(safe(zoom, 1));
             box.root.position.set(
