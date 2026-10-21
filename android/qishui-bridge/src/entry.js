@@ -128,6 +128,10 @@ const handlers = {
 
     'login.logout': () => car.logout(),
 
+    // 凭据在 App 侧也留一份（跨重启用）：桥自己那份存储读不回来时，启动时灌回去。
+    'session.export': () => car.exportSession(),
+    'session.import': params => car.importSession(params && params.credential),
+
     search: params => {
         const p = params || {};
         const keywords = String(p.keywords || p.query || '');

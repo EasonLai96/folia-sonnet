@@ -11,6 +11,11 @@ export type QishuiOperation =
     | 'login.qr'
     | 'login.check'
     | 'login.logout'
+    // 凭据在 App 这边也存一份（跨重启用）。只有安卓的隐藏 WebView 桥有这两个
+    // operation，桌面端的 Electron 是另一条链路（它自己的 cookie 罐本来就持久），
+    // 所以调用方要先判环境（见 qishuiProvider 的同名守卫），别在桌面端发。
+    | 'session.export'
+    | 'session.import'
     | 'search'
     | 'artist'
     | 'song.detail'

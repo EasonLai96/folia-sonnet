@@ -110,12 +110,19 @@ export function createQishuiCar(options = {}) {
      */
     async function accountTrack(id) {
         const credential = sessions.get();
-        if (!credential) return { track: await catalog.track(id), account: false };
+        // ⚠「没凭据」与「有凭据但这条路失败了」是两种完全不同的故障，必须分得开：
+        // 前者是登录态没恢复，后者是签名/接口那一路的问题。合成的 accountError
+        // 会一路带到渲染层的报错文案里（`audioMeta`），否则它只躺在隐藏 WebView
+        // 的 console 里 —— 那份日志用户根本看不到。
+        if (!credential) return { track: await catalog.track(id), account: false, accountError: 'no-session' };
         try {
             return { track: await catalog.track(id, { credential }), account: true };
         } catch (error) {
-            log(`[Qishui] account track read failed (${error?.code || 'error'}), falling back to the public token`);
-            return { track: await catalog.track(id), account: false, accountError: String(error?.code || error) };
+            const reason = error instanceof QishuiError
+                ? `${error.code}${error.stage ? '/' + error.stage : ''}`
+                : String(error?.code || error?.message || error);
+            log(`[Qishui] account track read failed (${reason}), falling back to the public token`);
+            return { track: await catalog.track(id), account: false, accountError: reason };
         }
     }
 
@@ -216,6 +223,47 @@ export function createQishuiCar(options = {}) {
         checkLogin: key => auth.check(key),
         cancelLogin: key => { auth.cancel(key); },
 
+        /**
+         * 把当前凭据原样导出，交给渲染层存进 **App 自己**那一份存储。
+         *
+         * 为什么要有这一手：桥自己那份（隐藏 WebView 的 SharedPreferences /
+         * localStorage）在真机上并不总是读得回来 —— 重启后它空了，登录态就凭空没了，
+         * 而播放地址那一路也会退回公共令牌（audioMeta 的 account=false，
+         * 受保护的曲子只剩试听）。App 主 WebView 的 localStorage 是另一条通道，
+         * 网易 / QQ / 酷狗的登录态都靠它跨重启活着，所以凭据在两边各留一份。
+         */
+        exportSession() {
+            return { provider: 'qishui', credential: sessions.get() || null };
+        },
+
+        /**
+         * 灌回一份凭据：启动时桥说没登录，就先把 App 存的那份塞回去再问一次。
+         *
+         * 只认形状不认内容 —— ticket 与 guardKey 缺一个就签不出请求。
+         *
+         * ⚠ 不是无条件覆盖：渲染层每次查登录态都会先灌一次（它不知道桥此刻有没有），
+         * 而桥这份可能是**刚续过期的**（renew 写过新 ticket）。拿 App 那份旧的盖回去，
+         * 等于把一次成功的续期作废。所以只在两种情况下真的写：桥现在没有凭据，
+         * 或者灌进来的这份过期时间更晚。
+         */
+        importSession(credential) {
+            const value = credential && typeof credential === 'object' ? credential : null;
+            if (!value || !value.ticket || !value.guardKey) {
+                return { provider: 'qishui', restored: false, reason: 'the saved session has no ticket or guard key' };
+            }
+            const current = sessions.get();
+            const currentExpiry = Number(current?.expiresAt) || 0;
+            const nextExpiry = Number(value.expiresAt) || 0;
+            if (current?.ticket && nextExpiry <= currentExpiry) {
+                return { provider: 'qishui', restored: false, kept: true, reason: 'the bridge already holds this session' };
+            }
+            sessions.set(value);
+            // 换账号后同一个歌单 id 的曲目可能不同。
+            coverCache.clear();
+            log('[Qishui] the session kept by the app was put back into the bridge');
+            return { provider: 'qishui', restored: true };
+        },
+
         logout() {
             auth.logout();
             feed.clear();
@@ -269,19 +317,25 @@ export function createQishuiCar(options = {}) {
         },
 
         async audio(id, quality) {
-            const { track, account } = await accountTrack(id);
+            const { track, account, accountError } = await accountTrack(id);
             const audio = await resolveAudio(client, track, quality);
-            // 这几个字段只为排查「为什么只剩试听」：有没有带凭据、上游给的是哪一型、
-            // full 那套到底有没有下发。渲染层在判成试听时会把它们写进报错文案。
+            // 这几个字段只为排查「为什么只剩试听」：有没有带凭据（没带的话为什么）、
+            // 上游给的是哪一型、full 那套到底有没有下发。渲染层在判成试听时会把它们
+            // 写进报错文案 —— 用户报「VIP 歌曲听不了」时，全靠这一串分清
+            // 「没登录」/「登录了但这首只授权试听」/「登录了但 full 换不出明文」。
             const player = track?.player_info || {};
             return {
                 provider: 'qishui',
                 ...audio,
                 audioMeta: {
                     account,
+                    ...(accountError ? { accountError } : {}),
                     playerType: Number.isFinite(Number(player.player_type)) ? Number(player.player_type) : -1,
                     fullModel: Boolean(player.full?.video_model_info),
                     previewModel: Boolean(player.preview?.video_model_info),
+                    // full 那套换没换出明文：换不出就会掉到 preview，这是同一现象的
+                    // 另一半原因（凭据在手也照样只剩试听）。
+                    gotFull: audio?.trial === false,
                 },
             };
         },

@@ -3,6 +3,10 @@ import { OnlineProviderError } from '../../types/onlineMusic';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
 import { parseQishuiLyrics } from '../../utils/lyrics/qishuiLyrics';
 import { getQishuiTransportAvailability, requestQishui, throwQishuiDataError } from './qishuiTransport';
+import {
+    readProviderSessionValue, removeProviderSessionValue, writeProviderSessionValue,
+} from './providerStorage';
+import { isAndroidAppShell } from '../../platform/runtime';
 import { normalizeQishuiCollection, normalizeQishuiSong, normalizeQishuiUser, qishuiPage, qishuiText } from './qishuiNormalize';
 import { QISHUI_FEED_PLAYLIST_ID, qishuiCatalog } from './qishuiCatalog';
 import { clearQishuiLibraryCache, qishuiLibrary } from './qishuiLibrary';
@@ -36,6 +40,65 @@ export const noteQishuiRefreshDiagnostic = (text: string): void => {
 let lastQishuiCheckNote: string | null = null;
 /** 二维码阶段服务端下发的扫码文案（谁家 App 能扫，由上游说了算）。 */
 let lastQishuiQrNote: string | null = null;
+
+// ---- 凭据在 App 这边也留一份 ---------------------------------------------
+//
+// 桥自己那份存在**隐藏 WebView** 的 SharedPreferences / localStorage 里，真机上并不
+// 总是读得回来：一重启它就是空的，于是登录态凭空消失，播放地址那一路还会退回公共
+// 令牌（audioMeta 的 account=false，受版权保护的曲子只剩试听）。
+//
+// App 主 WebView 的 localStorage 是另一条通道 —— 网易 / QQ / 酷狗的登录态都靠它跨
+// 重启活着。所以凭据两边各留一份：登录成功后抄出来，查登录态之前先灌回去。
+//
+// 判据也跟着换：不问「桥那份存储读没读出来」（那是桥的家事，且已被实测为不可靠），
+// 而是**直接看账号级读取拿不拿得到东西**（拉歌单）。灌回去之后 status 认了，
+// 后面 readWhole 会真的去拉歌单 —— 拉得到就是能用。
+const QISHUI_SESSION_KEY = 'car-session';
+/** 最近一次「灌回去」的结果：真机上再说账号没了，先看这一行。 */
+let lastQishuiSessionNote: string | null = null;
+/** 最近一次「抄出来」的失败原因（成功不记）。 */
+let lastQishuiSessionKeepNote: string | null = null;
+
+const readKeptCredential = (): unknown => {
+    const text = readProviderSessionValue('qishui', QISHUI_SESSION_KEY);
+    if (!text) return null;
+    try { return JSON.parse(text); } catch (_) { return null; }
+};
+
+/** 把桥里那份凭据抄一份到 App 这边。只有安卓那条桥有 session.export。 */
+async function keepQishuiCredential(): Promise<void> {
+    if (!isAndroidAppShell()) return;
+    try {
+        const data = await requestQishui<any>('session.export', {});
+        const credential = data?.credential;
+        if (credential?.ticket) {
+            writeProviderSessionValue('qishui', QISHUI_SESSION_KEY, JSON.stringify(credential));
+            return;
+        }
+        removeProviderSessionValue('qishui', QISHUI_SESSION_KEY);
+    } catch (error) {
+        // 抄不出来＝下一次重启还是没账号，这是要留在诊断里的。
+        lastQishuiSessionKeepNote = error instanceof Error ? error.message : String(error);
+    }
+}
+
+/** 查登录态之前先把 App 存的那份灌回桥（桥那份读不回来时全靠它）。 */
+async function restoreQishuiCredential(): Promise<void> {
+    if (!isAndroidAppShell()) return;
+    const credential = readKeptCredential();
+    if (!credential) {
+        lastQishuiSessionNote = 'the app keeps no copy yet';
+        return;
+    }
+    try {
+        const data = await requestQishui<any>('session.import', { credential });
+        lastQishuiSessionNote = data?.restored
+            ? 'the copy kept by the app was put back into the bridge'
+            : `kept but not used (${String(data?.reason || 'unknown')})`;
+    } catch (error) {
+        lastQishuiSessionNote = `could not be put back: ${error instanceof Error ? error.message : String(error)}`;
+    }
+}
 
 function qishuiNotOurs(): OnlineProviderError {
     return new OnlineProviderError('unsupported', 'Song does not belong to Qishui Music', 'qishui');
@@ -86,10 +149,17 @@ export const qishuiProvider: OnlineMusicProvider = {
             // 「登录了但这首确实只授权试听」的，而这两种是完全不同的问题。
             if (data?.trial === true) {
                 const meta = data?.audioMeta;
+                // `account=false` 有两种：桥里压根没凭据（登录态没恢复），或账号那条路
+                // 请求失败了退回公共令牌。前者看 accountError=no-session，后者看具体的
+                // 错误码 —— 一个是「没登录」，一个是「登录了但这条路走不通」，修法完全不同。
+                // 别再让它们长得一样：用户报「VIP 歌曲听不了」时只凭前半句分不出来。
+                const field = (key: string, value: unknown) => (value === undefined ? '' : ` ${key}=${String(value)}`);
                 throw new OnlineProviderError('preview-only',
                     'Qishui Music only offers a preview for this account'
-                    + (meta ? ` (account=${meta.account} playerType=${meta.playerType}`
-                        + ` fullModel=${meta.fullModel} previewModel=${meta.previewModel})` : ''),
+                    + (meta ? ` (account=${meta.account}${field('accountError', meta.accountError)}`
+                        + `${field('playerType', meta.playerType)}`
+                        + `${field('fullModel', meta.fullModel)}${field('previewModel', meta.previewModel)}`
+                        + `${field('gotFull', meta.gotFull)})` : ''),
                     'qishui');
             }
             const url = qishuiText(data?.url);
@@ -123,6 +193,13 @@ export const qishuiProvider: OnlineMusicProvider = {
     auth: {
         getLoginTexts: () => ({ title: 'home.loginTitleQishui', note: 'home.loginNoteQishui' }),
         async getLoginStatus() {
+            // ⚠ 先灌凭据、再问登录态。
+            //
+            // 顺序反过来就是「重启后账号没了」本身：桥那份存储读不回来时，问也是白问，
+            // 它只会回答「没登录」；而 accountRead 把这个答案当成「这个平台没账号」，
+            // 于是账号真的从界面上消失（clearAccount），播放也随之退回公共令牌。
+            // 凭据是 App 自己存的那份，先给它灌回去。
+            await restoreQishuiCredential();
             // 请求本身失败时也要留下痕迹：否则诊断只会写「last status: none」，
             // 看不出是没走到这一步，还是这一步抛了错。
             let data: any = null;
@@ -149,11 +226,21 @@ export const qishuiProvider: OnlineMusicProvider = {
                     ? ` libraryErrors=${data.libraryErrors.map((item: unknown) => String(item)).join(' | ')}` : '')
                 : 'null';
             if (!data?.loggedIn) return null;
+            // 认下了就立刻抄一份到 App 这边：下一次重启靠它活着。
+            // 不 await 也行（下一次查登录态还会再抄），但让它在返回之前写完，
+            // 「登录成功 → 马上重启」这种操作才不会漏。
+            await keepQishuiCredential();
             const user = normalizeQishuiUser(data);
             // 登录态只有 status 这一处能读，缺 id 也不能当作未登录，否则整库会被清空。
             return { ...user, id: user.id || 'qishui-account' };
         },
-        async logout() { clearQishuiLibraryCache(); await requestQishui('login.logout', {}); },
+        async logout() {
+            clearQishuiLibraryCache();
+            // 账号走了，App 这边那份也要一起走：留着它，下次启动会把它又灌回桥里，
+            // 表现成「已经退出登录，重启后又回来了」。
+            removeProviderSessionValue('qishui', QISHUI_SESSION_KEY);
+            await requestQishui('login.logout', {});
+        },
         async startLogin() {
             const data = await requestQishui<any>('login.qr', {});
             const token = qishuiText(data?.token);
@@ -235,6 +322,9 @@ export const qishuiProvider: OnlineMusicProvider = {
                 line(`last qr: ${lastQishuiQrNote ?? 'none'}`),
                 line(`last check: ${lastQishuiCheckNote ?? 'none'}`),
                 line(`last refresh: ${lastQishuiRefreshNote ?? 'none'}`),
+                // 「重启后账号没了」先看这一行：App 这边有没有存下凭据、灌回去没有。
+                line(`session: ${lastQishuiSessionNote ?? 'none'}`),
+                ...(lastQishuiSessionKeepNote ? [line(`session copy failed: ${lastQishuiSessionKeepNote}`)] : []),
                 // 安卓端协议层已换成车机协议（/api/luna/v1/platform）：签名是
                 // WebView 自带的 WebCrypto ECDSA P-256（bd-ticket-guard），不再
                 // 依赖 bdms.node，旧「a_bogus 回退」那行说明已过时。

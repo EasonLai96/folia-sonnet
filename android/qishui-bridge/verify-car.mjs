@@ -176,6 +176,15 @@ if (trackId) {
         if (head.status !== 200 && head.status !== 206) throw new Error('audio fetch HTTP ' + head.status);
         return `HTTP ${head.status} ${head.headers.get('content-type')}`;
     });
+    // 「VIP 歌曲听不了」的分诊闸门：没登录时 audio 必须点名是**没有凭据**
+    // （accountError=no-session），不能只给一个 account=false —— 那是两种故障
+    // （登录态没恢复 / 账号那条路请求失败）共用的一个值，混在一起就没法修。
+    await attempt('a signed-out audio read names the missing credential', async () => {
+        const audio = await car.audio(trackId, 'standard');
+        if (audio.audioMeta?.account !== false) throw new Error('account=' + audio.audioMeta?.account);
+        if (audio.audioMeta?.accountError !== 'no-session') throw new Error('accountError=' + audio.audioMeta?.accountError);
+        return JSON.stringify(audio.audioMeta);
+    });
 }
 
 await attempt('feed', async () => {
@@ -347,6 +356,43 @@ if (started) {
             if (store?.deviceIdReused !== true) throw new Error('device id was regenerated on restart');
             if (store?.read !== 'native') throw new Error('store.read=' + store?.read);
             return JSON.stringify(store);
+        });
+        // 「重启后账号没了」最坏的一种：桥自己那份存储（真机 = SharedPreferences）
+        // 整个空了。桥这边已经救不回来，只有 App 主 WebView 那份凭据能把它复活 ——
+        // 这就是 session.export / session.import 存在的理由，这条断言专门钉它。
+        await attempt('a bridge that lost its own store is revived by the copy the app kept', async () => {
+            const kept = loginCar.exportSession().credential;
+            if (!kept?.ticket || !kept?.guardKey) throw new Error('session.export gave no usable credential');
+            // ⚠ 必须把**三档全清掉**（原生 / localStorage / 内存）。只清外两档不够：
+            // car/storage.js 的内存兜底是模块级的，同一个进程里它照样把凭据递回来，
+            // 「存储被清空」根本没被模拟到 —— 这一条断言会假通过。storage.remove 正好
+            // 是三档一起删的那个动作，等价于「真机重启后 SharedPreferences 空了」。
+            const storage = await import('./src/car/storage.js');
+            storage.remove('session');
+            storage.remove('device-id');
+            try {
+                const rebooted = createQishuiCar({ transport: loginTransport });
+                const before = await rebooted.status();
+                if (before.loggedIn) throw new Error(`expected the rebooted bridge to have lost the session`
+                    + ` (storage=${before.storage} store=${JSON.stringify(before.store)})`);
+                const imported = rebooted.importSession(JSON.parse(JSON.stringify(kept)));
+                if (imported.restored !== true) throw new Error('import refused: ' + imported.reason);
+                const after = await rebooted.status();
+                if (!after.loggedIn) throw new Error('still not logged in after the import');
+                return `lost (storage=${before.storage}) → restored, user=${after.profile?.nickname}`;
+            } finally {
+                // 后面的断言还要看这份凭据：写回三档，别把现场留在坏状态。
+                loginCar.sessions.set(loginCar.sessions.get());
+            }
+        });
+        // 反方向也要钉住：渲染层每次查登录态都先灌一次，而桥这份可能是**刚续过期**的。
+        // 拿 App 那份旧的盖回去，等于把一次成功的续期作废。
+        await attempt('the import leaves a fresher session in the bridge alone', async () => {
+            const stale = { ...loginCar.exportSession().credential, ticket: 'STALE-TICKET', expiresAt: Date.now() - 1000 };
+            const result = loginCar.importSession(stale);
+            if (result.restored !== false || result.kept !== true) throw new Error(JSON.stringify(result));
+            if (loginCar.sessions.get()?.ticket !== 'FAKE-TICKET') throw new Error('the live session was clobbered');
+            return `kept=${result.kept} (${result.reason})`;
         });
         // 带凭据的曲目读取。两条都要跑：accountTrack 只在**失败**那一支里调 log()，
         // 而 `log` 曾经没在本文件里绑过 → `ReferenceError: log is not defined`，
