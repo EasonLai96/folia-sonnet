@@ -19,6 +19,7 @@ describe('visualizer registry', () => {
     it('auto-loads the built-in visualizer entries in stable order', () => {
         expect(VISUALIZER_REGISTRY.map(entry => entry.mode)).toEqual([
             'sonnet',
+            'prompt',
             'tempera',
             'lumiere',
             'classic',
@@ -77,7 +78,7 @@ describe('visualizer registry', () => {
         const modes = VISUALIZER_REGISTRY.map(candidate => candidate.mode);
         removeVisualizerEntry(entry.mode);
 
-        expect(modes.slice(0, 3)).toEqual(['sonnet', entry.mode, 'tempera']);
+        expect(modes.slice(0, 4)).toEqual(['sonnet', 'prompt', entry.mode, 'tempera']);
         expect(VISUALIZER_REGISTRY.map(candidate => candidate.mode)).not.toContain(entry.mode);
     });
 

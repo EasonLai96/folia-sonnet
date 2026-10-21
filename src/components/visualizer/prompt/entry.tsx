@@ -2,10 +2,11 @@ import React from 'react';
 import { defineVisualizer } from '../definition';
 
 // src/components/visualizer/prompt/entry.tsx
-// 提示词：和商籁共用同一套 Pixi 运行时，只把节目单锁成「一句一个输入框」——
-// 每唱完一句，这个框飞走、下一个框飞进来，框里的字跟着唱到的位置逐个落下。
-// 镜头本体在 sonnet/sonnetPromptField.ts，切法由 compileSonnetProgram 的 forcedShotKind 决定。
-const VisualizerSonnet = React.lazy(() => import('../sonnet/VisualizerSonnet'));
+// 提示词：一句一个输入框 —— 每唱完一句，这个框飞走、下一个框飞进来，框里的词按唱到的位置
+// 逐个落下。它**不依赖商籁**：自己的运行时（createPromptPixiRuntime）、自己的节目单
+// （compilePromptBoxes，一句一框），只有那个框本身（promptBox.ts）是和商籁的 prompt-field
+// 镜头共用的一份几何。
+const VisualizerPrompt = React.lazy(() => import('./VisualizerPrompt'));
 
 export default defineVisualizer({
     mode: 'prompt',
@@ -28,5 +29,5 @@ export default defineVisualizer({
         keywords: ['prompt', 'chat', 'dialog', 'input', '提示词', '输入框', '对话框', '打字'],
     },
     usesWordSegmentation: true,
-    render: props => <VisualizerSonnet {...props} forceShotKind="prompt-field" />,
+    render: props => <VisualizerPrompt {...props} />,
 });
