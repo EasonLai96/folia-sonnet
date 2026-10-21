@@ -1,6 +1,7 @@
 import type { Artist, UnifiedSong } from '../../types';
 import type { JsonValue, ProviderCollection, ProviderPage, ProviderUser } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
+import { searchCoverBySongName } from './onlineCoverFallback';
 
 // src/services/onlineMusic/qishuiNormalize.ts
 
@@ -96,8 +97,39 @@ export const normalizeQishuiCollection = (raw: unknown, type = 'playlist'): Prov
             ...(item.owned === undefined ? {} : { owned: Boolean(item.owned) }),
             ...(item.shelfPane ? { shelfPane: text(item.shelfPane) } : {}),
             ...(item.playbackMode ? { playbackMode: text(item.playbackMode) } : {}),
+            // 协议层带出来的「借封面用的那首歌」：歌单自己没封面、第一首歌也没给封面时，
+            // 拿这个名字去别的平台搜一张（见 backfillQishuiCollectionCovers）。
+            ...(item.providerData?.coverSongName ? { coverSongName: text(item.providerData.coverSongName) } : {}),
+            ...(item.providerData?.coverSongArtist ? { coverSongArtist: text(item.providerData.coverSongArtist) } : {}),
         },
     };
+};
+
+/** 一批歌单里最多同步等这么多张借来的封面，剩下的留白（集合封面没有广播可发）。 */
+const COLLECTION_COVER_LIMIT = 6;
+
+/**
+ * 歌单封面的第二层兜底。
+ *
+ * 第一层在协议层做（拿第一首歌的封面顶上，因为歌单自己的图一律 403）；那是同步的、
+ * 一次请求换一张。这里只负责「连第一首歌都没封面」的那一小撮：拿协议层带出来的歌名
+ * 去网易 / QQ / 酷狗搜一张。搜索要走共用那条桥，所以也限条数。
+ */
+export const backfillQishuiCollectionCovers = async (
+    collections: ProviderCollection[], limit = COLLECTION_COVER_LIMIT,
+): Promise<ProviderCollection[]> => {
+    let filled = 0;
+    for (const collection of collections) {
+        if (filled >= limit) break;
+        if (!collection || collection.coverUrl) continue;
+        const name = text(collection.providerData?.coverSongName);
+        if (!name) continue;
+        const coverUrl = await searchCoverBySongName(name, text(collection.providerData?.coverSongArtist));
+        if (!coverUrl) continue;
+        collection.coverUrl = coverUrl;
+        filled += 1;
+    }
+    return collections;
 };
 
 // 汽水分页字段来自协议层，但 token 搜索路径的 nextOffset 忘了加上自身 offset，

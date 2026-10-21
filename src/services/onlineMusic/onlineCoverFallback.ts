@@ -156,6 +156,27 @@ const searchBestCover = async (name: string, artist: string): Promise<string> =>
 };
 
 /**
+ * 只按「歌名」借一张封面（歌单封面兜底用）。
+ *
+ * 与 {@link requestSongCoverFallback} 共用缓存与预算，只是入口从「一首歌」换成「一个名字」：
+ * 汽水的歌单封面取不到字节（协议层已换成第一首歌的封面），而那一首自己也可能没封面，
+ * 于是协议层把它的名字带出来，由这里去别的平台搜一张。没有 song 对象可写回，
+ * 所以只返回地址、不广播 —— 调用方自己填进去。
+ */
+export const searchCoverBySongName = async (name: string, artist: string): Promise<string> => {
+    const song = String(name ?? '').trim();
+    if (!song || song === '未知标题') return '';
+    const who = String(artist ?? '');
+    const key = cacheKey(song, who);
+    const cached = coverCache.get(key);
+    if (cached !== undefined) return cached;
+    if (budget <= 0) return '';
+    const cover = await searchBestCover(song, who).catch(() => '');
+    coverCache.set(key, cover);
+    return cover;
+};
+
+/**
  * 异步给一首歌补封面。
  *
  * 拿到之后两件事都要做：原地写回 `song.album.coverUrl`（下一次同步读就有），

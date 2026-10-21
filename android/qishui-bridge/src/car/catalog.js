@@ -43,7 +43,8 @@ async function search(platform, query, type, limit, offset) {
 }
 
 /** 带 offset 的歌单读取：游标不是行号，只能从头翻过去。 */
-async function playlistPage(platform, id, ownerId, limit, offset) {
+// count 可调：只要第一首（封面兜底那一步）时传 1，别为一张图拉满 100 首。
+async function playlistPage(platform, id, ownerId, limit, offset, count = 100) {
     let cursor = '0';
     let consumed = 0;
     const seen = new Set();
@@ -53,7 +54,7 @@ async function playlistPage(platform, id, ownerId, limit, offset) {
     while (items.length < limit && seen.size < 500) {
         seen.add(cursor);
         const data = await platform('/playlist/detail/', {
-            playlist_id: id, owner_id: ownerId || '', count: 100, cursor, type: null,
+            playlist_id: id, owner_id: ownerId || '', count, cursor, type: null,
         });
         collection ||= data.playlist;
         const batch = array(data.media_entities, 'playlist tracks');
@@ -110,7 +111,7 @@ export function createCatalog({ platform }) {
             return media.track_entity;
         },
 
-        playlistTracks: ({ id, ownerId, limit, offset }) => playlistPage(platform, id, ownerId, limit, offset),
+        playlistTracks: ({ id, ownerId, limit, offset, count }) => playlistPage(platform, id, ownerId, limit, offset, count),
 
         async userPlaylists({ limit, offset }) {
             const items = [];

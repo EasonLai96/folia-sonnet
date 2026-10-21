@@ -1,5 +1,5 @@
 import type { MediaId, OnlineLibraryProvider, ProviderCollection } from '../../types/onlineMusic';
-import { normalizeQishuiCollection, qishuiPage } from './qishuiNormalize';
+import { backfillQishuiCollectionCovers, normalizeQishuiCollection, qishuiPage } from './qishuiNormalize';
 import { QISHUI_LIKED_PLAYLIST_ID, qishuiTrackPage } from './qishuiCatalog';
 import { requestQishui, throwQishuiDataError } from './qishuiTransport';
 
@@ -23,7 +23,7 @@ async function allPlaylists(userId: MediaId): Promise<ProviderCollection[]> {
     lastQishuiLibraryNote = errors.length
         ? `/luna errors: ${errors.join(' | ')}`
         : '/luna ok (no errors)';
-    const items = raw.map((item: unknown) => normalizeQishuiCollection(item));
+    const items = await backfillQishuiCollectionCovers(raw.map((item: unknown) => normalizeQishuiCollection(item)));
     playlistCache.set(String(userId), { at: Date.now(), items });
     return items;
 }

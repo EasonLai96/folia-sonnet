@@ -1,7 +1,7 @@
 import type { UnifiedSong } from '../../types';
 import type { MediaId, OnlineCatalogProvider, ProviderPage } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
-import { normalizeQishuiCollection, normalizeQishuiSong, qishuiArtistName, qishuiPage } from './qishuiNormalize';
+import { backfillQishuiCollectionCovers, normalizeQishuiCollection, normalizeQishuiSong, qishuiArtistName, qishuiPage } from './qishuiNormalize';
 import { requestQishui, throwQishuiDataError } from './qishuiTransport';
 
 // src/services/onlineMusic/qishuiCatalog.ts
@@ -37,7 +37,9 @@ export const qishuiCatalog: OnlineCatalogProvider = {
     async getPlaylistDetail(id, collection) {
         if (collection?.providerId === 'qishui') return collection;
         const card = await fetchQishuiPlaylistCard(id);
-        return card ? normalizeQishuiCollection(card) : null;
+        if (!card) return null;
+        const [normalized] = await backfillQishuiCollectionCovers([normalizeQishuiCollection(card)]);
+        return normalized;
     },
     async getAlbumTracks(id, limit = 50, offset = 0) {
         const data = await requestQishui<any>('album', { id, limit: QISHUI_ALBUM_TRACK_LIMIT });

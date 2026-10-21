@@ -107,7 +107,8 @@ export function toFoliaPlaylist(raw, options = {}) {
         isOwned: options.isOwned !== undefined ? Boolean(options.isOwned) : undefined,
         owned: options.isOwned !== undefined ? Boolean(options.isOwned) : undefined,
         // 我的喜欢（type 1）在渲染层有固定 id，协议层这里标一下便于排查。
-        providerData: { carType: Number(base.type) || 0 },
+        // ownerId 必须带上：/playlist/detail/ 要它，换封面那一步也要靠它读第一首。
+        providerData: { carType: Number(base.type) || 0, ownerId: text(base.owner_id) },
     };
 }
 

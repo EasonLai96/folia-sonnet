@@ -194,6 +194,25 @@ if (playlists && playlists.playlists.length) {
         if (!page.tracks.length) throw new Error('empty tracks');
         return page.tracks.length + ' tracks';
     });
+    // 前提（只记录不断言）：歌单自己那张图是取不到字节的。哪天它回 200 了，
+    // 「一律换成第一首歌的封面」就该改回「没封面才补」。
+    if (playlist.cover) {
+        const own = await fetch(playlist.cover, { method: 'GET', headers: { Range: 'bytes=0-1' } });
+        console.log(`NOTE playlist own cover → HTTP ${own.status} (${playlist.cover.slice(0, 60)}…)`);
+    }
+    // 歌单封面兜底：只写「没封面才补」是不够的 —— 封面字段非空，只是取不到字节
+    // （403 fail to get resource），界面上照样是占位图，而兜底一次都不会触发。
+    await attempt('playlist cover replaced by the first track cover', async () => {
+        const page = await car.playlistTracks(playlist.id, 3, 0);
+        const card = page.playlist;
+        const first = page.tracks[0];
+        if (!card?.cover) throw new Error('card has no cover');
+        if (!first?.cover) throw new Error('first track has no cover');
+        if (card.cover !== first.cover) throw new Error(`not replaced: ${card.cover}`);
+        const res = await fetch(card.cover, { method: 'GET', headers: { Range: 'bytes=0-1' } });
+        if (res.status !== 200 && res.status !== 206) throw new Error('cover HTTP ' + res.status);
+        return `card cover = first track cover, HTTP ${res.status}`;
+    });
 }
 
 await attempt('feedModes', async () => {

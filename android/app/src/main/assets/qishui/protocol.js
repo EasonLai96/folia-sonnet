@@ -777,7 +777,8 @@ ${lines.join("\n")}
       isOwned: options.isOwned !== void 0 ? Boolean(options.isOwned) : void 0,
       owned: options.isOwned !== void 0 ? Boolean(options.isOwned) : void 0,
       // 我的喜欢（type 1）在渲染层有固定 id，协议层这里标一下便于排查。
-      providerData: { carType: Number(base.type) || 0 }
+      // ownerId 必须带上：/playlist/detail/ 要它，换封面那一步也要靠它读第一首。
+      providerData: { carType: Number(base.type) || 0, ownerId: text(base.owner_id) }
     };
   }
   function toFoliaPlaylists(items) {
@@ -863,7 +864,7 @@ ${lines.join("\n")}
     }
     return { items, hasMore: more && items.length > 0, nextOffset: offset + items.length };
   }
-  async function playlistPage(platform, id, ownerId, limit, offset) {
+  async function playlistPage(platform, id, ownerId, limit, offset, count = 100) {
     let cursor = "0";
     let consumed = 0;
     const seen = /* @__PURE__ */ new Set();
@@ -875,7 +876,7 @@ ${lines.join("\n")}
       const data = await platform("/playlist/detail/", {
         playlist_id: id,
         owner_id: ownerId || "",
-        count: 100,
+        count,
         cursor,
         type: null
       });
@@ -927,7 +928,7 @@ ${lines.join("\n")}
         if (!media?.track_entity) throw new QishuiError("not-playable", "Qishui did not return the track");
         return media.track_entity;
       },
-      playlistTracks: ({ id, ownerId, limit, offset }) => playlistPage(platform, id, ownerId, limit, offset),
+      playlistTracks: ({ id, ownerId, limit, offset, count }) => playlistPage(platform, id, ownerId, limit, offset, count),
       async userPlaylists({ limit, offset }) {
         const items = [];
         for (const [path, field, owned] of [
@@ -1309,6 +1310,43 @@ ${lines.join("\n")}
     const library = createLibrary(client);
     const { platform } = client;
     let likedReal = null;
+    const coverCache = /* @__PURE__ */ new Map();
+    const COVER_FALLBACK_BUDGET = 12;
+    async function firstTrack(id, ownerId) {
+      const key = String(id || "");
+      if (!key) return null;
+      if (coverCache.has(key)) return coverCache.get(key);
+      let found = null;
+      try {
+        const page = await catalog.playlistTracks({
+          id: key,
+          ownerId: String(ownerId || ""),
+          limit: 1,
+          offset: 0,
+          count: 1
+        });
+        const [song] = toFoliaSongs(page.items);
+        if (song) found = { cover: song.cover || "", name: song.name || "", artist: song.artist || "" };
+      } catch (_) {
+        found = null;
+      }
+      coverCache.set(key, found);
+      return found;
+    }
+    function applyCoverFallback(playlist, track) {
+      if (!playlist) return;
+      if (track?.cover) {
+        playlist.cover = track.cover;
+        return;
+      }
+      if (track?.name) {
+        playlist.providerData = {
+          ...playlist.providerData || {},
+          coverSongName: track.name,
+          coverSongArtist: track.artist || ""
+        };
+      }
+    }
     async function resolveLiked() {
       if (likedReal) return likedReal;
       likedReal = await likedPlaylist(platform);
@@ -1392,6 +1430,7 @@ ${lines.join("\n")}
         auth.logout();
         feed.clear();
         likedReal = null;
+        coverCache.clear();
         return { provider: "qishui", loggedIn: false, webSession: false, cookieReady: false, configured: true };
       },
       async search(keywords, limit, offset) {
@@ -1407,6 +1446,8 @@ ${lines.join("\n")}
           hasMore: page.hasMore
         };
       },
+      // 搜索出来的歌单同样带着那个 403 的封面，但一次搜索就是十几张卡片，
+      // 逐张再发一次 /playlist/detail/ 换图不划算 —— 点进去看详情时再兜（见上）。
       async searchPlaylists(keywords, limit, offset) {
         const page = await catalog.searchPlaylists({ query: keywords, limit, offset });
         return {
@@ -1445,6 +1486,7 @@ ${lines.join("\n")}
         const page = await catalog.userPlaylists({ limit: 1e4, offset: 0 });
         const real = page.items.filter((item) => Number(item?.base_info?.type) !== 1);
         const liked = await resolveLiked().catch(() => null);
+        const likedTrack = liked ? await firstTrack(liked.id, liked.ownerId) : null;
         const virtual = [
           {
             id: QISHUI_LIKED_ID,
@@ -1472,7 +1514,16 @@ ${lines.join("\n")}
             playbackMode: "recommend-match"
           }
         ];
-        const items = [...virtual, ...toFoliaPlaylists(real)];
+        applyCoverFallback(virtual[0], likedTrack);
+        const mapped = toFoliaPlaylists(real);
+        const pending = [];
+        for (let i = 0; i < mapped.length && pending.length < COVER_FALLBACK_BUDGET; i++) {
+          pending.push({ index: i, id: String(real[i]?.base_info?.id || ""), ownerId: String(real[i]?.base_info?.owner_id || "") });
+        }
+        await Promise.all(pending.map(async (entry) => {
+          applyCoverFallback(mapped[entry.index], await firstTrack(entry.id, entry.ownerId));
+        }));
+        const items = [...virtual, ...mapped];
         return {
           provider: "qishui",
           playlists: items.slice(offset, offset + limit),
@@ -1515,11 +1566,13 @@ ${lines.join("\n")}
         }
         const page = await catalog.playlistTracks({ id: key, ownerId, limit, offset });
         const tracks = toFoliaSongs(page.items);
+        const card = page.collection ? toFoliaPlaylists([page.collection])[0] || null : null;
+        applyCoverFallback(card, tracks[0] ? { cover: tracks[0].cover, name: tracks[0].name, artist: tracks[0].artist } : null);
         return {
           provider: "qishui",
           tracks,
           songs: tracks,
-          playlist: page.collection ? toFoliaPlaylists([page.collection])[0] || null : null,
+          playlist: card,
           total: tracks.length,
           offset,
           nextOffset: page.nextOffset,
