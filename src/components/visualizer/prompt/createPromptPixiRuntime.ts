@@ -113,8 +113,6 @@ interface WordBox {
 interface BuiltWord {
     node: import('pixi.js').Text;
     box: WordBox;
-    /** AI 给这个词标的颜色（没有就是 null）。 */
-    color: number | null;
 }
 
 /** 唱完一个词之后飞出去的那个「残影」：位置/速度/出生时间都由这里记着。 */
@@ -155,6 +153,9 @@ interface BuiltBox {
 
 export class PromptPixiRuntime {
     private readonly boxes = new Map<number, BuiltBox>();
+    /** 高亮色缓存：主题对象没换就直接命中（见 highlightOf）。 */
+    private highlightTheme: Theme | null = null;
+    private highlightMap = new Map<string, number>();
     private destroyed = false;
     private resizeObserver: ResizeObserver | null = null;
     private lastWidth = 0;
@@ -337,7 +338,6 @@ export class PromptPixiRuntime {
             },
         });
 
-        const highlightOf = this.highlighter();
         const tokens: WordBox[] = plan.words.map((word, slot) => ({
             text: word.text,
             left: card.laid[slot]?.left ?? 0,
@@ -353,7 +353,7 @@ export class PromptPixiRuntime {
             // 纹理是按 BAKE_ZOOM 倍字号烤的，缩回去才是设计字号；镜头推近时才有像素可用。
             node.scale.set(1 / BAKE_ZOOM);
             node.visible = false;
-            return { node, box: token, color: highlightOf(token.text) };
+            return { node, box: token };
         });
         words.forEach(word => card.textLayer.addChild(word.node));
 
@@ -492,15 +492,28 @@ export class PromptPixiRuntime {
         });
     }
 
-    /** 词 → 高亮色。整行同色会很花，所以只给「被 AI 标过的词」备一份。 */
-    private highlighter() {
-        const byWord = new Map<string, number>();
-        (this.options.song.theme?.wordColors ?? []).forEach(entry => {
-            const word = String(entry?.word ?? '').trim();
-            if (!word) return;
-            byWord.set(word, themeColor(this.pixi, entry?.color, PROMPT_PALETTE.bone, 0.55));
-        });
-        return (text: string): number | null => byWord.get(text.trim()) ?? null;
+    /*
+     * 词 → AI 标的高亮色。整行同色会很花，所以只给「被 AI 标过的词」备一份。
+     *
+     * ⭐按**主题对象的引用**缓存，但**每帧都重新问一次** —— 不能只在搭框时读一次：
+     * AI 主题的 `wordColors` 常常比颜色晚到（叠层那一侧尤其：主题是先推一份、再补 AI 那份），
+     * 而换主题并不会重建框（见 swapSong 的 sameLook），晚到的那份于是永远用不上 ——
+     * 表现就是「播放页有 AI 高亮、桌面叠层一点没有」。
+     * 主题对象没换就直接命中缓存，一帧一次 Map 查找，不贵。
+     */
+    private highlightOf(text: string): number | null {
+        const theme = this.options.song.theme;
+        if (this.highlightTheme !== theme) {
+            this.highlightTheme = theme;
+            const byWord = new Map<string, number>();
+            (theme?.wordColors ?? []).forEach(entry => {
+                const word = String(entry?.word ?? '').trim();
+                if (!word) return;
+                byWord.set(word, themeColor(this.pixi, entry?.color, PROMPT_PALETTE.bone, 0.55));
+            });
+            this.highlightMap = byWord;
+        }
+        return this.highlightMap.get(text.trim()) ?? null;
     }
 
     /** 一整句的姿势：字的落下与高亮、下划线、以及整块窗的镜头。 */
@@ -589,7 +602,13 @@ export class PromptPixiRuntime {
             if (!word.node.visible) return;
             word.node.alpha = appear;
             word.node.y = (1 - appear) * fontPx * 0.14;
-            const tint = time >= word.box.startTime ? (word.color ?? colors.accent) : colors.text;
+            /*
+             * 高亮色**每帧问一次**（highlightOf 内部按主题缓存）：AI 那份 wordColors
+             * 常常比颜色晚到，而换主题不重建框 —— 只在搭框时读一次的话，晚到的那份
+             * 就永远落不到字上（桌面叠层那一侧正是这样）。
+             */
+            const marked = this.highlightOf(word.box.text);
+            const tint = time >= word.box.startTime ? (marked ?? colors.accent) : colors.text;
             if (word.node.tint !== tint) word.node.tint = tint;
         });
 
