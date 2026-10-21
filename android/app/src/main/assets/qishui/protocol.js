@@ -245,7 +245,7 @@ ${lines.join("\n")}
     const value = Number(raw || 0);
     const expires = value > 1e12 ? value : value > 1e9 ? value * 1e3 : value > 0 ? Date.now() + value * 1e3 : Date.now() + 6 * 36e5;
     if (!Number.isFinite(expires) || expires <= Date.now()) throw new Error("invalid credential expiry");
-    return expires;
+    return new Date(expires);
   }
   var isAccountId = (value) => typeof value === "string" && value.length > 0 && value.length <= 512 && !/[\s\x00-\x1f\x7f]/u.test(value);
   var newQrKey = () => randomHex(16);

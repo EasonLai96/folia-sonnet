@@ -128,13 +128,19 @@ export function readQishuiGuard(raw) {
     };
 }
 
-/** access_code 的过期时间：可能是秒/毫秒时间戳，也可能是「还有多少秒」。 */
+/**
+ * access_code 的过期时间：可能是秒/毫秒时间戳，也可能是「还有多少秒」。
+ *
+ * 返回 **Date**（与参考实现一致，调用方写的是 `.getTime()`）—— 早先这里返回
+ * 数字，真机上表现为 `qishuiCredentialExpiry(...).getTime is not a function`，
+ * 而且发生在 ticket 已经换到手之后，白白断掉一次登录。
+ */
 export function qishuiCredentialExpiry(raw) {
     const value = Number(raw || 0);
     const expires = value > 1e12 ? value : value > 1e9 ? value * 1000
         : value > 0 ? Date.now() + value * 1000 : Date.now() + 6 * 3600000;
     if (!Number.isFinite(expires) || expires <= Date.now()) throw new Error('invalid credential expiry');
-    return expires;
+    return new Date(expires);
 }
 
 export const isAccountId = value => (

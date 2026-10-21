@@ -201,5 +201,84 @@ await attempt('login QR created', async () => {
     return 'qr ok, key=' + result.key.slice(0, 8) + '…';
 });
 
+// ─── 3. 模拟登录全链路（扫码确认 → 换 ticket → 拿账号）───────────────────
+//
+// 真扫码只能靠真机，但「确认之后」这一串（access code → ticket → guard 解析 →
+// 过期时间 → /me/info → 写会话 → status）完全可以伪造上游响应来验证：签名是真的
+// （WebCrypto 现签），只有上游是假的。之前 expires 返回数字导致
+// `.getTime is not a function` 就是这类本机能抓住却漏到真机的错误。
+
+const { qishuiCredentialExpiry } = await import('./src/car/protocol.js');
+{
+    const expiry = qishuiCredentialExpiry(String(Math.floor(Date.now() / 1000) + 7200));
+    check('qishuiCredentialExpiry returns a Date', typeof expiry.getTime === 'function'
+        && Number.isFinite(expiry.getTime()), String(expiry));
+}
+
+const base64Json = value => Buffer.from(JSON.stringify(value)).toString('base64');
+const GUARD_HEADERS = {
+    'bd-ticket-guard-server-data': base64Json({
+        ticket: 'FAKE-TICKET', ts_sign: 'FAKE-TS', client_cert: 'FAKE-CERT',
+    }),
+};
+const loginTransport = {
+    async request(payload) {
+        const url = String(payload.url || '');
+        const headers = {};
+        const send = body => ({ status: 200, headers, body: JSON.stringify(body) });
+        if (url.includes('/oauth/get_qrcode/')) {
+            return send({ err_no: 0, data: { token: 'TOKEN-1', qrcode: 'iVBORw0KGgo=' } });
+        }
+        if (url.includes('/oauth/check_qrcode/')) {
+            return send({ err_no: 0, data: { status: 'confirmed', code: 'AUTH-CODE' } });
+        }
+        if (url.includes('/access/code/get/')) {
+            // 真实响应是一层 data：{ err_no, data: { access_code, ... } }。
+            return send({ err_no: 0, data: {
+                access_code: 'ACCESS-CODE', open_id: 'OPEN-ID',
+                expires_time: Math.floor(Date.now() / 1000) + 7200,
+            } });
+        }
+        if (url.includes('/passport/open/get_access_ticket/')) {
+            // CSR 必须是「PEM 文本再 base64」；顺带把这一条钉在模拟层里。
+            const csr = payload.headers['bd-ticket-guard-client-csr'] || '';
+            const decoded = Buffer.from(String(csr), 'base64').toString('utf8');
+            if (!decoded.startsWith('-----BEGIN CERTIFICATE REQUEST-----')) {
+                return send({ err_no: 10001, data: { description: 'CSR is not a PEM text' } });
+            }
+            return { status: 200, headers: GUARD_HEADERS, body: JSON.stringify({ err_no: 0, data: {} }) };
+        }
+        if (url.includes('/me/info/')) {
+            return send({ err_no: 0, data: { my_info: { id: 'UID-1', nickname: '测试账号' } } });
+        }
+        return send({ err_no: 0, data: {} });
+    },
+};
+
+const loginCar = createQishuiCar({ transport: loginTransport });
+const started = await attempt('login.qr (mock upstream)', async () => {
+    const result = await loginCar.startLogin();
+    if (!result.key) throw new Error('no key');
+    return 'key ok';
+});
+if (started) {
+    const qr = await loginCar.startLogin();
+    const check = await attempt('login.check with real key → confirmed', async () => {
+        const result = await loginCar.checkLogin(qr.key);
+        if (result.state !== 'confirmed') throw new Error('state=' + result.state);
+        return 'confirmed';
+    });
+    if (check) {
+        await attempt('status after login (mock upstream)', async () => {
+            const status = await loginCar.status();
+            if (!status.loggedIn) throw new Error('loggedIn=false');
+            if (status.profile?.id !== 'UID-1') throw new Error('profile id mismatch: ' + status.profile?.id);
+            const credential = loginCar.sessions.get();
+            if (!credential?.ticket || credential.ticket !== 'FAKE-TICKET') throw new Error('ticket not stored');
+            return `loggedIn, user=${status.profile.nickname}, expiresAt=${new Date(credential.expiresAt).toISOString()}`;
+        });
+    }
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL OK');
 process.exitCode = failures ? 1 : 0;
