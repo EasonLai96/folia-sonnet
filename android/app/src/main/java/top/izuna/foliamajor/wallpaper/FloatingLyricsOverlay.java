@@ -1830,13 +1830,23 @@ public final class FloatingLyricsOverlay {
                               WallpaperLyricsState.TimedWord[] words,
                               FloatingWordColors.Segment[] segments,
                               float clipTop, float clipBottom, boolean decorate) {
-            textPaint.setColor(color);
-            textPaint.setAlpha(textAlpha);
-            // 第一遍：整行的主色（还没唱到的那部分）。
-            canvas.drawText(text, x, baseline, textPaint);
+            /*
+             * 没有推进量的那几行（下一句 / 翻译 / 退场中的那一格）：整行照原样画一遍主色。
+             *
+             * 它们没有「唱到哪儿」这回事，走下面那条逐词路径会一个字都画不出来。
+             */
+            if (progress < 0f || line == null) {
+                textPaint.setColor(color);
+                textPaint.setAlpha(textAlpha);
+                canvas.drawText(text, x, baseline, textPaint);
+                return;
+            }
 
-            if (progress < 0f || line == null) return;
-
+            /*
+             * ⭐**不再先画整行主色**：要的是「和播放页一样逐个出现」—— 唱到哪个词，
+             * 哪个词才淡入；没唱到的部分不画（它的位置由底下那条下划线底与方括号标着）。
+             * 先铺一遍整行的话，字从头到尾都在那儿，看着就没有「出现」这个动作。
+             */
             /*
              * 逐词下划线：**每一句都在字底下画一排小线，一个词一条**。
              *
@@ -1849,7 +1859,7 @@ public final class FloatingLyricsOverlay {
             drawUnderlines(canvas, text, x, baseline, fontSize, bounds, sungX, alpha, decorate);
 
             /*
-             * 第二遍：**按词**重画唱过的那一段。
+             * **逐个词画**：唱到一个词，它才淡入并从下方顶上来一点（和播放页同一套动作）。
              *
              * 词取自词典 / ICU（见 FloatingVocab），**不看 line.words**：中文的 words 多数
              * 是逐字的，照它切就是用户说的「一个字一个字出现」。现在一个词是一整块，
@@ -1869,13 +1879,20 @@ public final class FloatingLyricsOverlay {
                 float head = textPaint.measureText(text, 0, start);
                 float width = textPaint.measureText(text, start, end);
                 if (width <= 0f) continue;
-                float swept = clamp(sungX - head, 0f, width);
-                if (swept <= 0.4f) continue;
+                /*
+                 * 「出现」这一下用**走过的距离**而不是时间：这层只有整行的推进量，
+                 * 没有每个字的时刻（有逐词时间戳时 sungX 也是按词算出来的）。
+                 * 唱到词头之后再走半个词的宽度，这个词才完全落定。
+                 */
+                float appear = clamp01((sungX - head) / Math.max(1f, width * 0.5f));
+                if (appear <= 0f) continue;
+                float rise = (1f - appear) * fontSize * 0.14f;
+                int wordColor = colorAtChar((start + end) / 2, segments);
                 canvas.save();
-                canvas.clipRect(x + head, clipTop, x + head + swept, clipBottom);
-                textPaint.setColor(colorAtChar((start + end) / 2, segments));
-                textPaint.setAlpha(textAlpha);
-                canvas.drawText(text, x, baseline, textPaint);
+                canvas.clipRect(x + head, clipTop, x + head + width, clipBottom);
+                textPaint.setColor(wordColor == FloatingWordColors.NO_COLOR ? accentColor : wordColor);
+                textPaint.setAlpha(Math.round(textAlpha * appear));
+                canvas.drawText(text, x, baseline + rise, textPaint);
                 canvas.restore();
             }
         }
