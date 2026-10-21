@@ -55,9 +55,10 @@ const VisualizerPrompt: React.FC<VisualizerSharedProps> = (props) => {
         readyGraceMs: 3000,
     });
 
+    // 只依赖歌词与种子：主题换了不该重编节目单（否则运行时会当成换歌重搭框，见 swapSong 的注释）。
     const boxes = useMemo(
-        () => (showText ? compilePromptBoxes(committedSong.lines, theme, committedSong.seed ?? 'prompt') : []),
-        [showText, committedSong.lines, theme, committedSong.seed],
+        () => (showText ? compilePromptBoxes(committedSong.lines, committedSong.seed ?? 'prompt') : []),
+        [showText, committedSong.lines, committedSong.seed],
     );
 
     const songContext = useMemo<PromptSongContext>(

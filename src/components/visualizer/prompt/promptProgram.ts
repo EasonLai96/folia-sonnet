@@ -1,4 +1,4 @@
-import type { Line, Theme } from '../../../types';
+import type { Line } from '../../../types';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { segmentLyricWords } from '../../../utils/lyrics/wordSegmentation';
 
@@ -22,8 +22,6 @@ export interface PromptBoxPlan {
     startTime: number;
     endTime: number;
     words: PromptWordPlan[];
-    /** 本首主题自己的高亮词：框上那行提示词优先从这几个里取。 */
-    ownWords: string[];
     /** 决定这一句取哪几个提示词。同一句每次重搭都取到同一行（seek 安全）。 */
     termSeed: number;
     /** 是否带 prompt2 那层铁栅栏：按种子半随机。 */
@@ -72,15 +70,17 @@ const promptWordsFor = (line: Line): PromptWordPlan[] => {
     });
 };
 
-/** 歌词 → 节目单。同一个 (lines, theme, seed) 每次都给同一份。 */
+/**
+ * 歌词 → 节目单。同一个 (lines, seed) 每次都给同一份。
+ *
+ * **刻意不吃主题**：主题对象在播放页每次重算都可能换一个引用，把它算进依赖里就会让「歌词没变、
+ * 主题重建」也重编一遍节目单 —— 运行时会当作换歌重搭框，屏幕上就是一直在开场那一帧。
+ * 框上那行提示词的「本首高亮词」由运行时搭框时现读 theme.wordColors，不进节目单。
+ */
 export const compilePromptBoxes = (
     lines: readonly Line[],
-    theme: Theme,
     seed: string | number,
 ): PromptBoxPlan[] => {
-    const ownWords = (theme.wordColors ?? [])
-        .map(entry => String(entry.word ?? '').trim())
-        .filter(word => word.length > 0);
     const plans: PromptBoxPlan[] = [];
     lines.forEach((line, index) => {
         const words = promptWordsFor(line);
@@ -96,7 +96,6 @@ export const compilePromptBoxes = (
             startTime: start,
             endTime: end,
             words,
-            ownWords,
             termSeed: hashString(`${seed}:terms:${start.toFixed(2)}`),
             withBars: hashString(`${seed}:bars:${start.toFixed(2)}`) % 2 === 1,
         });

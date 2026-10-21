@@ -33,8 +33,6 @@ const MIN_SCALE = 0.02;
 const MAX_SCALE = 2.4;
 /** 一个词从「没出现」到「全亮」用多久。 */
 const WORD_REVEAL_S = 0.09;
-/** 换歌时整层的淡入。框本来就有自己的入场，这里只是别让上一首的残影硬切。 */
-const SONG_FADE_MS = 220;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -76,8 +74,6 @@ export class PromptPixiRuntime {
     private resizeObserver: ResizeObserver | null = null;
     private lastWidth = 0;
     private lastHeight = 0;
-    /** 舞台淡入的起点（换歌时重置）。 */
-    private fadeAt = 0;
 
     private stage!: import('pixi.js').Container;
 
@@ -204,11 +200,11 @@ export class PromptPixiRuntime {
         const areaWidth = Math.max(240, this.lastWidth * 0.88);
         // 屏高那一头按「框高 = 字高 × 2.05」算，和 promptFieldMetrics 一致。
         const areaHeight = Math.max(180, this.lastHeight * 0.62);
-        const scale = clamp(
-            Math.min(areaWidth / field.width, areaHeight / field.height),
-            MIN_SCALE,
-            MAX_SCALE,
-        );
+        const solved = Math.min(areaWidth / field.width, areaHeight / field.height);
+        // 量不出宽度（字体没就绪）时会算出 NaN/0：整框 scale 一旦是 NaN，画面就是一片空。
+        const scale = Number.isFinite(solved) && solved > 0
+            ? clamp(solved, MIN_SCALE, MAX_SCALE)
+            : 1;
         // 词从「整行居中」的位置往右排：promptBox 的框是以 0 为中心的，框里的字必须也以 0 为中心。
         const tokens: PromptBoxToken[] = [];
         let cursor = -rowWidth / 2;
@@ -224,7 +220,14 @@ export class PromptPixiRuntime {
         return { tokens, rowWidth, scale, textStyle };
     }
 
-    private highlighter(plan: PromptBoxPlan) {
+    /** 本首主题自己的高亮词：框上那行提示词优先从这几个里取。 */
+    private ownWords(): string[] {
+        return (this.options.song.theme.wordColors ?? [])
+            .map(entry => String(entry.word ?? '').trim())
+            .filter(word => word.length > 0);
+    }
+
+    private highlighter() {
         const byWord = new Map<string, number>();
         (this.options.song.theme.wordColors ?? []).forEach(entry => {
             const word = String(entry.word ?? '').trim();
@@ -255,7 +258,7 @@ export class PromptPixiRuntime {
             rowHeight: FONT_BASE,
             startTime: plan.startTime,
             endTime: plan.endTime,
-            terms: samplePromptTerms(plan.ownWords, plan.termSeed, 5),
+            terms: samplePromptTerms(this.ownWords(), plan.termSeed, 5),
             // 整框已经按 scale 缩过，框内部一律用自然单位画。
             uiScale: 1,
             // 铁栅栏要铺满整屏：按「缩放前的屏」算，缩完正好回到屏上。
@@ -264,7 +267,7 @@ export class PromptPixiRuntime {
             withBars: plan.withBars,
         });
 
-        const highlightOf = this.highlighter(plan);
+        const highlightOf = this.highlighter();
         const words: BuiltWord[] = plan.words.map((word, wordIndex) => {
             const node = new Text({ text: word.text, style: { ...textStyle } });
             node.anchor.set(0, 0.5);
@@ -312,6 +315,10 @@ export class PromptPixiRuntime {
     /** 框的姿势 + 词的落下与高亮。一个词的可见性只看播放时间，所以 seek 之后照样对得上。 */
     private updateBox(box: BuiltBox, time: number, staticMode: boolean) {
         const frame = box.view.update(time);
+        // 帧值兜底：时间窗坏了（云端歌词偶尔会有缺 endTime 的行）会算出 NaN，
+        // 而 alpha 一旦是 NaN，root.visible 就永远为 false —— 空屏，且没有任何报错。
+        const safe = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback);
+        const alpha = safe(frame.alpha, 0);
         if (staticMode) {
             const on = time >= box.view.tokens[0]?.startTime - 0.2;
             box.frame.position.set(0, 0);
@@ -319,10 +326,10 @@ export class PromptPixiRuntime {
             box.frame.rotation = 0;
             box.root.alpha = on ? 1 : 0;
         } else {
-            box.frame.position.set(frame.offsetX, frame.offsetY);
-            box.frame.scale.set(frame.scale);
-            box.frame.rotation = frame.rotation;
-            box.root.alpha = frame.alpha;
+            box.frame.position.set(safe(frame.offsetX, 0), safe(frame.offsetY, 0));
+            box.frame.scale.set(safe(frame.scale, 1));
+            box.frame.rotation = safe(frame.rotation, 0);
+            box.root.alpha = alpha;
         }
         box.root.visible = box.root.alpha > 0.004;
 
@@ -341,11 +348,6 @@ export class PromptPixiRuntime {
     private renderFrame = () => {
         if (this.destroyed) return;
         if (this.lastWidth <= 0 || this.lastHeight <= 0) return;
-        if (this.fadeAt > 0) {
-            const elapsed = performance.now() - this.fadeAt;
-            this.stage.alpha = clamp01(elapsed / SONG_FADE_MS);
-            if (elapsed >= SONG_FADE_MS) this.fadeAt = 0;
-        }
         const { boxes } = this.options.song;
         if (boxes.length === 0) {
             this.stage.visible = false;
@@ -367,20 +369,27 @@ export class PromptPixiRuntime {
         });
     };
 
-    /** 从这一首换到下一首：节目单整体换掉，缓存清空，淡入一下。 */
+    /**
+     * 换一首歌：节目单整体换掉、缓存清空。
+     *
+     * 这里**不做整层淡入**。以前会在换歌时把 stage.alpha 压到 0 再花 220ms 推回 1，代价是
+     * 只要调用方多换几次歌（播放页重算 theme、切字幕开关都会让 song 对象换个引用），画面就永远
+     * 停在 alpha≈0 的那一帧 —— 看起来就是「选了提示词，只有背景，什么都没有」。框自己每一句都
+     * 有飞入，硬切一次比看不见好。
+     *
+     * 节目单没变（同一个数组）就只换主题：高亮色与提示词是搭框时读的，框不用重搭。
+     */
     swapSong(song: PromptSongContext) {
         if (this.destroyed) return;
+        const sameProgram = song.boxes === this.options.song.boxes;
         this.options.song = song;
-        this.clearBoxes();
-        if (this.options.paused) {
-            // 暂停时没有逐帧时钟去推淡入，直接给到位；否则换歌会换出一张空画布。
-            this.fadeAt = 0;
-            this.stage.alpha = 1;
-            this.renderOnce();
+        if (sameProgram) {
+            if (this.options.paused) this.renderOnce();
             return;
         }
-        this.fadeAt = performance.now();
-        this.stage.alpha = 0;
+        this.clearBoxes();
+        this.stage.alpha = 1;
+        if (this.options.paused) this.renderOnce();
     }
 
     setPaused(paused: boolean) {
