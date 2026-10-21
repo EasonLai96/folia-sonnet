@@ -23,6 +23,7 @@ import {
 } from '../backgrounds/registry';
 import BackgroundPicture from '../preview/BackgroundPicture';
 import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
+import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import SmartBeatSettingsCard from '../SmartBeatSettingsCard';
 import BeatEffectsGroup from '../BeatEffectsGroup';
 
@@ -118,6 +119,8 @@ const SECTION_LABEL_KEYS: Record<VisPlaygroundEditSection, string> = {
 // The window's own groups. A group without a heading still needs a name for assistive tech.
 const STYLE_NOTICE_GROUP: SettingsGroupDef = { id: 'vis-style-notice', titleKey: 'options.previewVisualizerGroup' };
 const BACKGROUND_NOTICE_GROUP: SettingsGroupDef = { id: 'vis-background-notice', titleKey: 'options.previewBackgroundGroup' };
+/** 无标题组（bare）：随机动画是这一栏的第一行，上面不再挂一个「歌词动画」的标题。 */
+const RANDOM_ANIMATION_GROUP: SettingsGroupDef = { id: 'vis-random-animation', titleKey: 'options.previewVisualizerGroup' };
 const BACKGROUND_KIND_GROUP: SettingsGroupDef = { id: 'vis-background-kind', titleKey: 'options.visualizerBackgroundMode' };
 const COMMON_GROUP: SettingsGroupDef = { id: 'vis-common', titleKey: 'options.previewCommonSettings' };
 const SUBTITLE_GROUP: SettingsGroupDef = { id: 'vis-subtitle', titleKey: 'options.previewSubtitleSettings' };
@@ -212,6 +215,8 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
     const missingFoliumSelections = useMissingFoliumSelections();
 
     const enablePlayerPageNativeBlur = usePlayerChromeSettingsStore(state => state.enablePlayerPageNativeBlur);
+    const randomVisualizerModePerSong = useVisualizerSettingsStore(state => state.randomVisualizerModePerSong);
+    const setRandomVisualizerModePerSong = useVisualizerSettingsStore(state => state.handleToggleRandomVisualizerModePerSong);
     const resolvedBackgroundMode = backgroundConfig?.mode ?? DEFAULT_VISUALIZER_BACKGROUND_MODE;
     const backgroundEntry = getVisualizerBackgroundRegistryEntry(resolvedBackgroundMode);
     const backgroundModeOptions = useMemo(() => (
@@ -275,6 +280,22 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                 <div key={activeSection} className="st-page-in" data-folia-vis-settings="true">
                     {activeSection === 'visualizer' && (
                         <>
+                            {/*
+                             * 随机动画：整幅画面怎么动由它定，所以放在这一栏最上面，在「智能动感模式」
+                             * 与各样式自己的选项之前。
+                             *
+                             * 与 AI 导演那条路是同一件事的两种做法（都在切歌时替你选一个样式），所以
+                             * 排除清单用导演那份（lyricDirector/state.ts 的 blockedModes），随机的那一票
+                             * 又压过 AI 自动给的答案 —— 两处都写在各自的实现里，这里只是开关。
+                             */}
+                            <Group def={RANDOM_ANIMATION_GROUP} bare>
+                                <ToggleRow
+                                    label={t('options.randomVisualizerMode')}
+                                    note={t('options.randomVisualizerModeDesc')}
+                                    checked={randomVisualizerModePerSong}
+                                    onChange={setRandomVisualizerModePerSong}
+                                />
+                            </Group>
                             {missingStyleNotice && (
                                 <Group def={STYLE_NOTICE_GROUP} bare>
                                     <Row notice={missingStyleNotice} />

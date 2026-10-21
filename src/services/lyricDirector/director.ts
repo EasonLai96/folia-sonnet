@@ -454,7 +454,17 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
      * 但 `force` 是用户亲手点的「重新决策」—— 那一刻他要的就是换掉当前样式，
      * 不该被同一个开关挡在门外。
      */
-    const applyAllowed = options.apply !== false && (settings.autoOnSongChange || force);
+    /*
+     * 「随机动画」开着时，AI 自动给的那一个让位 —— 随机的那一票优先级更高。
+     *
+     * 两者干的都是「切歌时替你换一个样式」，同时开就会互相覆盖：AI 算完把样式改了，随机那
+     * 一笔等于白掷一次，看上去就是「随机没生效」。所以自动这条路停手 —— 与上面那个开关关
+     * 掉时一样，答案照样算、照样推上云端。
+     *
+     * 亲手点「重新决策」不受影响（`force`）：那一刻人是冲着 AI 的答案来的，不是被自动覆盖。
+     */
+    const randomAnimation = useVisualizerSettingsStore.getState().randomVisualizerModePerSong === true;
+    const applyAllowed = options.apply !== false && (force || (!randomAnimation && settings.autoOnSongChange));
     const songKey = currentSongKey();
     if (!songKey || !songInfoOf(displaySong())) return { kind: 'no-song' };
 
@@ -506,6 +516,13 @@ export const runLyricDirectorDecision = async (options: { announce?: boolean; fo
 
         /* 开关关着：答案已经躺在云端了，别动用户手上的样式。 */
         if (!applyAllowed) {
+            // 让位给「随机动画」也得说出来：否则导演面板上停着上一次的说明，看上去像这一趟
+            // 什么都没发生（其实答案已经算出来并推上云端了）。
+            if (randomAnimation) {
+                lastSummary = translate('aiDirector.randomWins');
+                lastReason = '';
+                refreshRuntime();
+            }
             return { kind: 'produced', text: decision.reason };
         }
 
