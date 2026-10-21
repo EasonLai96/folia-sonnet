@@ -1402,12 +1402,12 @@ ${lines.join("\n")}
     }
     async function accountTrack(id) {
       const credential = sessions.get();
-      if (!credential) return catalog.track(id);
+      if (!credential) return { track: await catalog.track(id), account: false };
       try {
-        return await catalog.track(id, { credential });
+        return { track: await catalog.track(id, { credential }), account: true };
       } catch (error) {
         log(`[Qishui] account track read failed (${error?.code || "error"}), falling back to the public token`);
-        return catalog.track(id);
+        return { track: await catalog.track(id), account: false, accountError: String(error?.code || error) };
       }
     }
     async function resolveLiked() {
@@ -1532,11 +1532,11 @@ ${lines.join("\n")}
         };
       },
       async songDetail(id) {
-        const track = await accountTrack(id);
+        const { track } = await accountTrack(id);
         return { provider: "qishui", song: toFoliaSong(track) };
       },
       async lyrics(id) {
-        const track = await accountTrack(id);
+        const { track } = await accountTrack(id);
         const lyrics = lyricsFromTrack(track);
         return {
           provider: "qishui",
@@ -1547,9 +1547,19 @@ ${lines.join("\n")}
         };
       },
       async audio(id, quality) {
-        const track = await accountTrack(id);
+        const { track, account } = await accountTrack(id);
         const audio = await resolveAudio(client, track, quality);
-        return { provider: "qishui", ...audio };
+        const player = track?.player_info || {};
+        return {
+          provider: "qishui",
+          ...audio,
+          audioMeta: {
+            account,
+            playerType: Number.isFinite(Number(player.player_type)) ? Number(player.player_type) : -1,
+            fullModel: Boolean(player.full?.video_model_info),
+            previewModel: Boolean(player.preview?.video_model_info)
+          }
+        };
       },
       /**
        * 我的歌单：真实列表 + 两个虚拟入口（我的喜欢 / 推荐流）。

@@ -110,12 +110,12 @@ export function createQishuiCar(options = {}) {
      */
     async function accountTrack(id) {
         const credential = sessions.get();
-        if (!credential) return catalog.track(id);
+        if (!credential) return { track: await catalog.track(id), account: false };
         try {
-            return await catalog.track(id, { credential });
+            return { track: await catalog.track(id, { credential }), account: true };
         } catch (error) {
             log(`[Qishui] account track read failed (${error?.code || 'error'}), falling back to the public token`);
-            return catalog.track(id);
+            return { track: await catalog.track(id), account: false, accountError: String(error?.code || error) };
         }
     }
 
@@ -252,12 +252,12 @@ export function createQishuiCar(options = {}) {
         },
 
         async songDetail(id) {
-            const track = await accountTrack(id);
+            const { track } = await accountTrack(id);
             return { provider: 'qishui', song: toFoliaSong(track) };
         },
 
         async lyrics(id) {
-            const track = await accountTrack(id);
+            const { track } = await accountTrack(id);
             const lyrics = lyricsFromTrack(track);
             return {
                 provider: 'qishui',
@@ -269,9 +269,21 @@ export function createQishuiCar(options = {}) {
         },
 
         async audio(id, quality) {
-            const track = await accountTrack(id);
+            const { track, account } = await accountTrack(id);
             const audio = await resolveAudio(client, track, quality);
-            return { provider: 'qishui', ...audio };
+            // 这几个字段只为排查「为什么只剩试听」：有没有带凭据、上游给的是哪一型、
+            // full 那套到底有没有下发。渲染层在判成试听时会把它们写进报错文案。
+            const player = track?.player_info || {};
+            return {
+                provider: 'qishui',
+                ...audio,
+                audioMeta: {
+                    account,
+                    playerType: Number.isFinite(Number(player.player_type)) ? Number(player.player_type) : -1,
+                    fullModel: Boolean(player.full?.video_model_info),
+                    previewModel: Boolean(player.preview?.video_model_info),
+                },
+            };
         },
 
         /**

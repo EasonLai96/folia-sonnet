@@ -79,8 +79,18 @@ export const qishuiProvider: OnlineMusicProvider = {
             if (source?.kind !== 'online' || source.providerId !== 'qishui') throw qishuiNotOurs();
             const data = await requestQishui<any>('song.url', { id: source.mediaId, quality });
             // 试听段不能当成整曲进缓存与时长统计，与波点保持同一判断。
+            //
+            // 报错文案里带上现场：有没有带凭据（`account`）、上游给的是哪一型
+            // （`playerType`，2 那批在公共令牌下连 full 都不下发）、full/preview 有没有下发。
+            // 「每首都 only offers a preview」时只凭文案是分不清「没登录」和
+            // 「登录了但这首确实只授权试听」的，而这两种是完全不同的问题。
             if (data?.trial === true) {
-                throw new OnlineProviderError('preview-only', 'Qishui Music only offers a preview for this account', 'qishui');
+                const meta = data?.audioMeta;
+                throw new OnlineProviderError('preview-only',
+                    'Qishui Music only offers a preview for this account'
+                    + (meta ? ` (account=${meta.account} playerType=${meta.playerType}`
+                        + ` fullModel=${meta.fullModel} previewModel=${meta.previewModel})` : ''),
+                    'qishui');
             }
             const url = qishuiText(data?.url);
             if (url && data?.playable !== false) {
