@@ -180,9 +180,9 @@ const getApiBase = async () => {
  * 只来自它自己的罐子，没登录时罐子是空的：weapi 于是没有 `csrf_token`，上游一律 `{code: 301}`；
  * weapiJson 为了不让整页失败是**不抛错**的，所以表现不是「读不出来」，而是探索页每一栏都空着。
  *
- * ⚠️ 上游 4.41.1 的 `/register/anonimous` 走 xeapi，`weapi` 那条已经答不出东西了（实测：200、
- * 空 body、没有 Set-Cookie），只有 `eapi` 那条还下发 MUSIC_A / __csrf —— 注册要真走到桥那边去，
- * 别在渲染层自己拼。
+ * ⚠️ 上游 4.41.1 的 `/register/anonimous`：`weapi` 那条不认我们发的参数（模数修好后实测回
+ * `{"code":400,"参数错误"}`，此前因为模数写坏是「200 + 空 body」），只有 `eapi` 那条还下发
+ * MUSIC_A / __csrf —— 注册要真走到桥那边去，别在渲染层自己拼。
  */
 let guestCookieAsked: Promise<string> | null = null;
 const guestCookie = async (): Promise<string> => {

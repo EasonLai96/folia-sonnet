@@ -155,15 +155,16 @@ async function eapiJson(path, data, cookie) {
  * 整页失败），抛了反而把它变成了读不出来。
  */
 /*
- * 未加密的 /api/ 网关：同一条路径，参数挂在 query 上，cookie 走请求头。
+ * 未加密的 /api/ 网关兜底：同一条路径，参数挂在 query 上，cookie 走请求头。
  *
- * 为什么还需要它：`/weapi/` 那条现在一律答 **200 + 空 body**（实测 2026-10-21：换 UA、
- * 加 Referer/Origin/Sec-Fetch、带与不带 cookie、绕开代理都一样；`toplist`、
- * `homepage/block/page`、`cloudsearch/get/web` 无一例外），而 weapi 本身是不抛错的 ——
- * 于是「网关没了」和「这一栏本来就没内容」在页面上是同一个样子：整页空着。
- * 未加密这条老网关还在（`toplist`、`homepage/block/page`、`album/new`、
- * `v1/discovery/new/songs`、`v1/discovery/recommend/resource` 都实测答得出东西），
- * 所以 weapi 答不出内容时改问它一次。
+ * 它当初是**主路径**：那时 `weapi.js` 的 `RSA_MODULUS` 被写坏，weapi 一律答
+ * 「HTTP 200 + 空 body」，而未加密这条老网关还答得出内容（`toplist`、
+ * `homepage/block/page`、`album/new`、`v1/discovery/new/songs`、
+ * `v1/discovery/recommend/resource` 都实测过）。
+ *
+ * 模数已经在 2026-10-21 修好（见 `weapi.js` 里那个常量的注释），所以现在 weapi 才是主路径，
+ * 这条降级为**第二道防线**：哪天 weapi 又答不出东西，读接口还有一条退路，界面不至于整页空白。
+ * 走了哪条路会留痕（`api:fallback`），线上再空着时能一眼看出是网关没了还是会话没带上。
  */
 async function plainApiJson(path, data, cookie) {
   const query = new URLSearchParams();
@@ -199,7 +200,7 @@ async function plainApiJson(path, data, cookie) {
 const isBlankAnswer = (answer) => !answer || typeof answer !== 'object' || Object.keys(answer).length === 0;
 
 /**
- * 读一条：先走 weapi，答不出内容或会话不被认时改走未加密的 /api/。
+ * 读一条：先走 weapi（主路径），答不出内容或会话不被认时改走未加密的 /api/。
  *
  * 只用于**读**（下面探索页那一组都是读）：写操作的路径不能靠 GET 兜底。兜底那条答不出
  * 内容时仍把 weapi 的原答案交回去 —— 于是最坏的情况与现在一样，不会更差。
