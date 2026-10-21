@@ -1,9 +1,12 @@
 package top.izuna.foliamajor.wallpaper;
 
+import android.icu.text.BreakIterator;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -126,15 +129,86 @@ public final class FloatingVocab {
     }
 
     /**
-     * 整行文本 → 词区间。西文连成词、空白成段、中日韩按词典最长匹配
-     * （匹配不上就单字）。返回的区间一定是 [0, text.length) 的连续划分，
-     * 下游可以直接拿去 `measureText(text, start, end)`。
+     * 整行文本 → 词区间。
+     *
+     * 两条路一起用，因为**哪一条单着都不够**：
+     * - ICU（系统自带的分词器）认识「想想 / 天真 / 无邪」这类常用词，但它切不到歌词里的
+     *   偏词，而且某些 ROM 上它被裁成了逐字；
+     * - 随包那本词典是**分词器自己的 token 表**，覆盖的是另一批词，覆盖率靠它兜底。
+     *
+     * 所以：先跑 ICU，再把 ICU 切剩下的连续单字交给词典做最长匹配合并（{@link #mergeCjk}）。
+     * 返回的区间一定是 [0, text.length) 的连续划分，下游可以直接拿去 `measureText`。
      */
     public static List<Segment> split(String text) {
+        if (text == null || text.isEmpty()) return new ArrayList<Segment>();
+        List<Segment> icu = splitWithIcu(text);
+        if (icu != null && !icu.isEmpty()) return mergeCjk(text, icu);
+        return splitWithDict(text);
+    }
+
+    /**
+     * 系统 ICU 的分词结果。
+     *
+     * 拿不到（ROM 裁了 ICU 数据 / 版本太老）就返回 null，让调用方退到词典 —— 不要抛出去：
+     * 这层每帧都在画，抛一次就是整个悬浮窗黑掉。
+     */
+    private static List<Segment> splitWithIcu(String text) {
+        try {
+            BreakIterator iterator = BreakIterator.getWordInstance(Locale.CHINA);
+            iterator.setText(text);
+            List<Segment> out = new ArrayList<Segment>();
+            int start = iterator.first();
+            for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
+                if (end <= start) continue;
+                out.add(new Segment(start, end));
+            }
+            return out;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * ICU 没切开的地方（连续的单字）再拿词典最长匹配合成一遍。
+     *
+     * 只动**连续的 CJK 单字**那一段：ICU 已经切出来的词（哪怕词典里没有）一律保留 ——
+     * 它知道的比这本 673 条的词典多。
+     */
+    private static List<Segment> mergeCjk(String text, List<Segment> segments) {
         List<Segment> out = new ArrayList<Segment>();
-        if (text == null || text.isEmpty()) return out;
+        int count = segments.size();
         int index = 0;
-        int length = text.length();
+        while (index < count) {
+            Segment segment = segments.get(index);
+            if (segment.end - segment.start != 1 || !isCjk(text.charAt(segment.start))) {
+                out.add(segment);
+                index += 1;
+                continue;
+            }
+            int groupEnd = segment.end;
+            int cursor = index + 1;
+            while (cursor < count) {
+                Segment next = segments.get(cursor);
+                if (next.end - next.start != 1 || !isCjk(text.charAt(next.start))) break;
+                groupEnd = next.end;
+                cursor += 1;
+            }
+            out.addAll(splitWithDict(text, segment.start, groupEnd));
+            index = cursor;
+        }
+        return out;
+    }
+
+    /** 词典最长匹配：西文连成词、空白成段、中日韩按词典切（匹配不上就单字）。 */
+    private static List<Segment> splitWithDict(String text) {
+        return splitWithDict(text, 0, text.length());
+    }
+
+    private static List<Segment> splitWithDict(String text, int from, int to) {
+        List<Segment> out = new ArrayList<Segment>();
+        if (text == null || from >= to) return out;
+        int index = from;
+        int length = Math.min(to, text.length());
         while (index < length) {
             char head = text.charAt(index);
             if (isSpace(head)) {

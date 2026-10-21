@@ -1734,58 +1734,40 @@ public final class FloatingLyricsOverlay {
             /*
              * 逐词下划线：**每一句都在字底下画一排小线，一个词一条**。
              *
-             * 「分词」在小窗上唯一看得出痕迹的地方就是这条线 —— 有逐词时间戳时按词切，
-             * 没有时按词典 / ICU 切（见 FloatingVocab），再不济也是逐字，
-             * 但逐字正是用户说的「只有中文是这样的」，所以这条路径必须通。
+             * 「分词」在小窗上唯一看得出痕迹的地方就是这条线，所以这条线的**词从哪里来**
+             * 必须和下面「字怎么亮」用同一套 —— 以前线按词典切、字按 line.words 切，
+             * 中文的 words 又常常是逐字的，于是整排线看着就是「一个字一条、还叠在一起」。
              */
-            drawUnderlines(canvas, text, x, baseline, fontSize, progress, measured,
-                    alpha, words, segments, positionMs);
-
-            if (segments == null) {
-                // 没有逐词轴：整行按进度线性推进（老做法）。
-                float swept = measured * clamp01(progress);
-                if (swept > 0.5f) {
-                    canvas.save();
-                    canvas.clipRect(x - dp(2), clipTop, x + swept + dp(2), clipBottom);
-                    textPaint.setColor(accentColor);
-                    textPaint.setAlpha(textAlpha);
-                    canvas.drawText(text, x, baseline, textPaint);
-                    canvas.restore();
-                }
-                return;
-            }
+            List<FloatingVocab.Segment> bounds = wordBounds(text);
+            float sungX = sungOffsetX(text, measured, progress, words, segments, positionMs);
+            drawUnderlines(canvas, text, x, baseline, fontSize, bounds, sungX, alpha);
 
             /*
-             * 第二遍：**逐词**重画唱过的那一段。
+             * 第二遍：**按词**重画唱过的那一段。
              *
-             * 为什么要一个词一个词画而不是整行裁一刀：AI 主题给某些词单独标了颜色，
-             * 那些词唱过去时要用它自己的颜色（播放页也是这么做的），
-             * 一整行只能有一个颜色，做不到。
+             * 词取自词典 / ICU（见 FloatingVocab），**不看 line.words**：中文的 words 多数
+             * 是逐字的，照它切就是用户说的「一个字一个字出现」。现在一个词是一整块，
+             * 到下个词才换 —— 下划线与字的推进量都是上面那个 sungX，两边因而永远对齐。
              *
              * 每个词画的都是**整行**再裁到它在整行里的那一小段 —— 两者必须对齐到同一个
              * 坐标系（起点都是 x）。写成 drawText(text, wordX, …) 的话整行被整体平移了，
              * 裁出来的就永远是「整行的开头」，也就是第一个字 —— 表现是每个词都把第一个
              * 字重画一遍、往后推。
              */
-            for (int i = 0; i < words.length; i += 1) {
-                WallpaperLyricsState.TimedWord word = words[i];
-                if (word == null || word.text == null || word.text.isEmpty()) continue;
-                float ratio = sungRatio(word, positionMs);
-                if (ratio <= 0f) continue;
-                FloatingWordColors.Segment segment = segments[i];
-                if (segment == null || segment.endOffset <= segment.startOffset) continue;
-                int start = Math.min(segment.startOffset, text.length());
-                int end = Math.min(segment.endOffset, text.length());
+            for (int i = 0; i < bounds.size(); i += 1) {
+                FloatingVocab.Segment segment = bounds.get(i);
+                int start = Math.min(segment.start, text.length());
+                int end = Math.min(segment.end, text.length());
                 if (end <= start) continue;
-                float wordX = x + textPaint.measureText(text, 0, start);
-                float wordWidth = textPaint.measureText(text, start, end);
-                if (wordWidth <= 0f) continue;
-                float swept = ratio >= 1f ? wordWidth : wordWidth * ratio;
+                if (isBlank(text.charAt(start))) continue;
+                float head = textPaint.measureText(text, 0, start);
+                float width = textPaint.measureText(text, start, end);
+                if (width <= 0f) continue;
+                float swept = clamp(sungX - head, 0f, width);
+                if (swept <= 0.4f) continue;
                 canvas.save();
-                canvas.clipRect(wordX, clipTop, wordX + swept, clipBottom);
-                textPaint.setColor(segment.color == FloatingWordColors.NO_COLOR
-                        ? accentColor
-                        : segment.color);
+                canvas.clipRect(x + head, clipTop, x + head + swept, clipBottom);
+                textPaint.setColor(colorAtChar((start + end) / 2, segments));
                 textPaint.setAlpha(textAlpha);
                 canvas.drawText(text, x, baseline, textPaint);
                 canvas.restore();
@@ -1793,27 +1775,14 @@ public final class FloatingLyricsOverlay {
         }
 
         /**
-         * 逐词下划线：一条底线 + 唱到的那一段填色。
+         * 唱到哪儿了（沿 x 轴，单位与 measured 相同）。
          *
-         * 线的位置与宽度和上面「逐词上色」用的是**同一套区间**，所以字和线是对齐的；
-         * 空格 / 标点那种段不画线（它们只是切分出来的边界，画了就成一排碎线）。
+         * 有逐词时间戳就按词算（唱到一半的那个词按比例），没有就按整句进度线性推进。
+         * 下划线与字的高亮都拿它当唯一的推进量，两边才不会一个跑在前面一个落在后面。
          */
-        private void drawUnderlines(Canvas canvas, String text, float x, float baseline,
-                                    float fontSize, float progress, float measured, float alpha,
-                                    WallpaperLyricsState.TimedWord[] words,
-                                    FloatingWordColors.Segment[] segments, long positionMs) {
-            float lineY = baseline + fontSize * 0.22f;
-            // 参考画面里这条线是**有点厚度的小横杠**，不是一根发丝：太细了在小窗上根本看不见。
-            float hair = Math.max(2f, fontSize * 0.07f);
-            int alpha255 = Math.round(clamp01(alpha) * 255f);
-            if (alpha255 <= 0) return;
-
-            /*
-             * 有逐词时间戳：按词切，每个词自己算唱到几成。
-             *
-             * 没有：拿整句进度当「唱到的位置」，按词典 / ICU 切出来的词区间一条条填。
-             * 两种都要夹在 [0, span] 内 —— 越界的负数宽度会让 drawRect 画出一根反向的线。
-             */
+        private float sungOffsetX(String text, float measured, float progress,
+                                  WallpaperLyricsState.TimedWord[] words,
+                                  FloatingWordColors.Segment[] segments, long positionMs) {
             if (segments != null && words != null) {
                 for (int i = 0; i < words.length; i += 1) {
                     WallpaperLyricsState.TimedWord word = words[i];
@@ -1823,27 +1792,67 @@ public final class FloatingLyricsOverlay {
                     int start = Math.min(segment.startOffset, text.length());
                     int end = Math.min(segment.endOffset, text.length());
                     if (end <= start) continue;
+                    float ratio = sungRatio(word, positionMs);
+                    if (ratio >= 1f) continue;
                     float head = textPaint.measureText(text, 0, start);
                     float span = textPaint.measureText(text, start, end);
-                    if (span <= 0f) continue;
-                    float ratio = sungRatio(word, positionMs);
-                    drawUnderline(canvas, x + head, lineY, span, span * clamp01(ratio), hair, alpha255);
+                    return head + span * clamp01(ratio);
                 }
-                return;
+                return measured;
             }
+            return measured * clamp01(progress);
+        }
 
-            List<FloatingVocab.Segment> bounds = wordBounds(text);
-            float sung = measured * clamp01(progress);
+        /** AI 给这个字符位置标了什么颜色（没标就是 NO_COLOR，调用方退默认高亮色）。 */
+        private int colorAtChar(int offset, FloatingWordColors.Segment[] segments) {
+            if (segments == null) return FloatingWordColors.NO_COLOR;
+            for (int i = 0; i < segments.length; i += 1) {
+                FloatingWordColors.Segment segment = segments[i];
+                if (segment == null || segment.color == FloatingWordColors.NO_COLOR) continue;
+                if (offset >= segment.startOffset && offset < segment.endOffset) return segment.color;
+            }
+            return FloatingWordColors.NO_COLOR;
+        }
+
+        /**
+         * 逐词下划线：一条底线 + 唱到的那一段填色。
+         *
+         * 线的位置与宽度和上面「逐词上色」用的是**同一套区间**，所以字和线是对齐的；
+         * 空格 / 标点那种段不画线（它们只是切分出来的边界，画了就成一排碎线）。
+         */
+        private void drawUnderlines(Canvas canvas, String text, float x, float baseline,
+                                    float fontSize, List<FloatingVocab.Segment> bounds,
+                                    float sungX, float alpha) {
+            float lineY = baseline + fontSize * 0.22f;
+            // 参考画面里这条线是**有点厚度的小横杠**，不是一根发丝：太细了在小窗上根本看不见。
+            float hair = Math.max(2f, fontSize * 0.07f);
+            /*
+             * 词与词之间要留一道缝。
+             *
+             * 不留的话相邻两条线的端点就接上了，整排线连成一根通长的横杠 —— 看上去
+             * 「全部叠在一起」，分词白切了。参考画面里也是一个词一小段、彼此断开的。
+             */
+            float gap = Math.max(dp(1), fontSize * 0.08f);
+            int alpha255 = Math.round(clamp01(alpha) * 255f);
+            if (alpha255 <= 0) return;
+
             for (int i = 0; i < bounds.size(); i += 1) {
                 FloatingVocab.Segment segment = bounds.get(i);
                 int start = Math.min(segment.start, text.length());
                 int end = Math.min(segment.end, text.length());
                 if (end <= start) continue;
+                // 空白 / 标点段不画线：它们只是切出来的边界，画了就是一排碎线。
                 if (isBlank(text.charAt(start))) continue;
                 float head = textPaint.measureText(text, 0, start);
                 float span = textPaint.measureText(text, start, end);
                 if (span <= 0f) continue;
-                drawUnderline(canvas, x + head, lineY, span, clamp(sung - head, 0f, span), hair, alpha255);
+                float inset = Math.min(gap, span * 0.2f);
+                float left = x + head + inset;
+                float width = span - inset * 2f;
+                if (width <= 0f) continue;
+                // 一律夹在 [0, width] 内 —— 越界的负数宽度会让 drawRect 画出一根反向的线。
+                drawUnderline(canvas, left, lineY, width, clamp(sungX - head - inset, 0f, width),
+                        hair, alpha255);
             }
         }
 
