@@ -6,7 +6,7 @@ import android.content.SharedPreferences;
 import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -110,15 +110,36 @@ public final class FoliaLyricon {
     private static volatile long anchorDurationMs = 0L;
 
     private static final long HEARTBEAT_INTERVAL_MS = 5000L;
-    private static volatile Handler mainHandler = null;
+    /*
+     * ⭐ 心跳**绝不能挂在主线程**。
+     *
+     * 每一轮都是好几次跨进程调用 —— `player.isActive()`、`provider.register()`、
+     * `setPlaybackState` / `setPosition` —— 通向 SystemUI 那侧的 Lyricon 中心服务。
+     * 对方一忙（锁屏正在渲染、Binder 拥塞）就把这边的主线程**同步**堵住，5 秒一次，
+     * 界面上正是「每隔五六秒顿一下，像在等什么东西」。App 内跑着可视化，掉几帧最
+     * 明显；壁纸渲染器在它自己的渲染线程上，所以看起来「只有 App 内卡」。
+     *
+     * 这些 SDK 调用不碰任何 UI，不需要主线程 —— 起一条专用线程即可。
+     * 与播放器那条同理（见 FoliaNativePlayer 文件头）：线程归属是硬性的。
+     */
+    private static volatile Handler heartbeatHandler = null;
     private static volatile Context heartbeatContext = null;
     private static volatile boolean heartbeatScheduled = false;
 
     private static Handler handler() {
-        if (mainHandler == null) {
-            mainHandler = new Handler(Looper.getMainLooper());
+        Handler existing = heartbeatHandler;
+        if (existing != null) {
+            return existing;
         }
-        return mainHandler;
+        synchronized (FoliaLyricon.class) {
+            if (heartbeatHandler == null) {
+                // 线程本身不必单独留字段：Handler 抓着它的 Looper，Looper 抓着线程。
+                HandlerThread thread = new HandlerThread("folia-lyricon-heartbeat");
+                thread.start();
+                heartbeatHandler = new Handler(thread.getLooper());
+            }
+            return heartbeatHandler;
+        }
     }
 
     private FoliaLyricon() {}
@@ -191,8 +212,9 @@ public final class FoliaLyricon {
 
     private static void stopHeartbeat() {
         heartbeatScheduled = false;
-        if (mainHandler != null) {
-            mainHandler.removeCallbacks(heartbeatTask);
+        Handler existing = heartbeatHandler;
+        if (existing != null) {
+            existing.removeCallbacks(heartbeatTask);
         }
     }
 
