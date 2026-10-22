@@ -60,10 +60,12 @@ export const resolveBravaisKey = (input: BravaisKeyInput): BravaisKeyAction | nu
 /**
  * Esc 阶梯的一级（设计稿 §10.8：表单态 → 聚焦卡 → 键盘焦点 → 面板 → 过滤词 → onBack）。没有的级别跳过。
  * B9：首页的管理隐藏视图（view）排在面板之后、过滤词之前（两者互斥：有批量的目录没有可隐藏的条目）。
+ * search：首页缝里的全局搜索框开着（窄缝被临时展开成完整宽度）时先关掉它，再退出这一层。
  * seam：缝被展开成完整信息条（窄屏上这是用户自己打开的）时先把它收回去，再退出这一层。
  * 系统返回（nativeBack）跳过键盘焦点那一级——它只是一个焦点环，不是一个层。
  */
-export type BravaisEscapeStep = 'form' | 'focus-card' | 'keyboard-focus' | 'panel' | 'view' | 'query' | 'seam' | 'back';
+export type BravaisEscapeStep =
+    | 'form' | 'focus-card' | 'keyboard-focus' | 'panel' | 'view' | 'query' | 'search' | 'seam' | 'back';
 
 export const resolveEscapeStep = ({
     hasForm = false,
@@ -72,6 +74,7 @@ export const resolveEscapeStep = ({
     hasPanel = false,
     hasViewMode = false,
     hasQuery = false,
+    hasSearch = false,
     hasSeam = false,
     canGoBack,
 }: {
@@ -81,6 +84,7 @@ export const resolveEscapeStep = ({
     hasPanel?: boolean;
     hasViewMode?: boolean;
     hasQuery?: boolean;
+    hasSearch?: boolean;
     hasSeam?: boolean;
     canGoBack: boolean;
 }): BravaisEscapeStep | null => {
@@ -90,6 +94,7 @@ export const resolveEscapeStep = ({
     if (hasPanel) return 'panel';
     if (hasViewMode) return 'view';
     if (hasQuery) return 'query';
+    if (hasSearch) return 'search';
     if (hasSeam) return 'seam';
     return canGoBack ? 'back' : null;
 };

@@ -14,7 +14,7 @@ import { setBravaisPendingOrigin } from './bravaisStageStore';
 import { armBravaisPlayingCard } from './bravaisPlayingCard';
 import { closeBravaisPanel } from './bravaisPanelHistory';
 import { setBravaisWallHoverKey, useBravaisUiStore } from './bravaisUiStore';
-import { setBravaisSearchOpen } from './bravaisHomeUiStore';
+import { setBravaisSearchOpen, useBravaisHomeUiStore } from './bravaisHomeUiStore';
 import { resolveSeamEscapeLevel, useBravaisSeamStore } from './bravaisSeamLevel';
 import { canTakeSeamFocus, resolveSeamEntry, resolveSeamStep } from './bravaisSeamFocus';
 import { BRAVAIS_SEAM_FLIP_ATTRIBUTE } from './bravaisSeamMotion';
@@ -285,6 +285,9 @@ export const useBravaisInteractions = ({
             // 缝被用户展开成完整信息条（窄屏）时算一级：先收回去，再退出这一层。
             const seam = useBravaisSeamStore.getState();
             const seamEscape = resolveSeamEscapeLevel(seam.level, seam.viewportWidth);
+            // 首页缝里的全局搜索框（⌕ 或 `/` 把窄缝临时展开成完整宽度）：它自己的 Esc 只挂在输入框的
+            // React onKeyDown 上，安卓返回派发到 window 的那一次到不了那里（见 BravaisSeamSearch）。
+            const searchOpen = useBravaisHomeUiStore.getState().searchOpen;
             const step = resolveEscapeStep({
                 hasForm: Boolean(layer.entries?.hasForm),
                 hasFocusCard: expandedRef.current !== null,
@@ -294,6 +297,7 @@ export const useBravaisInteractions = ({
                 hasPanel: useBravaisUiStore.getState().panelFor === layer.key,
                 hasViewMode: Boolean(layer.entries?.hasViewMode),
                 hasQuery: Boolean(layer.entries?.hasQuery),
+                hasSearch: searchOpen && Boolean(layer.seam.home?.search),
                 hasSeam: seamEscape !== null,
                 canGoBack: Boolean(layer.onBack),
             });
@@ -303,6 +307,7 @@ export const useBravaisInteractions = ({
             else if (step === 'panel') closeBravaisPanel();
             else if (step === 'view') layer.entries?.exitViewMode?.();
             else if (step === 'query') layer.entries?.clearQuery?.();
+            else if (step === 'search') setBravaisSearchOpen(false);
             else if (step === 'seam' && seamEscape) useBravaisSeamStore.getState().setLevel(seamEscape);
             else if (step === 'back') layer.onBack!();
             return step !== null;

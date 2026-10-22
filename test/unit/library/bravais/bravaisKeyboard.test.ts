@@ -75,6 +75,15 @@ describe('resolveEscapeStep', () => {
         expect(resolveEscapeStep({ ...base, hasSeam: true })).toBe('seam');
         expect(resolveEscapeStep({ ...base })).toBe('back');
     });
+
+    it('closes the seam search before folding the seam or leaving the layer', () => {
+        const base = { hasFocusCard: false, hasKeyboardFocus: false, canGoBack: true };
+        expect(resolveEscapeStep({ ...base, hasSearch: true, hasSeam: true })).toBe('search');
+        expect(resolveEscapeStep({ ...base, hasSearch: true })).toBe('search');
+        // 搜索框的 Esc 原本只挂在输入框的 React onKeyDown 上：安卓返回派发到 window 的那一次到不了它
+        // （BravaisSeamSearch），所以这一级是给返回手势用的。
+        expect(resolveEscapeStep({ ...base, hasSeam: true })).toBe('seam');
+    });
 });
 
 describe('resolveSeamEscapeLevel', () => {
