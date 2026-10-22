@@ -32,6 +32,20 @@ public class FoliaNativePlayerPlugin extends Plugin {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /**
+     * 判断"这一拍的采样值要不要写进锚点"的容差：与播放器上报位置的周期一致。
+     *
+     * 见写锚点那一段的说明 —— 差在这么点以内就当作「外推是准的」，不把时间轴往回拽。
+     * 改播放器那个 `POSITION_TICK_MS` 时这里要跟着改。
+     */
+    private static final long POSITION_TICK_MS = 250L;
+
+    /** 采样值与「墙钟外推出来的位置」差不到一个采样周期：这一拍没有新信息。 */
+    private static boolean anchorStillTrue(long sampledMs) {
+        long gap = WallpaperLyricsState.get().positionMs() - sampledMs;
+        return gap < POSITION_TICK_MS && gap > -POSITION_TICK_MS;
+    }
+
+    /**
      * 服务那边（通知栏 / 锁屏 / 耳机）要能直接碰到播放器，只能走静态引用 ——
      * 与 FoliaPlaybackPlugin 同一个路子：Activity 可能已经不在了，插件实例也可能换过。
      */
@@ -66,7 +80,47 @@ public class FoliaNativePlayerPlugin extends Plugin {
                  */
                 if ("position".equals(type) || "playing".equals(type)
                     || "paused".equals(type) || "ready".equals(type)) {
-                    WallpaperLyricsState.setAnchor(positionMs, !"paused".equals(type));
+                    boolean playing = !"paused".equals(type);
+                    /*
+                     * ⭐ **"position" 这一档不是每次都写锚点。**
+                     *
+                     * 每 250ms 无条件 `setAnchor(采样值)` 之前，桌面歌词就是「放着放着
+                     * 往回抽一下」，而且壁纸与叠层一起抽 —— 两处其实只是同一个锚点的
+                     * 两个读者：
+                     *   · 壁纸 / 悬浮小窗是原生自绘，直接读 `positionMs()`
+                     *     （锚点 + 墙钟外推），锚点被往回写一次，画面就往回跳一次；
+                     *   · 叠层是另一个 WebView，它**只在签名变了的时候才收一次推送**
+                     *     （WallpaperOverlay 的 lastSignature，签名里含 anchorPositionMs），
+                     *     其余时间自己按 rAF 往前插值 —— 这是刻意的设计，不是省事。
+                     *     锚点每 250ms 一变，就等于每 250ms 推一次：页面每次都把
+                     *     「自己已经走了 250ms」的时钟重设成那个采样值，于是它也往回抽。
+                     *     商籁那种「按位置选景」的视觉器上更明显：位置一抖当前那一景就换，
+                     *     背景的装饰文字跟着一会大一会小、位置乱跑。
+                     *
+                     * 采样值天然比"墙钟外推出来的位置"慢一点（播放器位置的更新粒度、
+                     * 这一下回调排到线程上的那点延迟）。1 倍速下外推速率与真实速率都是
+                     * 1.0，**这个差值是恒定的、不会累积**，所以「差得不多就干脆不写」
+                     * 是安全的：让墙钟照旧往前走，代价只是一个看不见的恒定滞后。
+                     * 差超过一个采样周期才是真出事了（缓冲 / 欠载 / 卡顿：位置停着而
+                     * 墙钟还在走），那时候必须往回对齐。
+                     *
+                     * 其余几档（playing / paused / ready）一律照写：它们是状态边界，
+                     * 锚点必须以它们为准。
+                     */
+                    /*
+                     * 只有 **1 倍速**才走这条优化。
+                     *
+                     * 外推是「锚点 + 墙钟」，速率恒为 1.0；倍速下真实位置走得更快，
+                     * 差值会线性累积、每过一会儿就撞一次容差 —— 那反而变成「隔几秒
+                     * 抽一下」。倍速时不跳过，照旧每拍写（跟改之前一样），不引入回归。
+                     * 真要把倍速也抹平，得让 WallpaperLyricsState 的外推带上速率。
+                     */
+                    boolean unityRate = player != null && Math.abs(player.getSpeed() - 1f) < 0.01f;
+                    if ("position".equals(type) && playing && unityRate && anchorStillTrue(positionMs)) {
+                        // 差在一个采样周期内：这个采样值没有信息量，不写。
+                    } else {
+                        WallpaperLyricsState.setAnchor(positionMs, playing);
+                    }
                 }
                 /*
                  * 过桥那一下回主线程：`notifyListeners` 里的监听器表不是为并发写的

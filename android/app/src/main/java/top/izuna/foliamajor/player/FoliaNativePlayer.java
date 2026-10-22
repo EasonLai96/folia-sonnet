@@ -91,7 +91,8 @@ public final class FoliaNativePlayer {
     @Nullable private volatile String lastUrl;
     private boolean tickScheduled = false;
     private float requestedVolume = 1f;
-    private float requestedSpeed = 1f;
+    /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
+    private volatile float requestedSpeed = 1f;
     private int requestedRepeatMode = Player.REPEAT_MODE_OFF;
 
     // 读的位置/时长走缓存：读可能发生在插件线程上，直接问播放器会跨线程。
@@ -258,6 +259,14 @@ public final class FoliaNativePlayer {
 
     public boolean isPlaying() {
         return cachedPlaying;
+    }
+
+    /**
+     * 当前倍速。写锚点那一侧要拿它决定要不要跳过这一拍 —— 见
+     * FoliaNativePlayerPlugin 里 `anchorStillTrue` 那段说明。
+     */
+    public float getSpeed() {
+        return requestedSpeed;
     }
 
     /**
