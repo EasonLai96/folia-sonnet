@@ -22,6 +22,8 @@ public class FoliaApplication extends Application {
     public void onCreate() {
         super.onCreate();
         FoliaCrashHandler.install(this);
+        // ⚠️ 临时诊断（主界面隔几秒顿一下），定位完删。
+        FoliaMainLooperWatchdog.install();
     }
 
     /**

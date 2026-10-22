@@ -277,9 +277,32 @@ export const useCapacitorPlaybackBridge = ({
         speed: 1,
       });
     };
+    /*
+     * 只有**播放 / 暂停翻转**和挂载时推一次状态。位置那一拍下面单独判断。
+     */
     push();
     if (state !== 'playing') return;
-    const timer = window.setInterval(push, POSITION_TICK_MS);
+    /*
+     * ⭐ 位置那一拍：**原生播放器接管的那一首一次都不推。**
+     *
+     * 掉帧打点量出来的是「每秒一次、每次 80~290ms」的主线程阻塞，而这里正好是
+     * 每秒一次 —— 每一笔都是一次 `startService` 的 IPC，服务的 `onStartCommand`
+     * **跑在 App 的主线程上**，里面还要 `mediaSession.setPlaybackState()`（同步
+     * Binder 给 system_server 与所有 MediaController）。掉帧那一刻堆内存纹丝不动
+     * （28MB 恒定），所以不是 GC，就是主线程在等这次跨进程调用。
+     *
+     * 而这一推在原生播放时**没有任何收益**：服务那边 `resolvePlaybackPositionMs()`
+     * 在原生在播时直接问播放器，写进去的 `cachedPositionMs` 在那条分支上不参与
+     * 计算（全服务只有一处读取，就是它的兜底分支）。后台节流那个顾虑同样不成立 ——
+     * 它跑在原生侧，不吃 WebView 的定时器节流。
+     *
+     * ⚠️ 只挡**位置**：播放 / 暂停翻转靠上面那次 `push()`（effect 依赖 playerState），
+     * 服务要认状态，那条不能省。
+     */
+    const timer = window.setInterval(() => {
+      if (nativePlaybackEngine.ownsPlayback()) return;
+      push();
+    }, POSITION_TICK_MS);
     /*
      * 再补一条由播放器事件驱动的：**后台的定时器会被 Chromium 节流**（页面既不可见、
      * WebView 里又已经没有音频在响，会掉进「intensive throttling」，1 秒变 1 分钟）。
