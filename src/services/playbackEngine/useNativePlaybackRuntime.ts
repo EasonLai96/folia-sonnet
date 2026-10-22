@@ -51,13 +51,20 @@ export const useNativePlaybackRuntime = ({
 
     // 地址 → 播放器。blob 地址（媒体缓存副本 / 本地歌）原生吃不下，那种歌整首回落到 <audio>。
     useEffect(() => {
-        if (!takes || !audioSrc) return;
+        if (!enabled || !audioSrc) return;
+        if (!nativePlaybackEngine.supports(audioSrc)) {
+            // 「开关开了但这首歌还是网页在播」的全部答案都在这行日志里 —— 均衡器还能听出
+            // 变化，就是因为它根本没走原生。看日志比猜快。
+            console.info('[NativePlayer] 这一首回落到 <audio>', audioSrc.slice(0, 24), '(原生吃不下这种地址)');
+            return;
+        }
+        console.info('[NativePlayer] 接管这一首', audioSrc.slice(0, 24));
         nativePlaybackEngine.setRepeatMode(callbacksRef.current.repeatOne ? 1 : 0);
         void nativePlaybackEngine.setSource(audioSrc).catch(error => {
             console.error('[NativePlayer] prepare failed', error);
             callbacksRef.current.onError(String(error));
         });
-    }, [audioSrc, takes]);
+    }, [audioSrc, enabled]);
 
     // 关掉开关、或没有歌了 → 收掉播放器，别让上一首在后台继续响。
     useEffect(() => {
