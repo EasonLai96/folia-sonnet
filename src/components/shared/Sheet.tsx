@@ -8,6 +8,7 @@ import { SettingsKitThemeContext, settingsTokens, useSettingsKitTheme } from '..
 import { KIT_EASE, KIT_MOTION, kitMotionTokens, kitTransition, useKitReducedMotion } from '../modal/settings/kit/motion';
 import { Tooltip } from '../modal/settings/kit';
 import { escapeCloses, tabTarget } from './sheetKeys';
+import { isNativeBackKey } from '../../utils/keyboardTargets';
 
 // src/components/shared/Sheet.tsx
 // The frame of every dialog: a title and the close button at the top, the content in the middle,
@@ -23,6 +24,10 @@ import { escapeCloses, tabTarget } from './sheetKeys';
 //
 // While it is open the keyboard belongs to it: focus goes in, Tab stays in, and Escape closes the
 // topmost sheet and nothing under it. Closing gives focus back to what opened it.
+//
+// Escape reaches it by two roads that must not be confused: a real key press is caught on
+// `document` (so parts inside the sheet see it first), while Android's back button arrives as an
+// Escape dispatched straight on `window` and needs a listener there. See the two listeners.
 
 /**
  * s: a question or a short notice. m: a dialog with content of its own. l: a work window.
@@ -284,8 +289,41 @@ const SheetFrame: React.FC<SheetFrameProps> = ({
         };
 
         document.addEventListener('keydown', handleKeyDown);
+
+        // Android's back button and its edge swipe: the native side turns one into an Escape
+        // **dispatched on `window`** (useNativeBackButton). Its target is the window itself, so
+        // `document` is not in the propagation path and the listener above never sees it — every
+        // sheet here (the sign-in window among them) looked dead to the back gesture, and with
+        // nothing calling preventDefault the whole app went to the background instead.
+        //
+        // Only the marked key is taken here: a real Escape still belongs to the document listener
+        // above, which stops it before it could reach this one.
+        const handleNativeBack = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape' || !isNativeBackKey(event)) {
+                return;
+            }
+            if (openSheets[openSheets.length - 1] !== token) {
+                return;
+            }
+            const closes = escapeCloses({
+                taken: event.defaultPrevented,
+                held: event.repeat,
+                composing: event.isComposing,
+                popupOpen: panel.querySelector('[aria-haspopup][aria-expanded="true"]') !== null,
+                closeDisabled: closeDisabledRef.current,
+            });
+            if (closes) {
+                // Tells useNativeBackButton this one was handled: without it the app goes to the
+                // background on the very key that just closed a window.
+                event.preventDefault();
+                requestCloseRef.current();
+            }
+        };
+        window.addEventListener('keydown', handleNativeBack);
+
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keydown', handleNativeBack);
             openSheets.splice(openSheets.indexOf(token), 1);
             // Back to what opened the sheet, unless focus has since been put somewhere else.
             const active = document.activeElement;

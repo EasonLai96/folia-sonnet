@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Grid3DSlider } from '../../../src/library/suites/grid/home/Grid3DSlider';
 import ConfirmDialog from '../../../src/components/shared/ConfirmDialog';
 import Sheet, { SheetLayerContext } from '../../../src/components/shared/Sheet';
-import { hasBlockingWindow, hasOpenSheet } from '../../../src/utils/keyboardTargets';
+import { hasBlockingWindow, hasOpenSheet, markNativeBackKey } from '../../../src/utils/keyboardTargets';
 
 // test/unit/shared/sheetKeyboard.test.ts
 // Who has the keyboard while a dialog is open. Each case needs a key pressed at one moment with
@@ -115,6 +115,55 @@ describe('a sheet', () => {
         document.body.appendChild(layer);
         await render(inLayer(layer));
         expect(layer.querySelector('[role="dialog"]')).not.toBeNull();
+    });
+});
+
+describe('a sheet and the Android back key', () => {
+    /*
+     * The native side turns one into an Escape **dispatched on `window`** (useNativeBackButton).
+     * That event's target is the window itself, so `document` is not in its path — a sheet listening
+     * only there never sees the back key, and since nothing calls preventDefault the app is put in
+     * the background instead of the window closing. Users reported it as "the sign-in screen cannot
+     * be left".
+     */
+    const pressBack = () => {
+        const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+        markNativeBackKey(event);
+        window.dispatchEvent(event);
+        return event;
+    };
+    const sheet = (onClose: () => void, closeDisabled = false) => React.createElement(Sheet, {
+        isOpen: true, onClose, title: 'Sheet', closeDisabled, children: 'content',
+    });
+
+    it('closes on the back key, and says it was handled so the app stays put', async () => {
+        let closed = 0;
+        await render(sheet(() => { closed += 1; }));
+
+        const event = pressBack();
+        expect(closed).toBe(1);
+        expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('holds the back key while closing is disabled, as it holds Escape', async () => {
+        let closed = 0;
+        await render(sheet(() => { closed += 1; }, true));
+
+        const event = pressBack();
+        expect(closed).toBe(0);
+        expect(event.defaultPrevented).toBe(false);
+    });
+
+    it('cannot be reached from document: why the back key needs its own listener on window', async () => {
+        let seen = 0;
+        const spy = () => { seen += 1; };
+        document.addEventListener('keydown', spy);
+        try {
+            pressBack();
+        } finally {
+            document.removeEventListener('keydown', spy);
+        }
+        expect(seen).toBe(0);
     });
 });
 
