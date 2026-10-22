@@ -1962,8 +1962,8 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     /*
-     * 弹一条**自己画**的悬浮提示条（FoliaOverlayNotice），样子与位置都照 Web 层那条
-     * 顶部提示来做。
+     * 弹一条**自己画**的悬浮提示条（FoliaOverlayNotice），样子照 Web 层那条提示来做，
+     * 但贴在**屏幕下边**（画在别的应用上面时，压住别人顶部的状态栏比压住底部手势条更碍事）。
      *
      * 为什么还要这条路：系统 Toast 在 Android 11 起后台只给纯文本，画不出我们自己的
      * 圆角条；而「后台自动跳过了下一首」偏偏是最需要在别的应用上面说清楚的一句话。
@@ -1980,8 +1980,8 @@ public class FoliaNativePlugin extends Plugin {
     public void showOverlayNotice(PluginCall call) {
         final String text = call.getString("text", "");
         final String message = text == null ? "" : text;
-        final Long requested = call.getLong("durationMs", 3500L);
-        final long durationMs = requested == null ? 3500L : requested;
+        final Long requested = call.getLong("durationMs", 4000L);
+        final long durationMs = requested == null ? 4000L : requested;
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             boolean shown = false;
             try {
@@ -1994,6 +1994,27 @@ public class FoliaNativePlugin extends Plugin {
             result.put("shown", shown);
             call.resolve(result);
         });
+    }
+
+    /*
+     * 回到应用：收掉那条悬浮提示。
+     *
+     * 它是画在**别的应用上面**的，使命就是「界面没人看时替界面说一句话」。界面回来了，
+     * 这句话该由页面自己说 —— 再挂在上面就是挡自己的视线。
+     *
+     * 也是「它到底会不会消失」的最后一道保险：定时收掉那条路万一没走通（出场动画的回调
+     * 不派发、窗口令牌中途失效），至少回到应用时一定清掉。放在原生这边而不是让网页来调，
+     * 是因为后台 WebView 的 timer 会被节流，回前台那一刻不一定赶得及。
+     *
+     * Capacitor 是从 Activity 的 onResume 调过来的，所以已经在主线程上（hide 要求主线程）。
+     */
+    @Override
+    protected void handleOnResume() {
+        try {
+            FoliaOverlayNotice.hide();
+        } catch (Throwable error) {
+            Log.w(TAG, "hiding the overlay notice failed", error);
+        }
     }
 
     @PluginMethod

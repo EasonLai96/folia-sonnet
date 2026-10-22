@@ -124,7 +124,7 @@ interface FoliaNativePlugin {
      */
     showToast(options: { text: string; long?: boolean }): Promise<void>;
     /**
-     * 弹一条**自己画**的悬浮提示条，样子与位置都照 Web 层那条顶部提示。
+     * 弹一条**自己画**的悬浮提示条，样子照 Web 层那条提示，贴屏幕下边。
      *
      * 与 `showToast` 的区别：系统 Toast 从 Android 11 起后台只给纯文本，画不出我们想要
      * 的样子；这条路能画，但要先有「显示在其他应用上层」的授权。
