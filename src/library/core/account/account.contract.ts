@@ -50,6 +50,11 @@ export type LibraryPasswordLoginError =
     | 'network'
     /** 服务器回了，但不是能登录的状态（没这项能力、地址不对）。 */
     | 'unavailable'
+    /**
+     * 这台机器前面那一层（飞牛走 FN Connect 网关时）要求先在网页里登录一次：
+     * 账号密码本身没错，是这层不认只带账号密码的请求。
+     */
+    | 'web-login-required'
     /** 登录成功了，可账户刷新没跟上。 */
     | 'refresh'
     | 'unknown';

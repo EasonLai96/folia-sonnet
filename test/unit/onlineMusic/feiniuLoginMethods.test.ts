@@ -3,6 +3,7 @@ import { getOnlineMusicProvider } from '@/services/onlineMusic/providerRegistry'
 import {
     feiniuFnIdFromServerUrl,
     feiniuServerUrlFromFnId,
+    isFnConnectLoginPage,
     normalizeFeiniuServerUrl,
 } from '@/services/onlineMusic/feiniuTransport';
 
@@ -13,15 +14,17 @@ import {
 
 describe('an FN ID becomes the address of that machine', () => {
     it('adds the domain the vendor hands out, and speaks https', () => {
-        expect(feiniuServerUrlFromFnId('abcd1234')).toBe('https://abcd1234.fnid.cc');
-        expect(feiniuServerUrlFromFnId(' ABCD1234 ')).toBe('https://abcd1234.fnid.cc');
+        // 网关域名是飞牛自己的 5ddd.com（多个公共 DNS 实测一致）；写别的后缀 DNS 直接解析不了，
+        // 报出来却是「连不上」，看着像 NAS 没开机 —— 所以这个后缀必须钉住。
+        expect(feiniuServerUrlFromFnId('abcd1234')).toBe('https://abcd1234.5ddd.com');
+        expect(feiniuServerUrlFromFnId(' ABCD1234 ')).toBe('https://abcd1234.5ddd.com');
     });
 
     it('takes the ID back out of a full address, or out of a copied one', () => {
         // 用户从浏览器地址栏复制来的往往是整条：域名已经在里面，不该再补一次后缀。
-        expect(feiniuServerUrlFromFnId('https://abcd1234.fnid.cc/')).toBe('https://abcd1234.fnid.cc');
+        expect(feiniuServerUrlFromFnId('https://abcd1234.5ddd.com/')).toBe('https://abcd1234.5ddd.com');
         expect(feiniuServerUrlFromFnId('http://192.168.1.5:5666/music/')).toBe('https://192.168.1.5:5666');
-        expect(feiniuServerUrlFromFnId('abcd1234.fnid.cc:8443')).toBe('https://abcd1234.fnid.cc:8443');
+        expect(feiniuServerUrlFromFnId('abcd1234.5ddd.com:8443')).toBe('https://abcd1234.5ddd.com:8443');
     });
 
     it('is empty when nothing was typed', () => {
@@ -30,14 +33,14 @@ describe('an FN ID becomes the address of that machine', () => {
     });
 
     it('survives the paste that comes with a full-width colon', () => {
-        expect(feiniuServerUrlFromFnId('abcd1234.fnid.cc：8443')).toBe('https://abcd1234.fnid.cc:8443');
+        expect(feiniuServerUrlFromFnId('abcd1234.5ddd.com：8443')).toBe('https://abcd1234.5ddd.com:8443');
     });
 });
 
 describe('the other way round: whether an address is one of those', () => {
     it('answers the ID only for a machine reached through the vendor domain', () => {
-        expect(feiniuFnIdFromServerUrl('https://abcd1234.fnid.cc')).toBe('abcd1234');
-        expect(feiniuFnIdFromServerUrl('abcd1234.fnid.cc:8443/music')).toBe('abcd1234');
+        expect(feiniuFnIdFromServerUrl('https://abcd1234.5ddd.com')).toBe('abcd1234');
+        expect(feiniuFnIdFromServerUrl('abcd1234.5ddd.com:8443/music')).toBe('abcd1234');
         // 局域网地址不是 FN ID：那一栏不该被它填上。
         expect(feiniuFnIdFromServerUrl('http://192.168.1.5:5666')).toBe('');
         expect(feiniuFnIdFromServerUrl('')).toBe('');
@@ -47,6 +50,23 @@ describe('the other way round: whether an address is one of those', () => {
 describe('the address typed the other way is left as it is', () => {
     it('keeps http together with its default port', () => {
         expect(normalizeFeiniuServerUrl(' http://192.168.1.5:5666/music/ ')).toBe('http://192.168.1.5:5666');
+    });
+});
+
+describe('a page the gateway hands back instead of an answer', () => {
+    // 网关没有会话时把所有请求都换成自己的登录页（实测：POST 密码登录也回它）。
+    // 认得出这一页，界面才能说「先去网页登录一次」，而不是「这个地址上没有服务」。
+    const gateway = '<!doctype html><html lang="zh-CN"><head>'
+        + '<link rel="icon" href="https://static2.fnnas.com/connect/favicon.ico"/>'
+        + '<title>FN Connect 远程访问 - 飞牛 fnOS</title></head><body><div id="app"></div></body></html>';
+
+    it('knows the gateway login page when it sees one', () => {
+        expect(isFnConnectLoginPage(gateway)).toBe(true);
+    });
+
+    it('leaves any other page alone, so a wrong address still says service not found', () => {
+        expect(isFnConnectLoginPage('<html><head><title>fnOS</title></head><body>登录</body></html>')).toBe(false);
+        expect(isFnConnectLoginPage('')).toBe(false);
     });
 });
 

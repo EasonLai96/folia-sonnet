@@ -18,6 +18,7 @@ const ERROR_KEY: Record<LibraryPasswordLoginError, string> = {
     'invalid-credentials': 'home.loginPasswordInvalidCredentials',
     network: 'home.loginPasswordNetwork',
     unavailable: 'home.loginPasswordUnavailable',
+    'web-login-required': 'home.loginPasswordWebLoginRequired',
     refresh: 'home.loginPasswordRefreshFailed',
     unknown: 'home.loginPasswordFailed',
 };

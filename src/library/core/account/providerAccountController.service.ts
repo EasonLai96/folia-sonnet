@@ -521,6 +521,8 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         if (error instanceof OnlineProviderError) {
             if (error.code === 'invalid-credentials') return 'invalid-credentials';
             if (error.code === 'network') return 'network';
+            // 网关要先用网页登录：账号密码没错，是这一层不放行 —— 别按「地址上没有服务」说。
+            if (error.code === 'web-login-required') return 'web-login-required';
             if (error.code === 'unavailable' || error.code === 'unsupported' || error.code === 'invalid-response') return 'unavailable';
         }
         return 'unknown';

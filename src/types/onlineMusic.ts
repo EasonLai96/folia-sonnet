@@ -311,6 +311,12 @@ export type ProviderErrorCode =
     | 'invalid-response'
     /** 账号或密码不对（飞牛登录）：不是「登录态过期」，界面要按填错了提示。 */
     | 'invalid-credentials'
+    /**
+     * 请求到了，却被这台机器前面那一层拦下来要求先在网页里登录（飞牛走 FN Connect 网关时：
+     * 网关没有会话，任何接口都只回它自己的登录页，连密码登录那一步也不放行）。
+     * 与 `invalid-response` 分开：「地址上没有这个服务」这句话在这里是错的。
+     */
+    | 'web-login-required'
     // —— 以下只在 adapter 掌握对应证据时抛出 ——
     | 'timeout'
     | 'rate-limited'

@@ -1574,6 +1574,7 @@ export default {
     "loginPasswordInvalidCredentials": "Nama pengguna atau kata sandi salah. Silakan coba lagi.",
     "loginPasswordNetwork": "Tidak dapat menjangkau alamat ini. Periksa alamatnya, pastikan NAS menyala, dan kedua perangkat berada di jaringan yang sama.",
     "loginPasswordUnavailable": "Tidak ada layanan musik FeiNiu yang bisa digunakan di alamat ini.",
+    "loginPasswordWebLoginRequired": "NAS ini ada di balik gateway FN Connect, yang tidak menerima apa pun sebelum Anda masuk sekali lewat browser (akunnya sendiri tidak salah). Buka https://<FN ID>.5ddd.com di browser dan masuk, atau pakai alamat yang bisa dijangkau langsung.",
     "loginPasswordRefreshFailed": "Berhasil masuk, tetapi membaca pustaka gagal. Muat ulang dari beranda nanti.",
     "loginPasswordFailed": "Masuk gagal. Silakan coba lagi.",
     "qqLoginMethodTitle": "Pilih metode masuk",

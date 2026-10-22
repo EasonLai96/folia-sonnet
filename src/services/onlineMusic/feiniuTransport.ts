@@ -64,13 +64,30 @@ export const normalizeFeiniuServerUrl = (value: string): string => (
 );
 
 /**
- * FN ID 那台 NAS 的域名后缀。
+ * FN ID 那台 NAS 的域名后缀（FN Connect 的网关域名）。
  *
- * 飞牛给每台 NAS 发一个「FN ID」，远程访问的地址是 `https://<FN ID>.fnid.cc` —— 域名是一家给的，
- * 不是用户自己搭的反代，所以在这里补后缀就够了，不需要用户手写整条地址，也不需要那个 5666
- * 的局域网端口（走 https 就是 443）。例：填 `abcd1234` → `https://abcd1234.fnid.cc`。
+ * 飞牛的远程访问服务是 FN Connect：每台 NAS 领一个 FN ID，网关地址是 `https://<FN ID>.5ddd.com`
+ * —— 域名是飞牛自己的，不是用户搭的反代，所以在这里补后缀就够了，也不需要那个 5666 / 5667
+ * 的局域网端口（网关走 https 443）。例：填 `pcyear` → `https://pcyear.5ddd.com`。
+ *
+ * ⚠️ 后缀只有这一家：写别的（`fnid.cc` 之类）DNS 直接解析不了，报出来的是「连不上」，
+ * 看着像 NAS 没开机，其实是地址拼错了 —— 这个后缀是本仓库实测过的（多个公共 DNS 一致）。
+ *
+ * ⚠️ 网关不等于直连：它是 FN Connect 的一层鉴权，没有网关会话时任何接口都回它自己的登录页
+ * （HTML），连密码登录那一步也过不去。所以这一栏只解决「地址是什么」，不解决「怎么过网关」。
  */
-const FNID_HOST_SUFFIX = 'fnid.cc';
+const FNID_HOST_SUFFIX = '5ddd.com';
+
+/**
+ * 这一页是不是 FN Connect 网关自己的登录页。
+ *
+ * 网关没有会话时，任何请求（连密码登录那一步也在内）都只回这一页 —— 请求其实到了那台机器，
+ * 所以这里的失败原因不是「地址上没有服务」，而是「这一层要先用网页登录」。
+ * 判据取网关页自己的特征（标题与它引用的静态资源都带 FN Connect / fnnas.com/connect）。
+ */
+export const isFnConnectLoginPage = (text: string): boolean => (
+    /fn\s*connect|fnnas\.com\/connect/i.test(text.slice(0, 4096))
+);
 
 /** 用户在「FN ID」那一栏填的东西（可能带了 https、端口、或者干脆就是整条域名）变成服务器地址。 */
 export const feiniuServerUrlFromFnId = (value: string): string => {
@@ -333,6 +350,17 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
         // 兜到了前端页面上。必须把这句话说出来，否则只能看到「非 JSON 响应」。
         const head = text.trimStart().slice(0, 64).toLowerCase();
         const isHtml = head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<head');
+        // FN Connect 的登录页：请求**到了**网关，只是网关没有会话 —— 它把任何接口都换成这一页
+        // （连密码登录也是），所以这里要说「先去网页里登录一次」，而不是「这个地址上没有服务」。
+        const isGatewayLogin = isHtml && isFnConnectLoginPage(text);
+        if (isGatewayLogin) {
+            throw new OnlineProviderError(
+                'web-login-required',
+                `FeiNiu gateway asked for a web sign-in first for ${path} (HTTP ${status}, ${describeFeiniuTarget(url)}) — FN Connect 网关没有会话：它把所有请求都换成自己的登录页，密码登录也过不去`,
+                'feiniu',
+                error,
+            );
+        }
         throw new OnlineProviderError(
             'invalid-response',
             isHtml

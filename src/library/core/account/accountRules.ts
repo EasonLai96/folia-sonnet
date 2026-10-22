@@ -254,6 +254,7 @@ const PASSWORD_LOGIN_ERROR_KEYS: Readonly<Record<LibraryPasswordLoginError, stri
     'invalid-credentials': 'home.loginPasswordInvalidCredentials',
     network: 'home.loginPasswordNetwork',
     unavailable: 'home.loginPasswordUnavailable',
+    'web-login-required': 'home.loginPasswordWebLoginRequired',
     refresh: 'home.loginPasswordRefreshFailed',
     unknown: 'home.loginPasswordFailed',
 };
