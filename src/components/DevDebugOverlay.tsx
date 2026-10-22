@@ -191,6 +191,22 @@ const DebugRow: React.FC<{ label: string; value: string; }> = ({ label, value })
     );
 };
 
+/**
+ * 最近几次掉帧（**临时诊断**，定位完连 `usePlaybackVisualizerBridge` 里那段一起删）。
+ *
+ * 每行：`间隔ms@堆MB`，按最近三次倒着排。判据是堆：掉帧那一刻堆**回落**就是 GC；
+ * 没有回落却卡了，就是主线程在等别的东西（同步 IPC / 合成 / 布局）。
+ */
+const formatHitchLog = (): string => {
+    const log = (window as Window & {
+        __foliaHitchLog?: { gapMs: number; heapMB: number | null }[];
+    }).__foliaHitchLog;
+    if (!log || log.length === 0) return 'none';
+    return log.slice(-3).reverse()
+        .map(entry => `${entry.gapMs}ms@${entry.heapMB ?? '?'}MB`)
+        .join(' · ');
+};
+
 const renderCellValue = (value: string, isDaylight: boolean) => {
     if (/^#[0-9a-fA-F]{3,8}$/.test(value.trim())) {
         return (
@@ -659,6 +675,11 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
                         <DebugRow label="cores" value={frames.cores === null ? 'n/a' : String(frames.cores)} />
                         <DebugRow label="memory" value={frames.memoryGb === null ? 'n/a' : `${frames.memoryGb}GB`} />
                         <DebugRow label="visible/hidden" value={`${(frames.visibleMs / 1000).toFixed(0)}s / ${(frames.hiddenMs / 1000).toFixed(0)}s`} />
+                        {/*
+                         * 掉帧打点（**临时诊断**，定位完连 usePlaybackVisualizerBridge 里
+                         * 那一段一起删）。行里带堆内存：掉帧那一刻堆要是回落了就是 GC。
+                         */}
+                        <DebugRow label="hitches" value={formatHitchLog()} />
                     </dl>
                     <div className="mt-3 flex items-center gap-3">
                         <button

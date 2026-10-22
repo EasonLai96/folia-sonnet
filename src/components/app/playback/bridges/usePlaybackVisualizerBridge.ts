@@ -75,6 +75,8 @@ type UsePlaybackVisualizerBridgeParams = {
  * 但把这笔开销砍掉了一半以上。中间那些帧不写信号，可视化自然沿用上一帧的读数。
  */
 const SPECTRUM_READ_INTERVAL_MS = 33;
+/** 掉帧打点：两帧间隔超过这么久才记一条（临时诊断用，定位完删）。 */
+const HITCH_LOG_THRESHOLD_MS = 80;
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -107,6 +109,17 @@ export function usePlaybackVisualizerBridge({
     const incomingLyrics = usePlaybackStore(state => state.lyrics);
 
     const currentLineIndexRef = useRef(-1);
+    /**
+     * 掉帧打点（**临时诊断用**，定位到原因后连这一段一起删）。
+     *
+     * 这一条 rAF 是所有可视化共用的时钟，卡的那一下必然体现为这里两帧之间的间隔
+     * 突然变长。判据在堆内存上：卡顿时 `usedJSHeapSize` 要是**回落**了，就是 GC；
+     * 没回落却卡了，那就是主线程在等别的东西（同步 IPC / 合成 / 布局）。
+     *
+     * 打进 console.warn，用 logcat 过滤 `FoliaHitch` 就能看到；同时也留在
+     * `window.__foliaHitchLog` 里，方便在调试叠层里读。
+     */
+    const lastFrameAtMsRef = useRef(0);
     // 上一帧真的去问频谱是什么时候。只为那个 ~30Hz 的降频服务（见 SPECTRUM_READ_INTERVAL_MS）。
     const spectrumReadAtMsRef = useRef(0);
     // 智能动感模式: loads the track's beats while it is on; the clock is stepped below. A ref, so
@@ -196,6 +209,33 @@ export function usePlaybackVisualizerBridge({
         const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
         const nowMsValue = performance.now();
+        /*
+         * 掉帧打点（临时诊断，见上面 lastFrameAtMsRef 的说明）。
+         *
+         * 阈值取 80ms：正常一帧 16ms，掉三帧以上才记 —— 只留明显看得出来的那些。
+         */
+        if (lastFrameAtMsRef.current !== 0) {
+            const frameGapMs = nowMsValue - lastFrameAtMsRef.current;
+            if (frameGapMs >= HITCH_LOG_THRESHOLD_MS) {
+                const memory = (performance as Performance & {
+                    memory?: { usedJSHeapSize: number };
+                }).memory;
+                const entry = {
+                    gapMs: Math.round(frameGapMs),
+                    atMs: Math.round(nowMsValue),
+                    native: nativePlaybackEngine.ownsPlayback(),
+                    heapMB: memory ? Math.round(memory.usedJSHeapSize / 1048576) : null,
+                };
+                const log: typeof entry[] = (window as Window & {
+                    __foliaHitchLog?: typeof entry[];
+                }).__foliaHitchLog ?? [];
+                log.push(entry);
+                if (log.length > 40) log.shift();
+                (window as Window & { __foliaHitchLog?: typeof entry[] }).__foliaHitchLog = log;
+                console.warn('[FoliaHitch]', JSON.stringify(entry));
+            }
+        }
+        lastFrameAtMsRef.current = nowMsValue;
         const spectrumDue = nowMsValue - spectrumReadAtMsRef.current >= SPECTRUM_READ_INTERVAL_MS;
         const process = (value: number, boost = 2) => {
             const normalized = value / 255;
