@@ -16,6 +16,7 @@ import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
@@ -248,6 +249,17 @@ final class QishuiSignHost {
         }
         created.addJavascriptInterface(new HostBridge(), "FoliaQishuiHost");
         created.setWebViewClient(new HostClient());
+        /*
+         * 这一座 WebView **只跑 JS，不画东西**（引导页的 body 是空的），所以它不该再去占一块
+         * GPU 合成面：平板上主 WebView 的视口本来就比手机大得多，合成内存已经被吃掉一大截，
+         * 再多一块 GL 面就够让系统去收渲染进程（见 onSigningRendererGone）。改成软件绘制，
+         * 这一座一个像素都不必真的画出来。
+         */
+        try {
+            created.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        } catch (Throwable error) {
+            Log.w(TAG, "forcing software drawing on the signing webview failed", error);
+        }
         created.loadUrl(BOOTSTRAP_URL);
         // 音频代理提前起（失败只降级为「无本地代理」，song.url 原样直链）。
         executor.execute(audioServer::start);
@@ -348,20 +360,55 @@ final class QishuiSignHost {
         return sessionCookie;
     }
 
+    /** 主线程：把隐藏 WebView 摘下来并销毁；不管它现在是好的还是已经废了。 */
+    private void dropWebView() {
+        WebView view = webView;
+        webView = null;
+        ready = false;
+        if (view == null) return;
+        try {
+            view.stopLoading();
+            view.removeJavascriptInterface("FoliaQishuiHost");
+            ViewGroup parent = (ViewGroup) view.getParent();
+            if (parent != null) parent.removeView(view);
+            view.destroy();
+        } catch (Throwable error) {
+            Log.w(TAG, "dropping the signing webview failed", error);
+        }
+    }
+
+    /**
+     * 隐藏 WebView 的渲染进程没了：系统内存不足把它收走了，或者它自己崩了。
+     *
+     * ⚠ 这一声必须自己接住。`WebViewClient` 的默认实现返回 **false**，意思是
+     * 「这个 App 处理不了渲染进程没了」—— 系统随即把整个进程带走；真机上的表现就是
+     * 「一扫汽水的二维码，整屏先黑，接着整个 App 卡死，只能从最近任务里杀掉」。
+     * 只有汽水会这样：它是唯一会**再起一座 WebView** 的平台（协议层要一个真页面）。
+     * 平板上必现是因为视口大、合成内存本来就吃得多，多这一座就够让系统去收渲染进程。
+     *
+     * 接住之后只废这一座桥：在途的票据当场结掉（不结，渲染层只能干等到 45 秒兜底），
+     * 然后立刻重建一座 —— 用户点「刷新二维码」时它已经重新就绪了。应用其它部分不受影响。
+     */
+    private void onSigningRendererGone(boolean crashed) {
+        Log.w(TAG, "the signing webview's renderer is gone (crashed=" + crashed + "); the bridge is rebuilt");
+        mainHandler.post(() -> {
+            failureReason = crashed ? "renderer-crashed" : "renderer-killed";
+            dropWebView();
+            // 在途的票据要有结局：这一座已经废了，等它回话是等不到的。
+            synchronized (waiting) { waiting.clear(); }
+            for (Map.Entry<String, Pending> entry : pending.entrySet()) {
+                entry.getValue().resolve(envelopeJson(false, null, "unavailable", "The Qishui signing host lost its renderer"));
+            }
+            pending.clear();
+            // 就地重建：下一次请求（用户刷新二维码）落在一座好的上。
+            // 页面 ready 时 HostBridge.onReady 会把 failureReason 清掉。
+            ensureStarted();
+        });
+    }
+
     void dispose() {
         mainHandler.post(() -> {
-            if (webView == null) return;
-            try {
-                webView.stopLoading();
-                webView.removeJavascriptInterface("FoliaQishuiHost");
-                ViewGroup parent = (ViewGroup) webView.getParent();
-                if (parent != null) parent.removeView(webView);
-                webView.destroy();
-            } catch (Throwable error) {
-                Log.w(TAG, "disposing the signing webview failed", error);
-            }
-            webView = null;
-            ready = false;
+            dropWebView();
             audioServer.stop();
             // 还在排队的那几个票据仍挂在 pending 里，下面这一圈会一并把它们结掉。
             synchronized (waiting) { waiting.clear(); }
@@ -690,6 +737,18 @@ final class QishuiSignHost {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             // 页面里没有导航，任何跳转都拦掉，免得把用户带到别处去。
+            return true;
+        }
+
+        /**
+         * 渲染进程没了（API 26+）：**必须返回 true**，否则默认实现告诉系统「这个 App 处理不了」，
+         * 系统就把整个进程带走 —— 表现是整屏黑在那里、只能杀进程。见 onSigningRendererGone。
+         */
+        @Override
+        // 这个回调只在 API 26+ 上才会被系统调用，里面读 26 的 API 是安全的（minSdk 是 24）。
+        @SuppressLint("NewApi")
+        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+            onSigningRendererGone(detail != null && detail.didCrash());
             return true;
         }
     }
