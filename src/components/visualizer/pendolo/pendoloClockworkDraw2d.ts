@@ -187,7 +187,6 @@ export const drawPendoloClockwork2d = (
         phase,
         bassOscillation,
         secondGearAngle,
-        transBeatAngle = 0,
         primaryTextColor,
         accentTextColor,
         backgroundColor,
@@ -375,7 +374,7 @@ export const drawPendoloClockwork2d = (
 
     // Meshing Intermediate Transmission Gear (Lower-Left Offset)
     // Turns with the wheel, plus 智能动感模式's beat turn (0 otherwise).
-    const transAngle = -escapementAngle * 1.4 + transBeatAngle;
+    const transAngle = -escapementAngle * 1.4;
     drawGearTeeth(
         ctx, anchors.transCx, anchors.transCy, anchors.transR, 24, 7, transAngle,
         palette.gearPrimaryAlpha, 1.8,

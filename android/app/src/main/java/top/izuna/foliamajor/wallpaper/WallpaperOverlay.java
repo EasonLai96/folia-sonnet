@@ -114,7 +114,7 @@ public final class WallpaperOverlay {
      * 音频采集。
      *
      * 叠层是独立 WebView，拿不到主应用那个 AnalyserNode，而主应用的 rAF 在后台会被
-     * 系统停掉 —— 所以莫奈的「音频图案」只能靠这里从系统混音里抓。见 WallpaperAudioTap。
+     * 系统停掉 —— 所以画面的音频响应只能靠这里从系统混音里抓。见 WallpaperAudioTap。
      */
     private final WallpaperAudioTap audioTap = new WallpaperAudioTap(this::pushAudioFrame);
 
@@ -2822,8 +2822,11 @@ public final class WallpaperOverlay {
      * 的连续流。签名里塞不下（它会让整包每 50ms 重建一次、还带着整条逐字时间轴），
      * 也过不了那道「状态没变就不推」的门。
      *
-     * 频率（20Hz）也比页面画的慢，但页面自己有 rAF，柱子是逐帧插值的 ——
-     * 再快只是白烧桥带宽，看不出差别。
+     * 频率（20Hz）也比页面画的慢，但页面自己有 rAF，band 是逐帧插值的 ——
+     * 再快只是白烧带宽，看不出差别。
+     *
+     * 以前还跟着推一份 128 段的频谱数组（叠层上莫奈底部那条「音频图案」画它），
+     * 那条已随设置一起删掉，这里也不再拼 —— 每次少拼几百个字符、少 parse 一遍。
      */
     private void pushAudioFrame(WallpaperAudioTap.Frame frame) {
         if (webView == null || !pageReady) {
@@ -2839,21 +2842,15 @@ public final class WallpaperOverlay {
         }
         lastAudioSilent = false;
 
-        StringBuilder payload = new StringBuilder(512);
+        // 只有 6 个整数，整包本来就不长；这里不再是 512 起步了（那段留给频谱数组）。
+        StringBuilder payload = new StringBuilder(96);
         payload.append("{\"power\":").append(frame.power)
                 .append(",\"bass\":").append(frame.bass)
                 .append(",\"lowMid\":").append(frame.lowMid)
                 .append(",\"mid\":").append(frame.mid)
                 .append(",\"vocal\":").append(frame.vocal)
                 .append(",\"treble\":").append(frame.treble)
-                .append(",\"spectrum\":[");
-        for (int index = 0; index < frame.spectrum.length; index += 1) {
-            if (index > 0) {
-                payload.append(',');
-            }
-            payload.append(frame.spectrum[index]);
-        }
-        payload.append("]}");
+                .append("}");
         evaluateAudio(payload.toString());
     }
 

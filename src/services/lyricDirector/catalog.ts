@@ -172,9 +172,7 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
         setter: 'handleSetMonetTuning',
         params: {
             keywordColoringEnabled: { kind: 'boolean', zh: '关键词着色' },
-            audioStyle: { kind: 'select', options: ['bar', 'line'], zh: '音频样式' },
             showDescription: { kind: 'boolean', zh: '显示简介' },
-            showAudioVisualization: { kind: 'boolean', zh: '音频可视化' },
             fontScale: { kind: 'number', min: 0.7, max: 1.5, zh: '字号' },
             portraitStyle: { kind: 'select', options: ['square', 'rectangular'], zh: '封面样式' },
         },
@@ -304,9 +302,6 @@ const PARAM_GATES: Record<string, Record<string, DirectorGate | DirectorGate[]>>
     },
     cappella: {
         emojiPackSource: { key: 'showEmoMessages', mustBe: true },
-    },
-    monet: {
-        audioStyle: { key: 'showAudioVisualization', mustBe: true },
     },
     pendolo: {
         enableLineGlow: { key: 'showGearDecor', not: 'none', setTo: 'subtle' },

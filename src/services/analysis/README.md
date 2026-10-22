@@ -1,12 +1,12 @@
 # services/analysis
 
-曲目分析的公共底层。automix（`../automix/`）和节拍效果（`../beatFx/`，智能动感模式）都从这里读，beatFx 不依赖 automix。
+曲目分析的公共底层。automix（`../automix/`）从这里读；节拍效果（`../beatFx/`，智能动感模式）也曾从这里读，已于 2026-10-24 整体移除（鼓点分析 `drumHits.ts` 等因此没有调用方了，保留只为已存盘的数据还能被记账和清掉）。
 
 例外：这里还借用了 automix 下三个与 automix 本身无关的工具模块——`signalAnalysis`（梅尔滤波等信号处理）、`uiYield`（让出主线程）、`analysisOffThread`（频谱放到 worker 算）。它们都是无状态的纯计算（`analysisOffThread` 的 worker 还连带 `trackProfile`，同样无状态），不碰 automix 的队列、缓存或播放状态；以后要彻底分层，就把这几个搬进来。
 
 | 文件 | 职责 |
 |---|---|
-| `trackAudio.ts` | 读一首歌**已经在本机**的字节：播放 representation → 媒体缓存 → 本地 URL → 本地文件句柄（App 注册的读取器）。从不下载在线歌曲（Navidrome 这类以 http 提供的曲库源会读，但会检查响应确实是音频）；要不要下载由调用方决定（automix 的 profile 会；智能动感模式在在线歌还没进缓存时，用播放已解析出的这首歌的音源地址再读一份来分析，不写缓存，见 `services/beatFx/beatFxSource.ts`）。另含按分析采样率解码、拆 mid/side。 |
+| `trackAudio.ts` | 读一首歌**已经在本机**的字节：播放 representation → 媒体缓存 → 本地 URL → 本地文件句柄（App 注册的读取器）。从不下载在线歌曲（Navidrome 这类以 http 提供的曲库源会读，但会检查响应确实是音频）；要不要下载由调用方决定（automix 的 profile 会；过去智能动感模式在在线歌还没进缓存时，会用播放已解析出的音源地址再读一份来分析、不写缓存，那一档已随 beatFx 移除）。另含按分析采样率解码、拆 mid/side。 |
 | `beatThis.ts` | Beat This! 的前处理契约：梅尔频谱、1500 帧分块、峰值挑选、网格折算。推理先走 GPU，`cpuFallback` 决定能否退到 CPU（只有 final0 有 CPU 路径）。模型只有一个：final0（`beat_this-wgsl.bin`，随应用打包），automix 和智能动感模式共用。 |
 | `beatThisGpu.ts` + `beatThisWgsl/` | 渲染进程 Worker 里的 WebGPU 推理，Beat This! final0 和 htdemucs 共用同一个 GPU device，Worker 里各加载一次、同时常驻；`probeBeatThisGpu` 给设置页判断有没有可用 GPU。 |
 | `beatGrid.ts` | 整首歌的拍点，automix 和智能动感模式共用一份：先读存盘结果，正在跑就等同一次，否则跑一次并存盘（`beat_this_grid_<分析 key>`，归入「分析」缓存类别）。GPU 跑的那次顺带算重音、一起存；CPU 跑的没有重音，智能动感要用时再补。以前 small0 存的 `beat_this_small_grid_` 不再读取，清分析缓存时一并清掉。只存整首；只读了开头的 automix 分析自己跑、不存。 |
@@ -14,7 +14,7 @@
 | `htdemucsWgsl/` | htdemucs 的 WebGPU 版（自写 WGSL）：权重由 `build/htdemucs_wgsl/export_weights.py` 从与 CPU 版同一份 `htdemucs.onnx`（sha256 099b5be7…）导出，按段（172032 采样，3.9 秒）跑完整的 STFT → 双分支编码 → 交叉 Transformer → 解码 → iSTFT。对 ORT 每层 SNR 73–103 dB，6 段红线每轨电平最差差值 0.0006 dB（门槛 0.01）。设备支持 shader-f16 时 GEMM 走 f16（工作组 tile 存 f16、每 16 步在 f16 里乘加再累加进 f32，激活仍是 f32）：各层对 ORT 50–64 dB，鼓轨误差在混音以下 58–77 dB；几乎无声的鼓轨过不了 0.01 dB 红线（0.018），但整首有鼓的歌找出的鼓点与 f32 一致（386 个里 385 个同帧同类，强度差均值 0.0005，有鼓时段占比相同）。M4 单段 GPU 时间 f32 141.7 ms、f16 128.0 ms；自动切片后 186 / 170 ms，单个 dispatch 最长 4.7 ms，不挤掉渲染帧。跑在 `beatThisGpu.ts` 的同一个 Worker、同一个 device 上（`runHtdemucsGpu`），权重是可下载项 `htdemucs_gpu`（`htdemucs-wgsl.bin`，约 92 MB）。 |
 | `drumStem.ts` | 整首歌的鼓声：按 htdemucs 的段长切，段间 1/4 重叠、三角窗叠加（和 CPU 版 `electron/analysis/htdemucs.cjs` 同一套），每段在 GPU 上分离，取鼓轨、两声道平均。只走 GPU，任何一段分不出来就整体返回 null。叠加的和与权重就像 online softmax 的分子分母：每段算完，下一段起点之前的样本不会再变，当场除掉，作为已定稿的开头交给调用方（`onSegment`）。 |
 | `drumHitStream.ts` | 边分离边读鼓点：把鼓轨新定稿的一段重采样、算梅尔频谱、取三个频段，接到已有的帧后面，不必每段把开头重算一遍。每段按帧边界切开，两边各多读 4 帧再扔掉，免得 STFT 窗或重采样滤波碰到切口、把台阶当成鼓点。真实鼓轨上逐帧和整首一次算完全相同（2026-10-17，两首）。 |
-| `drumHits.ts` | 整首歌的鼓点，分层同 `beatGrid.ts`：内存 → 存盘（`drum_hits_v1_<分析 key>`，归入「分析」缓存类别）→ 正在跑就等同一次 → 跑一次。鼓轨的梅尔频谱上分底鼓 / 军鼓 / 镲片三段找突起，每个鼓点记时间、类别、强度。时计在智能动感模式下按它们驱动（`usePendoloBeatFx.ts`）。htdemucs 文件缺失或没有 WebGPU 时不分离（已存的照读），时计不出效果。没有鼓的歌（鼓声能量占比 ≥ 3% 的 0.25 秒窗口不到全曲有声部分的 8%，`DRUMLESS_COVERAGE`；用户的 21 首里雪绒花 0.006、理想三旬 0.024、第二圆舞曲 0.043，有鼓的从 0.135 起）不给鼓点：htdemucs 照样会分出一条「鼓」，那是漏进来的贝斯（雪绒花）。鼓声和整首的能量随鼓点一起存，阈值改了不必重新分离。只在屏上有读鼓点的效果开着（`beatEffects` 里 `source: 'drums'`，目前只有时计的「仿真鼓面」）时才跑，不再等 beat_this 的拍点先出来（`beatFxSource.ts` 的 `loadBeatFxTrackDrums`）。边播边算：分离进行中，开头定稿满 10 秒后，大约每秒按已定稿部分重挑一次鼓点，带 `until`（已知到哪）交出去。是重挑而不是追加：强度是相对本频段响亮鼓点（`HIT_TOP` 分位数）的比例，听得越多这个归一化越准，前面的强度跟着改，没鼓判断也按已定稿部分做。分离比播放快约 15 倍，一秒左右就有鼓点；存盘的是最后一次，即整首的结果。中途切走，半截鼓点作废。 |
+| `drumHits.ts` | 整首歌的鼓点，分层同 `beatGrid.ts`：内存 → 存盘（`drum_hits_v1_<分析 key>`，归入「分析」缓存类别）→ 正在跑就等同一次 → 跑一次。鼓轨的梅尔频谱上分底鼓 / 军鼓 / 镲片三段找突起，每个鼓点记时间、类别、强度。时计的「仿真鼓面」曾按它们驱动（`usePendoloBeatFx.ts`），已于 2026-10-24 随智能动感模式移除；现在没有调用方，整条链路随时可以拆。htdemucs 文件缺失或没有 WebGPU 时不分离（已存的照读）。没有鼓的歌（鼓声能量占比 ≥ 3% 的 0.25 秒窗口不到全曲有声部分的 8%，`DRUMLESS_COVERAGE`；用户的 21 首里雪绒花 0.006、理想三旬 0.024、第二圆舞曲 0.043，有鼓的从 0.135 起）不给鼓点：htdemucs 照样会分出一条「鼓」，那是漏进来的贝斯（雪绒花）。鼓声和整首的能量随鼓点一起存，阈值改了不必重新分离。过去只在屏上有读鼓点的效果开着（`beatEffects` 里 `source: 'drums'`，只有时计的「仿真鼓面」）时才跑，不等 beat_this 的拍点先出来（原 `beatFxSource.ts` 的 `loadBeatFxTrackDrums`）。边播边算：分离进行中，开头定稿满 10 秒后，大约每秒按已定稿部分重挑一次鼓点，带 `until`（已知到哪）交出去。是重挑而不是追加：强度是相对本频段响亮鼓点（`HIT_TOP` 分位数）的比例，听得越多这个归一化越准，前面的强度跟着改，没鼓判断也按已定稿部分做。分离比播放快约 15 倍，一秒左右就有鼓点；存盘的是最后一次，即整首的结果。中途切走，半截鼓点作废。 |
 | `modelAvailability.ts` | 模型文件（beat_this / htdemucs / htdemucs_gpu，后两个是同一个 `htdemucs-wgsl.bin`）是否在安装包里，可同步读取。打包的版本恒为 true；开发环境没跑 `npm run models:fetch` 时为 false。 |
 
 约定：

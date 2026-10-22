@@ -488,7 +488,7 @@ export default {
         "cappella": "Lyrics arrive as chat bubbles, left and right, with avatars and stickers",
         "tilt": "Long lines break themselves up and lean into italics, like someone speaking close up",
         "claddagh": "Lyrics circle a tilted ring track, size contrast pulling the loop into depth",
-        "monet": "A poster layout — lyric rail left, portrait right, spectrum along the bottom",
+        "monet": "A poster layout — lyric rail left, portrait filling the right",
         "diorama": "Dot-matrix text flies through a 3D scene, the camera cut to the lyrics",
         "pendolo": "The cover sits in a clock face; lyrics tick along an arc, escapement by escapement",
         "sonnet": "Thin rules, frames and hollow giant letters unfold in turn, each line set like a page of verse",
@@ -824,7 +824,6 @@ export default {
       "visualizer-diorama": { "title": "Visualizer: Diorama", "description": "Switch to Diorama visualizer" },
       "visualizer-pendolo": { "title": "Visualizer: Pendolo", "description": "Switch to Pendolo visualizer" },
       "visualizer-sonnet": { "title": "Visualizer: Sonnet", "description": "Switch to the Sonnet Japanese lyric PV" },
-      "smart-beat-toggle": { "title": "Smart beat mode on / off", "description": "Turn the beat effects (Sonnet and Diorama on the beats, Pendolo on the drums) on or off" },
       "visualizer-tempera": { "title": "Visualizer: Tempera", "description": "Switch to the Tempera color-block lyric PV" },
       "visualizer-lumiere": { "title": "Visualizer: Lumiere", "description": "Switch to the Lumiere stage-light lyric PV" },
       "desktop-toggle-remote-control": { "title": "Toggle remote control window", "description": "Open or close the remote control window" },
@@ -2781,28 +2780,6 @@ export default {
     "sonnetPostProcessLensDispersion": "Lens dispersion",
     "sonnetPostProcessHalftone": "Halftone screen",
     "sonnetPostProcessVignette": "Vignette",
-    "smartBeat": "Smart beat mode",
-    "smartBeatEnabled": "Switch",
-    "smartBeatOn": "On",
-    "smartBeatOff": "Off",
-    "smartBeatDesc": "The main switch. On, the beat effects listed in each lyric renderer's own settings drive the picture from the music, each with its own switch and strength; off, every picture keeps its original spectrum response. Beat effects follow the beats beat_this detects, drum effects the drums HTDemucs separates, each analysed only while an effect on screen uses it. A local track is analysed for a few seconds on its first play; an online track from its stream on its first play. Analysed tracks are remembered.",
-    "beatFxUnavailable_noGpu": "No usable WebGPU on this device, so beat effects have no effect.",
-    "beatFxUnavailable_desktopOnly": "Beat effects are only available in the desktop app.",
-    "beatFxUnavailable_noWeights": "Beat effects need the analysis model (~133MB). Download it under the model settings below and they start working.",
-    "beatEffects": "Beat effects",
-    "beatEffectsNeedSmartBeat": "Turn on smart beat mode above for these effects to play.",
-    "beatEffectStrength": "Strength",
-    "beatEffectNeedsDrums": "The stem separation model (HTDemucs) is not there, so drum-driven effects stay off; a song without drums would show nothing anyway.",
-    "beatEffect_sonnetLensTear": "Lens Tear",
-    "beatEffect_sonnetLensTearDesc": "On the beats beat_this detects: every beat punches the camera in; each bar's first beat tears and flares.",
-    "beatEffect_dioramaRipple": "Mirror Ripples",
-    "beatEffect_dioramaRippleDesc": "On the beats beat_this detects: the particles ripple on every beat, with a large ripple on each bar's first beat, and the word being sung hops.",
-    "beatEffect_pendoloDrumhead": "Drumhead",
-    "beatEffect_pendoloDrumheadDesc": "On the drums HTDemucs separates: the kick swells the dial, a hard one shakes the screen; the snare strikes off centre and tilts it that way; hats light the ticks and the inner ring.",
-    "beatEffect_pendoloGearBeats": "Gear Beat",
-    "beatEffect_pendoloGearBeatsDesc": "The gears step on the beats beat_this detects. (Retired)",
-    "beatEffect_latentPulse": "Tidal Pulse",
-    "beatEffect_latentPulseDesc": "The Latent background's flow pulses with the beats beat_this detects. (Retired)",
     "temperaMotionSection": "Motion & Color",
     "temperaDisplaySection": "Visibility",
     "temperaLyricSection": "Lyric Shots",
@@ -3252,10 +3229,6 @@ export default {
     "monetPortraitDragHanger": "Drag Hanger",
     "monetUploadPortrait": "Upload Portrait",
     "monetClearPortrait": "Clear Portrait",
-    "monetAudioStyle": "Audio Style",
-    "monetAudioStyleBar": "Bars",
-    "monetAudioStyleLine": "Line",
-    "monetShowAudioVisualization": "Audio visualization",
     "monetFontScale": "Font Size Scale",
     "monetShowDescription": "Show Song Description",
     "monetGroupBackgroundSource": "Background Source",
@@ -3501,10 +3474,6 @@ export default {
       "lyricFilterPersistence": {
         "title": "Lyric Filter Patterns Stick Around",
         "description": "Turning the per-line lyric filter off no longer erases the pattern you wrote. It is still there when you switch the filter back on, so comparing both states is easy."
-      },
-      "monetAudioVisibility": {
-        "title": "Hide the Monet Spectrum",
-        "description": "The Monet visualizer can now hide its audio spectrum, leaving just the lyrics and artwork."
       }
     },
     "v0_7_5": {
@@ -3589,10 +3558,6 @@ export default {
       "explore": {
         "title": "Explore",
         "description": "The home screen has a new Explore tab with recommended playlists, charts, new songs and new albums from NetEase Cloud Music, QQ Music, Spotify and YouTube Music, plus your recent plays and \"Play it again\" kept on this device, with a button to bring in a new batch. Bravais gets an Explore tab too, and opening Lattice from Explore lays it all out as a poster wall. You can turn it off in Settings → Home & playlists; QQ Music's Explore needs qq-music-api 3.3.3 or later on the backend."
-      },
-      "smartBeat": {
-        "title": "Smart Beat Mode",
-        "description": "Lyric styles on desktop gain Smart beat mode: Sonnet pushes the camera in on every beat and tears with light on the first beat of a bar, Diorama's particles ripple on the beat while the word being sung hops, and Pendolo's dial swells with the separated kick, snare and cymbals. Each effect has its own switch and strength, and the whole mode can be toggled from the command palette. It needs a GPU with WebGPU; a song is analysed for a moment the first time it plays and remembered afterwards. The models now ship with the installer, so automix no longer needs a separate model download either."
       },
       "qqMusic": {
         "title": "QQ Music: App Sign-in and More",
@@ -4664,7 +4629,6 @@ export default {
         "subtitle": "Shared subtitle",
         "monetDescription": "Song description",
         "monetHanger": "Drag hanger",
-        "monetAudio": "Audio visualization",
         "backgroundPictures": "Background Type",
         "subtitleFont": "Subtitle Font"
       },
@@ -5318,8 +5282,7 @@ export default {
         "monetIntro": "Monet: lyrics on the left, a portrait on the right. The most common question is how to turn off the things on the right. They all live in Monet's own settings.",
         "monetDescription": "The text at the bottom left is the song description. Turn off “Show Song Description” to hide it.",
         "monetHanger": "The round button above the portrait is the drag hanger, for moving the portrait. Once it is where you want it, hide the button with “Drag Hanger”.",
-        "monetAudio": "Below the portrait is the audio visualization. “Audio visualization” hides it; “Audio Style” switches between bars and a line.",
-        "monetBare": "With all three off, only the lyrics and the portrait remain. These switches belong to Monet alone and do not appear for other styles.",
+        "monetBare": "With both off, only the lyrics and the portrait remain. These switches belong to Monet alone and do not appear for other styles.",
         "combineTwo": "Background and lyric style are two separate choices. In the Controls tab they are two rows, Lyrics Style and Background Type, each switched on its own.",
         "combineBackground": "Change only the background: the lyric style stays. The background's own settings are on the Background page of the Lyrics Style window.",
         "combineStyle": "Now change only the lyric style: the background you just picked stays. Any background works with any lyric style; only the Still style draws no background.",

@@ -488,7 +488,7 @@ export default {
         "cappella": "Lirik muncul sebagai gelembung obrolan kiri-kanan, lengkap dengan avatar dan stiker",
         "tilt": "Baris panjang memecah sendiri dan miring jadi italic, seperti orang berbisik dekat",
         "claddagh": "Lirik mengelilingi lintasan cincin miring, kontras ukuran memberi kedalaman",
-        "monet": "Tata letak poster — rel lirik di kiri, potret di kanan, spektrum di bawah",
+        "monet": "Tata letak poster — rel lirik di kiri, potret memenuhi kanan",
         "diorama": "Teks titik-titik melintasi ruang 3D dengan kamera mengikuti lirik",
         "pendolo": "Sampul duduk di muka jam; lirik berdetak sepanjang busur, satu gigi demi satu",
         "sonnet": "Garis halus, bingkai, dan huruf raksasa berongga bergantian terbuka; tiap baris tertata bagai halaman sajak",
@@ -824,7 +824,6 @@ export default {
       "visualizer-diorama": { "title": "Visualizer: Diorama", "description": "Alihkan ke visualizer Diorama" },
       "visualizer-pendolo": { "title": "Visualizer: Pendolo", "description": "Alihkan ke visualizer Pendolo" },
       "visualizer-sonnet": { "title": "Visualizer: Sonnet", "description": "Alihkan ke PV lirik Jepang Sonnet" },
-      "smart-beat-toggle": { "title": "Mode ketukan pintar aktif / nonaktif", "description": "Aktifkan atau nonaktifkan efek ketukan (Sonnet dan Diorama mengikuti ketukan, Pendolo mengikuti drum)" },
       "visualizer-tempera": { "title": "Visualizer: Tempera", "description": "Alihkan ke PV lirik blok warna Tempera" },
       "visualizer-lumiere": { "title": "Visualizer: Lumiere", "description": "Alihkan ke PV lirik cahaya panggung Lumiere" },
       "desktop-toggle-remote-control": { "title": "Alihkan jendela remote control", "description": "Buka atau tutup jendela remote control" },
@@ -2888,28 +2887,6 @@ export default {
     "lumiereTextOnly": "Lirik saja",
     "lumiereTextOnlyHint": "Lirik saja: hanya lirik dan efeknya (cahaya, pendar, kilau) yang ditampilkan. Sumber cahaya, asap, bintang, seni garis, debu, lirik latar, ikon tema, dan bingkai disembunyikan. Lirik tetap berubah terang dan redup mengikuti sorotan yang kini tak terlihat.",
     "lumiereTrails": "Lacak setiap gerakan",
-    "smartBeat": "Mode ketukan pintar",
-    "smartBeatEnabled": "Sakelar",
-    "smartBeatOn": "Aktif",
-    "smartBeatOff": "Nonaktif",
-    "smartBeatDesc": "Sakelar utama. Saat aktif, efek ketukan di pengaturan masing-masing animasi lirik menggerakkan gambar mengikuti musik, masing-masing dengan sakelar dan kekuatannya sendiri; saat nonaktif, semua gambar mempertahankan respons spektrum aslinya. Efek ketukan mengikuti ketukan yang dideteksi beat_this, efek drum mengikuti drum yang dipisahkan HTDemucs, masing-masing dianalisis hanya saat efek di layar memakainya. Lagu lokal dianalisis beberapa detik saat pertama diputar; lagu online dari stream-nya saat pertama diputar. Lagu yang sudah dianalisis akan diingat.",
-    "beatFxUnavailable_noGpu": "Tidak ada WebGPU yang dapat digunakan di perangkat ini, jadi efek ketukan tidak berfungsi.",
-    "beatFxUnavailable_desktopOnly": "Efek ketukan hanya tersedia di aplikasi desktop.",
-    "beatFxUnavailable_noWeights": "Efek ketukan membutuhkan model analisis (~133MB). Unduh di pengaturan model di bawah agar mulai berfungsi.",
-    "beatEffects": "Efek ketukan",
-    "beatEffectsNeedSmartBeat": "Aktifkan mode ketukan pintar di atas agar efek ini berjalan.",
-    "beatEffectStrength": "Kekuatan",
-    "beatEffectNeedsDrums": "Model pemisahan stem (HTDemucs) belum ada, jadi efek yang mengikuti drum tetap nonaktif; pada lagu tanpa drum memang tidak ada efek.",
-    "beatEffect_sonnetLensTear": "Robekan Lensa",
-    "beatEffect_sonnetLensTearDesc": "Mengikuti ketukan yang dideteksi beat_this: setiap ketukan mendorong kamera; ketukan pertama tiap birama memberi efek sobek dan kilau.",
-    "beatEffect_dioramaRipple": "Riak Cermin",
-    "beatEffect_dioramaRippleDesc": "Mengikuti ketukan yang dideteksi beat_this: partikel beriak setiap ketukan, riak besar pada ketukan pertama tiap birama, dan kata yang sedang dinyanyikan melompat.",
-    "beatEffect_pendoloDrumhead": "Kulit Drum",
-    "beatEffect_pendoloDrumheadDesc": "Mengikuti drum yang dipisahkan HTDemucs: kick menggembungkan dial, yang keras mengguncang layar; snare memukul di luar tengah dan memiringkannya ke sana; hi-hat menyalakan garis skala dan cincin dalam.",
-    "beatEffect_pendoloGearBeats": "Gigi Berdetak",
-    "beatEffect_pendoloGearBeatsDesc": "Roda gigi melangkah mengikuti ketukan yang dideteksi beat_this. (Dihentikan)",
-    "beatEffect_latentPulse": "Denyut Pasang",
-    "beatEffect_latentPulseDesc": "Aliran latar Latent berdenyut mengikuti ketukan yang dideteksi beat_this. (Dihentikan)",
     "lumiereHideTrails": "Sembunyikan garis lintasan",
     "lumiereHideTrailsHint": "Menyembunyikan semua garis lintasan lirik, termasuk tata letak silang dan perubahan orientasi. Lirik tetap terbang mengikuti lintasan yang sama dan transisi mulus tetap berjalan.",
     "lumiereSeamlessTransitions": "Transisi mulus",
@@ -3252,10 +3229,6 @@ export default {
     "monetPortraitDragHanger": "Gantungan Seret",
     "monetUploadPortrait": "Unggah Potret",
     "monetClearPortrait": "Bersihkan Potret",
-    "monetAudioStyle": "Gaya Audio",
-    "monetAudioStyleBar": "Batang",
-    "monetAudioStyleLine": "Garis",
-    "monetShowAudioVisualization": "Visualisasi audio",
     "monetFontScale": "Skala Ukuran Font",
     "monetShowDescription": "Tampilkan Deskripsi Lagu",
     "monetGroupBackgroundSource": "Sumber Latar Belakang",
@@ -3501,10 +3474,6 @@ export default {
       "lyricFilterPersistence": {
         "title": "Pola Filter Lirik Tidak Hilang",
         "description": "Mematikan filter lirik per baris tidak lagi menghapus pola yang sudah Anda tulis. Pola itu tetap ada saat filter dinyalakan kembali, sehingga mudah membandingkan kedua kondisi."
-      },
-      "monetAudioVisibility": {
-        "title": "Sembunyikan Spektrum Monet",
-        "description": "Visualizer Monet kini dapat menyembunyikan spektrum audionya, menyisakan lirik dan sampul saja."
       }
     },
     "v0_7_5": {
@@ -3589,10 +3558,6 @@ export default {
       "explore": {
         "title": "Jelajahi",
         "description": "Beranda mendapat tab Jelajahi berisi playlist rekomendasi, tangga lagu, lagu baru, dan album baru dari NetEase Cloud Music, QQ Music, Spotify, dan YouTube Music, ditambah putaran terakhir dan \"Putar lagi\" yang tersimpan di perangkat ini, dengan tombol untuk menampilkan kumpulan baru. Bravais juga mendapat tab Jelajahi, dan membuka Lattice dari Jelajahi menata semuanya menjadi dinding poster. Anda bisa mematikannya di Pengaturan → Beranda & playlist; Jelajahi untuk QQ Music memerlukan backend qq-music-api 3.3.3 atau lebih baru."
-      },
-      "smartBeat": {
-        "title": "Mode Ketukan Pintar",
-        "description": "Gaya lirik di desktop mendapat Mode ketukan pintar: Sonnet mendorong kamera mendekat di setiap ketukan dan merobek dengan cahaya di ketukan pertama birama, partikel Diorama beriak mengikuti ketukan sementara kata yang sedang dinyanyikan melompat, dan cakram Pendolo mengembang mengikuti kick, snare, dan simbal yang dipisahkan. Setiap efek punya sakelar dan kekuatan sendiri, dan seluruh mode bisa dinyalakan dari palet perintah. Memerlukan GPU dengan WebGPU; lagu dianalisis sebentar saat pertama kali diputar lalu diingat. Model kini disertakan dalam installer, jadi automix juga tak perlu lagi mengunduh model terpisah."
       },
       "qqMusic": {
         "title": "QQ Music: Masuk dengan Aplikasi dan Lainnya",
@@ -4664,7 +4629,6 @@ export default {
         "subtitle": "Subtitel bersama",
         "monetDescription": "Deskripsi lagu",
         "monetHanger": "Tombol geser",
-        "monetAudio": "Visualisasi audio",
         "backgroundPictures": "Jenis Latar Belakang",
         "subtitleFont": "Font Subtitle"
       },
@@ -5318,8 +5282,7 @@ export default {
         "monetIntro": "Monet: lirik di kiri, potret di kanan. Pertanyaan paling umum adalah cara mematikan elemen di kanan. Semuanya ada di pengaturan Monet sendiri.",
         "monetDescription": "Teks di kiri bawah adalah deskripsi lagu. Matikan “Tampilkan Deskripsi Lagu” untuk menyembunyikannya.",
         "monetHanger": "Tombol bulat di atas potret adalah gantungan seret, untuk memindahkan potret. Setelah posisinya pas, sembunyikan lewat “Gantungan Seret”.",
-        "monetAudio": "Di bawah potret ada visualisasi audio. “Visualisasi audio” menyembunyikannya; “Gaya Audio” beralih antara batang dan garis.",
-        "monetBare": "Dengan ketiganya mati, yang tersisa hanya lirik dan potret. Sakelar ini hanya milik Monet dan tidak muncul untuk gaya lain.",
+        "monetBare": "Dengan keduanya mati, yang tersisa hanya lirik dan potret. Sakelar ini hanya milik Monet dan tidak muncul untuk gaya lain.",
         "combineTwo": "Latar dan gaya lirik adalah dua pilihan terpisah. Di tab Kontrol keduanya dua baris, Gaya Lirik dan Jenis Latar Belakang, masing-masing diganti sendiri.",
         "combineBackground": "Ganti latarnya saja: gaya lirik tetap. Pengaturan latar ada di halaman Latar pada jendela Gaya Lirik.",
         "combineStyle": "Sekarang ganti gaya liriknya saja: latar yang baru dipilih tetap. Latar apa pun cocok dengan gaya lirik apa pun; hanya gaya Still yang tidak menggambar latar.",

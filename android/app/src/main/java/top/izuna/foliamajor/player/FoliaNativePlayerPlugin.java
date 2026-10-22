@@ -6,7 +6,6 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import top.izuna.foliamajor.wallpaper.WallpaperAudioTap;
 import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
 
 /**
@@ -72,32 +71,6 @@ public class FoliaNativePlayerPlugin extends Plugin {
                      */
                     WallpaperLyricsState.setAnchor(positionMs, !"paused".equals(type));
                 }
-            }
-
-            /**
-             * 频谱（P2）。20 帧/秒，每帧 128 段。
-             *
-             * 只在 Web 侧开着采集的时候才有 —— 后台画给谁看，那条路一藏就关掉了。
-             *
-             * ⚠️ **不要用 JSArray 装那 128 段**。Capacitor 的 `notifyListeners` 会把
-             * JSObject 整个序列化成 JSON 再注入页面，128 次 `JSArray.put` + 逐元素转义，
-             * 一秒二十次 —— 那是每秒二十次几百字节的解析与一次 GC，界面上就是
-             * 「过一段时间卡一下」。改成两个字符串：频谱走 base64（128 字节 → 172 字符，
-             * 一次 put），五个频段挤成一段逗号分隔的数字。同一个 payload 从 ~600 字节
-             * 的深结构变成一个扁平短串，序列化快一个量级。
-             */
-            @Override
-            public void onSpectrum(WallpaperAudioTap.Frame frame) {
-                byte[] bytes = frame.spectrum == null ? new byte[0] : new byte[frame.spectrum.length];
-                for (int index = 0; index < bytes.length; index += 1) {
-                    bytes[index] = (byte) frame.spectrum[index];
-                }
-                JSObject payload = new JSObject();
-                payload.put("type", "spectrum");
-                payload.put("spectrum", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP));
-                payload.put("bands", frame.bass + "," + frame.lowMid + "," + frame.mid
-                        + "," + frame.vocal + "," + frame.treble + "," + frame.power);
-                notifyListeners(EVENT, payload);
             }
         });
     }
@@ -269,26 +242,7 @@ public class FoliaNativePlayerPlugin extends Plugin {
         result.put("positionMs", (double) current.getPositionMs());
         result.put("durationMs", (double) current.getDurationMs());
         result.put("playing", current.isPlaying());
-        result.put("audioSessionId", current.getAudioSessionId());
         call.resolve(result);
-    }
-
-    /**
-     * 频谱采集的开关（P2）。
-     *
-     * ⚠️ 必须能关：开着就是每秒 20 帧 × 128 段过桥，而页面藏起来之后既没人看，
-     * 也没有意义。Web 侧按可见性开关，不需要它的时候一个字节都不推。
-     */
-    @PluginMethod
-    public void setSpectrumEnabled(PluginCall call) {
-        FoliaNativePlayer current = player;
-        if (current == null) {
-            call.reject("The player is not ready.");
-            return;
-        }
-        Boolean enabled = call.getBoolean("enabled");
-        current.setSpectrumEnabled(Boolean.TRUE.equals(enabled));
-        call.resolve();
     }
 
     @PluginMethod

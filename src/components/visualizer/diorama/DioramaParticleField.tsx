@@ -27,21 +27,6 @@ import {
     type DioramaBandSignal,
 } from './dioramaParticleModel';
 import {
-    createDioramaBeatCounter,
-    resolveDioramaBeatClusterPulse,
-    resolveDioramaBeatRipple,
-    stepDioramaBeatCounter,
-} from './dioramaBeatRipples';
-import { beatImpact, downbeatImpact } from '../../../stores/motionSignals';
-import {
-    getBeatFxFiredCounts,
-    getBeatFxIntensities,
-    getBeatFxLastBeat,
-    getBeatFxLastDownbeat,
-    getBeatFxTrackScale,
-    isBeatFxReady,
-} from '../../../services/beatFx/beatFxLive';
-import {
     createDioramaParticleGlowMaterial,
     createDioramaParticleMaterial,
     lerpDioramaParticleMaterialColors,
@@ -54,8 +39,6 @@ import {
 // source every other visualizer reads), smoothed with the project's standard fast-attack/slow-release
 // envelope - no custom compressor or beat analysis of its own. All reads land on shader uniforms; React
 // state never participates frame-by-frame, and the camera is never read into the audio path.
-// Under 智能动感模式, once the track's beats are in, beat_this' beats spawn the bass and mid ripples
-// and drive the breath instead (dioramaBeatRipples.ts); the treble ripples stay on the band.
 interface DioramaParticleFieldProps {
     mode: DioramaGeometryMode;
     clusters: DioramaParticleClusterAnchor[];
@@ -234,8 +217,6 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
     // One valley/peak tracker per band. These are what keep a steady beat reading as a beat for the whole
     // song instead of fading into the background - see stepDioramaBandTracker.
     const trackersRef = useRef(RIPPLE_BANDS.map(() => createDioramaBandTracker()));
-    // 智能动感模式: the beat clock's fired counts as of the last frame.
-    const beatCounterRef = useRef(createDioramaBeatCounter());
     const ripplesRef = useRef<RipplePool>(createRipplePool());
     const flowTimeRef = useRef(0);
     const previousPlaybackTimeRef = useRef<number | null>(null);
@@ -263,7 +244,6 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
         // A new song has its own loudness; the trackers must re-prime onto it rather than carry the last
         // song's floor and peak across (which would mis-read the first seconds in both directions).
         trackersRef.current = RIPPLE_BANDS.map(() => createDioramaBandTracker());
-        beatCounterRef.current = createDioramaBeatCounter();
     }, [resetKey]);
 
     useFrame((frameState, rawDelta) => {
@@ -282,9 +262,6 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
         const treble = stepDioramaBandTracker(trackers[2], trebleTarget, delta);
         const bands: DioramaBandSignal[] = [bass, mid, treble];
         const response = resolveDioramaParticleAudioResponse(bass, mid);
-        // Stepped every frame, ready or not, so the counts are current the frame the beats arrive.
-        const beatTriggers = stepDioramaBeatCounter(beatCounterRef.current, getBeatFxFiredCounts());
-        const beatFxActive = isBeatFxReady();
         // The one place the slider lands. 0 disables the audio response entirely; 1 is the designed feel;
         // the top of the range genuinely overdrives it, because it scales the DISPLACEMENT rather than a
         // detection threshold that was already saturated.
@@ -318,24 +295,8 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
         if (gain > 0.001) {
             bands.forEach((signal, index) => {
                 if (!signal.onset) return;
-                // With the beats in, they spawn the bass and mid scales; only treble stays on its band.
-                if (beatFxActive && index < 2) return;
                 spawnRipple(pool, index, signal.transient, flowTimeRef.current, isCorridor, readHeadAlong);
             });
-            if (beatFxActive) {
-                const intensities = getBeatFxIntensities();
-                const trackScale = getBeatFxTrackScale();
-                if (beatTriggers.downbeat && intensities.downbeat > 0) {
-                    const ripple = resolveDioramaBeatRipple('downbeat', getBeatFxLastDownbeat(), trackScale, intensities.downbeat);
-                    // A beat in a bar with no rhythm has strength 0: no ripple, no pool slot taken.
-                    if (ripple.strength > 0) spawnRipple(pool, ripple.index, ripple.strength, flowTimeRef.current, isCorridor, readHeadAlong);
-                }
-                if (beatTriggers.beat && intensities.beat > 0) {
-                    const ripple = resolveDioramaBeatRipple('beat', getBeatFxLastBeat(), trackScale, intensities.beat);
-                    // A beat in a bar with no rhythm has strength 0: no ripple, no pool slot taken.
-                    if (ripple.strength > 0) spawnRipple(pool, ripple.index, ripple.strength, flowTimeRef.current, isCorridor, readHeadAlong);
-                }
-            }
         }
 
         // The corridor keeps only a trace of the whole-body pulse (see DIORAMA_CORRIDOR_PULSE_SHARE): its
@@ -344,7 +305,7 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
         const elasticPulse = stepDioramaParticleElasticResponse(
             elasticStateRef.current,
             resolveDioramaPulseTarget(
-                beatFxActive ? resolveDioramaBeatClusterPulse(beatImpact.get(), downbeatImpact.get()) : response.clusterPulse,
+                response.clusterPulse,
                 gain,
                 isCorridor,
             ),

@@ -21,8 +21,8 @@ const REAL_KEYS = new Set([
     'options.latentDitheringOpacity',
     'options.latentMeshSwirl',
     'options.monetPortraitSource',
-    'options.monetAudioStyle',
-    'options.monetShowAudioVisualization',
+    'options.monetPortraitStyle',
+    'options.monetShowDescription',
 ]);
 
 const has = (key: string) => REAL_KEYS.has(key);
@@ -49,8 +49,8 @@ describe('resolveSettingLabelKey', () => {
         expect(resolve('latentBackgroundTuning', 'ditheringSize')).toBe('options.latentDitheringSize');
         expect(resolve('latentBackgroundTuning', 'meshSwirl')).toBe('options.latentMeshSwirl');
         expect(resolve('monetTuning', 'portraitSource')).toBe('options.monetPortraitSource');
-        expect(resolve('monetTuning', 'audioStyle')).toBe('options.monetAudioStyle');
-        expect(resolve('monetTuning', 'showAudioVisualization')).toBe('options.monetShowAudioVisualization');
+        expect(resolve('monetTuning', 'portraitStyle')).toBe('options.monetPortraitStyle');
+        expect(resolve('monetTuning', 'showDescription')).toBe('options.monetShowDescription');
     });
 
     // Nested groups are labelled by their own leaf.
@@ -142,7 +142,7 @@ describe('resolveSettingLabelKey against the real locale', () => {
         expect(label('latentBackgroundTuning', 'ditheringSize')).toBe('像素尺寸');
         expect(label('latentBackgroundTuning', 'meshSwirl')).toBe('流体旋涡');
         expect(label('monetTuning', 'portraitSource')).toBe('右侧肖像来源');
-        expect(label('monetTuning', 'audioStyle')).toBe('频谱样式');
+        expect(label('monetTuning', 'portraitStyle')).toBe('封面形状');
     });
 
     // fumeGeometricBackground is a positive label the panel pairs with show/hide options, so reaching
@@ -169,7 +169,7 @@ describe('resolveSettingLabelKey against the real locale', () => {
 
         it('takes the prefix from the path instead of the owner field', () => {
             expect(bundled('monet.portraitSource')).toBe('右侧肖像来源');
-            expect(bundled('monet.audioStyle')).toBe('频谱样式');
+            expect(bundled('monet.portraitStyle')).toBe('封面形状');
             expect(bundled('fume.hidePrintSymbols')).toBe('隐藏打印方块');
         });
 
@@ -184,8 +184,8 @@ describe('resolveSettingLabelKey against the real locale', () => {
 
         // Distinct renderers give distinct prefixes, so a shared leaf name is not ambiguous here.
         it('does not treat the same leaf under two renderers as a collision', () => {
-            const siblings = ['monet.audioStyle', 'cadenza.audioStyle'];
-            expect(bundled('monet.audioStyle', siblings)).toBe('频谱样式');
+            const siblings = ['monet.portraitStyle', 'cadenza.portraitStyle'];
+            expect(bundled('monet.portraitStyle', siblings)).toBe('封面形状');
         });
     });
 
@@ -199,8 +199,8 @@ describe('resolveSettingLabelKey against the real locale', () => {
         };
 
         it('names the choice the panel names', () => {
-            expect(valueLabel('visualizerTunings', 'monet.audioStyle', 'bar')).toBe(options.monetAudioStyleBar);
-            expect(valueLabel('visualizerTunings', 'monet.audioStyle', 'line')).toBe(options.monetAudioStyleLine);
+            expect(valueLabel('visualizerTunings', 'monet.portraitStyle', 'square')).toBe(options.monetPortraitStyleSquare);
+            expect(valueLabel('visualizerTunings', 'monet.portraitStyle', 'rectangular')).toBe(options.monetPortraitStyleRectangular);
             expect(valueLabel('tiltTuning', 'colorScheme', 'swap')).toBe(options.tiltColorSchemeSwap);
             expect(valueLabel('tiltTuning', 'colorScheme', 'accentAll')).toBe(options.tiltColorSchemeAccentAll);
         });
@@ -209,14 +209,14 @@ describe('resolveSettingLabelKey against the real locale', () => {
         it('returns null rather than guessing when the value does not follow the rule', () => {
             // monetBackgroundSource: 'cover-derived' is labelled by ...SourceCover, not ...SourceCover-derived.
             expect(valueLabel('monetBackgroundTuning', 'backgroundSource', 'cover-derived')).toBeNull();
-            expect(valueLabel('visualizerTunings', 'monet.audioStyle', 'nonsense')).toBeNull();
+            expect(valueLabel('visualizerTunings', 'monet.portraitStyle', 'nonsense')).toBeNull();
         });
 
         it('stays quiet for values and fields that have no key', () => {
             expect(resolveSettingValueLabelKey(null, 'bar', existsForReal)).toBeNull();
-            expect(resolveSettingValueLabelKey('options.monetAudioStyle', 42, existsForReal)).toBeNull();
-            expect(resolveSettingValueLabelKey('options.monetAudioStyle', '', existsForReal)).toBeNull();
-            expect(resolveSettingValueLabelKey('options.monetAudioStyle', true, existsForReal)).toBeNull();
+            expect(resolveSettingValueLabelKey('options.monetPortraitStyle', 42, existsForReal)).toBeNull();
+            expect(resolveSettingValueLabelKey('options.monetPortraitStyle', '', existsForReal)).toBeNull();
+            expect(resolveSettingValueLabelKey('options.monetPortraitStyle', true, existsForReal)).toBeNull();
         });
     });
 });

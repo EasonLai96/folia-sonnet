@@ -11,20 +11,16 @@ import android.util.Log;
  *
  * 为什么需要它：叠层是一个**独立的 WebView**，而播放的音频在主应用的 WebView 里
  * （`usePlaybackAudioBridge` 的 `createMediaElementSource` + `createAnalyser`）。
- * 叠层拿不到那个 AnalyserNode，于是莫奈的「音频图案」在叠层上一直是死的 ——
- * 数据恒为 0，画出来只剩 `performance.now()` 带来的那点抖动。
+ * 叠层拿不到那个 AnalyserNode，band 全是 0，画面就只剩静态那点呼吸。
  *
  * 更要紧的是：**也不能把主应用采到的频谱经桥转过来**。采它的那个 rAF 跑在主应用
- * WebView 里，用户一回到桌面、那个 WebView 不可见，Chromium 直接把 rAF 停掉 ——
- * 数据源本身就冻住了，桥上再怎么送都是送一份死值。所以只能在这里用系统级的方式去抓：
- * `android.media.audiofx.Visualizer` 的 session 0（全局混音）。
  *
  * 输出刻意做成**和 Web 侧同一套量纲**，好让叠层画出来的形状和播放页一致：
+ * 5 个 band 走 `usePlaybackVisualizerBridge` 里同一组频率边界、同一条 shape 曲线。
  *
- *   - 5 个 band 走 `usePlaybackVisualizerBridge` 里同一组频率边界、同一条 shape 曲线；
- *   - spectrum 是 0..255 的数组，语义对齐 `getByteFrequencyData`
- *     （-100dB..-30dB 映射到 0..255），于是叠层那份 `AudioOverlay` 里的
- *     `sampleRawSpectrumProfile`（降噪 + 幂压缩）能原样吃下去。
+ * 曾经还有一份 128 段的频谱数组跟着一起推（叠层上莫奈底部那条「音频图案」画它），
+ * 那条已于 2026-10-24 连同它的两个设置一起删掉：每秒二十次传一份没人读的数组，
+ * 白白给叠层的 WebView 主线程加活。band 才是叠层现在唯一吃的东西。
  *
  * 拿不到数据时静默降级：一帧都不推，叠层维持它原来的行为。
  * 会拿不到的情况有几种：manifest 缺 MODIFY_AUDIO_SETTINGS、别的进程已经占用了
@@ -34,26 +30,13 @@ public final class WallpaperAudioTap {
 
     private static final String TAG = "FoliaWallpaperAudioTap";
 
-    /** 推给页面的频谱段数。页面只画 72 根柱子，128 段足够，再密只是白耗桥带宽。 */
-    public static final int SPECTRUM_LENGTH = 128;
-
     /** 采集节拍（次/秒）。下面按 Visualizer 要求的毫赫兹换算。 */
     private static final int CAPTURE_FPS = 20;
 
     /** 幅度上的指数平滑，对齐 AnalyserNode 的 smoothingTimeConstant = 0.6。 */
     private static final double SMOOTHING = 0.6;
 
-    /**
-     * 跳过的低频 bin（≈129Hz 以下）。
-     *
-     * 对齐页面侧的 `MIN_RAW_SPECTRUM_BIN = 6`：那边每个 bin 是 21.5Hz（44.1kHz / 2048），
-     * 跳过 6 个 = 129Hz；这边 Visualizer 最大只能给到 1024 的捕获长度，每个 bin 是
-     * 43Hz，所以对应跳过 3 个。
-     */
-    private static final int SKIP_BINS = 3;
-
-    /**
-     * 幅度 → 0..255 的参考响度。
+    /** 幅度 → 0..255 的参考响度。
      *
      * Visualizer 给的是**线性幅度**（signed byte 尺度，hypot 之后约 0..181），
      * 而页面那侧吃的是 dB 域。两边差一个固定尺度因子，这里用一个常量把它对上。
@@ -73,16 +56,14 @@ public final class WallpaperAudioTap {
         public final int mid;
         public final int vocal;
         public final int treble;
-        public final int[] spectrum;
 
-        Frame(int power, int bass, int lowMid, int mid, int vocal, int treble, int[] spectrum) {
+        Frame(int power, int bass, int lowMid, int mid, int vocal, int treble) {
             this.power = power;
             this.bass = bass;
             this.lowMid = lowMid;
             this.mid = mid;
             this.vocal = vocal;
             this.treble = treble;
-            this.spectrum = spectrum;
         }
     }
 
@@ -118,8 +99,6 @@ public final class WallpaperAudioTap {
     private int captureSize = 0;
     /** 平滑后的幅度，长度 = captureSize / 2。只有采集线程碰它。 */
     private double[] smoothed;
-    /** 输出缓冲，只有采集线程碰它。 */
-    private int[] spectrum;
 
     private volatile boolean running = false;
     /**
@@ -170,7 +149,7 @@ public final class WallpaperAudioTap {
             probe = new Visualizer(audioSessionId);
             int[] range = Visualizer.getCaptureSizeRange();
             // 捕获长度越大频率越细，但上限是 1024（Visualizer 的硬规定），
-            // 也就是 512 个频点 —— 比页面侧的 1024 个粗一倍，够画 72 根柱子。
+            // 也就是 512 个频点 —— 比页面侧的 1024 个粗一倍，分成 5 个 band 足够。
             int size = Math.min(1024, Math.max(128, range[1]));
             if (probe.setCaptureSize(size) != Visualizer.SUCCESS) {
                 release(probe);
@@ -213,7 +192,6 @@ public final class WallpaperAudioTap {
              */
             captureSize = size;
             smoothed = new double[size / 2];
-            spectrum = new int[SPECTRUM_LENGTH];
             if (probe.setEnabled(true) != Visualizer.SUCCESS) {
                 release(probe);
                 failed = true;
@@ -221,7 +199,7 @@ public final class WallpaperAudioTap {
             }
             visualizer = probe;
         } catch (Throwable error) {
-            Log.w(TAG, "音频采集起不来，叠层的音频图案维持原样", error);
+            Log.w(TAG, "音频采集起不来，叠层的音频响应维持原样", error);
             release(probe);
             failed = true;
         }
@@ -281,11 +259,6 @@ public final class WallpaperAudioTap {
         double vocalRaw = bandValue(hzPerBin, 1000, 3500);
         double trebleRaw = bandValue(hzPerBin, 3500, 12000);
 
-        buildSpectrum();
-
-        int[] snapshot = new int[SPECTRUM_LENGTH];
-        System.arraycopy(spectrum, 0, snapshot, 0, SPECTRUM_LENGTH);
-
         // shape 指数也与 usePlaybackVisualizerBridge 里的逐条对齐。
         final Frame frame = new Frame(
                 shape((bassRaw + lowMidRaw) / 2.0, 3),
@@ -293,8 +266,7 @@ public final class WallpaperAudioTap {
                 shape(lowMidRaw, 2),
                 shape(midRaw, 2),
                 shape(vocalRaw, 1.5),
-                shape(trebleRaw, 2),
-                snapshot);
+                shape(trebleRaw, 2));
         mainHandler.post(() -> listener.onAudioFrame(frame));
     }
 
@@ -316,39 +288,6 @@ public final class WallpaperAudioTap {
             sum += toByte(smoothed[index]);
         }
         return sum / (end - start + 1);
-    }
-
-    /**
-     * 把 512 个频点重采样成 128 段，分段的对数曲线复刻页面侧
-     * `sampleRawSpectrumProfile` 的映射 —— 那边按同一个指数往下取窗，
-     * 这里按同一个指数往上分段，段与窗口才对得上。
-     */
-    private void buildSpectrum() {
-        int usable = smoothed.length - SKIP_BINS;
-        if (usable <= 1) {
-            return;
-        }
-        double logSpan = Math.log(usable + 1);
-        for (int index = 0; index < SPECTRUM_LENGTH; index += 1) {
-            double from = Math.expm1((index / (double) SPECTRUM_LENGTH) * logSpan);
-            double to = Math.expm1(((index + 1) / (double) SPECTRUM_LENGTH) * logSpan);
-            int start = SKIP_BINS + (int) Math.floor(from);
-            int end = SKIP_BINS + (int) Math.floor(to) - 1;
-            if (start < SKIP_BINS) {
-                start = SKIP_BINS;
-            }
-            if (end >= smoothed.length) {
-                end = smoothed.length - 1;
-            }
-            if (end < start) {
-                end = start;
-            }
-            double sum = 0;
-            for (int bin = start; bin <= end; bin += 1) {
-                sum += toByte(smoothed[bin]);
-            }
-            spectrum[index] = (int) Math.round(sum / (end - start + 1));
-        }
     }
 
     /**

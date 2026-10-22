@@ -33,8 +33,6 @@ const portraitSource = (value: MonetPortraitSource | undefined): MonetPortraitSo
 export const resolveStoredMonetTuning = (parsed: Partial<MonetTuning> & Record<string, unknown>): MonetTuning => ({
     keywordColoringEnabled: parsed.keywordColoringEnabled ?? DEFAULT_MONET_TUNING.keywordColoringEnabled,
     showDescription: parsed.showDescription ?? DEFAULT_MONET_TUNING.showDescription,
-    showAudioVisualization: parsed.showAudioVisualization ?? DEFAULT_MONET_TUNING.showAudioVisualization,
-    audioStyle: parsed.audioStyle === 'line' ? 'line' : DEFAULT_MONET_TUNING.audioStyle,
     fontScale: fontScale(
         parsed.fontScale ?? DEFAULT_MONET_TUNING.fontScale,
         DEFAULT_MONET_TUNING.fontScale,

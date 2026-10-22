@@ -28,10 +28,9 @@ const anchors = {
     settingsPanel: settingsRegion(G.panel, 'ponder.anchors.lyricStyle.settingsPanel'),
     tabs: panelPart(G.tabs, 'ponder.anchors.lyricStyle.tabs'),
     rows: panelPart(G.rows, 'ponder.anchors.lyricStyle.rows'),
-    // 莫奈那一页上要讲的三个开关：显示歌曲描述、拖拽调整按钮、显示音频图案。
+    // 莫奈那一页上要讲的两个开关：显示歌曲描述、拖拽调整按钮。
     monetDescriptionRow: panelPart(G.rowThree, 'ponder.anchors.lyricStyle.monetDescription'),
     monetHangerRow: panelPart(G.rowSix, 'ponder.anchors.lyricStyle.monetHanger'),
-    monetAudioRow: panelPart(G.rowSeven, 'ponder.anchors.lyricStyle.monetAudio'),
     backgroundPictures: panelPart(G.backgroundPictures, 'ponder.anchors.lyricStyle.backgroundPictures'),
     // 「字幕」页：副字幕内容在第二行，模糊在第五行，最下面一组是继承歌词字体和字幕缩放。
     subtitleContent: panelPart(G.rowTwo, 'ponder.anchors.lyricStyle.rowTwo'),
@@ -41,7 +40,6 @@ const anchors = {
     subtitle: previewPart(L.subtitle, 'ponder.anchors.lyricStyle.subtitle'),
     monetDescription: previewPart(L.monetDescription, 'ponder.anchors.lyricStyle.monetDescription'),
     monetHanger: previewPart(L.monetHanger, 'ponder.anchors.lyricStyle.monetHanger'),
-    monetAudio: previewPart(L.monetAudio, 'ponder.anchors.lyricStyle.monetAudio'),
 } satisfies Record<string, PonderAnchorSource>;
 
 const openStyleSettings = {
@@ -122,17 +120,6 @@ const monet: PonderSceneScript = {
 
         { kind: 'highlight', id: 'dimHanger', anchor: 'monetHanger', intensity: [0.9, 0], durationMs: 340, keyframe: true },
         { kind: 'highlight', id: 'dimHangerRow', anchor: 'monetHangerRow', intensity: [0.8, 0], durationMs: 340, withPrevious: true },
-        { kind: 'highlight', id: 'markAudio', anchor: 'monetAudio', intensity: [0, 0.8], durationMs: 420, withPrevious: true },
-        { kind: 'highlight', id: 'markAudioRow', anchor: 'monetAudioRow', intensity: [0, 0.8], durationMs: 420, withPrevious: true },
-        {
-            kind: 'caption', id: 'audio',
-            textKey: 'ponder.captions.lyricStyle.monetAudio',
-            pointTo: { anchor: 'monetAudio' }, durationMs: 5600, withPrevious: true,
-        },
-        { kind: 'pause', id: 'readAudio' },
-
-        { kind: 'highlight', id: 'dimAudio', anchor: 'monetAudio', intensity: [0.8, 0], durationMs: 340, keyframe: true },
-        { kind: 'highlight', id: 'dimAudioRow', anchor: 'monetAudioRow', intensity: [0.8, 0], durationMs: 340, withPrevious: true },
         { kind: 'surfaceState', id: 'bare', anchor: 'panel', state: 'preview-monet-bare', durationMs: 520, withPrevious: true },
         { kind: 'surfaceState', id: 'togglesOff', anchor: 'panel', state: 'panel-monet-off', durationMs: 520, withPrevious: true },
         {

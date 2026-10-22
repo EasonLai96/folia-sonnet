@@ -13,28 +13,19 @@ export type NativePlaybackEventType =
     | 'position'
     | 'buffering'
     | 'error'
-    | 'idle'
-    | 'spectrum';
+    | 'idle';
 
 export type NativePlaybackEvent = {
     type: NativePlaybackEventType;
     positionMs?: number;
     durationMs?: number;
     message?: string;
-    /**
-     * 频谱的整条（P2）。**base64 编码的 128 个字节**，不是数组 ——
-     * 每秒 20 次把 128 个数字塞进 JSArray 序列化，界面会周期性卡一下。
-     */
-    spectrum?: string;
-    /** 五个频段，`"bass,lowMid,mid,vocal,treble,power"`，同为 0..255。 */
-    bands?: string;
 };
 
 export type NativePlaybackSnapshot = {
     positionMs: number;
     durationMs: number;
     playing: boolean;
-    audioSessionId: number;
 };
 
 interface FoliaNativePlayerPlugin {
@@ -52,8 +43,6 @@ interface FoliaNativePlayerPlugin {
     setSpeed(options: { speed: number }): Promise<void>;
     getSnapshot(): Promise<NativePlaybackSnapshot>;
     release(): Promise<void>;
-    /** 频谱采集的开关（P2）。关着的时候原生一个字节都不推。 */
-    setSpectrumEnabled(options: { enabled: boolean }): Promise<void>;
     addListener(
         eventName: 'foliaNativePlayer',
         listener: (event: NativePlaybackEvent) => void,
@@ -85,7 +74,6 @@ export const nativePlayer = {
     setSpeed: (speed: number) => FoliaNativePlayer.setSpeed({ speed }),
     getSnapshot: () => FoliaNativePlayer.getSnapshot(),
     release: () => FoliaNativePlayer.release(),
-    setSpectrumEnabled: (enabled: boolean) => FoliaNativePlayer.setSpectrumEnabled({ enabled }),
     addListener: (listener: (event: NativePlaybackEvent) => void) =>
         FoliaNativePlayer.addListener('foliaNativePlayer', listener),
 };

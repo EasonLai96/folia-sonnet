@@ -1,4 +1,4 @@
-import { AudioWaveform, Compass, LogIn, Music2, QrCode, Sparkles } from 'lucide-react';
+import { Compass, LogIn, Music2, QrCode, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // src/components/modal/newFeaturesRelease.ts
@@ -23,7 +23,6 @@ export const NEW_FEATURES_RELEASE: NewFeaturesRelease = {
         { id: 'newPlatforms', icon: Music2 },
         { id: 'loginWindow', icon: LogIn },
         { id: 'explore', icon: Compass },
-        { id: 'smartBeat', icon: AudioWaveform },
         { id: 'qqMusic', icon: QrCode },
         { id: 'moreDetails', icon: Sparkles },
     ],

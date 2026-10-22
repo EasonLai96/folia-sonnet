@@ -132,15 +132,6 @@ const Monet: React.FC<PaintProps & { bare: boolean }> = ({ bare, accent, line, o
                     className="rounded-full"
                     style={{ ...relativeRectStyle(L.monetHanger), boxShadow: `inset 0 0 0 1px ${outline}`, backgroundColor: 'rgba(0,0,0,0.55)' }}
                 />
-                <span
-                    data-ponder-lyric-style-monet-audio
-                    className="flex items-end justify-between px-[4%] pb-[2%]"
-                    style={relativeRectStyle(L.monetAudio)}
-                >
-                    {[40, 75, 55, 90, 35, 65, 80, 45, 60, 30].map((height, index) => (
-                        <span key={index} className="w-[6%] rounded-sm" style={{ height: `${height}%`, backgroundColor: accent, opacity: 0.6 }} />
-                    ))}
-                </span>
             </>
         )}
     </>

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
-import type { MotionValue } from 'framer-motion';
 import { findLatestActiveLineIndex } from '../../../../utils/appPlaybackHelpers';
 import { PlayerState } from '../../../../types';
-import type { AudioBands, LyricData } from '../../../../types';
 import { setCurrentLineIndex, setHandoffLineIndex, setPlayerState } from '../../../../stores/usePlaybackStore';
 import { selectDisplayLyrics, usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { readLatestSpectrum } from '../../../../services/spectrumTap';
@@ -16,10 +14,7 @@ import {
     lyricCurrentTime,
 } from '../../../../stores/motionSignals';
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
-import { tickBeatFx } from '../../../../services/beatFx/beatFxLive';
-import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
 import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
-import { readNativeSpectrum, setNativeSpectrumEnabled } from '../../../../services/playbackEngine/nativeSpectrum';
 import { readIncomingLyricClock } from './incomingLyricClock';
 
 // src/components/app/playback/bridges/usePlaybackVisualizerBridge.ts
@@ -116,8 +111,6 @@ export function usePlaybackVisualizerBridge({
     const spectrumReadAtMsRef = useRef(0);
     // 智能动感模式: loads the track's beats while it is on; the clock is stepped below. A ref, so
     // switching it does not rebuild the frame loop.
-    const beatFxWantedRef = useRef(false);
-    beatFxWantedRef.current = useBeatFxTrack();
     const handoffLineIndexRef = useRef(-1);
     // The lyric offsets as the loop reads them. The settle moves the displayed one onto the incoming
     // track's as it copies that track's clock: the prop catches up a render later, and a frame read in
@@ -192,12 +185,13 @@ export function usePlaybackVisualizerBridge({
          *
          * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
          *
-         * ⚠️ 原生在播时**不能**还写 `readLatestSpectrum() ?? readNativeSpectrum()`：
-         * 那条 worklet 是挂在 Web Audio 图上的，图一断它就再也不会有新帧，但它**并没有
-         * 被回收** —— `readLatestSpectrum()` 依然返回非 null（冻住的最后一帧，通常全 0），
-         * `??` 于是永远不会走到原生那条。所以原生接管时反过来问：先要原生的，没有再退回。
+         * ⚠️ 原生出声（原生播放）时这条**没有数据**：抽头挂在 Web Audio 图上，而
+         * `createMediaElementSource` 单向不可逆 —— 图一断它就再也不会有新帧。那时
+         * `readLatestSpectrum()` 依然会返回非 null（冻住的最后一帧，通常全 0），
+         * 下游拿到的是一份趴着的频谱。原生接管时不另采数据（每秒 20 帧过桥的代价是
+         * 界面周期性卡一下），就让它趴着。
          */
-        const tapped = (usesNativeClock ? readNativeSpectrum() : null) ?? readLatestSpectrum();
+        const tapped = readLatestSpectrum();
         // 取成局部变量：ref 上的 .current 进不了分支条件的窄化，后面要直接用它。
         const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
@@ -364,12 +358,6 @@ export function usePlaybackVisualizerBridge({
             }
         }
 
-        if (beatFxWantedRef.current) {
-            // 原生播放时元素是空的：节拍那套补偿（beatFx）读的是元素与 AudioContext 的延迟，
-            // 这时候两边都没有意义，传 null 让它待着。
-            tickBeatFx(isActuallyPlaying && !usesNativeClock ? audioElement : null, analyserRef.current?.context);
-        }
-
         // While a blend holds the picture, the active deck is the incoming track: its hand-off, clock
         // and line for the visualizer, off this same frame rather than a second loop.
         const heldElement = getDisplayElement?.() ?? null;
@@ -423,27 +411,4 @@ export function usePlaybackVisualizerBridge({
             }
         };
     }, [animationFrameRef, updateLoop]);
-
-    /*
-     * 原生频谱的开关（P2）。
-     *
-     * 开着就是每秒 20 帧 × 128 段过桥，所以只在「前台 + 原生手上确实有歌」时才开，
-     * 页面一藏立刻关。`ownsPlayback()` 不是响应式的值，这里用一次 2 秒的巡检去对齐它 ——
-     * 开关本身是幂等的（状态没变时一个字节都不过桥），这点代价可以忽略。
-     */
-    useEffect(() => {
-        if (typeof document === 'undefined') return;
-        const sync = () => {
-            const wanted = document.visibilityState === 'visible' && nativePlaybackEngine.ownsPlayback();
-            void setNativeSpectrumEnabled(wanted);
-        };
-        sync();
-        document.addEventListener('visibilitychange', sync);
-        const timer = window.setInterval(sync, 2000);
-        return () => {
-            document.removeEventListener('visibilitychange', sync);
-            window.clearInterval(timer);
-            void setNativeSpectrumEnabled(false);
-        };
-    }, []);
 }

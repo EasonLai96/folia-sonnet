@@ -285,7 +285,6 @@
         "subtitle": "通用副字幕",
         "monetDescription": "歌曲描述",
         "monetHanger": "拖拽调整按钮",
-        "monetAudio": "音频图案",
         "backgroundPictures": "背景类型",
         "subtitleFont": "字幕字体"
       },
@@ -939,8 +938,7 @@
         "monetIntro": "莫奈样式：左边歌词，右边肖像。最常见的问题是右边这几样东西怎么关。它们都在莫奈自己的设置里。",
         "monetDescription": "左下的文字是歌曲描述。关闭「显示歌曲描述」即可隐藏。",
         "monetHanger": "肖像上方的圆钮是拖拽调整按钮，用来挪动肖像。位置调好后，在「拖拽调整按钮」里把它隐藏。",
-        "monetAudio": "肖像下方是音频图案。在「音频图案」里可以隐藏它，「频谱样式」可以在柱状和线条之间切换。",
-        "monetBare": "三项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。",
+        "monetBare": "两项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。",
         "combineTwo": "背景和歌词样式是两个独立的选择。控制页里它们是上下两行：「歌词样式」和「背景类型」，各切各的。",
         "combineBackground": "只换背景：歌词样式不动。背景自己的参数在歌词样式窗口的「背景」页。",
         "combineStyle": "再只换歌词样式：刚选的背景留着。任意背景都能配任意歌词样式；只有「静止」样式不渲染背景。",
@@ -1587,8 +1585,7 @@
 | `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetIntro` | 莫奈样式：左边歌词，右边肖像。最常见的问题是右边这几样东西怎么关。它们都在莫奈自己的设置里。 | preview：实时预览 | `ponder.anchors.lyricStyle.preview` |
 | `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetDescription` | 左下的文字是歌曲描述。关闭「显示歌曲描述」即可隐藏。 | monetDescription：歌曲描述 | `ponder.anchors.lyricStyle.monetDescription` |
 | `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetHanger` | 肖像上方的圆钮是拖拽调整按钮，用来挪动肖像。位置调好后，在「拖拽调整按钮」里把它隐藏。 | monetHanger：拖拽调整按钮 | `ponder.anchors.lyricStyle.monetHanger` |
-| `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetAudio` | 肖像下方是音频图案。在「音频图案」里可以隐藏它，「频谱样式」可以在柱状和线条之间切换。 | monetAudio：音频图案 | `ponder.anchors.lyricStyle.monetAudio` |
-| `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetBare` | 三项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。 | preview：实时预览 | `ponder.anchors.lyricStyle.preview` |
+| `lyric-style` | `lyric-style-monet` | 莫奈：隐藏右侧部件 | `ponder.captions.lyricStyle.monetBare` | 两项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。 | preview：实时预览 | `ponder.anchors.lyricStyle.preview` |
 | `lyric-style` | `lyric-style-combine` | 背景和歌词样式各选各的 | `ponder.captions.lyricStyle.combineTwo` | 背景和歌词样式是两个独立的选择。控制页里它们是上下两行：「歌词样式」和「背景类型」，各切各的。 | preview：实时预览 | `ponder.anchors.lyricStyle.preview` |
 | `lyric-style` | `lyric-style-combine` | 背景和歌词样式各选各的 | `ponder.captions.lyricStyle.combineBackground` | 只换背景：歌词样式不动。背景自己的参数在歌词样式窗口的「背景」页。 | backgroundPictures：背景类型 | `ponder.anchors.lyricStyle.backgroundPictures` |
 | `lyric-style` | `lyric-style-combine` | 背景和歌词样式各选各的 | `ponder.captions.lyricStyle.combineStyle` | 再只换歌词样式：刚选的背景留着。任意背景都能配任意歌词样式；只有「静止」样式不渲染背景。 | preview：实时预览 | `ponder.anchors.lyricStyle.preview` |

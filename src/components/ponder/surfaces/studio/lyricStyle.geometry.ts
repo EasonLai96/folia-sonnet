@@ -19,8 +19,7 @@ export const LYRIC_STYLE_GEOMETRY = {
     /** 莫奈：左边一列歌词，下面一段歌曲描述。 */
     monetRail: { left: 0.06, top: 0.12, width: 0.46, height: 0.50 },
     monetDescription: { left: 0.06, bottom: 0.10, width: 0.46, height: 0.16 },
-    /** 莫奈：右边的肖像，顶上一颗拖拽调整按钮，底下一条音频图案。 */
+    /** 莫奈：右边的肖像，顶上一颗拖拽调整按钮。 */
     monetPortrait: { right: 0.07, top: 0.12, width: 0.34, bottom: 0.26 },
     monetHanger: { right: 0.21, top: 0.06, width: 0.06, square: true },
-    monetAudio: { right: 0.07, bottom: 0.08, width: 0.34, height: 0.12 },
 } satisfies Record<string, PonderRelativeRect>;

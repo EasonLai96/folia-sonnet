@@ -489,7 +489,7 @@ export default {
         "cappella": "歌词化成聊天气泡左右往返，配头像与表情，像一场对唱",
         "tilt": "长句自动断行、随机斜体强调，像有人凑近低声说话",
         "claddagh": "歌词沿倾斜圆环轨道循环推进，大小对比拉开纵深",
-        "monet": "海报式版面：左侧歌词轨、右侧肖像、底部频谱",
+        "monet": "海报式版面：左侧歌词轨、右侧肖像，人像铺满右侧",
         "diorama": "点阵化的文字在 3D 空间里穿行，镜头跟着歌词运镜",
         "pendolo": "封面嵌进钟表盘，歌词沿弧线随擒纵一格格推过",
         "sonnet": "短线、边框与镂空巨字轮番铺开，歌词像被排进一页页翻动的诗稿",
@@ -825,7 +825,6 @@ export default {
       "visualizer-diorama": { "title": "切换到可视化：镜台", "description": "切换到镜台可视化" },
       "visualizer-pendolo": { "title": "切换到可视化：时计", "description": "切换到时计可视化" },
       "visualizer-sonnet": { "title": "切换到可视化：商籁", "description": "切换到商籁可视化" },
-      "smart-beat-toggle": { "title": "智能动感模式 开 / 关", "description": "开关智能动感模式（商籁、镜台按节拍，时计按鼓点驱动画面）" },
       "visualizer-tempera": { "title": "切换到可视化：凝彩", "description": "切换到凝彩色块 PV 可视化" },
       "visualizer-lumiere": { "title": "切换到可视化：绘光", "description": "切换到绘光舞台光 PV 可视化" },
       "desktop-toggle-remote-control": { "title": "切换遥控窗口", "description": "打开或关闭遥控窗口" },
@@ -2782,28 +2781,6 @@ export default {
     "sonnetPostProcessLensDispersion": "透镜色散",
     "sonnetPostProcessHalftone": "半调网点",
     "sonnetPostProcessVignette": "暗角",
-    "smartBeat": "智能动感模式",
-    "smartBeatEnabled": "开关",
-    "smartBeatOn": "开启",
-    "smartBeatOff": "关闭",
-    "smartBeatDesc": "总开关。开启后，各歌词动画自己设置里的「动感效果」按音乐驱动画面，每个效果可以单独开关、调强度；关闭时所有画面保持原来的频谱响应。按节拍的效果用 beat_this 识别节拍，按鼓点的效果用 HTDemucs 分离鼓声，画面上有效果用到时才分析。本地歌曲第一次播放时分析几秒；在线歌曲第一次播放时读取音频流来分析。分析过的歌会被记住。",
-    "beatFxUnavailable_noGpu": "此设备没有可用的 WebGPU，节拍效果不会生效。",
-    "beatFxUnavailable_desktopOnly": "节拍效果仅在桌面版可用。",
-    "beatFxUnavailable_noWeights": "节拍效果需要分析模型（约 133MB）。在下面的模型设置里下载后即可使用。",
-    "beatEffects": "动感效果",
-    "beatEffectsNeedSmartBeat": "在上方打开智能动感模式后，这些效果才会生效。",
-    "beatEffectStrength": "强度",
-    "beatEffectNeedsDrums": "还没有音轨分离模型（HTDemucs），跟着鼓点走的效果暂不可用；没有鼓的歌本来也不出效果。",
-    "beatEffect_sonnetLensTear": "推镜裂光",
-    "beatEffect_sonnetLensTearDesc": "跟着 beat_this 识别的节拍：每拍镜头推近，小节第一拍撕裂并泛起辉光。",
-    "beatEffect_dioramaRipple": "水镜涟漪",
-    "beatEffect_dioramaRippleDesc": "跟着 beat_this 识别的节拍：粒子每拍泛起涟漪，小节第一拍泛起大涟漪，正在唱的字随拍跳动。",
-    "beatEffect_pendoloDrumhead": "仿真鼓面",
-    "beatEffect_pendoloDrumheadDesc": "跟着 HTDemucs 分离出的鼓声：底鼓让表盘鼓起，重的震屏；军鼓打在偏处，表盘朝那边倾；镲片点亮刻度和内圈。",
-    "beatEffect_pendoloGearBeats": "齿轮随拍",
-    "beatEffect_pendoloGearBeatsDesc": "齿轮跟着 beat_this 识别的节拍转动。（已停用）",
-    "beatEffect_latentPulse": "潮汐脉动",
-    "beatEffect_latentPulseDesc": "隐现背景的流速随 beat_this 识别的节拍脉动。（已停用）",
     "temperaMotionSection": "动态与调色",
     "temperaDisplaySection": "显示内容",
     "temperaLyricSection": "歌词分镜",
@@ -3254,10 +3231,6 @@ export default {
     "monetPortraitDragHanger": "拖拽调整按钮",
     "monetUploadPortrait": "上传肖像图",
     "monetClearPortrait": "清空肖像图",
-    "monetAudioStyle": "频谱样式",
-    "monetAudioStyleBar": "柱状",
-    "monetAudioStyleLine": "线条",
-    "monetShowAudioVisualization": "音频图案",
     "monetFontScale": "字体缩放",
     "monetShowDescription": "显示歌曲描述",
     "monetGroupBackgroundSource": "背景来源",
@@ -3502,10 +3475,6 @@ export default {
       "lyricFilterPersistence": {
         "title": "保留歌词过滤表达式",
         "description": "关闭逐行歌词过滤不再清空写好的正则表达式，下次开启时仍在原处，方便反复对比开关效果。"
-      },
-      "monetAudioVisibility": {
-        "title": "Monet 可隐藏频谱",
-        "description": "Monet 视觉器新增频谱显示开关，可只保留歌词与封面画面。"
       }
     },
     "v0_7_5": {
@@ -3590,10 +3559,6 @@ export default {
       "explore": {
         "title": "探索页",
         "description": "主页新增「探索」页签，汇集网易云、QQ 音乐、Spotify、YouTube Music 的推荐歌单、排行榜、新歌和新碟，还有本机记下的最近播放和「再听一次」，可以换一批。Bravais 也有探索页签；从探索页打开 Lattice，会把这些内容铺成一面海报墙。不想要可以在「设置 → 主页与歌单」关掉；QQ 音乐的探索内容需要 qq-music-api 3.3.3 或更新的后端。"
-      },
-      "smartBeat": {
-        "title": "智能动感模式",
-        "description": "桌面版歌词样式里新增「智能动感模式」：商籁每拍推近镜头、小节第一拍裂光，镜台的粒子随拍泛起涟漪、正在唱的字跟着跳，时计的表盘跟着分离出的底鼓、军鼓和镲片起伏。每个效果可以单独开关、调强度，命令面板里也能一键开关。需要支持 WebGPU 的显卡；歌曲第一次播放时先分析一会儿，之后会记住。用到的模型随安装包附带，自动混音也不必再单独下载模型。"
       },
       "qqMusic": {
         "title": "QQ 音乐扫码与新功能",
@@ -4665,7 +4630,6 @@ export default {
         "subtitle": "通用副字幕",
         "monetDescription": "歌曲描述",
         "monetHanger": "拖拽调整按钮",
-        "monetAudio": "音频图案",
         "backgroundPictures": "背景类型",
         "subtitleFont": "字幕字体"
       },
@@ -5319,8 +5283,7 @@ export default {
         "monetIntro": "莫奈样式：左边歌词，右边肖像。最常见的问题是右边这几样东西怎么关。它们都在莫奈自己的设置里。",
         "monetDescription": "左下的文字是歌曲描述。关闭「显示歌曲描述」即可隐藏。",
         "monetHanger": "肖像上方的圆钮是拖拽调整按钮，用来挪动肖像。位置调好后，在「拖拽调整按钮」里把它隐藏。",
-        "monetAudio": "肖像下方是音频图案。在「音频图案」里可以隐藏它，「频谱样式」可以在柱状和线条之间切换。",
-        "monetBare": "三项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。",
+        "monetBare": "两项都关掉后，画面只剩歌词和肖像。这些开关只属于莫奈，换到别的样式时不会出现。",
         "combineTwo": "背景和歌词样式是两个独立的选择。控制页里它们是上下两行：「歌词样式」和「背景类型」，各切各的。",
         "combineBackground": "只换背景：歌词样式不动。背景自己的参数在歌词样式窗口的「背景」页。",
         "combineStyle": "再只换歌词样式：刚选的背景留着。任意背景都能配任意歌词样式；只有「静止」样式不渲染背景。",

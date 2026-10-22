@@ -11,7 +11,6 @@ import VisualizerShell from '../VisualizerShell';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { resolveThemeFontStack, resolveThemeTranslationFontStack } from '../../../utils/fontStacks';
 import { resolveSubtitleContentMode } from '../../../utils/lyrics/alternateText';
-import AudioOverlay from './AudioOverlay';
 import MonetFloatingDecor from './MonetFloatingDecor';
 import MonetLyricsRail from './MonetLyricsRail';
 import MonetPortraitImage from './MonetPortraitImage';
@@ -561,36 +560,6 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 </div>
             </div>
 
-            {/*
-              * 底部频谱。以前这里还有一道 `!isWallpaperSurface`：叠层（桌面歌词那一层）上
-              * 一律不画。当时是因为叠层根本拿不到音频 —— 它在**另一个 WebView** 里，
-              * 读不到主应用那张 Web Audio 图，频谱恒为 0，画出来只是一条平线。
-              *
-              * 现在两条路都能喂它了（原生 WallpaperAudioTap 推 session 混音 / 原生播放器
-              * 的 session），所以不再按「在哪一层画」来砍，只跟着设置走：
-              * 桌面歌词那边的开关和播放页是同一个 `showAudioVisualization`，默认开。
-              */}
-            {showText && monetTuning.showAudioVisualization && (
-                <motion.div
-                    key={`audio-${introKey}`}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1], delay: 0.8 }}
-                    className="absolute bottom-0 left-0 z-20 h-10 overflow-hidden px-5 sm:px-8 lg:px-14"
-                    style={{ width: 'min(450px, 55vw)' }}
-                >
-                    <div className="h-full w-full">
-                        <AudioOverlay
-                            audioPower={audioPower}
-                            audioBands={audioBands}
-                            theme={theme}
-                            mode={monetTuning.audioStyle}
-                            staticMode={staticMode}
-                            isPreviewMode={isPreviewMode}
-                        />
-                    </div>
-                </motion.div>
-            )}
         </VisualizerShell>
     );
 };

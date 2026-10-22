@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, AudioWaveform, Move } from 'lucide-react';
+import { AlignLeft, Move } from 'lucide-react';
 import { DEFAULT_MONET_TUNING, type MonetTuning } from '../../../types';
 import { QuickControlToggle } from '../../shared/QuickControlChip';
 import { defineVisualizer, type VisualizerQuickControlsProps } from '../definition';
@@ -63,13 +63,6 @@ export default defineVisualizer({
                     onToggle={() => onTuningChange({ showPortraitDragHanger: !showHanger })}
                 >
                     <Move size={14} />
-                </QuickControlToggle>
-                <QuickControlToggle
-                    active={tuning.showAudioVisualization}
-                    label={t('options.monetShowAudioVisualization')}
-                    onToggle={() => onTuningChange({ showAudioVisualization: !tuning.showAudioVisualization })}
-                >
-                    <AudioWaveform size={14} />
                 </QuickControlToggle>
             </>
         );

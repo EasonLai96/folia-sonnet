@@ -13,7 +13,7 @@
 //
 // The prefix comes from two places. A standalone tuning names it in the owner field
 // (`monetBackgroundTuning` -> `monetBackground`), while the visualizerTunings bundle names it in the
-// path (`monet.audioStyle` -> `monet`). The bundle is the ordinary case: every export carries one.
+// path (`monet.portraitStyle` -> `monet`). The bundle is the ordinary case: every export carries one.
 
 // Suffixes panels leave out because the value's unit is shown next to the slider instead.
 const UNIT_SUFFIXES = ['Px', 'Deg', 'Sec', 'Ms'];
@@ -109,7 +109,7 @@ export function resolveSettingLabelKey(
     for (const siblingPath of siblingPaths) {
         if (siblingPath === leafPath) continue;
         // Same-named leaves collide just as surely as shortened ones do -- but only when they
-        // resolve alike, so `monet.audioStyle` and `latent.audioStyle` stay distinct.
+        // resolve alike, so `monet.portraitStyle` and `latent.portraitStyle` stay distinct.
         if (resolveOne(ownerField, siblingPath, hasKey) === key) return null;
     }
 
@@ -118,8 +118,8 @@ export function resolveSettingLabelKey(
 
 /**
  * The i18n key a panel uses for one enum VALUE of a field, or null. Panels name these by appending
- * the capitalized value to the field's own key: `options.monetAudioStyle` + `'bar'` ->
- * `options.monetAudioStyleBar`.
+ * the capitalized value to the field's own key: `options.monetPortraitStyle` + `'square'` ->
+ * `options.monetPortraitStyleSquare`.
  *
  * Exact match only. Some values do not follow the rule (`monetBackgroundSource: 'cover-derived'` is
  * labelled by `...SourceCover`), and printing the raw id is better than printing a neighbouring

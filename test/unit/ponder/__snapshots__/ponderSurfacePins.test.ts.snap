@@ -25,7 +25,7 @@ exports[`the stand-ins as recorded before the size table was split > every kind 
   "local-track-list": "5092 fc150ffa0705d1cf",
   "lyric-export": "16852 f05853a9cc70336a",
   "lyric-match": "30697 9b80daf4374ec5b2",
-  "lyric-style": "118736 a3fe1dfa813ff964",
+  "lyric-style": "117593 fab946e806507243",
   "lyrics-animation-settings": "5909 3f6c67f62463f916",
   "lyrics-source-settings": "2867 65ee2022870b90ef",
   "online-collection-actions": "4036 8d3b15edf43a9381",
@@ -5136,12 +5136,6 @@ exports[`the stand-ins as recorded before the size table was split > every size 
       "left": 0.14,
       "right": 0.14,
       "top": 0.24,
-    },
-    "monetAudio": {
-      "bottom": 0.08,
-      "height": 0.12,
-      "right": 0.07,
-      "width": 0.34,
     },
     "monetDescription": {
       "bottom": 0.1,

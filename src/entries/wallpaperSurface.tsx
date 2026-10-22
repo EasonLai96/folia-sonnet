@@ -176,9 +176,11 @@ export type WallpaperPayload = {
  * `WallpaperOverlay.pushAudioFrame` 走独立通道推到这里。
  *
  * 所有数值都是 0..255，量纲和主应用 `motionSignals` 里那份一致 ——
- * band 走的是同一组频率边界与同一条 shape 曲线，spectrum 的语义对齐
- * `getByteFrequencyData`，于是 `AudioOverlay` 里那套降噪 + 幂压缩能原样吃下去，
- * 叠层画出来的形状跟播放页是同一套。
+ * band 走的是同一组频率边界与同一条 shape 曲线。
+ *
+ * ⚠️ 这里**没有频谱**：叠层唯一画频谱的是莫奈底部那条「音频图案」，已于 2026-10-24
+ * 随它的两个设置一起删掉，原生侧 `WallpaperAudioTap` 也不再算、不再推 128 段数组 ——
+ * 每秒二十次传一份没人读的数组，白白给叠层的 WebView 主线程加活。
  */
 export type WallpaperAudioPayload = {
     power: number;
@@ -187,23 +189,16 @@ export type WallpaperAudioPayload = {
     mid: number;
     vocal: number;
     treble: number;
-    /** 0..255 的频谱。空数组 = 没有数据（暂停 / 采集不可用）。 */
-    spectrum: number[];
 };
-
-const EMPTY_SPECTRUM = new Uint8Array(0);
 
 /**
  * 断流判定时长。
  *
  * 原生是**推**模型的：采集停了、蓝牙切回扬声器期间、或者那一帧被 WebView 吞了，
- * 页面这边都不会收到任何「没了」的通知。不自己看一眼，频谱就永远冻在断流前那一帧上。
+ * 页面这边都不会收到任何「没了」的通知。不自己看一眼，band 就永远冻在断流前那一帧上。
  * 采集节拍是 20Hz（50ms），给到 1.2s 是二十来帧的余量。
  */
 const AUDIO_STALE_MS = 1200;
-
-/** 复用同一段缓冲，别每帧都新开一份 Uint8Array。 */
-let audioSpectrumBuffer: Uint8Array<ArrayBuffer> | null = null;
 
 const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: AudioBands } => {
     const audioPower = useMotionValue(0);
@@ -212,11 +207,10 @@ const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: Audio
     const mid = useMotionValue(0);
     const vocal = useMotionValue(0);
     const treble = useMotionValue(0);
-    const spectrum = useMotionValue<Uint8Array<ArrayBuffer>>(EMPTY_SPECTRUM);
 
     const audioBands = React.useMemo(
-        () => ({ bass, lowMid, mid, vocal, treble, spectrum }),
-        [bass, lowMid, mid, vocal, treble, spectrum]);
+        () => ({ bass, lowMid, mid, vocal, treble }),
+        [bass, lowMid, mid, vocal, treble]);
 
     React.useEffect(() => {
         let lastFrameAtMs = 0;
@@ -229,7 +223,6 @@ const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: Audio
                 mid.set(0);
                 vocal.set(0);
                 treble.set(0);
-                spectrum.set(EMPTY_SPECTRUM);
                 return;
             }
             lastFrameAtMs = performance.now();
@@ -239,18 +232,6 @@ const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: Audio
             mid.set(payload.mid);
             vocal.set(payload.vocal);
             treble.set(payload.treble);
-            const source = payload.spectrum;
-            if (source && source.length > 0) {
-                let buffer = audioSpectrumBuffer;
-                if (!buffer || buffer.length !== source.length) {
-                    buffer = new Uint8Array(source.length);
-                    audioSpectrumBuffer = buffer;
-                }
-                buffer.set(source);
-                spectrum.set(buffer);
-            } else {
-                spectrum.set(EMPTY_SPECTRUM);
-            }
         };
 
         window.__foliaWallpaperPushAudio = apply;
@@ -271,7 +252,7 @@ const useBridgedAudio = (): { audioPower: MotionValue<number>; audioBands: Audio
             window.clearInterval(watchdog);
             apply(null);
         };
-    }, [audioPower, bass, lowMid, mid, vocal, treble, spectrum]);
+    }, [audioPower, bass, lowMid, mid, vocal, treble]);
 
     return React.useMemo(
         () => ({ audioPower, audioBands }),

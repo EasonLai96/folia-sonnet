@@ -12,9 +12,10 @@ import { decodeAtRate } from './trackAudio';
 // A whole track's drum hits, read off htdemucs' drum stem (drumStem.ts, the renderer's GPU) and kept:
 // in memory, on disk under the track's analysis key (DRUM_HITS_PREFIX, registered with the beat lists
 // in services/repositories/cacheRepository.ts as analysis data), and in flight for as long as one run
-// is going - the layering of beatGrid.ts. 时计 plays them under 智能动感模式
+// is going - the layering of beatGrid.ts. 时计's drumhead effect played them under 智能动感模式
 // (components/visualizer/pendolo/usePendoloBeatFx.ts): the user found the drums' own hits far truer
-// than any rule over beat_this' beats (2026-10-17).
+// than any rule over beat_this' beats (2026-10-17). Both are gone now (2026-10-24); nothing asks for
+// the hits any more, and this is kept only so the stored ones can still be accounted for and cleared.
 //
 // A hit is where the stem rises: each of three bands (kick below KICK_MAX_HZ, snare up to SNARE_MAX_HZ,
 // hats from HAT_MIN_HZ) against that band's own loud hits (HIT_TOP), a hit wherever the largest of the
@@ -34,9 +35,9 @@ import { decodeAtRate } from './trackAudio';
 // and 时计 plays beat_this' beats as it always did. A separation takes ~15 s of GPU for a four-minute
 // track, so it runs only for the wanted track (`setWantedDrumTrack`) and stops at its next segment
 // once another is wanted - skipping through tracks does not queue their separations up. The wanted
-// track is the one 智能动感模式 plays while it is on (hooks/useBeatFxTrack.ts), not only while 时计 is
-// on screen: a separation stopped on a picture switch threw away what it had, and coming back to 时计
-// separated the track again from the start.
+// track is the one whose hits the picture on screen plays (it used to be `hooks/useBeatFxTrack.ts`,
+// feeding 时计's drumhead), not only while that picture is on screen: a separation stopped on a
+// picture switch threw away what it had, and coming back to it separated the track again from the start.
 //
 // A track separating now has hits before it is done: the stem is read as its head is finished
 // (drumHitStream.ts), and about once a second (LIVE_EVERY_MS) the hits so far are picked again and
@@ -252,8 +253,8 @@ const MAX_TRACKS = 24;
 let wanted: string | null = null;
 
 /**
- * Names the track whose drum hits are wanted now, or null for none (it was left, or 智能动感模式 is
- * off). Set when a picture asks for the hits; cleared on the track change, not on a picture switch.
+ * Names the track whose drum hits are wanted now, or null for none (it was left, or nothing wants
+ * them). Set when a picture asks for the hits; cleared on the track change, not on a picture switch.
  */
 export const setWantedDrumTrack = (key: string | null): void => {
     wanted = key;
