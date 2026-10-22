@@ -68,6 +68,19 @@ export const AUTO_SKIP_UNPLAYABLE_KEY = 'folia_auto_skip_unplayable';
  */
 export const MIX_WITH_OTHER_AUDIO_KEY = 'folia_mix_with_other_audio';
 
+/**
+ * 原生播放（Android，P1）。
+ *
+ * 打开后音频不再由 WebView 的 `<audio>` 出声，改由原生 ExoPlayer 解码播放。
+ * 默认关，且**只在原生播放器真的在**时才生效（Capacitor.isPluginAvailable）——
+ * 桌面端、以及还没编进这个插件的包里，这一项既不显示也不起作用。
+ *
+ * ⚠️ 打开意味着 Web 音频图整体失效：均衡器、音效链、淡入淡出、automix 交叉淡化、
+ * 以及播放页的频谱都是挂在 `createMediaElementSource` 上的，而它是单向不可逆的
+ * —— 原生一出声，那些节点就都成了空跑。这是已知代价，不是 bug。
+ */
+export const NATIVE_PLAYBACK_KEY = 'folia_native_playback';
+
 /** Gigabytes of cached audio to keep. Zero is the listener asking for no ceiling at all. */
 export const DEFAULT_MEDIA_CACHE_LIMIT_GB = 5;
 
@@ -185,6 +198,8 @@ export type AudioSettingsState = {
     keepScreenOnWhilePlaying: boolean;
     /** 后台与其他音源同时播放（Android）。Off by default，见 MIX_WITH_OTHER_AUDIO_KEY。 */
     mixWithOtherAudio: boolean;
+    /** 原生播放（Android，P1）。Off by default，见 NATIVE_PLAYBACK_KEY。 */
+    nativePlaybackEnabled: boolean;
     audioOutputDeviceId: string;
     audioEqualizerSettings: AudioEqualizerSettings;
     isAudioEqualizerOpen: boolean;
@@ -203,6 +218,7 @@ export type AudioSettingsState = {
     handleToggleAutoSkipUnplayable: (enable: boolean) => void;
     handleToggleKeepScreenOnWhilePlaying: (enable: boolean) => void;
     handleToggleMixWithOtherAudio: (enable: boolean) => void;
+    handleToggleNativePlayback: (enable: boolean) => void;
     handleSetAudioOutputDeviceId: (deviceId: string) => void;
     handleSetAudioEqualizerSettings: (settings: AudioEqualizerSettings) => void;
     handleApplyAudioSoundPreset: (modeId: AudioEqualizerModeId) => void;
@@ -236,6 +252,8 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     // 默认关：常亮等于放弃系统那套自动熄屏，该由用户点头，不该替他决定。
     keepScreenOnWhilePlaying: getStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, false),
     mixWithOtherAudio: getStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, false),
+    // 默认关：原生播放会让均衡器 / 音效 / 频谱整体失效，这是能听见的代价。
+    nativePlaybackEnabled: getStoredBoolean(NATIVE_PLAYBACK_KEY, false),
     audioOutputDeviceId: readStoredAudioOutputDeviceId(),
     audioEqualizerSettings: readStoredAudioEqualizerSettings(),
     isAudioEqualizerOpen: false,
@@ -315,6 +333,10 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
          * 开始播放才生效。被打断后的自动恢复走的是 JS 那条路，不依赖它，拨过去就管用。
          */
         void setAudioFocusPolicy(enable);
+    },
+    handleToggleNativePlayback: (enable) => {
+        setStoredBoolean(NATIVE_PLAYBACK_KEY, enable);
+        set({ nativePlaybackEnabled: enable });
     },
     handleSetAudioOutputDeviceId: (deviceId) => {
         set({ audioOutputDeviceId: deviceId });

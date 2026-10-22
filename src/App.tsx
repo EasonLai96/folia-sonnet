@@ -117,6 +117,9 @@ import { usePlaybackAudioBridge } from './components/app/playback/bridges/usePla
 import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
 import { useTranscodeFallback } from './hooks/useTranscodeFallback';
 import { useAutomixDecks, type AutomixDeckId } from './services/automix/useAutomixDecks';
+import { nativePlaybackEngine } from './services/playbackEngine/nativePlaybackEngine';
+import { isNativePlayerAvailable } from './services/playbackEngine/nativePlayerPlugin';
+import { useNativePlaybackRuntime } from './services/playbackEngine/useNativePlaybackRuntime';
 import { usePlaybackInteractionBridge } from './components/app/playback/bridges/usePlaybackInteractionBridge';
 import { usePersonalFmModeController } from './hooks/usePersonalFmModeController';
 import { PERSONAL_FM_MODE_COMMAND_ID } from './components/command-palette/commands/fmModeCommand';
@@ -588,8 +591,37 @@ export default function App() {
 
     const persistLastPlaybackCache = useCallback(persistPlaybackCache, []);
 
+    /*
+     * 原生播放（P1）。
+     *
+     * 三个层次，别混：
+     *  · `nativePlaybackEnabled` —— 用户开关（设置里那一项）；
+     *  · `nativeActive`          —— 开关开了**且**原生插件真的在（不能靠 `typeof
+     *                               plugin.method === 'function'` 判，registerPlugin 给的是代理）；
+     *  · `nativeTakes`           —— 这一首真的交给原生：地址还得是原生吃得下的
+     *                               （blob 是 WebView 自己的对象 URL，媒体缓存副本就是这种，
+     *                                 那首整首回落 `<audio>`）。
+     *
+     * `nativeTakesRef` 给那些「用户按下时才跑」的回调（音量、seek、transport）用：
+     * 它们不该因为换了一首歌就换身份。
+     */
+    const nativePlaybackEnabled = useAudioSettingsStore(state => state.nativePlaybackEnabled);
+    const nativeActive = nativePlaybackEnabled && isNativePlayerAvailable();
+    const nativeTakes = nativeActive && nativePlaybackEngine.supports(audioSrc);
+    const nativeTakesRef = useRef(false);
+    useEffect(() => {
+        nativeTakesRef.current = nativeTakes;
+    }, [nativeTakes]);
+
     const syncOutputGain = useCallback((targetVolume: number, smoothing = 0.015) => {
         const clampedVolume = clampMediaVolume(targetVolume);
+
+        // 原生播放（P1）：音频不在 Web 音频图上，音量只能交给 ExoPlayer。
+        // 图上的 gain 节点这时候是空跑的，写它等于什么都没做。
+        if (nativeTakesRef.current) {
+            nativePlaybackEngine.setVolume(clampedVolume);
+            return;
+        }
 
         if (gainNodeRef.current && audioContextRef.current) {
             // Volume only. ReplayGain lives on each deck now, because during a blend the two
@@ -1195,7 +1227,10 @@ export default function App() {
         currentSongKeyRef: currentSongRef,
         coverUrl,
         loopMode: effectiveLoopMode,
-        isEnabled: automixEnabled && !isNowPlayingStageActive,
+        // 原生播放（P1）：automix 的双 deck 交叉淡化是靠 Web 音频图做的，图一断它就只剩
+        // 「两个空元素互相等」，转场点永远到不了、下一首也就永远不会自己来。原生阶段
+        // 直接关掉：切歌回到「播完再切」。
+        isEnabled: automixEnabled && !isNowPlayingStageActive && !nativeActive,
         transition: transitionSettings,
         onAdvanceTrack: () => {
             // Same advance the end of a track would trigger, only early enough for the outgoing
@@ -1448,6 +1483,7 @@ export default function App() {
         syncStageLyricsClock,
         pauseDuringTransition: handlePauseDuringTransition,
         isTransitionAudible: automix.isTransitionAudible,
+        nativeTakesRef,
     });
     useNavidromeScrobbleReporter({
         audioRef,
@@ -1650,6 +1686,30 @@ export default function App() {
         syncNowPlayingClock,
         lyricTimelineOffsetMs: effectiveLyricTimelineOffsetMs,
         incomingLyricTimelineOffsetMs,
+    });
+
+    /*
+     * 原生播放（P1）的接线。
+     *
+     * 这里只接「事件 → 状态机」那一半（时长、播完、播不出来）。进度条与歌词的时钟不在这里写：
+     * 它们在 usePlaybackVisualizerBridge 的 rAF 里统一从 `nativePlaybackEngine` 读，
+     * 两个写手抢同一个 motion signal 只会互相抹掉。
+     */
+    useNativePlaybackRuntime({
+        enabled: nativeActive,
+        audioSrc,
+        shouldAutoPlayRef: shouldAutoPlay,
+        isLyricsLoading,
+        getTargetPlaybackVolume,
+        repeatOne: effectiveLoopMode === 'one',
+        onEnded: () => {
+            cacheSongAssets();
+            void handleNextTrack({ allowStopOnMissing: true, shouldNavigateToPlayer: false });
+        },
+        onError: () => {
+            setStatusMsg(prev => (prev?.persistent ? prev : { type: 'error', text: t('status.playbackError') }));
+            setPlayerState(PlayerState.IDLE);
+        },
     });
 
     const {
@@ -2318,6 +2378,13 @@ export default function App() {
         if (seekDuringTransitionRef.current(time)) {
             return;
         }
+        // 原生播放（P1）：元素是空的，写它的 currentTime 没有意义，还会顺手把那个空元素
+        // 「播」起来。交给 ExoPlayer。
+        if (nativeTakesRef.current) {
+            void nativePlaybackEngine.seek(time);
+            void publishStagePlayerPlaybackUpdate();
+            return;
+        }
         if (audioRef.current) {
             audioRef.current.currentTime = time;
             if (audioRef.current.paused) {
@@ -2710,7 +2777,8 @@ export default function App() {
         <audio
             key={deck}
             ref={register}
-            src={automix.deckSrc(deck)}
+            // 原生接管的这一首，元素必须空着：它有 src 就会自己播一份，两处同时出声。
+            src={nativeTakes ? '' : automix.deckSrc(deck)}
             preload="auto"
             crossOrigin="anonymous"
             loop={effectiveLoopMode === 'one' && automix.activeDeck === deck}

@@ -3029,6 +3029,8 @@ export default {
     "keepScreenOnWhilePlayingDesc": "Cegah layar mati hanya saat audio sedang diputar, dan kembalikan kendali ke sistem begitu pemutaran dijeda. Hanya berlaku saat aplikasi di latar depan; sistem tetap akan menidurkan layar setelah Anda keluar.",
     "mixWithOtherAudio": "Putar bersama audio lain",
     "mixWithOtherAudioDesc": "Jika aktif, aplikasi lain yang mengeluarkan suara di latar belakang (efek game, navigasi, video pendek) tidak lagi menjeda musik - keduanya berbunyi bersamaan. Jika nonaktif, perilaku sistem berlaku: pemutaran berhenti begitu aplikasi lain mulai memutar audio.",
+    "nativePlayback": "Pemutaran native (eksperimental)",
+    "nativePlaybackNote": "Menyerahkan output suara ke pemutar sistem (ExoPlayer), bukan lagi ke mesin audio web. Pemutaran di latar belakang lebih stabil, hemat baterai, dan satu lapis audio tearing hilang. Biayanya: equalizer, efek suara, fade, transisi crossfade dan spektrum di halaman pemutar semuanya dibangun di atas grafik audio web, dan berhenti bekerja begitu pemutar native mengeluarkan suara. Lagu dari cache media tetap diputar di web view. Nonaktif secara default.",
     "deviceTypeSection": "Jenis perangkat",
     "deviceType": "Ponsel atau tablet",
     "deviceTypeDesc": "Di ponsel, seluruh layar diperkecil sedikit saat lanskap agar kontrol tidak saling menutupi. Tablet ditampilkan ukuran penuh di kedua orientasi.",

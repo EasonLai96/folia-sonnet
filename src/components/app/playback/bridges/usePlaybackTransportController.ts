@@ -11,6 +11,7 @@ import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 import type { OnlineRecovery, OnlineRecoveryOptions } from '../restore/createOnlineRecoveryController';
 import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { onlineFailureToast } from '../source/onlineFailureToast';
+import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 
 // src/components/app/playback/bridges/usePlaybackTransportController.ts
 
@@ -52,6 +53,14 @@ type UsePlaybackTransportControllerParams = {
     pauseDuringTransition?: () => boolean;
     /** True while a blend is audible on the deck no control points at. Such a pause still needs the fade. */
     isTransitionAudible?: () => boolean;
+    /**
+     * 这一首是不是由原生 ExoPlayer 在播（P1）。
+     *
+     * 传 ref 而不是布尔值：resume/pause 是 useCallback，跟着开关换身份会把整批订阅重建。
+     * 原生模式下元素是空的（没有 src），`audioRef.current.play()` 只会 reject，
+     * 所以这两条路径必须在碰到元素之前就分出去。
+     */
+    nativeTakesRef?: MutableRefObject<boolean>;
 };
 
 // Owns play and pause transport behavior across main playback and Stage lyric-only playback.
@@ -70,6 +79,7 @@ export function usePlaybackTransportController({
     syncStageLyricsClock,
     pauseDuringTransition,
     isTransitionAudible,
+    nativeTakesRef,
 }: UsePlaybackTransportControllerParams) {
     // Read here rather than passed in: store fields, a module-level motion signal, or i18n.
     const { t } = useTranslation();
@@ -134,6 +144,24 @@ export function usePlaybackTransportController({
         // A pending refresh can still supply the source after a pause. Its autoplay
         // decision follows the latest transport intent, including a later resume.
         const shouldAutoplay = () => wantsPlayback.current && isSameSource();
+
+        // 原生播放（P1）：下面这一整段（等音频上下文 resume、按 TTL 换在线地址、淡入淡出）
+        // 都是围着 Web 音频图转的，原生播放器不挂在那张图上，也用不着这些 —— 它自己管
+        // 解码与缓冲。这里是唯一该走的分岔，且必须在碰到元素之前。
+        if (nativeTakesRef?.current) {
+            syncOutputGain(getTargetPlaybackVolume(), 0);
+            try {
+                await nativePlaybackEngine.play();
+                if (!isCurrent()) return;
+                setPlayerState(PlayerState.PLAYING);
+            } catch (error) {
+                if (!isCurrent()) return;
+                setStatusMsg(prev => (prev?.persistent ? prev : { type: 'error', text: t('status.playbackError') }));
+                setPlayerState(PlayerState.PAUSED);
+                throw error;
+            }
+            return;
+        }
 
         setupAudioAnalyzer();
         // 后台和前台能做的事不一样：下面两处都要看它（换地址、等 ctx.resume）。
@@ -260,7 +288,7 @@ export function usePlaybackTransportController({
             setPlayerState(PlayerState.PAUSED);
             throw error;
         }
-    }, [activePlaybackContext, audioContextRef, audioRef, audioSrc, currentTime, duration, getSyntheticStageLyricsTime, getTargetPlaybackVolume, isNowPlayingStageActive, isTransitionAudible, recoverOnlinePlaybackSource, setPlayerState, setStatusMsg, setupAudioAnalyzer, shouldRefreshCurrentOnlineAudioSource, stageActiveEntryKind, stageLyricsClockRef, syncOutputGain, syncStageLyricsClock, t]);
+    }, [activePlaybackContext, audioContextRef, audioRef, audioSrc, currentTime, duration, getSyntheticStageLyricsTime, getTargetPlaybackVolume, isNowPlayingStageActive, isTransitionAudible, nativeTakesRef, recoverOnlinePlaybackSource, setPlayerState, setStatusMsg, setupAudioAnalyzer, shouldRefreshCurrentOnlineAudioSource, stageActiveEntryKind, stageLyricsClockRef, syncOutputGain, syncStageLyricsClock, t]);
 
     const pausePlayback = useCallback(() => {
         if (isNowPlayingStageActive) {
@@ -275,6 +303,13 @@ export function usePlaybackTransportController({
             const currentSyntheticTime = getSyntheticStageLyricsTime();
             syncStageLyricsClock(currentSyntheticTime, duration, PlayerState.PAUSED, stageLyricsClockRef.current.startTimeSec);
             currentTime.set(currentSyntheticTime);
+            setPlayerState(PlayerState.PAUSED);
+            return;
+        }
+
+        // 原生播放（P1）：淡出是 Web 音频图上的节点，原生不挂在那张图上，直接停。
+        if (nativeTakesRef?.current) {
+            void nativePlaybackEngine.pause();
             setPlayerState(PlayerState.PAUSED);
             return;
         }
@@ -338,7 +373,7 @@ export function usePlaybackTransportController({
         if (settlePause()) {
             setPlayerState(PlayerState.PAUSED);
         }
-    }, [activePlaybackContext, audioRef, audioSrc, currentTime, duration, getSyntheticStageLyricsTime, getTargetPlaybackVolume, isNowPlayingStageActive, isTransitionAudible, pauseDuringTransition, setPlayerState, stageActiveEntryKind, stageLyricsClockRef, syncOutputGain, syncStageLyricsClock]);
+    }, [activePlaybackContext, audioRef, audioSrc, currentTime, duration, getSyntheticStageLyricsTime, getTargetPlaybackVolume, isNowPlayingStageActive, isTransitionAudible, nativeTakesRef, pauseDuringTransition, setPlayerState, stageActiveEntryKind, stageLyricsClockRef, syncOutputGain, syncStageLyricsClock]);
 
     /*
      * 回到前台补一次。

@@ -204,6 +204,9 @@ public class MainActivity extends BridgeActivity {
         // Spotify：只管 OAuth —— 回调要一个本地端口（5588），换 token 会撞 CORS，
         // 两件 WebView 都做不了（见 FoliaSpotifyPlugin 的说明）。
         registerPlugin(FoliaSpotifyPlugin.class);
+        // 原生播放内核（P1，ExoPlayer）：只有「设置 → 原生播放」打开时才被用到，
+        // 注册本身不碰任何播放行为。
+        registerPlugin(top.izuna.foliamajor.player.FoliaNativePlayerPlugin.class);
 
         super.onCreate(savedInstanceState);
 

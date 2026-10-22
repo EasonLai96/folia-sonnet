@@ -18,6 +18,7 @@ import {
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
 import { tickBeatFx } from '../../../../services/beatFx/beatFxLive';
 import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
+import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 import { readIncomingLyricClock } from './incomingLyricClock';
 
 // src/components/app/playback/bridges/usePlaybackVisualizerBridge.ts
@@ -163,7 +164,11 @@ export function usePlaybackVisualizerBridge({
         // Normally the active deck; the outgoing one for as long as a blend holds the picture on
         // the track it is finishing, so that clock and picture never describe different songs.
         const audioElement = getDisplayElement?.() ?? audioRef.current;
-        const isActuallyPlaying = Boolean(audioElement && !audioElement.paused && !audioElement.ended);
+        // 原生播放（P1）：元素是空的，它的 currentTime 恒为 0，而歌词与进度条都从下面
+        // 那个 `time` 走 —— 所以这时候改从引擎读插值后的位置。null 表示「这一首不是原生在播」。
+        const nativeTime = nativePlaybackEngine.isPlaying() ? nativePlaybackEngine.getPositionSec() : null;
+        const usesNativeClock = nativeTime !== null;
+        const isActuallyPlaying = usesNativeClock || Boolean(audioElement && !audioElement.paused && !audioElement.ended);
         // Mid-handover a deck can be loading while the other one is still sounding. The analyser
         // is downstream of both, so it has real signal: dropping to the idle breath here would put
         // a visible stutter at exactly the moment meant to be seamless.
@@ -244,7 +249,7 @@ export function usePlaybackVisualizerBridge({
         }
 
         if (isActuallyPlaying && audioElement) {
-            const time = audioElement.currentTime;
+            const time = usesNativeClock ? (nativeTime as number) : audioElement.currentTime;
             currentTime.set(time);
 
             const effectiveLyricTime = time - displayOffsetMsRef.current / 1000;
@@ -341,7 +346,9 @@ export function usePlaybackVisualizerBridge({
         }
 
         if (beatFxWantedRef.current) {
-            tickBeatFx(isActuallyPlaying ? audioElement : null, analyserRef.current?.context);
+            // 原生播放时元素是空的：节拍那套补偿（beatFx）读的是元素与 AudioContext 的延迟，
+            // 这时候两边都没有意义，传 null 让它待着。
+            tickBeatFx(isActuallyPlaying && !usesNativeClock ? audioElement : null, analyserRef.current?.context);
         }
 
         // While a blend holds the picture, the active deck is the incoming track: its hand-off, clock
