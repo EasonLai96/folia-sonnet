@@ -267,6 +267,21 @@ describe('createLibraryHomeActions — opening cards', () => {
         expect(open).toHaveBeenCalledWith(expect.objectContaining({ source: 'online', providerId: 'p', id: 'daily_recommendations' }));
     });
 
+    it('a card from the merged "all providers" view opens under its own provider', async () => {
+        // 「全部」视图：当前平台是 netease，这张卡是 QQ 的歌单 —— 必须按 QQ 去取曲目，
+        // 拿当前平台去问别家的歌单 id 只会 404，或取成当前平台那份「我喜欢的」。
+        const { port } = createPort();
+        const open = vi.fn();
+        const raw = { id: 'qq-liked', name: '我喜欢的' };
+        await createLibraryHomeActions(port).openOnlineCard(
+            { id: 'qq:qq-liked', name: '我喜欢的', type: 'playlist', sourceProviderId: 'qq', raw },
+            'netease',
+            open,
+        );
+        expect(port.describeOnlineCollection).toHaveBeenCalledWith({ ...raw, type: 'playlist' }, 'qq');
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'qq', id: 'qq-liked' }));
+    });
+
     it('local groups and Navidrome cards open through the port\'s descriptor factories', () => {
         const { port } = createPort();
         const actions = createLibraryHomeActions(port);

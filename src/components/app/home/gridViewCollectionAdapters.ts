@@ -40,10 +40,15 @@ export const createOnlineGridViewCollection = (
     providerId: OnlineProviderId,
 ): OnlineGridViewCollectionDescriptor => {
     const creator = collection.creator;
+    // 归属平台：歌单自己带了就用它自己的（「全部」视图里合了各家歌单，每张卡来自哪家是它自己的事，
+    // 见 LibraryHomeCard.sourceProviderId）；没带（单平台视图）才是传入的当前平台。
+    // 别拿 providerId 盖掉自带的 —— 那等于用当前平台去问别家的歌单：取空、取错，或拿别家的歌单 id
+    // 撞上当前平台的接口（404）。
+    const ownerProviderId = (collection.providerId as OnlineProviderId | undefined) ?? providerId;
     return {
         ...collection,
         source: 'online',
-        providerId,
+        providerId: ownerProviderId,
         coverUrl: collection.coverUrl,
         trackCount: collection.trackCount,
         albumCount: collection.albumCount,

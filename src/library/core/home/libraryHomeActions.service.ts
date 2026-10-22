@@ -209,9 +209,17 @@ export const createLibraryHomeActions = (port: LibraryHomePort): LibraryHomeActi
 
         playPersonalFm,
 
+        /**
+         * 打开在线卡片。`providerId` 是**当前平台**，只有单平台视图里才是卡片的归属平台。
+         *
+         * 「全部」视图把各家的歌单合在一屏，每张卡自己来自哪家记在 `sourceProviderId` 上（见
+         * homeModel.contract 的注释）：这时必须按**卡片自己的**平台去取曲目，拿当前平台去问别家的
+         * 歌单只会取空、取错，或者拿别家的歌单 id 撞上当前平台的接口（404；「我喜欢的」各家都有，
+         * 于是点 QQ 的那张打开的是当前平台那一份）。
+         */
         openOnlineCard: async (card: LibraryHomeCard, providerId: string, open: LibraryHomeOpenCollection) => {
             if (isPersonalFmCard(card)) return playPersonalFm();
-            open(port.describeOnlineCollection(onlineCardCollection(card), providerId));
+            open(port.describeOnlineCollection(onlineCardCollection(card), card.sourceProviderId ?? providerId));
             return OK;
         },
 
