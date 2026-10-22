@@ -281,14 +281,37 @@ export const useCapacitorPlaybackBridge = ({
     if (state !== 'playing') return;
     const timer = window.setInterval(push, POSITION_TICK_MS);
     /*
-     * 原生播放（P1）时再补一条：**后台的定时器会被 Chromium 节流**（页面既不可见、
+     * 再补一条由播放器事件驱动的：**后台的定时器会被 Chromium 节流**（页面既不可见、
      * WebView 里又已经没有音频在响，会掉进「intensive throttling」，1 秒变 1 分钟）。
-     * 靠那个 setInterval 推位置，通知栏在后台上就永远是同一个数字。
+     * 靠上面那个 setInterval 推位置，通知栏在后台上就永远是同一个数字。
      * 播放器每 250ms 会推一次位置过来，那是桥事件、不吃定时器节流 —— 用它来驱动这一拍。
      * 合并成 500ms 一次，别为了进度条把桥刷满。
+     *
+     * ⚠️ 但**只在网页播放（`<audio>`）时**才真的推 —— 原生接管的那一首服务自己会问
+     * 播放器，这一推纯属浪费（见下面 `ownsPlayback()` 那一处的说明）。
      */
     let lastPushAt = 0;
     const stopFollowingEngine = nativePlaybackEngine.subscribe(() => {
+        /*
+         * ⭐ **原生播放器接管的那一首，这一路一次都不推。**
+         *
+         * 服务那边 `FoliaPlaybackService.resolvePlaybackPositionMs()` 在原生在播时
+         * **直接问播放器**（`FoliaNativePlayerPlugin.currentPositionMs()`）：比这里
+         * 插值出来的更准，而且它跑在原生侧，**根本不吃 WebView 的定时器节流** ——
+         * 上面那条注释担心的「后台通知栏不动」，靠的就是它，不需要 Web 顶这一下。
+         * 也就是说这一推对进度条没有任何贡献（写进去的 cachedPositionMs 在原生在播
+         * 时压根不参与计算），只有代价：
+         *   · 一次 `startService` 的 IPC，服务 `onStartCommand` 还要重建一次
+         *     MediaSession 的 PlaybackState（跨进程广播给系统 UI / 蓝牙 / Auto）；
+         *   · 而 **Capacitor 的桥只有一条** —— 500ms 一笔正好把界面定期顶一下，
+         *     表现就是「App 里隔一会儿顿一下，像在等什么东西」。
+         *
+         * 网页播放（`<audio>`）时不走这里，那条路只有播放器自己知道位置，照旧推。
+         *
+         * ⚠️ 只挡**位置**这一路：播放 / 暂停翻转是上面那个 effect 推的（依赖
+         * playerState），服务要靠它认状态，那条不能省。
+         */
+        if (nativePlaybackEngine.ownsPlayback()) return;
         const now = Date.now();
         if (now - lastPushAt < 500) return;
         lastPushAt = now;
