@@ -1,4 +1,4 @@
-import type { LoginDiagnosticLine, OnlineMusicProvider, ProviderAudioSource, ProviderCollection } from '../../types/onlineMusic';
+import type { LoginDiagnosticLine, LoginMethod, OnlineMusicProvider, ProviderAudioSource, ProviderCollection } from '../../types/onlineMusic';
 import { OnlineProviderError } from '../../types/onlineMusic';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
 import { parseQishuiLyrics } from '../../utils/lyrics/qishuiLyrics';
@@ -53,14 +53,73 @@ let lastQishuiQrNote: string | null = null;
 // 判据也跟着换：不问「桥那份存储读没读出来」（那是桥的家事，且已被实测为不可靠），
 // 而是**直接看账号级读取拿不拿得到东西**（拉歌单）。灌回去之后 status 认了，
 // 后面 readWhole 会真的去拉歌单 —— 拉得到就是能用。
-const QISHUI_SESSION_KEY = 'car-session';
+/**
+ * 汽水的两套协议。
+ *
+ * - `luna-car`：车机协议（/api/luna/v1/platform），抖音开放平台扫码换 ticket-guard 凭据；
+ * - `passport-web`：手机协议，passport 扫码换会话 Cookie，数据走 api.qishui.com 的 PC/Web 接口。
+ *
+ * 两套凭据互不相认：选哪套登录就用哪套拉数据。
+ */
+type QishuiProtocol = 'luna-car' | 'passport-web';
+
+// ---- 两套协议，凭据各存一份 ---------------------------------------------
+//
+// 车机（ticket-guard）与手机（passport 会话 Cookie）是两套互不相认的凭据：切协议
+// 等于换一套会话，所以 App 这边存的副本也要按协议分开 —— 共用一个键的话，
+// 用手机协议登完再切回车机，会把 Cookie 当成 ticket 灌回去（或反过来），
+// 表现就是「换了协议，登录态两边都不对」。
+const QISHUI_SESSION_KEYS: Record<QishuiProtocol, string> = {
+    'luna-car': 'car-session',
+    'passport-web': 'phone-session',
+};
+const QISHUI_PROTOCOL_KEY = 'protocol';
+
+/** 选了哪套协议（记住上一次的选择：登录窗口里选过一次，下次沿用）。 */
+let currentProtocol: QishuiProtocol = readProtocolPreference();
+
+function readProtocolPreference(): QishuiProtocol {
+    return readProviderSessionValue('qishui', QISHUI_PROTOCOL_KEY) === 'passport-web'
+        ? 'passport-web' : 'luna-car';
+}
+
+/**
+ * 换协议：先告诉桥（它的默认也是车机，重启后要重新说一遍），再决定记不记住。
+ *
+ * ⚠ 老包不认 `protocol.use`（那时还没有这套 operation），抛错不能让它影响登录：
+ * 按「只有车机」继续 —— 而 resolveLoginMethods 那边问过 `protocol.get`，
+ * 老包根本不会把「手机协议」摆出来。
+ */
+async function useProtocol(protocol: QishuiProtocol, { remember = false } = {}): Promise<void> {
+    currentProtocol = protocol;
+    if (remember) writeProviderSessionValue('qishui', QISHUI_PROTOCOL_KEY, protocol);
+    try {
+        await requestQishui('protocol.use', { protocol });
+    } catch (_) {
+        // 桥不认就当只有车机：这一次的登录仍会照车机走。
+    }
+}
+
+const sessionKey = (): string => QISHUI_SESSION_KEYS[currentProtocol];
+
+/**
+ * 登录窗口里给的两条路。
+ *
+ * ⚠ 只有**桥真的两套都支持**时才把它们摆出来（见 resolveLoginMethods）：老包没有
+ * protocol.get，摆出来点了也没用 —— 那还不如维持原来的单步流程（直接出车机的码）。
+ */
+const QISHUI_LOGIN_METHODS: LoginMethod[] = [
+    { id: 'luna-car', labelKey: 'home.loginMethodQishuiCar', iconKey: 'qishui' },
+    { id: 'passport-web', labelKey: 'home.loginMethodQishuiPhone', iconKey: 'qishui' },
+];
+
 /** 最近一次「灌回去」的结果：真机上再说账号没了，先看这一行。 */
 let lastQishuiSessionNote: string | null = null;
 /** 最近一次「抄出来」的失败原因（成功不记）。 */
 let lastQishuiSessionKeepNote: string | null = null;
 
 const readKeptCredential = (): unknown => {
-    const text = readProviderSessionValue('qishui', QISHUI_SESSION_KEY);
+    const text = readProviderSessionValue('qishui', sessionKey());
     if (!text) return null;
     try { return JSON.parse(text); } catch (_) { return null; }
 };
@@ -71,11 +130,15 @@ async function keepQishuiCredential(): Promise<void> {
     try {
         const data = await requestQishui<any>('session.export', {});
         const credential = data?.credential;
-        if (credential?.ticket) {
-            writeProviderSessionValue('qishui', QISHUI_SESSION_KEY, JSON.stringify(credential));
+        // 车机那份认 ticket，手机那份认 cookie：两套凭据长得不一样，判定也得分开
+        // （统一要求 ticket 的话，手机协议永远「抄不出来」，下次重启就没账号了）。
+        const usable = currentProtocol === 'passport-web'
+            ? Boolean(credential?.cookie) : Boolean(credential?.ticket);
+        if (usable) {
+            writeProviderSessionValue('qishui', sessionKey(), JSON.stringify(credential));
             return;
         }
-        removeProviderSessionValue('qishui', QISHUI_SESSION_KEY);
+        removeProviderSessionValue('qishui', sessionKey());
     } catch (error) {
         // 抄不出来＝下一次重启还是没账号，这是要留在诊断里的。
         lastQishuiSessionKeepNote = error instanceof Error ? error.message : String(error);
@@ -195,7 +258,26 @@ export const qishuiProvider: OnlineMusicProvider = {
     },
     auth: {
         getLoginTexts: () => ({ title: 'home.loginTitleQishui', note: 'home.loginNoteQishui' }),
+        /**
+         * 桥是不是两套协议都在。
+         *
+         * 返回空数组＝「只有一条路」，登录窗口维持单步流程（直接出车机的码）——
+         * 这既是老包的行为，也是桥没起来时的行为。
+         */
+        async resolveLoginMethods() {
+            try {
+                const data = await requestQishui<any>('protocol.get', {});
+                const available = Array.isArray(data?.available) ? data.available.map(String) : [];
+                if (available.includes('luna-car') && available.includes('passport-web')) return QISHUI_LOGIN_METHODS;
+            } catch (_) {
+                // 桥不认这个 operation（老包）：按单步流程走。
+            }
+            return [];
+        },
         async getLoginStatus() {
+            // ⚠ 桥那边的协议默认是车机，重启后要按偏好再说一遍：不然「上次选了手机
+            // 协议、重启」会被当成车机来问，登录态凭空消失。
+            await useProtocol(currentProtocol);
             // ⚠ 先灌凭据、再问登录态。
             //
             // 顺序反过来就是「重启后账号没了」本身：桥那份存储读不回来时，问也是白问，
@@ -205,13 +287,27 @@ export const qishuiProvider: OnlineMusicProvider = {
             await restoreQishuiCredential();
             // 请求本身失败时也要留下痕迹：否则诊断只会写「last status: none」，
             // 看不出是没走到这一步，还是这一步抛了错。
-            let data: any = null;
-            try {
-                data = await requestQishui<any>('status', {});
-            } catch (error) {
-                lastQishuiLoginStatus = 'status request failed: '
-                    + (error instanceof Error ? `${error.message}` : String(error));
-                throw error;
+            const askStatus = async (): Promise<any> => {
+                try {
+                    return await requestQishui<any>('status', {});
+                } catch (error) {
+                    lastQishuiLoginStatus = 'status request failed: '
+                        + (error instanceof Error ? `${error.message}` : String(error));
+                    throw error;
+                }
+            };
+            let data: any = await askStatus();
+            // 这一套没登、另一套还登着：切过去再问一次。
+            //
+            // ⚠ 少了这一步，切一下协议就会把已经登着的账号从界面上抹掉 —— accountRead
+            // 把「问出来没登录」当成「这个平台没账号」，而账号其实好好地躺在另一套里。
+            const alt = data?.alt;
+            if (!data?.loggedIn && alt?.loggedIn
+                && (alt.protocol === 'luna-car' || alt.protocol === 'passport-web')) {
+                lastQishuiSessionNote = `the other protocol (${String(alt.protocol)}) still holds a session`;
+                await useProtocol(alt.protocol === 'passport-web' ? 'passport-web' : 'luna-car');
+                await restoreQishuiCredential();
+                data = await askStatus();
             }
             lastQishuiLoginStatus = data
                 ? `loggedIn=${data.loggedIn ? 'yes' : 'no'} webSession=${data.webSession ? 'yes' : 'no'}`
@@ -241,10 +337,23 @@ export const qishuiProvider: OnlineMusicProvider = {
             clearQishuiLibraryCache();
             // 账号走了，App 这边那份也要一起走：留着它，下次启动会把它又灌回桥里，
             // 表现成「已经退出登录，重启后又回来了」。
-            removeProviderSessionValue('qishui', QISHUI_SESSION_KEY);
-            await requestQishui('login.logout', {});
+            //
+            // ⚠ 两套协议各存了一份，只清当前这份的话，另一套的会话还在：退出之后一查
+            // 登录态它又冒出来（「点了退出却还登着」的另一半），所以两份一起清。
+            removeProviderSessionValue('qishui', QISHUI_SESSION_KEYS['luna-car']);
+            removeProviderSessionValue('qishui', QISHUI_SESSION_KEYS['passport-web']);
+            // 桥那边也要两套各退一次：login.logout 只作用于当前协议。
+            const preferred = readProtocolPreference();
+            for (const protocol of ['luna-car', 'passport-web'] as QishuiProtocol[]) {
+                await useProtocol(protocol);
+                await requestQishui('login.logout', {}).catch(() => {});
+            }
+            await useProtocol(preferred);
         },
-        async startLogin() {
+        async startLogin(methodId?: string) {
+            // 选了哪条路就切到哪套协议，并把它记住（下次进登录还是这一套）。
+            // 两套凭据互不相认，所以这一步必须在出码之前做完。
+            await useProtocol(methodId === 'passport-web' ? 'passport-web' : 'luna-car', { remember: true });
             const data = await requestQishui<any>('login.qr', {});
             const token = qishuiText(data?.token);
             const imageUrl = qishuiText(data?.qrDataUrl || data?.qrcode || data?.qrCodeUrl);
@@ -266,7 +375,8 @@ export const qishuiProvider: OnlineMusicProvider = {
             qrSessions.set(token, imageUrl);
             // 服务端下发的扫码文案原样留档：上游实测是「抖音」，诊断里一眼可见，
             // 免得靠猜「到底该用哪个 App 扫」。
-            lastQishuiQrNote = `qr copywriting: ${qishuiText(data?.copywriting) || '(none)'}`
+            lastQishuiQrNote = `protocol: ${qishuiText(data?.protocol) || currentProtocol}`
+                + ` / qr copywriting: ${qishuiText(data?.copywriting) || '(none)'}`
                 + ` / webName: ${qishuiText(data?.webName) || '(none)'}`;
             return token;
         },
@@ -328,10 +438,11 @@ export const qishuiProvider: OnlineMusicProvider = {
                 // 「重启后账号没了」先看这一行：App 这边有没有存下凭据、灌回去没有。
                 line(`session: ${lastQishuiSessionNote ?? 'none'}`),
                 ...(lastQishuiSessionKeepNote ? [line(`session copy failed: ${lastQishuiSessionKeepNote}`)] : []),
-                // 安卓端协议层已换成车机协议（/api/luna/v1/platform）：签名是
-                // WebView 自带的 WebCrypto ECDSA P-256（bd-ticket-guard），不再
-                // 依赖 bdms.node，旧「a_bogus 回退」那行说明已过时。
-                line('signed requests: android=luna-car protocol (bd-ticket-guard via WebCrypto); desktop=passport cookies'),
+                // 两套协议：车机（/api/luna/v1/platform，签名是 WebView 自带的 WebCrypto
+                // ECDSA P-256，bd-ticket-guard）与手机（passport 扫码换会话 Cookie，
+                // 数据走 /luna/pc/*，实测免签名）。桌面端仍是它自己那条 passport 链路。
+                line(`protocol: ${currentProtocol}`),
+                line('signed requests: android=luna-car (bd-ticket-guard via WebCrypto) / passport-web (cookie only, no signature); desktop=passport cookies'),
             ];
         },
     },

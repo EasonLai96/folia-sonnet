@@ -1563,6 +1563,8 @@ export default {
     "loginFeiniuFnIdPlaceholder": "mis. abcd1234",
     "loginTitleQishui": "Pindai untuk masuk ke Qishui Music",
     "loginNoteQishui": "Pindai kode ini dengan aplikasi Qishui Music dan konfirmasi masuk",
+    "loginMethodQishuiCar": "Protokol mobil",
+    "loginMethodQishuiPhone": "Protokol ponsel",
     "loginServerUrl": "Alamat server",
     "loginServerUrlPlaceholder": "http://192.168.1.5:5666",
     "loginUsername": "Nama pengguna",

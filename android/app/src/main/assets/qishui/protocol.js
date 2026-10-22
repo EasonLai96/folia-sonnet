@@ -7034,6 +7034,9 @@ ${lines.join("\n")}
       const result = await api().startLogin();
       return {
         provider: "qishui",
+        // 这一张码是哪套协议出的：两套的扫码 App 可能一样，但换来的凭据完全不同，
+        // 诊断里要能一眼分清（渲染层把它记进 last qr 那一行）。
+        protocol,
         token: result.key,
         qrcode: result.qrDataUrl,
         qrDataUrl: result.qrDataUrl,

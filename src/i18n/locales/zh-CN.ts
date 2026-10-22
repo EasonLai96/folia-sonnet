@@ -1564,6 +1564,8 @@ export default {
     "loginFeiniuFnIdPlaceholder": "例如 abcd1234",
     "loginTitleQishui": "扫码登录汽水音乐",
     "loginNoteQishui": "打开汽水音乐 App 扫描二维码并确认登录",
+    "loginMethodQishuiCar": "车机协议",
+    "loginMethodQishuiPhone": "手机协议",
     "loginServerUrl": "服务器地址",
     "loginServerUrlPlaceholder": "http://192.168.1.5:5666",
     "loginUsername": "用户名",

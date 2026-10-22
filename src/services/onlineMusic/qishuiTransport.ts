@@ -11,6 +11,13 @@ export type QishuiOperation =
     | 'login.qr'
     | 'login.check'
     | 'login.logout'
+    // 两套协议（车机 / 手机）共用下面那一批 operation，选哪套由这两个先说好。
+    // `protocol.get` 问「现在用哪一套、有哪些可选」；`protocol.use` 换一套
+    // （桥把它记在模块里，之后的所有 operation 都按新的走）。
+    | 'protocol.get'
+    | 'protocol.use'
+    // 手机协议专用：手动粘贴会话 Cookie，跳过扫码。
+    | 'login.cookie'
     // 凭据在 App 这边也存一份（跨重启用）。只有安卓的隐藏 WebView 桥有这两个
     // operation，桌面端的 Electron 是另一条链路（它自己的 cookie 罐本来就持久），
     // 所以调用方要先判环境（见 qishuiProvider 的同名守卫），别在桌面端发。
