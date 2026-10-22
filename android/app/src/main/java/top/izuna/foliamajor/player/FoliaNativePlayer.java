@@ -305,10 +305,20 @@ public final class FoliaNativePlayer {
                 cachedAudioSessionId = current.getAudioSessionId();
                 startTicking();
                 emit("playing", cachedPositionMs, cachedDurationMs, null);
-            } else {
-                stopTicking();
-                emit("paused", cachedPositionMs, cachedDurationMs, null);
+                return;
             }
+            /*
+             * 缓冲时 ExoPlayer 也会报 `isPlaying = false`，而歌其实没停。
+             * 这时候要是发 "paused"，Web 侧会把播放标记清掉：进度条停住、歌词不动，
+             * 缓冲一结束又猛跳一段 —— 用起来就是「一直在抽搐」。
+             * 缓冲照旧上报位置（它本来不前进），只是不装作已经停了。
+             */
+            if (current.getPlaybackState() == Player.STATE_BUFFERING) {
+                emit("buffering", cachedPositionMs, cachedDurationMs, null);
+                return;
+            }
+            stopTicking();
+            emit("paused", cachedPositionMs, cachedDurationMs, null);
         }
 
         @Override

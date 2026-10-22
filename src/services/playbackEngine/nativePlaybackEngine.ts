@@ -49,6 +49,11 @@ class NativePlaybackEngine {
         return this.hasSource ? this.currentUrl : null;
     }
 
+    /** 原生手上有没有歌（不论在不在播）。进度条与歌词看这个，不看 isPlaying。 */
+    ownsPlayback(): boolean {
+        return this.hasSource;
+    }
+
     isPlaying(): boolean {
         return this.hasSource && this.playing;
     }
@@ -166,6 +171,14 @@ class NativePlaybackEngine {
             case 'error':
             case 'idle':
                 this.playing = false;
+                break;
+            case 'buffering':
+                /*
+                 * 缓冲期间播放器的 `isPlaying` 会翻成 false（ExoPlayer 的语义：没在出声）。
+                 * 但歌并没有停 —— 这里要是跟着置 false，进度条就停在原地、歌词不动，
+                 * 等缓冲结束再猛地跳一段，看着就是「一直抽搐」。所以缓冲不改这个标记：
+                 * 位置上报送着（缓冲时它本来不前进），插值也就不会跑飞。
+                 */
                 break;
             default:
                 break;

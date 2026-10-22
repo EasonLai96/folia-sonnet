@@ -55,6 +55,14 @@ type UsePlaybackInteractionBridgeParams = {
      */
     isTransitionAudible?: () => boolean;
     /**
+     * 这一首是不是由原生 ExoPlayer 在播（P1）。
+     *
+     * 必须有：下面那个「元素在不在播」的判据对原生不成立 —— 元素是空的（src=''），
+     * `paused` 恒为 true，于是按播放键永远走「开始播放」分支，**应用内就再也按不停**。
+     * 传 ref 而不是布尔值：这些回调是 useCallback，跟着开关换身份会把整批订阅重建。
+     */
+    nativeTakesRef?: React.MutableRefObject<boolean>;
+    /**
      * Takes a seek that lands during a blend, returning true when it did.
      *
      * Mid-blend `audioRef` is the incoming deck: writing to it moves a track the listener cannot
@@ -85,6 +93,7 @@ export function usePlaybackInteractionBridge({
     isNowPlayingStageActive,
     audioRef,
     isTransitionAudible,
+    nativeTakesRef,
     seekDuringTransition,
     stageLyricsClockRef,
     cyclePlayerChromeVisibilityMode,
@@ -160,6 +169,17 @@ export function usePlaybackInteractionBridge({
             return;
         }
 
+        // 原生播放（P1）：下面的 `audioRef.current.paused` 这时候恒为 true（元素是空的），
+        // 照它判就变成「按播放键只会一直开始播放，永远按不停」。改看播放状态。
+        if (nativeTakesRef?.current) {
+            if (playerState === PlayerState.PLAYING) {
+                pausePlayback();
+            } else {
+                startPlaybackFromInteraction();
+            }
+            return;
+        }
+
         if (audioRef.current) {
             if (!audioRef.current.paused && !audioRef.current.ended) {
                 pausePlayback();
@@ -167,7 +187,7 @@ export function usePlaybackInteractionBridge({
                 startPlaybackFromInteraction();
             }
         }
-    }, [activePlaybackContext, audioRef, audioSrc, isNowPlayingStageActive, isTransitionAudible, pausePlayback, playerState, startPlaybackFromInteraction, stageActiveEntryKind]);
+    }, [activePlaybackContext, audioRef, audioSrc, isNowPlayingStageActive, isTransitionAudible, nativeTakesRef, pausePlayback, playerState, startPlaybackFromInteraction, stageActiveEntryKind]);
 
     const toggleLoop = useCallback((event?: React.MouseEvent) => {
         event?.stopPropagation();

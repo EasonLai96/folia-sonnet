@@ -5,6 +5,7 @@ import type { SongResult } from '../types';
 import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../services/onlineMusic/songMetadata';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { fetchCoverBytes } from '../services/coverBytes';
+import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 
@@ -279,7 +280,24 @@ export const useCapacitorPlaybackBridge = ({
     push();
     if (state !== 'playing') return;
     const timer = window.setInterval(push, POSITION_TICK_MS);
-    return () => window.clearInterval(timer);
+    /*
+     * 原生播放（P1）时再补一条：**后台的定时器会被 Chromium 节流**（页面既不可见、
+     * WebView 里又已经没有音频在响，会掉进「intensive throttling」，1 秒变 1 分钟）。
+     * 靠那个 setInterval 推位置，通知栏在后台上就永远是同一个数字。
+     * 播放器每 250ms 会推一次位置过来，那是桥事件、不吃定时器节流 —— 用它来驱动这一拍。
+     * 合并成 500ms 一次，别为了进度条把桥刷满。
+     */
+    let lastPushAt = 0;
+    const stopFollowingEngine = nativePlaybackEngine.subscribe(() => {
+        const now = Date.now();
+        if (now - lastPushAt < 500) return;
+        lastPushAt = now;
+        push();
+    });
+    return () => {
+        window.clearInterval(timer);
+        stopFollowingEngine();
+    };
   }, [enabled, playerState, currentSong]);
 };
 

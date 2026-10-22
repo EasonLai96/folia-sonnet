@@ -165,10 +165,17 @@ export function usePlaybackVisualizerBridge({
         // the track it is finishing, so that clock and picture never describe different songs.
         const audioElement = getDisplayElement?.() ?? audioRef.current;
         // 原生播放（P1）：元素是空的，它的 currentTime 恒为 0，而歌词与进度条都从下面
-        // 那个 `time` 走 —— 所以这时候改从引擎读插值后的位置。null 表示「这一首不是原生在播」。
-        const nativeTime = nativePlaybackEngine.isPlaying() ? nativePlaybackEngine.getPositionSec() : null;
-        const usesNativeClock = nativeTime !== null;
-        const isActuallyPlaying = usesNativeClock || Boolean(audioElement && !audioElement.paused && !audioElement.ended);
+        // 那个 `time` 走 —— 所以这时候改从引擎读插值后的位置。
+        //
+        // ⚠️ 判据是 `ownsPlayback`（原生手上有没有歌），**不是** `isPlaying`：
+        // 缓冲、切后台、焦点被抢都会让 isPlaying 短暂为 false，跟着它走的结果就是
+        // 「进度条和歌词时走时停、一停一冲」—— 用户说的抽搐。位置该不该前进由引擎的
+        // 插值决定（停着的时候它本来就给同一个值）。
+        const usesNativeClock = nativePlaybackEngine.ownsPlayback();
+        const nativeTime = usesNativeClock ? nativePlaybackEngine.getPositionSec() : null;
+        const isActuallyPlaying = usesNativeClock
+            ? nativePlaybackEngine.isPlaying()
+            : Boolean(audioElement && !audioElement.paused && !audioElement.ended);
         // Mid-handover a deck can be loading while the other one is still sounding. The analyser
         // is downstream of both, so it has real signal: dropping to the idle breath here would put
         // a visible stutter at exactly the moment meant to be seamless.
@@ -248,8 +255,14 @@ export function usePlaybackVisualizerBridge({
             audioBands.treble.set(process(treble, 2));
         }
 
-        if (isActuallyPlaying && audioElement) {
-            const time = usesNativeClock ? (nativeTime as number) : audioElement.currentTime;
+        // 原生这一路不看 isActuallyPlaying：暂停时引擎给的是停住的位置，照样要写进去
+        // （不写的话进度条与歌词会停在「上一次还活着」的地方，等下次 events 才跳一次）。
+        const clockTime = usesNativeClock
+            ? (nativeTime as number)
+            : (isActuallyPlaying && audioElement ? audioElement.currentTime : null);
+
+        if (clockTime !== null) {
+            const time = clockTime;
             currentTime.set(time);
 
             const effectiveLyricTime = time - displayOffsetMsRef.current / 1000;

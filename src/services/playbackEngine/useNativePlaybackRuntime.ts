@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { setDuration } from '../../stores/usePlaybackStore';
+import { currentTime } from '../../stores/motionSignals';
 import { nativePlaybackEngine } from './nativePlaybackEngine';
 
 // src/services/playbackEngine/useNativePlaybackRuntime.ts
@@ -90,6 +91,18 @@ export const useNativePlaybackRuntime = ({
     useEffect(() => {
         if (!enabled) return undefined;
         return nativePlaybackEngine.subscribe(event => {
+            /*
+             * 位置也在这里落一次 —— **只在页面不可见时**。
+             *
+             * 前台时 rAF 每帧都在写（插值过的、更平滑），这里再写一次只是把 250ms 前的
+             * 采样值覆盖回去：每秒四次、每次往回退最多 250ms，歌词就会看得见的抖。
+             * 切到后台以后 rAF 直接被 Chromium 停掉，那时候只剩这一条 —— 通知栏那条
+             * 进度条才走得动（原来的写法只靠 rAF，后台永远停在最后一次前台读数上）。
+             */
+            const pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+            if (pageHidden && typeof event.positionMs === 'number' && event.type !== 'ready') {
+                currentTime.set(Math.max(0, event.positionMs) / 1000);
+            }
             switch (event.type) {
                 case 'ready':
                     if (typeof event.durationMs === 'number' && event.durationMs > 0) {

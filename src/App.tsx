@@ -1556,7 +1556,10 @@ export default function App() {
         mediaSessionPauseRef,
         mediaSessionPrevRef,
         mediaSessionNextRef,
-        getCurrentTime: () => currentTime.get(),
+        // 通知栏那条进度条的位置来源。原生播放时必须直接问引擎：后台里 rAF 被停掉，
+        // `currentTime` 那个 motion signal 会停在最后一次前台读数上 —— 于是通知栏
+        // 显示 00、拖动改完又被下一拍推回 00。
+        getCurrentTime: () => (nativeTakesRef.current ? nativePlaybackEngine.getPositionSec() : currentTime.get()),
         onSeek: (seconds) => seekMainAudioRef.current(seconds),
         isLiked: nativeSongLiked,
         canLike: nativeCanLikeSong,
@@ -1725,6 +1728,7 @@ export default function App() {
         // Play-vs-pause cannot be decided off the active deck mid-blend: that is the arriving track,
         // and it is silent for the whole lead.
         isTransitionAudible: automix.isTransitionAudible,
+        nativeTakesRef,
         // The arrow keys check for a blend first, the way the bar and the remote do, rather than
         // writing to the active deck - which mid-blend is not the deck the listener is watching.
         seekDuringTransition,
