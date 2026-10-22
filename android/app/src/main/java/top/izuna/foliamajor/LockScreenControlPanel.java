@@ -559,10 +559,17 @@ final class LockScreenControlPanel {
      * 所以末尾再按 runway 夹一次，宁可少走两 dp 也不要被切。
      */
     void setChromeHidden(boolean hidden, boolean animate) {
-        chromeHidden = hidden;
+        /*
+         * 窗口不在（重排那趟 detach 之后、attach 之前）就**一个字都不改**，连状态也不翻。
+         *
+         * 先翻状态再 return 的话，那空档里的一下点击会把开关拨到"收起"却没有任何画面响应；
+         * 等 attach 回来照着状态复位，面板就直接以收起的姿态出现 ——
+         * 用户看到的是"面板自己没了"，而且再点一下是**放出**（状态是收起），等于反了一次。
+         */
         if (panel == null || cardView == null) {
             return;
         }
+        chromeHidden = hidden;
         if (chromeAnimator != null) {
             chromeAnimator.cancel();
             chromeAnimator = null;
