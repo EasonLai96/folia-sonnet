@@ -3,6 +3,7 @@
  *
  * 与 `qq-login-qr.js`（手机QQ 的 ptlogin 网页码）、`qq-wechat-login.js`（微信 OAuth 码）并列，
  * 是第三条通道，也是上游 `qqmusic` 通道在安卓内置桥里的落地：
+ *  0. POST musicu `music.getSession.session/GetSession` → 设备会话 uid / sid，之后每笔 comm 都带
  *  1. POST u.y.qq.com musicu `music.login.LoginServer/CreateQRCode` → qrcodeID + 二维码图
  *     （comm 照安卓客户端：ct 23 / cv 0，参数里 tmeAppID qqmusic、ct 11、cv 14090008）
  *  2. 连 `wss://mu.y.qq.com/ws/handshake`，订阅 `management.qrcode_login/<qrcodeID>`（见 `mqtt.js`）
@@ -15,7 +16,6 @@
  * 都被上游按 QQ 账号解析而拒收（和 `qq-wechat-login.js` 里那段同源）。
  */
 
-import { UA } from '../weapi.js';
 import { clearCookieCache, saveProviderCookie, setBrowserCookies } from '../cookies.js';
 import { noteQrLoginStep, resetQrLoginTrace } from '../qrLoginTrace.js';
 import { buildLoginSession, clearQQPlatformSessionCookies, fetchWithTimeout } from '../qq-login-qr.js';
@@ -46,43 +46,114 @@ const randomHex = (length) => {
   return out.slice(0, length);
 };
 
+const randomDigits = (length) => {
+  let out = '';
+  for (let index = 0; index < length; index += 1) out += Math.floor(Math.random() * 10);
+  return out;
+};
+
 // 设备身份只用来让上游把这次登录当成一台新设备，不涉及任何账号信息；每次启动换一套即可。
+// 字段与上游 `createAndroidDevice()` 同一套：换票那一笔上游会拿 `rom` / `phonetype` / `os_ver`
+// 去核对「取码的是不是这台设备」，写少了同样是没有解释的 `code 1000` 级别拒绝。
 let deviceIdentity = null;
 const device = () => {
-  if (!deviceIdentity) deviceIdentity = { openUdid: randomHex(16), androidId: randomHex(16) };
+  if (!deviceIdentity) {
+    deviceIdentity = {
+      openUdid: randomHex(32),
+      androidId: randomHex(16),
+      osRelease: '10',
+      model: 'MI 6',
+      sdk: 29,
+      fingerprint: `xiaomi/iarim/sagit:10/eomam.200122.001/${randomDigits(7)}:user/release-keys`,
+      sessionUid: '',
+      sessionSid: '',
+    };
+  }
   return deviceIdentity;
 };
 
-const buildComm = (loginType) => ({
-  ct: 23,
-  cv: 0,
-  v: 14090008,
-  chid: '10003505',
-  tmeAppID: 'qqmusic',
-  OpenUDID: device().openUdid,
-  udid: device().openUdid,
-  aid: device().androidId,
-  os_ver: '14',
-  uin: '0',
-  ...(loginType ? { tmeLoginType: loginType } : {}),
-});
+/**
+ * musicu 的 comm，照安卓客户端那一套（上游 `buildAndroidComm`）。
+ *
+ * 🔴 `ct/cv` 是「我是谁」：**取码那一笔**上游传 `{ ct: 23, cv: 0 }`（网页那张脸），
+ * **换票这一笔**必须回到安卓客户端的 `{ ct: 11, cv: 14090008 }` —— 差在这一对上，上游就是
+ * 一句不带任何解释的 `code 1000`（凭据不被接受），看不出是脸不对还是令牌不对。
+ */
+const buildComm = (overrides = {}) => {
+  const identity = device();
+  return {
+    ct: 11,
+    cv: 14090008,
+    v: 14090008,
+    chid: '10003505',
+    tmeAppID: 'qqmusic',
+    // QIMEI 是空串也照样走通（取码那笔就是这么验的），上游只要求字段在。
+    QIMEI: '',
+    QIMEI36: '',
+    OpenUDID: identity.openUdid,
+    udid: identity.openUdid,
+    OpenUDID2: identity.openUdid,
+    aid: identity.androidId,
+    os_ver: identity.osRelease,
+    phonetype: identity.model,
+    devicelevel: String(identity.sdk),
+    newdevicelevel: String(identity.sdk),
+    rom: identity.fingerprint,
+    ...(identity.sessionUid ? { uid: identity.sessionUid } : {}),
+    ...(identity.sessionSid ? { sid: identity.sessionSid } : {}),
+    ...overrides,
+  };
+};
+
+/**
+ * 设备会话 bootstrap：上游在取码 **之前** 先 `GetSession` 拿 `uid` / `sid`，之后每一笔 comm 都带上
+ * （`buildAndroidComm` 里那两个 `device.sessionUid/sessionSid` 分支）。不带这两个字段，换票那一笔
+ * 上游照样回一句没有解释的 `code 1000` —— 而 `1000 / 104400 / 104401` 这一组在上游的错误码登记表里
+ * 就是「凭据不被接受」，不是网络问题。
+ *
+ * 这一笔失败不拦登录：实测 `CreateQRCode` 没有它也能出码（QIMEI 同理，空串照走），
+ * 所以这里只记一条诊断，剩下的交给二维码本身成败。
+ */
+const bootstrapDeviceSession = async () => {
+  const identity = device();
+  if (identity.sessionUid && identity.sessionSid) return identity;
+  try {
+    const body = JSON.stringify({
+      comm: buildComm(),
+      req_0: { module: 'music.getSession.session', method: 'GetSession', param: { uid: identity.sessionUid || '', vkey: 0, caller: 0 } },
+    });
+    const data = await postMusicu(body);
+    const session = (data && data.session) || {};
+    const uid = String(session.uid ?? '').trim();
+    const sid = String(session.sid ?? '').trim();
+    if (!uid || !sid) throw new Error('GetSession returned no uid/sid');
+    identity.sessionUid = uid;
+    identity.sessionSid = sid;
+    noteQrLoginStep('app:qr:session:ok');
+  } catch (error) {
+    noteQrLoginStep('app:qr:session:failed', { message: error?.message || String(error) });
+  }
+  return identity;
+};
 
 const postMusicu = async (body, timeout = 15000) => {
   const response = await fetchWithTimeout(`${MUSICU_URL}?format=json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json;charset=UTF-8',
-      Referer: 'https://y.qq.com/',
-      'User-Agent': UA,
+      // 上游 `callMusicu` 送的是客户端自己的 UA，不是浏览器的：换票那一笔认这个头。
+      'User-Agent': `QQMusic 14090008(android ${device().osRelease})`,
     },
     body,
   }, timeout);
   const json = await response.json().catch(() => null);
   const item = json && (json.req_0 || json.req);
-  if (!item || Number(json?.code ?? 0) !== 0 || Number(item.code ?? 0) !== 0 || !item.data) {
-    const code = item?.code ?? json?.code ?? 'unknown';
-    const error = new Error(`QQ app QR: musicu rejected (code ${code})`);
-    error.upstreamCode = Number.isFinite(Number(code)) ? Number(code) : undefined;
+  const globalCode = Number(json?.code ?? 0);
+  const upstreamCode = Number(item?.code ?? 0);
+  if (!item || globalCode !== 0 || upstreamCode !== 0 || !item.data) {
+    const error = new Error(`QQ app QR: musicu rejected (upstream ${item?.code ?? 'unknown'}, global ${json?.code ?? 'unknown'})`);
+    error.upstreamCode = Number.isFinite(upstreamCode) ? upstreamCode : undefined;
+    error.globalCode = Number.isFinite(globalCode) ? globalCode : undefined;
     throw error;
   }
   return item.data;
@@ -91,7 +162,7 @@ const postMusicu = async (body, timeout = 15000) => {
 /** 要一张 App 扫码的码。图和 id 一起回来，图是 data URL，界面拿到就能画。 */
 const createAppQr = async () => {
   const body = JSON.stringify({
-    comm: buildComm(),
+    comm: buildComm({ ct: 23, cv: 0 }),
     req_0: {
       module: 'music.login.LoginServer',
       method: 'CreateQRCode',
@@ -118,7 +189,7 @@ const createAppQr = async () => {
  */
 const exchangeCredential = async (qrcodeId, musicid, token) => {
   const musicIdLiteral = /^\d{1,19}$/.test(musicid) ? musicid : JSON.stringify(musicid);
-  const body = `{"comm":${JSON.stringify(buildComm(MOBILE_LOGIN_TYPE))},"req_0":{"module":"music.login.LoginServer","method":"Login","param":{"musicid":${musicIdLiteral},"qrCodeID":${JSON.stringify(qrcodeId)},"token":${JSON.stringify(token)}}}}`;
+  const body = `{"comm":${JSON.stringify(buildComm({ tmeLoginType: MOBILE_LOGIN_TYPE }))},"req_0":{"module":"music.login.LoginServer","method":"Login","param":{"musicid":${musicIdLiteral},"qrCodeID":${JSON.stringify(qrcodeId)},"token":${JSON.stringify(token)}}}}`;
   const data = await postMusicu(body);
   const musicKey = String(data.musickey || '');
   // 微信账号的 musicid 是占位的 0，真正的账号 ID 只在 str_musicid 里。
@@ -130,6 +201,55 @@ const exchangeCredential = async (qrcodeId, musicid, token) => {
   const loginType = Number(data.loginType) || MOBILE_LOGIN_TYPE;
   if (!musicKey) throw new Error('QQ app QR: exchange returned no musickey');
   return { accountId: accountId.replace(/\D/g, ''), musicKey, loginType };
+};
+
+/**
+ * 拿一份凭据去读登录用户（`music.UserInfo.userInfoServer/GetLoginUserInfo`），能读通就说明
+ * 上游认这份凭据。上游把这当成换票失败后的兜底验证（`getLoginUser`）。
+ *
+ * 🔴 comm 里带 `qq` / `authst` / `tmeLoginType` 就是「我是谁」：这三个字段就是上游
+ * `buildAndroidComm(device, credential)` 在带凭据时多加的那一段。
+ */
+const validateCredential = async (credential) => {
+  const body = JSON.stringify({
+    comm: buildComm({
+      qq: credential.accountId,
+      authst: credential.musicKey,
+      tmeLoginType: credential.loginType,
+    }),
+    req_0: { module: 'music.UserInfo.userInfoServer', method: 'GetLoginUserInfo', param: {} },
+  });
+  await postMusicu(body);
+  return credential;
+};
+
+/**
+ * 换票失败后的兜底：MQTT 给的那个令牌本身有时就是能用的 musickey（上游
+ * `exchangeQqLogin` 里记着这条：`fallbackAttempted`）。用「拿它去读一次登录用户」来判定，
+ * 读得通就认，读不通再抛换票那一步的原始错误 —— 别让兜底的失败盖掉真正的原因。
+ */
+const credentialFromToken = (musicid, token) => ({
+  accountId: String(musicid).replace(/\D/g, ''),
+  musicKey: String(token || ''),
+  loginType: MOBILE_LOGIN_TYPE,
+});
+
+const resolveCredential = async (qrcodeId, musicid, token) => {
+  try {
+    return await exchangeCredential(qrcodeId, musicid, token);
+  } catch (error) {
+    noteQrLoginStep('app:qr:exchange:fallback:start', { message: error?.message || String(error) });
+    const direct = credentialFromToken(musicid, token);
+    if (!direct.musicKey) throw error;
+    try {
+      await validateCredential(direct);
+      noteQrLoginStep('app:qr:exchange:fallback:ok');
+      return direct;
+    } catch (validationError) {
+      noteQrLoginStep('app:qr:exchange:fallback:failed', { message: validationError?.message || String(validationError) });
+      throw error;
+    }
+  }
 };
 
 const buildCookie = ({ accountId, musicKey, loginType }) => {
@@ -170,6 +290,8 @@ export async function qqAppGetLoginQr() {
   prune();
   noteQrLoginStep('app:qr:create:start');
   await clearQQPlatformSessionCookies().catch(() => undefined);
+  // 先取设备会话（uid/sid），再取码：之后每笔 comm 都靠它证明「取码和换票是同一台设备」。
+  await bootstrapDeviceSession();
   const qr = await createAppQr();
   const session = {
     qrcodeId: qr.qrcodeId,
@@ -259,7 +381,7 @@ export async function qqAppCheckLoginQr(qrcodeId) {
           loginType: valueOf('tmeLoginType') || 'unknown',
         });
         if (!musicid || !token) throw new Error('QQ app QR: MQTT cookies missing credential');
-        const credential = await exchangeCredential(session.qrcodeId, musicid, token);
+        const credential = await resolveCredential(session.qrcodeId, musicid, token);
         const sessionData = await applySession(buildCookie(credential));
         noteQrLoginStep('app:qr:done:ok', { loginType: credential.loginType });
         const result = {
