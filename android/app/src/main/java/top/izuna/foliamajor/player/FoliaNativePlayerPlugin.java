@@ -62,7 +62,16 @@ public class FoliaNativePlayerPlugin extends Plugin {
                  */
                 if ("position".equals(type) || "playing".equals(type)
                     || "paused".equals(type) || "ready".equals(type)) {
-                    WallpaperLyricsState.setAnchor(positionMs, "playing".equals(type));
+                    /*
+                     * ⚠️ 这里只能把 paused 当成「没在播」。
+                     *
+                     * 早先写成 `"playing".equals(type)` —— 于是每 250ms 那一次 `position`
+                     * 就把 playing 写成 false。而 `WallpaperLyricsState.playing = false` 的
+                     * 意思是「暂停」，叠层据此收起自己（设置里那条「暂停时自动隐藏」），
+                     * 表现就是「桌面歌词整层不见了」。position 只在真的在播时才发
+                     * （暂停时 tick 就停了），所以它本身就是「在播」的证据。
+                     */
+                    WallpaperLyricsState.setAnchor(positionMs, !"paused".equals(type));
                 }
             }
 
@@ -137,6 +146,19 @@ public class FoliaNativePlayerPlugin extends Plugin {
     public static boolean hasActiveMedia() {
         FoliaNativePlayerPlugin current = instance;
         return current != null && current.player != null && current.player.hasMedia();
+    }
+
+    /**
+     * 原生播放器**此刻是不是在播**。
+     *
+     * 和 `hasActiveMedia()` 是两件事：手上有一首不等于在播（暂停之后 `lastUrl` 还在）。
+     * 谁该给壁纸喂锚点，问的是这一个 —— 暂停之后原生就不再报位置了，那段时间必须
+     * 交回 Web，否则锚点谁都不写，叠层按「暂停」把自己收起来（设置里那条
+     * 「暂停时自动隐藏」），看上去就是「桌面歌词不见了」。
+     */
+    public static boolean isNativePlaying() {
+        FoliaNativePlayerPlugin current = instance;
+        return current != null && current.player != null && current.player.isPlaying();
     }
 
     /**

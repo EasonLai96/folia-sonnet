@@ -101,13 +101,15 @@ public class FoliaWallpaperPlugin extends Plugin {
              * 常规心跳：只挪时间锚点，不碰时间轴，也不落盘。
              * 开关本身走 setAppearance，心跳不带时间轴时不重复写盘。
              *
-             * ⚠️ 原生正在放的时候这一份要让位。Web 给的是**插值**出来的位置
-             * （`nativePlaybackEngine.getPositionSec()` 往后补的那一截），而播放器
-             * 自己每 250ms 报一次采样值（见 FoliaNativePlayerPlugin 里写锚点那一段）。
-             * 两边交替写同一个锚点，时间轴会被拽得来回抖 —— 桌面歌词看着就是抽搐。
-             * 换歌那一推不受影响：它走下面 publish，带来整条新时间轴。
+             * ⚠️ 原生**正在播**的时候这一份要让位。Web 给的是**插值**出来的位置
+             * （`nativePlaybackEngine.getPositionSec()` 往后补的那一截），而播放器自己
+             * 每 250ms 报一次采样值（见 FoliaNativePlayerPlugin 里写锚点那一段）。
+             * 两边交替写同一个锚点，时间轴会被拽得来回抖。
+             *
+             * ⚠️ 判据是「在播」而不是「手上有一首」：暂停之后原生就不再报位置了，
+             * 那时这里必须接着写，否则锚点谁都不给 —— 叠层会按暂停把自己收起来。
              */
-            if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+            if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.isNativePlaying()) {
                 WallpaperLyricsState.setAnchor(positionMs, isPlaying);
             }
         } else {

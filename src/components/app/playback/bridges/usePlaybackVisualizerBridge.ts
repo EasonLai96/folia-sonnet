@@ -191,8 +191,13 @@ export function usePlaybackVisualizerBridge({
          *    缓冲多大**没有关系**，别照着「缓冲越大等得越久」那条旧结论去调 latencyHint。
          *
          * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
+         *
+         * ⚠️ 原生在播时**不能**还写 `readLatestSpectrum() ?? readNativeSpectrum()`：
+         * 那条 worklet 是挂在 Web Audio 图上的，图一断它就再也不会有新帧，但它**并没有
+         * 被回收** —— `readLatestSpectrum()` 依然返回非 null（冻住的最后一帧，通常全 0），
+         * `??` 于是永远不会走到原生那条。所以原生接管时反过来问：先要原生的，没有再退回。
          */
-        const tapped = readLatestSpectrum() ?? readNativeSpectrum();
+        const tapped = (usesNativeClock ? readNativeSpectrum() : null) ?? readLatestSpectrum();
         // 取成局部变量：ref 上的 .current 进不了分支条件的窄化，后面要直接用它。
         const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
