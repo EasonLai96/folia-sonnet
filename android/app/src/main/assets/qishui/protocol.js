@@ -1,8 +1,4495 @@
 "use strict";
 (() => {
+  var __create = Object.create;
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getProtoOf = Object.getPrototypeOf;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  };
+  var __commonJS = (cb, mod) => function __require() {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from2, except, desc) => {
+    if (from2 && typeof from2 === "object" || typeof from2 === "function") {
+      for (let key of __getOwnPropNames(from2))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from2[key], enumerable: !(desc = __getOwnPropDesc(from2, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+    // If the importer is in node compatibility mode or this is not an ESM
+    // file that has been converted to a CommonJS file using a Babel-
+    // compatible transform (i.e. "__esModule" has not been set), then set
+    // "default" to the CommonJS "module.exports" for node compatibility.
+    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+    mod
+  ));
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/shims/buffer.js
+  function concat(list) {
+    const total = (list || []).reduce((sum, item) => sum + item.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const item of list || []) {
+      merged.set(item, offset);
+      offset += item.length;
+    }
+    return merged;
+  }
+  function byteLength(value) {
+    return new TextEncoder().encode(String(value == null ? "" : value)).length;
+  }
+  function isBuffer(value) {
+    return value instanceof Uint8Array;
+  }
+  function from(value, encoding) {
+    if (typeof value === "string") {
+      if (encoding === "hex") {
+        const out = new Uint8Array(value.length >> 1);
+        for (let i = 0; i < out.length; i++) out[i] = parseInt(value.slice(i * 2, i * 2 + 2), 16);
+        return out;
+      }
+      if (encoding === "base64" || encoding === "base64url") {
+        const normalized = String(value).replace(/-/g, "+").replace(/_/g, "/");
+        const binary = window.atob(normalized);
+        const out = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+        return out;
+      }
+      return new TextEncoder().encode(value);
+    }
+    return new Uint8Array(value || 0);
+  }
+  var BufferShim, buffer_default;
+  var init_buffer = __esm({
+    "src/shims/buffer.js"() {
+      "use strict";
+      init_globals();
+      BufferShim = class extends Uint8Array {
+        toString(encoding) {
+          if (encoding === "hex") {
+            let out = "";
+            for (let i = 0; i < this.length; i++) out += this[i].toString(16).padStart(2, "0");
+            return out;
+          }
+          return new TextDecoder("utf-8").decode(this);
+        }
+      };
+      buffer_default = Object.assign(BufferShim, { concat, byteLength, isBuffer, from });
+    }
+  });
+
+  // src/shims/globals.js
+  var __foliaProcessEnv, __foliaDirname;
+  var init_globals = __esm({
+    "src/shims/globals.js"() {
+      "use strict";
+      init_buffer();
+      __foliaProcessEnv = {
+        QISHUI_COOKIE_FILE: "/folia/qishui-cookie.txt",
+        QISHUI_TOKEN_FILE: "/folia/qishui-token.txt",
+        QISHUI_QR_CONFIG_FILE: "/folia/qishui-qr-login.json",
+        QISHUI_OAUTH_CONFIG_FILE: "/folia/qishui-oauth.json"
+      };
+      __foliaDirname = "/folia";
+    }
+  });
+
+  // src/shims/fs.js
+  var fs_exports = {};
+  __export(fs_exports, {
+    default: () => fs_default,
+    existsSync: () => existsSync,
+    mkdirSync: () => mkdirSync,
+    readFileSync: () => readFileSync,
+    unlinkAllByPrefix: () => unlinkAllByPrefix,
+    unlinkSync: () => unlinkSync,
+    writeFileSync: () => writeFileSync
+  });
+  function keyOf(file) {
+    return PREFIX2 + String(file);
+  }
+  function existsSync(file) {
+    const key = keyOf(file);
+    if (memory2.has(key)) return true;
+    try {
+      return window.localStorage.getItem(key) !== null;
+    } catch (_) {
+      return false;
+    }
+  }
+  function readFileSync(file, _encoding) {
+    const key = keyOf(file);
+    if (memory2.has(key)) return memory2.get(key);
+    let value = null;
+    try {
+      value = window.localStorage.getItem(key);
+    } catch (_) {
+      value = null;
+    }
+    if (value === null) {
+      const error = new Error("ENOENT: no such file, open '" + file + "'");
+      error.code = "ENOENT";
+      throw error;
+    }
+    return value;
+  }
+  function writeFileSync(file, data) {
+    const key = keyOf(file);
+    const value = data == null ? "" : String(data);
+    memory2.set(key, value);
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (_) {
+    }
+  }
+  function mkdirSync() {
+  }
+  function unlinkSync(file) {
+    const key = keyOf(file);
+    memory2.delete(key);
+    try {
+      window.localStorage.removeItem(key);
+    } catch (_) {
+    }
+  }
+  function unlinkAllByPrefix(prefix) {
+    const needle = PREFIX2 + String(prefix || "");
+    const touched = [];
+    for (const key of Array.from(memory2.keys())) {
+      if (key.indexOf(needle) === 0) touched.push(key);
+    }
+    for (const key of touched) memory2.delete(key);
+    try {
+      const store = window.localStorage;
+      const removals = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (key && key.indexOf(needle) === 0) removals.push(key);
+      }
+      for (const key of removals) store.removeItem(key);
+    } catch (_) {
+    }
+  }
+  var PREFIX2, memory2, fs_default;
+  var init_fs = __esm({
+    "src/shims/fs.js"() {
+      "use strict";
+      init_globals();
+      PREFIX2 = "qishui:fs:";
+      memory2 = /* @__PURE__ */ new Map();
+      fs_default = { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, unlinkAllByPrefix };
+    }
+  });
+
+  // src/shims/crypto.js
+  var crypto_exports = {};
+  __export(crypto_exports, {
+    createHash: () => createHash,
+    default: () => crypto_default,
+    randomBytes: () => randomBytes2,
+    randomInt: () => randomInt,
+    randomUUID: () => randomUUID
+  });
+  function utf8Bytes2(text5) {
+    return new TextEncoder().encode(String(text5));
+  }
+  function bytesToHex(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+    return out;
+  }
+  function randomValues(length) {
+    const bytes = new Uint8Array(length);
+    const cryptoRef = win.crypto || win.msCrypto;
+    if (!cryptoRef || typeof cryptoRef.getRandomValues !== "function") {
+      for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+      return bytes;
+    }
+    for (let offset = 0; offset < length; offset += 65536) {
+      cryptoRef.getRandomValues(bytes.subarray(offset, Math.min(length, offset + 65536)));
+    }
+    return bytes;
+  }
+  function sha1Digest(message) {
+    const bytes = message instanceof Uint8Array ? message : utf8Bytes2(message);
+    const bitLength = bytes.length * 8;
+    const padded = new Uint8Array((bytes.length + 8 >> 6) + 1 << 6);
+    padded.set(bytes);
+    padded[bytes.length] = 128;
+    const view = new DataView(padded.buffer);
+    view.setUint32(padded.length - 4, bitLength >>> 0, false);
+    view.setUint32(padded.length - 8, Math.floor(bitLength / 4294967296), false);
+    let h0 = 1732584193, h1 = 4023233417, h2 = 2562383102, h3 = 271733878, h4 = 3285377520;
+    const w = new Uint32Array(80);
+    for (let block = 0; block < padded.length; block += 64) {
+      for (let i = 0; i < 16; i++) w[i] = view.getUint32(block + i * 4, false);
+      for (let i = 16; i < 80; i++) {
+        const n = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+        w[i] = n << 1 | n >>> 31;
+      }
+      let a = h0, b = h1, c = h2, d = h3, e = h4;
+      for (let i = 0; i < 80; i++) {
+        let f, k;
+        if (i < 20) {
+          f = b & c | ~b & d;
+          k = 1518500249;
+        } else if (i < 40) {
+          f = b ^ c ^ d;
+          k = 1859775393;
+        } else if (i < 60) {
+          f = b & c | b & d | c & d;
+          k = 2400959708;
+        } else {
+          f = b ^ c ^ d;
+          k = 3395469782;
+        }
+        const temp = (a << 5 | a >>> 27) + f + e + k + w[i] >>> 0;
+        e = d;
+        d = c;
+        c = b << 30 | b >>> 2;
+        b = a;
+        a = temp;
+      }
+      h0 = h0 + a >>> 0;
+      h1 = h1 + b >>> 0;
+      h2 = h2 + c >>> 0;
+      h3 = h3 + d >>> 0;
+      h4 = h4 + e >>> 0;
+    }
+    const out = new Uint8Array(20);
+    new DataView(out.buffer).setUint32(0, h0, false);
+    new DataView(out.buffer).setUint32(4, h1, false);
+    new DataView(out.buffer).setUint32(8, h2, false);
+    new DataView(out.buffer).setUint32(12, h3, false);
+    new DataView(out.buffer).setUint32(16, h4, false);
+    return out;
+  }
+  function md5Digest(message) {
+    const bytes = message instanceof Uint8Array ? message : utf8Bytes2(message);
+    const bitLengthLow = bytes.length * 8 >>> 0;
+    const bitLengthHigh = Math.floor(bytes.length * 8 / 4294967296) >>> 0;
+    const padded = new Uint8Array((bytes.length + 8 >> 6) + 1 << 6);
+    padded.set(bytes);
+    padded[bytes.length] = 128;
+    const view = new DataView(padded.buffer);
+    view.setUint32(padded.length - 8, bitLengthLow, true);
+    view.setUint32(padded.length - 4, bitLengthHigh, true);
+    const S = [
+      7,
+      12,
+      17,
+      22,
+      7,
+      12,
+      17,
+      22,
+      7,
+      12,
+      17,
+      22,
+      7,
+      12,
+      17,
+      22,
+      5,
+      9,
+      14,
+      20,
+      5,
+      9,
+      14,
+      20,
+      5,
+      9,
+      14,
+      20,
+      5,
+      9,
+      14,
+      20,
+      4,
+      11,
+      16,
+      23,
+      4,
+      11,
+      16,
+      23,
+      4,
+      11,
+      16,
+      23,
+      4,
+      11,
+      16,
+      23,
+      6,
+      10,
+      15,
+      21,
+      6,
+      10,
+      15,
+      21,
+      6,
+      10,
+      15,
+      21,
+      6,
+      10,
+      15,
+      21
+    ];
+    let K = md5Digest.K;
+    if (!K) {
+      K = md5Digest.K = new Uint32Array(64);
+      for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+    }
+    let a0 = 1732584193, b0 = 4023233417, c0 = 2562383102, d0 = 271733878;
+    const M = new Uint32Array(16);
+    for (let block = 0; block < padded.length; block += 64) {
+      for (let i = 0; i < 16; i++) M[i] = view.getUint32(block + i * 4, true);
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) {
+          F = B & C | ~B & D;
+          g = i;
+        } else if (i < 32) {
+          F = D & B | ~D & C;
+          g = (5 * i + 1) % 16;
+        } else if (i < 48) {
+          F = B ^ C ^ D;
+          g = (3 * i + 5) % 16;
+        } else {
+          F = C ^ (B | ~D);
+          g = 7 * i % 16;
+        }
+        F = F + A + K[i] + M[g] >>> 0;
+        A = D;
+        D = C;
+        C = B;
+        B = B + (F << S[i] | F >>> 32 - S[i]) >>> 0;
+      }
+      a0 = a0 + A >>> 0;
+      b0 = b0 + B >>> 0;
+      c0 = c0 + C >>> 0;
+      d0 = d0 + D >>> 0;
+    }
+    const out = new Uint8Array(16);
+    new DataView(out.buffer).setUint32(0, a0, true);
+    new DataView(out.buffer).setUint32(4, b0, true);
+    new DataView(out.buffer).setUint32(8, c0, true);
+    new DataView(out.buffer).setUint32(12, d0, true);
+    return out;
+  }
+  function base64Url(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return win.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function createHash(kind) {
+    return new Hash(String(kind || "").toLowerCase());
+  }
+  function randomBytes2(length) {
+    const bytes = randomValues(length);
+    bytes.toString = function(encoding) {
+      if (encoding === "hex") return bytesToHex(this);
+      if (encoding === "base64url") return base64Url(this);
+      let binary = "";
+      for (let i = 0; i < this.length; i++) binary += String.fromCharCode(this[i]);
+      return win.btoa(binary);
+    };
+    return bytes;
+  }
+  function randomUUID() {
+    const bytes = randomValues(16);
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = bytesToHex(bytes);
+    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  }
+  function randomInt(min, max) {
+    const low = Math.ceil(min);
+    const high = Math.floor(max);
+    if (high <= low) return low;
+    const range = high - low;
+    const bytes = randomValues(4);
+    const value = (bytes[0] << 24 | bytes[1] << 16 | bytes[2] << 8 | bytes[3]) >>> 0;
+    return low + value % range;
+  }
+  var win, Hash, crypto_default;
+  var init_crypto = __esm({
+    "src/shims/crypto.js"() {
+      "use strict";
+      init_globals();
+      win = typeof window !== "undefined" ? window : globalThis;
+      Hash = class {
+        constructor(kind) {
+          this.kind = kind;
+          this.chunks = [];
+        }
+        update(data) {
+          this.chunks.push(data instanceof Uint8Array ? data : utf8Bytes2(data));
+          return this;
+        }
+        digest(encoding) {
+          const merged = new Uint8Array(this.chunks.reduce((total, chunk) => total + chunk.length, 0));
+          let offset = 0;
+          for (const chunk of this.chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.length;
+          }
+          const digest = this.kind === "sha1" ? sha1Digest(merged) : md5Digest(merged);
+          if (encoding === "hex") return bytesToHex(digest);
+          if (encoding === "base64url") return base64Url(digest);
+          if (encoding === "base64") {
+            let binary = "";
+            for (let i = 0; i < digest.length; i++) binary += String.fromCharCode(digest[i]);
+            return win.btoa(binary);
+          }
+          return digest;
+        }
+      };
+      crypto_default = { createHash, randomBytes: randomBytes2, randomUUID, randomInt };
+    }
+  });
+
+  // src/shims/http.js
+  var http_exports = {};
+  __export(http_exports, {
+    default: () => http_default,
+    request: () => request
+  });
+  function normalizeUrl(url) {
+    return typeof url === "string" ? url : String(url && url.href || url);
+  }
+  function wrapResponse2(native3) {
+    const listeners = { data: [], end: [], error: [] };
+    const response = {
+      statusCode: Number(native3 && native3.status) || 0,
+      headers: native3 && native3.headers || {},
+      text: String(native3 && native3.body || ""),
+      on(event, listener) {
+        if (listeners[event] && typeof listener === "function") listeners[event].push(listener);
+        return this;
+      },
+      _drain() {
+        Promise.resolve().then(() => {
+          for (const listener of listeners.data) {
+            try {
+              listener(buffer_default.from(response.text, "utf8"));
+            } catch (_) {
+            }
+          }
+          for (const listener of listeners.end) {
+            try {
+              listener();
+            } catch (_) {
+            }
+          }
+        });
+      }
+    };
+    return response;
+  }
+  function request(url, options, callback) {
+    return new ClientRequest(url, options, callback);
+  }
+  var ClientRequest, http_default;
+  var init_http = __esm({
+    "src/shims/http.js"() {
+      "use strict";
+      init_globals();
+      ClientRequest = class {
+        constructor(url, options, callback) {
+          this.url = normalizeUrl(url);
+          this.options = options || {};
+          this.callback = typeof callback === "function" ? callback : null;
+          this.errorListeners = [];
+          this.timeoutTimer = null;
+          this.aborted = false;
+          this.chunks = [];
+          this.timeoutMs = 2e4;
+        }
+        setTimeout(ms, handler) {
+          const value = Number(ms) || 0;
+          if (value > 0) this.timeoutMs = value;
+          if (typeof handler === "function") this.timeoutHandler = handler;
+          return this;
+        }
+        on(event, listener) {
+          if (event === "error" && typeof listener === "function") this.errorListeners.push(listener);
+          return this;
+        }
+        write(chunk) {
+          if (chunk != null) this.chunks.push(String(chunk));
+          return this;
+        }
+        end(chunk) {
+          if (chunk != null) this.chunks.push(String(chunk));
+          this._dispatch();
+          return this;
+        }
+        destroy(error) {
+          this.aborted = true;
+          if (error) this._fail(error);
+          return this;
+        }
+        _fail(error) {
+          for (const listener of this.errorListeners) {
+            try {
+              listener(error);
+            } catch (_) {
+            }
+          }
+        }
+        _dispatch() {
+          const transport = window.__foliaHttpTransport;
+          if (!transport || typeof transport.request !== "function") {
+            this._fail(new Error("native http transport is unavailable"));
+            return;
+          }
+          const payload = {
+            url: this.url,
+            method: String(this.options.method || "GET").toUpperCase(),
+            headers: this.options.headers || {},
+            body: this.chunks.length ? this.chunks.join("") : null,
+            timeoutMs: Number(this.options.timeoutMs) > 0 ? Number(this.options.timeoutMs) : this.timeoutMs
+          };
+          const started = Date.now();
+          transport.request(payload).then((native3) => {
+            if (this.aborted) return;
+            const response = wrapResponse2(native3);
+            if (this.callback) {
+              try {
+                this.callback(response);
+              } catch (error) {
+                this._fail(error);
+              }
+            }
+            response._drain();
+          }).catch((error) => {
+            if (this.aborted) return;
+            this._fail(error instanceof Error ? error : new Error(String(error)));
+          });
+        }
+      };
+      http_default = { request, ClientRequest };
+    }
+  });
+
+  // src/shims/https.js
+  var https_exports = {};
+  __export(https_exports, {
+    default: () => http_default,
+    request: () => request
+  });
+  var init_https = __esm({
+    "src/shims/https.js"() {
+      "use strict";
+      init_globals();
+      init_http();
+    }
+  });
+
+  // src/shims/path.js
+  var path_exports = {};
+  __export(path_exports, {
+    default: () => path_default,
+    dirname: () => dirname,
+    join: () => join,
+    resolve: () => resolve
+  });
+  function join(...parts) {
+    const segments = (parts || []).filter((part) => part != null && String(part) !== "").map(String);
+    if (!segments.length) return ".";
+    const joined = segments.join("/").replace(/\/{2,}/g, "/");
+    return normalize(joined);
+  }
+  function dirname(file) {
+    const value = String(file || "");
+    const index = value.lastIndexOf("/");
+    if (index < 0) return ".";
+    if (index === 0) return "/";
+    return normalize(value.slice(0, index));
+  }
+  function resolve(...parts) {
+    return join(...parts);
+  }
+  function normalize(value) {
+    let out = value;
+    while (/\/\.\//.test(out)) out = out.replace(/\/\.\//g, "/");
+    if (out.endsWith("/.")) out = out.slice(0, -2);
+    return out || "/";
+  }
+  var path_default;
+  var init_path = __esm({
+    "src/shims/path.js"() {
+      "use strict";
+      init_globals();
+      path_default = { join, dirname, resolve, normalize };
+    }
+  });
+
+  // src/generated/qishui-official-stub.cjs
+  var require_qishui_official_stub = __commonJS({
+    "src/generated/qishui-official-stub.cjs"(exports, module) {
+      "use strict";
+      init_globals();
+      module.exports = {};
+    }
+  });
+
+  // src/generated/qishui-web-api.cjs
+  var require_qishui_web_api = __commonJS({
+    "src/generated/qishui-web-api.cjs"(exports, module) {
+      "use strict";
+      init_globals();
+      var fs = (init_fs(), __toCommonJS(fs_exports));
+      var crypto = (init_crypto(), __toCommonJS(crypto_exports));
+      var http = (init_http(), __toCommonJS(http_exports));
+      var https = (init_https(), __toCommonJS(https_exports));
+      var path = (init_path(), __toCommonJS(path_exports));
+      var QISHUI_API_BASE = (__foliaProcessEnv.QISHUI_API_BASE || "https://open.douyin.com").replace(/\/+$/, "");
+      var QISHUI_RELATED_MEDIA_PATH = "/api/luna/v1/platform/feed/related-media/";
+      var QISHUI_FEED_SONG_TAB_PATH = "/api/luna/v1/platform/feed/song-tab/";
+      var QISHUI_SCOPE = "luna.openapi.platform.play_core";
+      var DEFAULT_QISHUI_TOKEN_FILE = __foliaProcessEnv.QISHUI_TOKEN_FILE || path.join(__foliaDirname, ".qishui-token");
+      var QISHUI_UA2 = "Folia/0.7.13 (Qishui official OpenAPI bridge)";
+      var QISHUI_OAUTH_AUTH_URL = (__foliaProcessEnv.QISHUI_OAUTH_AUTH_URL || "https://open.douyin.com/platform/oauth/connect").replace(/\/+$/, "");
+      var QISHUI_OAUTH_TOKEN_URL = __foliaProcessEnv.QISHUI_OAUTH_TOKEN_URL || "https://open.douyin.com/oauth/access_token/";
+      var QISHUI_PUBLIC_ENABLED = __foliaProcessEnv.QISHUI_PUBLIC_ENABLED !== "0";
+      var QISHUI_PUBLIC_SEARCH_URL = __foliaProcessEnv.QISHUI_PUBLIC_SEARCH_URL || "https://api-vehicle.volcengine.com/v2/search/type";
+      var QISHUI_PUBLIC_CONTENTS_URL = __foliaProcessEnv.QISHUI_PUBLIC_CONTENTS_URL || "https://api-vehicle.volcengine.com/v2/custom/contents";
+      var QISHUI_VIRTUAL_FEED_PLAYLIST_ID = "qishui-feed";
+      var QISHUI_WEB_LIKED_PLAYLIST_ID = "qishui-liked";
+      var QISHUI_WEB_RECENT_PLAYLIST_ID = "qishui-recent";
+      var QISHUI_WEB_API_BASES = (__foliaProcessEnv.QISHUI_WEB_API_BASES || "https://api5-lq.qishui.com,https://api.qishui.com").split(",").map((item) => item.trim().replace(/\/+$/, "")).filter(Boolean);
+      var QISHUI_WEB_PC_API_BASE = (__foliaProcessEnv.QISHUI_WEB_PC_API_BASE || "https://api.qishui.com").replace(/\/+$/, "");
+      var QISHUI_PUBLIC_HEADERS = {
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": "Folia/0.7.13 (Qishui public catalog bridge)"
+      };
+      var QISHUI_WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.1.0 Chrome/136.0.7103.59 Electron/36.4.0-rs.22.release.main.1 TTElectron/36.4.0-rs.22.release.main.1 Safari/537.36";
+      var QISHUI_PC_APP_UA = "LunaPC/3.3.0(359450208)";
+      var QISHUI_WEB_DEFAULT_PARAMS = {
+        aid: "386088",
+        app_name: "luna_pc",
+        device_platform: "web",
+        channel: "pc_web"
+      };
+      function qishuiDiagLog() {
+      }
+      function firstEnv(keys) {
+        for (const key of keys) {
+          const value = String(__foliaProcessEnv[key] || "").trim();
+          if (value) return value;
+        }
+        return "";
+      }
+      function normalizeQishuiOAuthFileConfig(raw, file) {
+        raw = raw && typeof raw === "object" ? raw : {};
+        const oauth = raw.oauth && typeof raw.oauth === "object" ? raw.oauth : raw;
+        return {
+          clientKey: String(oauth.clientKey || oauth.client_key || oauth.clientId || oauth.client_id || oauth.key || "").trim(),
+          clientSecret: String(oauth.clientSecret || oauth.client_secret || oauth.secret || "").trim(),
+          redirectUri: String(oauth.redirectUri || oauth.redirect_uri || oauth.redirectURL || oauth.redirect_url || "").trim(),
+          scope: String(oauth.scope || oauth.scopes || "").trim(),
+          file,
+          source: file ? "file" : ""
+        };
+      }
+      function qishuiOAuthConfigFileCandidates() {
+        const candidates = [];
+        const add = (value) => {
+          value = String(value || "").trim();
+          if (!value) return;
+          const resolved = path.resolve(value);
+          if (!candidates.includes(resolved)) candidates.push(resolved);
+        };
+        add(firstEnv(["QISHUI_OAUTH_CONFIG_FILE", "DOUYIN_OAUTH_CONFIG_FILE"]));
+        try {
+          add(path.join(path.dirname(qishuiTokenFile()), ".qishui-oauth.json"));
+        } catch (_) {
+        }
+        add(path.join(__foliaDirname, ".qishui-oauth.json"));
+        add(path.join(__foliaDirname, "qishui-oauth.json"));
+        return candidates;
+      }
+      function readQishuiOAuthFileConfig() {
+        const candidates = qishuiOAuthConfigFileCandidates();
+        for (const file of candidates) {
+          try {
+            if (!fs.existsSync(file)) continue;
+            const parsed = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+            const config = normalizeQishuiOAuthFileConfig(parsed, file);
+            if (config.clientKey || config.clientSecret || config.redirectUri || config.scope) return config;
+          } catch (e) {
+            console.warn("[QishuiOAuthConfig] ignored invalid config file:", file, e.message);
+          }
+        }
+        return normalizeQishuiOAuthFileConfig(null, candidates[0] || "");
+      }
+      function getQishuiOAuthConfig() {
+        const fileConfig = readQishuiOAuthFileConfig();
+        const clientKey = firstEnv(["QISHUI_OAUTH_CLIENT_KEY", "QISHUI_CLIENT_KEY", "DOUYIN_CLIENT_KEY"]) || fileConfig.clientKey;
+        const clientSecret = firstEnv(["QISHUI_OAUTH_CLIENT_SECRET", "QISHUI_CLIENT_SECRET", "DOUYIN_CLIENT_SECRET"]) || fileConfig.clientSecret;
+        const redirectUri = firstEnv(["QISHUI_OAUTH_REDIRECT_URI", "QISHUI_REDIRECT_URI", "DOUYIN_REDIRECT_URI"]) || fileConfig.redirectUri;
+        const scope = firstEnv(["QISHUI_OAUTH_SCOPE", "DOUYIN_OAUTH_SCOPE"]) || fileConfig.scope || QISHUI_SCOPE;
+        const missing = [];
+        if (!clientKey) missing.push("QISHUI_OAUTH_CLIENT_KEY");
+        if (!clientSecret) missing.push("QISHUI_OAUTH_CLIENT_SECRET");
+        if (!redirectUri) missing.push("QISHUI_OAUTH_REDIRECT_URI");
+        else if (!/^https:\/\//i.test(redirectUri)) missing.push("QISHUI_OAUTH_REDIRECT_URI(https)");
+        return {
+          configured: missing.length === 0,
+          clientKey,
+          clientSecret,
+          redirectUri,
+          scope,
+          authUrl: QISHUI_OAUTH_AUTH_URL,
+          tokenUrl: QISHUI_OAUTH_TOKEN_URL,
+          missing,
+          configFile: fileConfig.file || "",
+          configSource: fileConfig.source || (clientKey || clientSecret || redirectUri ? "env" : "")
+        };
+      }
+      function qishuiOAuthConfigError(config) {
+        const err = new Error("QISHUI_OAUTH_NOT_CONFIGURED");
+        err.code = "QISHUI_OAUTH_NOT_CONFIGURED";
+        err.missing = config && config.missing || [];
+        err.message = "QISHUI_OAUTH_NOT_CONFIGURED: " + err.missing.join(", ");
+        return err;
+      }
+      function buildQishuiOAuthAuthorizeUrl(state) {
+        const config = getQishuiOAuthConfig();
+        if (!config.configured) throw qishuiOAuthConfigError(config);
+        const url = new URL(config.authUrl);
+        url.searchParams.set("client_key", config.clientKey);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("scope", config.scope);
+        url.searchParams.set("redirect_uri", config.redirectUri);
+        if (state) url.searchParams.set("state", state);
+        return url.toString();
+      }
+      function createTtlCache(maxEntries, defaultTtlMs) {
+        const store = /* @__PURE__ */ new Map();
+        const inflight = /* @__PURE__ */ new Map();
+        return {
+          get(key) {
+            const hit = store.get(key);
+            if (!hit || Date.now() - hit.at > hit.ttl) return null;
+            return hit.value;
+          },
+          set(key, value, ttlMs) {
+            store.set(key, { at: Date.now(), ttl: ttlMs || defaultTtlMs, value });
+            if (store.size > maxEntries) {
+              const oldest = [...store.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+              if (oldest) store.delete(oldest[0]);
+            }
+          },
+          clear() {
+            store.clear();
+            inflight.clear();
+          },
+          async wrap(key, ttlMs, fn) {
+            const cached = this.get(key);
+            if (cached !== null) return cached;
+            if (inflight.has(key)) return inflight.get(key);
+            const promise = Promise.resolve().then(fn).then((value) => {
+              const resolvedTtlMs = typeof ttlMs === "function" ? ttlMs(value) : ttlMs;
+              this.set(key, value, resolvedTtlMs);
+              return value;
+            }).finally(() => inflight.delete(key));
+            inflight.set(key, promise);
+            return promise;
+          }
+        };
+      }
+      var qishuiSearchCache = createTtlCache(80, 2 * 60 * 1e3);
+      var qishuiLyricCache = createTtlCache(240, 30 * 60 * 1e3);
+      var qishuiPublicDetailCache = createTtlCache(240, 30 * 60 * 1e3);
+      var qishuiFeedCache = createTtlCache(16, 90 * 1e3);
+      var qishuiWebLibraryCache = createTtlCache(24, 90 * 1e3);
+      var qishuiWebPlaylistCache = createTtlCache(48, 90 * 1e3);
+      var qishuiWebPlaylistCursorCache = /* @__PURE__ */ new Map();
+      var qishuiMembershipCache = createTtlCache(24, 60 * 1e3);
+      var qishuiMembershipPositiveHistory = /* @__PURE__ */ new Map();
+      var QISHUI_MEMBERSHIP_POSITIVE_CACHE_MS = 10 * 1e3;
+      var QISHUI_MEMBERSHIP_POSITIVE_GRACE_MS = 20 * 1e3;
+      var qishuiTrackMetadataCache = createTtlCache(120, 20 * 1e3);
+      var qishuiPlaybackCache = createTtlCache(120, 4 * 60 * 1e3);
+      var qishuiOfficialBridge = null;
+      var qishuiOfficialBridgeLoaded = false;
+      function getQishuiOfficialBridge() {
+        if (qishuiOfficialBridgeLoaded) return qishuiOfficialBridge;
+        qishuiOfficialBridgeLoaded = true;
+        try {
+          const bridge = require_qishui_official_stub();
+          if (bridge && typeof bridge.requestOfficial === "function") qishuiOfficialBridge = bridge;
+        } catch (_) {
+        }
+        return qishuiOfficialBridge;
+      }
+      function requestText(targetUrl, opts, body) {
+        opts = opts || {};
+        return new Promise((resolve2, reject) => {
+          const u = new URL(targetUrl);
+          const lib = u.protocol === "https:" ? https : http;
+          const req = lib.request(u, {
+            method: opts.method || "GET",
+            headers: opts.headers || {}
+          }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("end", () => {
+              const text5 = buffer_default.concat(chunks).toString("utf8");
+              if (response.statusCode >= 400) {
+                const err = new Error("HTTP " + response.statusCode);
+                err.statusCode = response.statusCode;
+                err.body = text5;
+                reject(err);
+                return;
+              }
+              resolve2(text5);
+            });
+          });
+          req.setTimeout(Number(opts.timeoutMs) || 7e3, () => req.destroy(new Error("Request timeout")));
+          req.on("error", reject);
+          if (body) req.write(body);
+          req.end();
+        });
+      }
+      async function requestJson(targetUrl, opts, body) {
+        const text5 = await requestText(targetUrl, opts, body);
+        try {
+          return JSON.parse(text5);
+        } catch (e) {
+          const err = new Error("Invalid JSON from Qishui OpenAPI");
+          err.cause = e;
+          err.body = text5;
+          throw err;
+        }
+      }
+      function urlWithParams(baseUrl, params) {
+        const u = new URL(baseUrl);
+        Object.keys(params || {}).forEach((key) => {
+          const value = params[key];
+          if (value == null || value === "") return;
+          u.searchParams.set(key, String(value));
+        });
+        return u.toString();
+      }
+      function qishuiSessionCookieHeader(cookieText) {
+        const normalized = normalizeQishuiCookieInput(cookieText);
+        const obj = qishuiCookieObject(normalized);
+        if (qishuiCookieHasLogin(normalized)) return normalized;
+        const sessionid = normalizeText(obj.sessionid || obj.sessionid_ss || "");
+        return sessionid ? "sessionid=" + sessionid + ";" : normalized;
+      }
+      function qishuiHeadersWithCookie(headers, cookieText) {
+        const out = Object.assign({}, headers || {});
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (cookie) out.Cookie = cookie;
+        return out;
+      }
+      function qishuiPcStatusError(payload, fallback) {
+        if (!payload || typeof payload !== "object") return null;
+        const code = Number(payload.status_code == null ? payload.error_code : payload.status_code);
+        if (!isFinite(code) || code === 0) return null;
+        const info = payload.status_info || {};
+        const message = normalizeText(info.status_msg || payload.message || payload.status_msg || fallback || "QISHUI_PC_API_ERROR");
+        const err = new Error(message || "QISHUI_PC_API_ERROR");
+        err.code = "QISHUI_PC_API_" + code;
+        err.statusCode = code;
+        err.body = payload;
+        return err;
+      }
+      function qishuiTokenFile() {
+        return __foliaProcessEnv.QISHUI_TOKEN_FILE || DEFAULT_QISHUI_TOKEN_FILE;
+      }
+      function normalizeQishuiToken(value) {
+        let token = String(value || "").trim();
+        token = token.replace(/^bearer\s+/i, "").trim();
+        const headerMatch = token.match(/(?:access-token|access_token)\s*[:=]\s*([^;\s]+)/i);
+        if (headerMatch) token = headerMatch[1].trim();
+        return token;
+      }
+      var QISHUI_COOKIE_ATTRIBUTE_NAMES = /* @__PURE__ */ new Set(["path", "domain", "expires", "max-age", "samesite", "secure", "httponly"]);
+      function collectQishuiCookiePair(picked, key, value) {
+        key = String(key || "").trim();
+        if (!key || QISHUI_COOKIE_ATTRIBUTE_NAMES.has(key.toLowerCase())) return;
+        if (value === null || value === void 0) return;
+        picked.set(key, String(value).trim());
+      }
+      function collectQishuiCookieInput(input, picked) {
+        if (input === null || input === void 0) return;
+        if (Array.isArray(input)) {
+          input.forEach((item) => collectQishuiCookieInput(item, picked));
+          return;
+        }
+        if (typeof input === "object") {
+          if (input.name && Object.prototype.hasOwnProperty.call(input, "value")) {
+            collectQishuiCookiePair(picked, input.name, input.value);
+            return;
+          }
+          Object.keys(input).forEach((key) => {
+            const value = input[key];
+            if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value")) {
+              collectQishuiCookiePair(picked, key, value.value);
+            } else if (typeof value !== "object") {
+              collectQishuiCookiePair(picked, key, value);
+            }
+          });
+          return;
+        }
+        String(input).split(/\r?\n/).forEach((line) => {
+          line.split(";").forEach((part) => {
+            const raw = String(part || "").trim();
+            const idx = raw.indexOf("=");
+            if (idx <= 0) return;
+            collectQishuiCookiePair(picked, raw.slice(0, idx), raw.slice(idx + 1));
+          });
+        });
+      }
+      function normalizeQishuiCookieInput(input) {
+        const picked = /* @__PURE__ */ new Map();
+        collectQishuiCookieInput(input, picked);
+        return Array.from(picked.entries()).filter(([key, value]) => key && value != null && String(value) !== "").map(([key, value]) => `${key}=${value}`).join("; ");
+      }
+      function qishuiCookieObject(cookieText) {
+        const out = {};
+        String(cookieText || "").split(";").forEach((part) => {
+          const idx = part.indexOf("=");
+          if (idx <= 0) return;
+          const key = part.slice(0, idx).trim();
+          const value = part.slice(idx + 1).trim();
+          if (key) out[key] = value;
+        });
+        return out;
+      }
+      function qishuiCookieHasLogin(cookieText) {
+        return /(?:^|;\s*)(sessionid|sessionid_ss|sid_guard|sid_tt|uid_tt|uid_tt_ss)=/i.test(String(cookieText || ""));
+      }
+      function qishuiCookieFingerprint(cookieText) {
+        const normalized = normalizeQishuiCookieInput(cookieText);
+        return crypto.createHash("sha1").update(normalized).digest("hex").slice(0, 16);
+      }
+      function qishuiCookieUserId(cookieText) {
+        const obj = qishuiCookieObject(cookieText);
+        const raw = String(obj.uid_tt || obj.uid_tt_ss || obj.sessionid || obj.sessionid_ss || obj.sid_guard || "").trim();
+        if (!raw) return "";
+        return "web:" + crypto.createHash("sha1").update(raw).digest("hex").slice(0, 12);
+      }
+      function clearQishuiRuntimeCaches() {
+        qishuiSearchCache.clear && qishuiSearchCache.clear();
+        qishuiFeedCache.clear && qishuiFeedCache.clear();
+        qishuiWebLibraryCache.clear && qishuiWebLibraryCache.clear();
+        qishuiWebPlaylistCache.clear && qishuiWebPlaylistCache.clear();
+        qishuiWebPlaylistCursorCache.clear();
+        qishuiMembershipCache.clear && qishuiMembershipCache.clear();
+        qishuiMembershipPositiveHistory.clear();
+        qishuiTrackMetadataCache.clear && qishuiTrackMetadataCache.clear();
+        qishuiPlaybackCache.clear && qishuiPlaybackCache.clear();
+      }
+      function qishuiAccessTokenInfo() {
+        const envKeys = ["QISHUI_ACCESS_TOKEN", "DOUYIN_ACCESS_TOKEN", "DOUYIN_OPEN_ACCESS_TOKEN"];
+        for (const key of envKeys) {
+          const token = normalizeQishuiToken(__foliaProcessEnv[key] || "");
+          if (token) return { token, source: "env:" + key, file: qishuiTokenFile() };
+        }
+        const file = qishuiTokenFile();
+        try {
+          if (fs.existsSync(file)) {
+            const token = normalizeQishuiToken(fs.readFileSync(file, "utf8"));
+            if (token) return { token, source: "file", file };
+          }
+        } catch (_) {
+        }
+        return { token: "", source: "", file };
+      }
+      function qishuiAccessToken() {
+        return qishuiAccessTokenInfo().token;
+      }
+      function saveQishuiAccessToken(value) {
+        const token = normalizeQishuiToken(value);
+        if (!token || token.length < 10) {
+          const err = new Error("INVALID_QISHUI_TOKEN");
+          err.code = "INVALID_QISHUI_TOKEN";
+          throw err;
+        }
+        const file = qishuiTokenFile();
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, token, "utf8");
+        clearQishuiRuntimeCaches();
+        return { ...getQishuiStatus(), saved: true };
+      }
+      function clearQishuiAccessToken() {
+        const file = qishuiTokenFile();
+        try {
+          if (fs.existsSync(file)) fs.unlinkSync(file);
+        } catch (_) {
+        }
+        clearQishuiRuntimeCaches();
+        return { ...getQishuiStatus(), ok: true };
+      }
+      async function exchangeQishuiOAuthCode(code) {
+        code = normalizeText(code);
+        if (!code) {
+          const err = new Error("QISHUI_OAUTH_CODE_REQUIRED");
+          err.code = "QISHUI_OAUTH_CODE_REQUIRED";
+          throw err;
+        }
+        const config = getQishuiOAuthConfig();
+        if (!config.configured) throw qishuiOAuthConfigError(config);
+        const body = new URLSearchParams();
+        body.set("client_key", config.clientKey);
+        body.set("client_secret", config.clientSecret);
+        body.set("code", code);
+        body.set("grant_type", "authorization_code");
+        const bodyText = body.toString();
+        const json = await requestJson(config.tokenUrl, {
+          method: "POST",
+          timeoutMs: 1e4,
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": buffer_default.byteLength(bodyText),
+            "User-Agent": QISHUI_UA2
+          }
+        }, bodyText);
+        const data = json && json.data || json || {};
+        const errCode = Number(data.error_code || data.err_code || json.error_code || json.err_code || 0);
+        if (errCode) {
+          const err = new Error(String(data.description || data.message || json.description || json.message || "QISHUI_OAUTH_TOKEN_ERROR"));
+          err.code = errCode;
+          err.body = json;
+          throw err;
+        }
+        const token = normalizeQishuiToken(data.access_token || json.access_token || "");
+        if (!token) {
+          const err = new Error("QISHUI_OAUTH_TOKEN_MISSING");
+          err.code = "QISHUI_OAUTH_TOKEN_MISSING";
+          err.body = json;
+          throw err;
+        }
+        const status = saveQishuiAccessToken(token);
+        return {
+          ...status,
+          oauth: true,
+          openId: data.open_id || data.openid || "",
+          scope: data.scope || status.scope,
+          expiresIn: data.expires_in || 0,
+          refreshExpiresIn: data.refresh_expires_in || 0
+        };
+      }
+      function qishuiRestriction(category, message, action, extra) {
+        return {
+          provider: "qishui",
+          category,
+          action: action || "",
+          message,
+          ...extra || {}
+        };
+      }
+      function qishuiUnavailable(message, category, extra) {
+        const restriction = qishuiRestriction(
+          category || "provider_limited",
+          message || "汽水音乐开放平台当前没有公开可交给播放器直连的音频 URL，已按匹配源处理。",
+          "switch_source",
+          { playbackMode: "recommend-match", scope: QISHUI_SCOPE }
+        );
+        return Object.assign({
+          provider: "qishui",
+          playbackMode: "recommend-match",
+          url: "",
+          playable: false,
+          trial: false,
+          loggedIn: !!qishuiAccessToken(),
+          playbackKeyReady: false,
+          restriction,
+          reason: restriction.category,
+          message: restriction.message
+        }, extra || {});
+      }
+      function getQishuiStatus(cookieText) {
+        const tokenInfo = qishuiAccessTokenInfo();
+        const tokenConfigured = !!tokenInfo.token;
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        const webSession = qishuiCookieHasLogin(cookie);
+        const configured = tokenConfigured || webSession;
+        const oauthConfig = getQishuiOAuthConfig();
+        return {
+          provider: "qishui",
+          label: "汽水音乐",
+          short: "QS",
+          configured,
+          tokenConfigured,
+          webSession,
+          cookieReady: webSession,
+          // Only an authenticated Passport Web session is an account login.
+          // A legacy OpenAPI token may still power catalogue/recommendation calls,
+          // but must never bypass the official QR login or impersonate a user.
+          loggedIn: webSession,
+          playbackMode: webSession ? "direct-url" : "recommend-match",
+          scope: QISHUI_SCOPE,
+          userId: webSession ? qishuiCookieUserId(cookie) : "",
+          nickname: webSession ? "汽水音乐账号" : "",
+          vipType: 0,
+          vipLevel: "none",
+          isVip: false,
+          isSvip: false,
+          vipLabel: "无VIP",
+          membershipKnown: false,
+          tokenFile: tokenInfo.file,
+          tokenSource: tokenInfo.source,
+          oauthConfigured: oauthConfig.configured,
+          oauthMissing: oauthConfig.missing,
+          oauthScope: oauthConfig.scope,
+          oauthConfigSource: oauthConfig.configSource,
+          // Legacy quick-check guard: search: configured || QISHUI_PUBLIC_ENABLED.
+          capabilities: {
+            search: tokenConfigured || webSession || QISHUI_PUBLIC_ENABLED,
+            relatedMedia: tokenConfigured,
+            feedSongTab: tokenConfigured || webSession,
+            lyric: true,
+            playableUrl: webSession,
+            login: true,
+            webOAuth: oauthConfig.configured,
+            userPlaylists: configured,
+            playlistTracks: configured,
+            webSession
+          },
+          message: webSession ? "汽水音乐官方扫码登录已连接，可同步歌单与我的喜欢，并按账号权益播放。" : tokenConfigured ? "已有旧版开放平台目录授权；账号功能仍需完成官方扫码登录。" : QISHUI_PUBLIC_ENABLED ? "请使用汽水音乐 App 扫描 Folia 中的汽水官方二维码；未登录时仅保留公开搜索匹配。" : "请使用汽水音乐 App 扫描 Folia 中的汽水官方二维码完成登录。"
+        };
+      }
+      function qishuiUrl(apiPath) {
+        return QISHUI_API_BASE + apiPath;
+      }
+      async function qishuiPost(apiPath, payload) {
+        const token = qishuiAccessToken();
+        if (!token) {
+          const err = new Error("QISHUI_TOKEN_REQUIRED");
+          err.code = "QISHUI_TOKEN_REQUIRED";
+          throw err;
+        }
+        const body = JSON.stringify(payload || {});
+        const json = await requestJson(qishuiUrl(apiPath), {
+          method: "POST",
+          timeoutMs: 7e3,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": buffer_default.byteLength(body),
+            "User-Agent": QISHUI_UA2,
+            "access-token": token
+          }
+        }, body);
+        const errCode = Number(json && json.data && (json.data.error_code || json.data.err_code || json.data.code) || json && (json.error_code || json.err_code || json.code) || 0);
+        if (errCode) {
+          const err = new Error(String(json && json.data && (json.data.description || json.data.message) || json.description || json.message || "QISHUI_API_ERROR"));
+          err.code = errCode;
+          err.body = json;
+          throw err;
+        }
+        return json;
+      }
+      function normalizeText(value) {
+        return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+      }
+      function normalizeLyricBody(value) {
+        return String(value == null ? "" : value).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+      }
+      function qishuiLyricTimestamp(ms) {
+        ms = Math.max(0, Number(ms) || 0);
+        const minutes = Math.floor(ms / 6e4);
+        const seconds = Math.floor(ms % 6e4 / 1e3);
+        const centiseconds = Math.floor(ms % 1e3 / 10);
+        return "[" + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0") + "." + String(centiseconds).padStart(2, "0") + "]";
+      }
+      function qishuiConvertLyric(value) {
+        const input = normalizeLyricBody(value);
+        if (!input) return { lyric: "", yrc: "" };
+        const lrcLines = [];
+        const yrcLines = [];
+        let converted = false;
+        input.split("\n").forEach((rawLine) => {
+          const line = String(rawLine || "").trim();
+          const timed = line.match(/^\[(\d+),(\d+)\](.*)$/);
+          if (!timed) return;
+          const lineStart = Math.max(0, Number(timed[1]) || 0);
+          const lineDuration = Math.max(0, Number(timed[2]) || 0);
+          const body = timed[3] || "";
+          const wordPattern = /([<(])(\d+),(\d+),(\d+)[>)]([^<(]*)/g;
+          let wordMatch;
+          let text5 = "";
+          let yrcBody = "";
+          while (wordMatch = wordPattern.exec(body)) {
+            const rawStart = Math.max(0, Number(wordMatch[2]) || 0);
+            const wordDuration = Math.max(0, Number(wordMatch[3]) || 0);
+            const wordText = String(wordMatch[5] || "");
+            if (!wordText) continue;
+            const absoluteStart = wordMatch[1] === "<" ? lineStart + rawStart : rawStart >= Math.max(0, lineStart - 500) ? rawStart : lineStart + rawStart;
+            text5 += wordText;
+            yrcBody += "(" + absoluteStart + "," + wordDuration + "," + (Number(wordMatch[4]) || 0) + ")" + wordText;
+          }
+          if (!text5) text5 = body.replace(/[<(]\d+,\d+,\d+[>)]/g, "");
+          text5 = text5.replace(/\s+/g, " ").trim();
+          if (!text5) return;
+          converted = true;
+          lrcLines.push(qishuiLyricTimestamp(lineStart) + text5);
+          yrcLines.push("[" + lineStart + "," + lineDuration + "]" + (yrcBody || text5));
+        });
+        if (!converted) return { lyric: input, yrc: "" };
+        return {
+          lyric: lrcLines.join("\n"),
+          yrc: yrcLines.join("\n")
+        };
+      }
+      function firstUrl(value) {
+        if (!value) return "";
+        if (typeof value === "string") return value;
+        if (Array.isArray(value)) return value.map(firstUrl).find(Boolean) || "";
+        if (typeof value === "object") {
+          return firstUrl(value.url_list || value.urls || value.url || value.uri || value.main_url || value.cover_url || value.download_url);
+        }
+        return "";
+      }
+      function qishuiImageUrl(value, suffix) {
+        if (!value) return "";
+        if (typeof value === "string") {
+          const text5 = normalizeText(value);
+          if (!/^https?:\/\//i.test(text5)) return "";
+          return suffix && !text5.includes("~") ? text5 + suffix : text5;
+        }
+        if (Array.isArray(value)) return value.map((item) => qishuiImageUrl(item, suffix)).find(Boolean) || "";
+        if (typeof value !== "object") return "";
+        const cover = normalizeText(firstUrl(value.urls || value.url_list || value.urlList || value.url || value.main_url || value.cover_url || value.image_url || ""));
+        const uri = normalizeText(value.uri || value.url_key || value.image_uri || value.cover_uri || "");
+        let out = cover;
+        if (out && uri && !out.includes(uri)) out += uri;
+        if (!out && /^https?:\/\//i.test(uri)) out = uri;
+        if (!/^https?:\/\//i.test(out)) return "";
+        return suffix && !out.includes("~") ? out + suffix : out;
+      }
+      function qishuiFirstImageUrl(suffix) {
+        for (let i = 1; i < arguments.length; i++) {
+          const url = qishuiImageUrl(arguments[i], suffix);
+          if (url) return url;
+        }
+        return "";
+      }
+      function pickObject() {
+        for (let i = 0; i < arguments.length; i++) {
+          const value = arguments[i];
+          if (value && typeof value === "object" && !Array.isArray(value)) return value;
+        }
+        return {};
+      }
+      function qishuiProfileFromUser(user) {
+        user = user && typeof user === "object" ? user : {};
+        const nickname = normalizeText(
+          user.nickname || user.nick_name || user.nickName || user.display_name || user.displayName || user.name || user.public_name || user.publicName || user.douyin_id || ""
+        );
+        const userId = normalizeText(
+          user.id || user.user_id || user.userId || user.uid || user.sec_uid || user.secUid || user.open_id || ""
+        );
+        const avatar = qishuiFirstImageUrl(
+          "~c5_300x300.jpg",
+          user.larger_avatar_url,
+          user.medium_avatar_url,
+          user.avatar_url,
+          user.avatarUrl,
+          user.avatar,
+          user.user_avatar,
+          user.pic,
+          user.icon
+        );
+        return {
+          userId,
+          nickname,
+          avatar,
+          douyinId: normalizeText(user.douyin_id || user.unique_id || user.short_id || ""),
+          profileReady: !!(userId || nickname || avatar)
+        };
+      }
+      var QISHUI_VIP_NUMBER_KEYS = /* @__PURE__ */ new Set([
+        "viptype",
+        "viplevel",
+        "membertype",
+        "memberlevel",
+        "musicviptype",
+        "musicviplevel"
+      ]);
+      var QISHUI_SVIP_NUMBER_KEYS = /* @__PURE__ */ new Set([
+        "sviptype",
+        "sviplevel",
+        "superviptype",
+        "superviplevel"
+      ]);
+      var QISHUI_VIP_FLAG_KEYS = /* @__PURE__ */ new Set([
+        "isvip",
+        "ismember",
+        "hasvip",
+        "hasmembership",
+        "vipactive",
+        "vipenabled"
+      ]);
+      var QISHUI_SVIP_FLAG_KEYS = /* @__PURE__ */ new Set([
+        "issvip",
+        "issupervip",
+        "hassvip",
+        "hassupervip",
+        "svipactive",
+        "svipenabled"
+      ]);
+      var QISHUI_MEMBERSHIP_LABEL_KEYS = /* @__PURE__ */ new Set([
+        "viplevelname",
+        "vipname",
+        "memberlevelname",
+        "membername",
+        "membershiplevel",
+        "membershiptype",
+        // 汽水 web /luna/pc/me 用 vip_stage 表示会员档位：vip=会员、svip=超级会员。
+        // 实测真实 SVIP 账号该字段返回 "svip"，此前未被识别导致档位锁死、面板只显示 VIP。
+        "vipstage"
+      ]);
+      var QISHUI_VIP_CONTAINER_KEYS = /* @__PURE__ */ new Set([
+        "vipinfo",
+        "vipdetail",
+        "vipbenefit",
+        "vippackage",
+        "memberinfo",
+        "memberdetail",
+        "memberbenefit",
+        "memberpackage",
+        "membershipinfo",
+        "membershipdetail"
+      ]);
+      var QISHUI_SVIP_CONTAINER_KEYS = /* @__PURE__ */ new Set([
+        "svipinfo",
+        "svipdetail",
+        "svipbenefit",
+        "svippackage",
+        "supervipinfo",
+        "supervipdetail",
+        "supervipbenefit",
+        "supervippackage"
+      ]);
+      var QISHUI_MEMBERSHIP_STATUS_KEYS = /* @__PURE__ */ new Set([
+        "status",
+        "state",
+        "active",
+        "valid",
+        "enabled",
+        "isactive",
+        "isvalid",
+        "isenabled"
+      ]);
+      var QISHUI_MEMBERSHIP_GENERIC_EXPIRY_KEYS = /* @__PURE__ */ new Set([
+        "expiretime",
+        "expiresat",
+        "expirationtime",
+        "expiredat",
+        "endtime",
+        "validuntil"
+      ]);
+      var QISHUI_VIP_EXPIRY_KEYS = /* @__PURE__ */ new Set([
+        "vipexpiretime",
+        "vipexpiresat",
+        "vipexpiredat",
+        "vipendtime",
+        "memberexpiretime",
+        "memberexpiresat",
+        "memberexpiredat",
+        "memberendtime"
+      ]);
+      var QISHUI_SVIP_EXPIRY_KEYS = /* @__PURE__ */ new Set([
+        "svipexpiretime",
+        "svipexpiresat",
+        "svipexpiredat",
+        "svipendtime"
+      ]);
+      function qishuiNormalizedFieldKey(value) {
+        return String(value || "").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, "");
+      }
+      function qishuiExplicitPositive(value) {
+        if (value === true) return true;
+        if (typeof value === "number") return Number.isFinite(value) && value > 0;
+        const text5 = normalizeText(value).toLowerCase();
+        if (!text5) return false;
+        if (/^\d+(?:\.\d+)?$/.test(text5)) return Number(text5) > 0;
+        return /^(true|yes|active|valid|enabled|opened|vip|svip|premium|member|会员|已开通|有效)$/.test(text5);
+      }
+      function qishuiExplicitNegative(value) {
+        if (value === false || value === null) return true;
+        if (typeof value === "number") return Number.isFinite(value) && value <= 0;
+        const text5 = normalizeText(value).toLowerCase();
+        if (!text5) return false;
+        if (/^\d+(?:\.\d+)?$/.test(text5)) return Number(text5) <= 0;
+        return /^(false|no|inactive|invalid|disabled|closed|expired|none|free|normal|ordinary|非会员|普通用户|未开通|无vip|已过期|过期)$/.test(text5);
+      }
+      function qishuiMembershipLevelValue(value) {
+        const text5 = normalizeText(value).toLowerCase().replace(/[\s_-]+/g, "");
+        if (/^(svip|supervip|超级会员|超级vip|豪华会员)$/.test(text5)) return "svip";
+        if (/^(vip|premium|member|会员|普通会员)$/.test(text5)) return "vip";
+        if (/^(none|free|normal|ordinary|novip|非会员|普通用户|未开通|无vip|已过期|过期)$/.test(text5)) return "none";
+        return "";
+      }
+      function qishuiMembershipExpiryMillis(value) {
+        if (value === null || value === void 0 || value === "") return 0;
+        const number = Number(value);
+        if (Number.isFinite(number) && number > 0) {
+          return number < 1e11 ? number * 1e3 : number;
+        }
+        const parsed = Date.parse(String(value));
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+      }
+      function qishuiMembershipObjectState(value, level) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return { known: false, active: null, expiresAt: 0 };
+        }
+        let known = false;
+        let statusPositive = false;
+        let statusNegative = false;
+        let genericExpiryKnown = false;
+        let genericExpiryExpired = false;
+        let genericFutureExpiry = 0;
+        let levelExpiryKnown = false;
+        let levelExpiryExpired = false;
+        let levelFutureExpiry = 0;
+        const levelExpiryKeys = level === "svip" ? QISHUI_SVIP_EXPIRY_KEYS : level === "vip" ? QISHUI_VIP_EXPIRY_KEYS : null;
+        for (const [key, item] of Object.entries(value)) {
+          const normalizedKey = qishuiNormalizedFieldKey(key);
+          const isGenericExpiry = QISHUI_MEMBERSHIP_GENERIC_EXPIRY_KEYS.has(normalizedKey);
+          const isLevelExpiry = levelExpiryKeys ? levelExpiryKeys.has(normalizedKey) : QISHUI_VIP_EXPIRY_KEYS.has(normalizedKey) || QISHUI_SVIP_EXPIRY_KEYS.has(normalizedKey);
+          if (isGenericExpiry || isLevelExpiry) {
+            const expiresAt = qishuiMembershipExpiryMillis(item);
+            const isKnownExpiry = expiresAt > 0 || item !== "" && item !== null && item !== void 0 && Number.isFinite(Number(item)) && Number(item) <= 0;
+            if (!isKnownExpiry) continue;
+            known = true;
+            if (isLevelExpiry) {
+              levelExpiryKnown = true;
+              if (expiresAt > Date.now()) {
+                levelFutureExpiry = Math.max(levelFutureExpiry, expiresAt);
+              } else {
+                levelExpiryExpired = true;
+              }
+            } else {
+              genericExpiryKnown = true;
+              if (expiresAt > Date.now()) {
+                genericFutureExpiry = Math.max(genericFutureExpiry, expiresAt);
+              } else {
+                genericExpiryExpired = true;
+              }
+            }
+            continue;
+          }
+          if (!QISHUI_MEMBERSHIP_STATUS_KEYS.has(normalizedKey)) continue;
+          if (qishuiExplicitNegative(item)) {
+            known = true;
+            statusNegative = true;
+          } else if (qishuiExplicitPositive(item)) {
+            known = true;
+            statusPositive = true;
+          }
+        }
+        const expiryKnown = levelExpiryKnown || genericExpiryKnown;
+        const expiryExpired = levelExpiryKnown ? levelExpiryExpired : genericExpiryExpired;
+        const futureExpiry = levelExpiryKnown ? levelFutureExpiry : genericFutureExpiry;
+        const active = statusNegative || expiryExpired ? false : futureExpiry > 0 || !expiryKnown && statusPositive ? true : expiryKnown ? false : null;
+        return {
+          known,
+          active,
+          expiresAt: active === true ? futureExpiry : 0
+        };
+      }
+      function qishuiMembershipFromData(value) {
+        value = value && typeof value === "object" ? value : {};
+        let membershipKnown = false;
+        let isVip = false;
+        let isSvip = false;
+        let vipType = 0;
+        let svipType = 0;
+        let vipExpiresAt = 0;
+        let svipExpiresAt = 0;
+        let visited = 0;
+        const rememberExpiry = (level, expiresAt) => {
+          expiresAt = Number(expiresAt) || 0;
+          if (expiresAt <= Date.now()) return;
+          if (level === "svip") {
+            if (!svipExpiresAt || expiresAt < svipExpiresAt) svipExpiresAt = expiresAt;
+            return;
+          }
+          if (level === "vip" && (!vipExpiresAt || expiresAt < vipExpiresAt)) vipExpiresAt = expiresAt;
+        };
+        const applyLevel = (level, numericValue, active, expiresAt) => {
+          if (active === false || !level) return;
+          if (level === "svip") {
+            isSvip = true;
+            isVip = true;
+            svipType = Math.max(svipType, Number(numericValue) || 1);
+            rememberExpiry("svip", expiresAt);
+            return;
+          }
+          if (level === "vip") {
+            isVip = true;
+            vipType = Math.max(vipType, Number(numericValue) || 1);
+            rememberExpiry("vip", expiresAt);
+          }
+        };
+        const visit = (node, depth) => {
+          if (!node || typeof node !== "object" || depth > 6 || visited > 600) return;
+          visited += 1;
+          if (Array.isArray(node)) {
+            node.slice(0, 120).forEach((item) => visit(item, depth + 1));
+            return;
+          }
+          const vipObjectState = qishuiMembershipObjectState(node, "vip");
+          const svipObjectState = qishuiMembershipObjectState(node, "svip");
+          for (const [key, item] of Object.entries(node).slice(0, 160)) {
+            const normalizedKey = qishuiNormalizedFieldKey(key);
+            if (QISHUI_SVIP_NUMBER_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              const number = Number(item);
+              if (Number.isFinite(number) && number > 0) applyLevel("svip", number, svipObjectState.active, svipObjectState.expiresAt);
+            } else if (QISHUI_VIP_NUMBER_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              const number = Number(item);
+              if (Number.isFinite(number) && number > 0) applyLevel("vip", number, vipObjectState.active, vipObjectState.expiresAt);
+            } else if (QISHUI_SVIP_FLAG_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              if (qishuiExplicitPositive(item)) applyLevel("svip", 1, svipObjectState.active, svipObjectState.expiresAt);
+            } else if (QISHUI_VIP_FLAG_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              if (qishuiExplicitPositive(item)) applyLevel("vip", 1, vipObjectState.active, vipObjectState.expiresAt);
+            } else if (QISHUI_MEMBERSHIP_LABEL_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              const level = qishuiMembershipLevelValue(item);
+              const state = level === "svip" ? svipObjectState : vipObjectState;
+              applyLevel(level, 1, state.active, state.expiresAt);
+            } else if (QISHUI_SVIP_CONTAINER_KEYS.has(normalizedKey) || QISHUI_VIP_CONTAINER_KEYS.has(normalizedKey)) {
+              membershipKnown = true;
+              const level = QISHUI_SVIP_CONTAINER_KEYS.has(normalizedKey) ? "svip" : "vip";
+              const state = qishuiMembershipObjectState(item, level);
+              if (state.active === true) {
+                applyLevel(
+                  level,
+                  1,
+                  true,
+                  state.expiresAt
+                );
+              }
+            }
+            if (item && typeof item === "object") visit(item, depth + 1);
+          }
+        };
+        visit(value, 0);
+        if (isSvip) isVip = true;
+        const vipLevel = isSvip ? "svip" : isVip ? "vip" : "none";
+        const activeExpiries = [vipExpiresAt, svipExpiresAt].filter((item) => item > Date.now());
+        return {
+          membershipKnown,
+          vipType: isSvip ? svipType : vipType,
+          vipLevel,
+          isVip,
+          isSvip,
+          vipLabel: vipLevel === "svip" ? "SVIP" : vipLevel === "vip" ? "VIP" : "无VIP",
+          expiresAt: activeExpiries.length ? Math.min(...activeExpiries) : 0
+        };
+      }
+      function qishuiPlaybackMembershipFromPayload(payload) {
+        const data = payload && payload.data || payload || {};
+        const trustedCandidates = [
+          data.user_membership,
+          data.userMembership,
+          data.account_membership,
+          data.accountMembership,
+          data.user && data.user.membership,
+          data.account && data.account.membership,
+          data.me && data.me.membership
+        ].filter((item) => item && typeof item === "object");
+        if (trustedCandidates.length) {
+          const trusted = qishuiMembershipFromData({ membership_sources: trustedCandidates });
+          if (trusted.membershipKnown) return trusted;
+        }
+        const ambiguousCandidates = [
+          data.membership,
+          data.membership_info,
+          data.membershipInfo
+        ].filter((item) => item && typeof item === "object");
+        void ambiguousCandidates;
+        return {
+          membershipKnown: false,
+          vipType: 0,
+          vipLevel: "none",
+          isVip: false,
+          isSvip: false,
+          vipLabel: "无VIP",
+          expiresAt: 0
+        };
+      }
+      function qishuiProfileFromMeData(meData) {
+        const data = meData && meData.data || meData || {};
+        const user = pickObject(data.my_info, data.myInfo, data.user, data.user_info, data.userInfo, data.account, data.me, data);
+        const profile = qishuiProfileFromUser(user);
+        if (!profile.userId) {
+          profile.userId = normalizeText(data.user_id || data.userId || data.uid || data.id || "");
+        }
+        if (!profile.nickname) {
+          profile.nickname = normalizeText(data.nickname || data.nick_name || data.name || data.douyin_id || "");
+        }
+        if (!profile.avatar) {
+          profile.avatar = qishuiFirstImageUrl(
+            "~c5_300x300.jpg",
+            data.larger_avatar_url,
+            data.medium_avatar_url,
+            data.avatar_url,
+            data.avatar,
+            data.pic
+          );
+        }
+        Object.assign(profile, qishuiMembershipFromData(data));
+        profile.profileReady = !!(profile.userId || profile.nickname || profile.avatar);
+        return profile;
+      }
+      function pickArray() {
+        for (let i = 0; i < arguments.length; i++) {
+          const value = arguments[i];
+          if (Array.isArray(value)) return value;
+        }
+        return [];
+      }
+      function qishuiObjectString(obj, keys) {
+        obj = obj && typeof obj === "object" ? obj : {};
+        for (const key of keys || []) {
+          const value = obj[key];
+          if (value === null || value === void 0) continue;
+          if (Array.isArray(value)) {
+            const text5 = value.map((item) => normalizeText(item)).find(Boolean);
+            if (text5) return text5;
+            continue;
+          }
+          if (typeof value !== "object") {
+            const text5 = normalizeText(value);
+            if (text5) return text5;
+          }
+        }
+        return "";
+      }
+      function qishuiObjectNumber(obj, keys) {
+        const text5 = qishuiObjectString(obj, keys);
+        const num = Number(text5);
+        return Number.isFinite(num) ? num : 0;
+      }
+      function qishuiNormalizeDurationSeconds(value) {
+        const num = Number(value) || 0;
+        if (!num) return 0;
+        return num > 1e3 ? Math.round(num / 1e3) : Math.round(num);
+      }
+      function qishuiNormalizeBitrateKbps(value) {
+        const num = Number(value) || 0;
+        if (!num) return 0;
+        return num > 1e3 ? Math.round(num / 1e3) : Math.round(num);
+      }
+      function qishuiBitrateForUi(value) {
+        const kbps = qishuiNormalizeBitrateKbps(value);
+        return kbps > 0 ? kbps * 1e3 : 0;
+      }
+      function qishuiQualityRank(quality, format, bitrate) {
+        const q = normalizeText(quality).toLowerCase().replace(/[-_\s]/g, "");
+        const f = normalizeText(format).toLowerCase();
+        const br = qishuiNormalizeBitrateKbps(bitrate);
+        const losslessFormat = /flac|alac|wav/.test(f);
+        const losslessLabel = /lossless|flac|sq|svip/.test(q);
+        const hiresLabel = /hires|master/.test(q);
+        if (hiresLabel && (losslessFormat || br >= 900)) return 110;
+        if (losslessLabel || losslessFormat || br >= 900) return 100;
+        if (hiresLabel) return 90;
+        if (/atmos|dolby|spatial/.test(q)) return 88;
+        if (/higher|high|320/.test(q) || br >= 320) return 70;
+        if (/standard|medium|normal|128/.test(q) || br >= 128) return 50;
+        if (/low|preview/.test(q)) return 10;
+        return br > 0 ? 20 : 0;
+      }
+      function qishuiNormalizeAppQuality(q) {
+        q = normalizeText(q || "").toLowerCase().replace(/[-_\s]/g, "");
+        if (/^standard|medium|normal|std|128|higher/.test(q)) return "standard";
+        if (/^exhigh|high|hq|320|highest|excellent|superhigh/.test(q)) return "exhigh";
+        if (/^lossless|flac|sq/.test(q)) return "lossless";
+        if (/^hires|hi-res|highres|master/.test(q)) return "hires";
+        if (/^spatial|atmos|dolby|immersive/.test(q)) return "atmos";
+        return "standard";
+      }
+      function qishuiStreamAppTier(stream) {
+        stream = stream && typeof stream === "object" ? stream : {};
+        const q = normalizeText(stream.quality || stream.definition || stream.quality_type || "").toLowerCase().replace(/[-_\s]/g, "");
+        if (/^(hi-?res|highres|master|hires)/.test(q)) return "hires";
+        if (/^(spatial|atmos|dolby|immersive)/.test(q)) return "atmos";
+        if (/^(lossless|flac|sq)/.test(q)) return "lossless";
+        if (/^(medium|standard|normal|std|128k?|higher)/.test(q)) return "standard";
+        if (/^(highest|excellent|superhigh|hq|320k?|high$|exhigh)/.test(q)) return "exhigh";
+        const br = qishuiNormalizeBitrateKbps(stream.bitrate);
+        if (br >= 900) return "lossless";
+        if (br >= 320) return "exhigh";
+        return "standard";
+      }
+      function qishuiBetterStreamCandidate(a, b) {
+        if (!b) return true;
+        const ad = qishuiNormalizeDurationSeconds(a && a.duration);
+        const bd = qishuiNormalizeDurationSeconds(b && b.duration);
+        if (ad > 0 || bd > 0) {
+          if (ad > bd + 1) return true;
+          if (bd > ad + 1) return false;
+        }
+        const ar = qishuiQualityRank(a && a.quality, a && a.format, a && a.bitrate);
+        const br = qishuiQualityRank(b && b.quality, b && b.format, b && b.bitrate);
+        if (ar !== br) return ar > br;
+        const ab = qishuiNormalizeBitrateKbps(a && a.bitrate);
+        const bb = qishuiNormalizeBitrateKbps(b && b.bitrate);
+        if (ab !== bb) return ab > bb;
+        return (Number(a && a.size) || 0) > (Number(b && b.size) || 0);
+      }
+      function qishuiBestStreamCandidate(candidates) {
+        let best = null;
+        (candidates || []).forEach((item) => {
+          if (!item || !item.url) return;
+          if (qishuiBetterStreamCandidate(item, best)) best = item;
+        });
+        return best;
+      }
+      var QISHUI_TRACK_VIP_KEYS = /* @__PURE__ */ new Set([
+        "onlyvipplayable",
+        "viprequired",
+        "needvip",
+        "isvip",
+        "isviponly",
+        "viponly",
+        "onlyvip",
+        "onlymemberplayable",
+        "memberrequired",
+        "needmember",
+        "payplay"
+      ]);
+      var QISHUI_TRACK_SVIP_KEYS = /* @__PURE__ */ new Set([
+        "onlysvipplayable",
+        "sviprequired",
+        "needsvip",
+        "issvip",
+        "issviponly",
+        "sviponly",
+        "onlysvip",
+        "onlysupervipplayable",
+        "superviprequired",
+        "needsupervip",
+        "issuperviponly",
+        "superviponly"
+      ]);
+      var QISHUI_TRACK_ACCOUNT_CONTAINER_KEYS = /* @__PURE__ */ new Set([
+        "membership",
+        "membershipinfo",
+        "usermembership",
+        "accountmembership",
+        "account",
+        "userinfo",
+        "userprofile",
+        "me"
+      ]);
+      var QISHUI_TRACK_DOWNLOAD_CONTAINER_KEYS = /* @__PURE__ */ new Set([
+        "downloaddetail",
+        "downloadinfo",
+        "download_detail",
+        "downloadinfo",
+        "download",
+        "dldetail",
+        "dl"
+      ]);
+      function qishuiTrackPlaybackRestriction(value) {
+        let vipRequired = false;
+        let svipRequired = false;
+        let membershipHintKnown = false;
+        let visited = 0;
+        const evidence = [];
+        const visit = (node, depth, pathKeys) => {
+          if (!node || typeof node !== "object" || depth > 7 || visited > 800) return;
+          visited += 1;
+          if (Array.isArray(node)) {
+            node.slice(0, 160).forEach((item) => visit(item, depth + 1, pathKeys));
+            return;
+          }
+          for (const [key, item] of Object.entries(node).slice(0, 180)) {
+            const normalizedKey = qishuiNormalizedFieldKey(key);
+            const nextPath = pathKeys.concat(normalizedKey);
+            if (QISHUI_TRACK_ACCOUNT_CONTAINER_KEYS.has(normalizedKey)) continue;
+            if (QISHUI_TRACK_DOWNLOAD_CONTAINER_KEYS.has(normalizedKey)) continue;
+            if (QISHUI_TRACK_SVIP_KEYS.has(normalizedKey)) {
+              membershipHintKnown = true;
+              if (qishuiExplicitPositive(item)) {
+                svipRequired = true;
+                vipRequired = true;
+                evidence.push(nextPath.join("."));
+              }
+            } else if (QISHUI_TRACK_VIP_KEYS.has(normalizedKey)) {
+              membershipHintKnown = true;
+              if (qishuiExplicitPositive(item)) {
+                vipRequired = true;
+                evidence.push(nextPath.join("."));
+              }
+            } else if (normalizedKey === "fee") {
+              membershipHintKnown = true;
+              if (Number(item) === 1) {
+                vipRequired = true;
+                evidence.push(nextPath.join("."));
+              }
+            } else if (normalizedKey === "privilege") {
+              membershipHintKnown = true;
+              if (Number(item) >= 9) {
+                vipRequired = true;
+                evidence.push(nextPath.join("."));
+              }
+            }
+            if (item && typeof item === "object") visit(item, depth + 1, nextPath);
+          }
+        };
+        visit(value, 0, []);
+        return {
+          vipRequired,
+          svipRequired,
+          requiredTier: svipRequired ? "svip" : vipRequired ? "vip" : "free",
+          membershipHintKnown,
+          evidence
+        };
+      }
+      function qishuiTrackRequiresVip(value) {
+        return qishuiTrackPlaybackRestriction(value).vipRequired;
+      }
+      var QISHUI_TIER_RANK = Object.freeze({ free: 0, vip: 1, svip: 2 });
+      function qishuiNormalizeRequiredTier(value) {
+        const text5 = normalizeText(value).toLowerCase().replace(/[-_\s]/g, "");
+        if (/^(svip|supervip|hires|highres|highresolution|master|atmos|dolby|spatial)$/.test(text5)) return "svip";
+        if (/^(vip|member|premium|lossless|sq|flac|exhigh|high|higher|highest|hq|320)$/.test(text5)) return "vip";
+        return "free";
+      }
+      function qishuiHigherRequiredTier(a, b) {
+        a = qishuiNormalizeRequiredTier(a);
+        b = qishuiNormalizeRequiredTier(b);
+        return QISHUI_TIER_RANK[b] > QISHUI_TIER_RANK[a] ? b : a;
+      }
+      function qishuiStreamRequiredTier(stream) {
+        stream = stream && typeof stream === "object" ? stream : {};
+        let requiredTier = qishuiNormalizeRequiredTier(
+          stream.requiredTier || stream.required_tier || stream.membershipTier || stream.membership_tier || ""
+        );
+        const quality = normalizeText(stream.quality || stream.definition || "").toLowerCase().replace(/[-_\s]/g, "");
+        const format = normalizeText(stream.format || "").toLowerCase();
+        const bitrate = qishuiNormalizeBitrateKbps(stream.bitrate);
+        if (/svip|supervip|hires|highres|highresolution|master|atmos|dolby|spatial/.test(quality)) {
+          requiredTier = qishuiHigherRequiredTier(requiredTier, "svip");
+        } else if (/lossless|flac|sq/.test(quality) || /flac|alac|wav/.test(format) || bitrate >= 900) {
+          requiredTier = qishuiHigherRequiredTier(requiredTier, "vip");
+        } else if (/highest|excellent|superhigh|high$|hq|exhigh|320/.test(quality) || bitrate > 192) {
+          requiredTier = qishuiHigherRequiredTier(requiredTier, "vip");
+        }
+        return requiredTier;
+      }
+      function qishuiMembershipTier(membership) {
+        if (!(membership && membership.membershipKnown)) return "unknown";
+        if (membership.isSvip) return "svip";
+        if (membership.isVip) return "vip";
+        return "free";
+      }
+      function qishuiRequiredTierAllowed(requiredTier, membership) {
+        requiredTier = qishuiNormalizeRequiredTier(requiredTier);
+        if (requiredTier === "free") return true;
+        if (!(membership && membership.membershipKnown)) return false;
+        if (requiredTier === "svip") return !!membership.isSvip;
+        return !!membership.isVip;
+      }
+      function qishuiStreamAllowedForMembership(stream, membership) {
+        if (!stream || !stream.url) return false;
+        return qishuiRequiredTierAllowed(qishuiStreamRequiredTier(stream), membership);
+      }
+      function qishuiBestStreamCandidateForMembership(candidates, membership) {
+        return qishuiBestStreamCandidate((candidates || []).filter((item) => qishuiStreamAllowedForMembership(item, membership)));
+      }
+      function qishuiStreamUrlFrom(value) {
+        return normalizeText(qishuiObjectString(value, [
+          "main_play_url",
+          "MainPlayUrl",
+          "main_url",
+          "MainUrl",
+          "url",
+          "URL",
+          "play_url",
+          "PlayURL",
+          "playable_url",
+          "PlayableUrl",
+          "playableUrl"
+        ]) || qishuiObjectString(value, [
+          "backup_play_url",
+          "BackupPlayUrl",
+          "backup_url",
+          "BackupUrl",
+          "backup_url_1",
+          "backup_url_2",
+          "backup_url_3"
+        ]) || firstUrl(value && (value.backup_urls || value.backupUrls || value.url_list || value.UrlList)));
+      }
+      function qishuiBitrateFromUrl(value) {
+        value = normalizeText(value);
+        if (!value) return 0;
+        try {
+          const parsed = new URL(value);
+          for (const key of ["br", "bitrate", "bit_rate", "real_bitrate"]) {
+            const bitrate = Number(parsed.searchParams.get(key)) || 0;
+            if (bitrate > 0) return bitrate;
+          }
+        } catch (_) {
+        }
+        const match = value.match(/(?:^|[/_.-])(\d{2,4})(?:k|kbps)(?:[/_.-]|$)/i);
+        return match ? Number(match[1]) || 0 : 0;
+      }
+      function qishuiBitrateFromSize(size, duration) {
+        size = Number(size) || 0;
+        duration = qishuiNormalizeDurationSeconds(duration);
+        if (size <= 0 || duration <= 0) return 0;
+        const bitrate = Math.round(size * 8 / duration);
+        return bitrate >= 32e3 && bitrate <= 12e6 ? bitrate : 0;
+      }
+      function qishuiStreamFromObject(value, inherited) {
+        if (!value || typeof value !== "object") return null;
+        const url = qishuiStreamUrlFrom(value);
+        if (!url) return null;
+        inherited = inherited || {};
+        const meta = pickObject(value.video_meta, value.VideoMeta, value.meta, value.Meta);
+        const size = qishuiObjectNumber(value, ["size", "Size", "file_size", "FileSize", "data_size", "DataSize"]) || qishuiObjectNumber(meta, ["size", "Size", "file_size", "FileSize"]);
+        const duration = qishuiNormalizeDurationSeconds(qishuiObjectNumber(value, ["duration", "Duration"]) || inherited.duration || 0);
+        const bitrate = qishuiObjectNumber(value, ["bitrate", "Bitrate", "real_bitrate", "RealBitrate", "br", "BR", "bit_rate", "BitRate"]) || qishuiObjectNumber(meta, ["bitrate", "Bitrate", "real_bitrate", "RealBitrate", "bit_rate", "BitRate"]) || qishuiBitrateFromUrl(url) || qishuiBitrateFromSize(size, duration);
+        const stream = {
+          url,
+          auth: qishuiObjectString(value, ["play_auth", "PlayAuth", "spade_a", "SpadeA"]) || qishuiVideoModelPlayAuth(value) || inherited.auth || "",
+          size,
+          format: qishuiObjectString(value, ["format", "Format", "vtype", "VType", "file_format", "FileFormat"]) || qishuiObjectString(meta, ["format", "Format", "vtype", "VType", "codec_type", "CodecType"]),
+          bitrate,
+          quality: qishuiObjectString(value, ["quality", "Quality", "definition", "Definition", "quality_type", "QualityType"]) || qishuiObjectString(meta, ["quality", "Quality", "definition", "Definition", "quality_type", "QualityType"]) || qishuiVideoModelQualityHint(qishuiObjectString(value, ["gear_des_key", "GearDesKey"]) || inherited.keyHint || ""),
+          duration
+        };
+        stream.requiredTier = qishuiStreamRequiredTier(stream);
+        return stream;
+      }
+      function qishuiMaybeParseJson(value) {
+        let text5 = typeof value === "string" ? value.trim() : "";
+        if (!text5) return value;
+        for (let i = 0; i < 3 && text5.charAt(0) === '"'; i++) {
+          try {
+            text5 = JSON.parse(text5);
+          } catch (_) {
+            break;
+          }
+          if (typeof text5 !== "string") return text5;
+          text5 = text5.trim();
+        }
+        try {
+          return JSON.parse(text5);
+        } catch (_) {
+          return value;
+        }
+      }
+      function qishuiCollectVideoModelStreams(value, keyHint, inherited, out) {
+        value = qishuiMaybeParseJson(value);
+        inherited = inherited || {};
+        if (!value) return;
+        if (Array.isArray(value)) {
+          value.forEach((item) => qishuiCollectVideoModelStreams(item, keyHint, inherited, out));
+          return;
+        }
+        if (typeof value !== "object") return;
+        const ownAuth = qishuiVideoModelPlayAuth(value) || inherited.auth || "";
+        const ownDuration = qishuiNormalizeDurationSeconds(qishuiObjectNumber(value, ["video_duration", "duration", "Duration"])) || inherited.duration || 0;
+        const entry = qishuiStreamFromObject(value, { auth: ownAuth, duration: ownDuration, keyHint });
+        if (entry) out.push(entry);
+        Object.keys(value).forEach((key) => {
+          qishuiCollectVideoModelStreams(value[key], key, { auth: ownAuth, duration: ownDuration }, out);
+        });
+      }
+      function qishuiVideoModelPlayAuth(value) {
+        value = value && typeof value === "object" ? value : {};
+        const child = pickObject(value.encrypt_info, value.EncryptInfo, value.encryptInfo);
+        return qishuiObjectString(child, ["spade_a", "SpadeA", "spadeA", "play_auth", "PlayAuth"]);
+      }
+      function qishuiVideoModelQualityHint(key) {
+        const normalized = normalizeText(key).toLowerCase().replace(/[-_\s]/g, "");
+        if (!normalized) return "";
+        return ["hires", "spatial", "atmos", "dolby", "lossless", "sq", "flac", "highest", "higher", "standard", "normal"].find((token) => normalized.includes(token)) || "";
+      }
+      function extractQishuiMediaList(payload) {
+        const data = payload && payload.data || payload || {};
+        const direct = pickArray(
+          data.media_resources,
+          data.media_list,
+          data.related_media,
+          data.medias,
+          data.media,
+          data.tracks,
+          data.track_list,
+          data.songs,
+          data.items,
+          data.list,
+          data.result,
+          data.song_list,
+          data.recommend_media_list
+        );
+        if (direct.length) return direct;
+        const candidates = [];
+        function walk(node, depth) {
+          if (!node || depth > 4) return;
+          if (Array.isArray(node)) {
+            const mediaLike = node.filter((item) => item && typeof item === "object" && (item.media || item.track_entity || item.entity || item.base_info || item.id || item.media_id));
+            if (mediaLike.length > candidates.length) candidates.splice(0, candidates.length, ...mediaLike);
+            node.forEach((item) => walk(item, depth + 1));
+          } else if (typeof node === "object") {
+            Object.keys(node).slice(0, 80).forEach((key) => walk(node[key], depth + 1));
+          }
+        }
+        walk(data, 0);
+        return candidates;
+      }
+      function qishuiArtists(related, base, display, track, media) {
+        const links = pickArray(
+          related.artist_links,
+          related.artists,
+          base.artist_links,
+          base.artists,
+          display.artist_links,
+          display.artists,
+          track && track.artists,
+          media && media.artists
+        );
+        const out = [];
+        links.forEach((item) => {
+          const name = normalizeText(item && (item.name || item.display_name || item.simple_display_name || item.title || item.artist_name));
+          if (!name || out.some((a) => a.name === name)) return;
+          out.push({
+            id: String(item && (item.id || item.artist_id || item.open_id) || ""),
+            name,
+            mid: String(item && (item.id || item.artist_id || item.open_id) || "")
+          });
+        });
+        const fallback = normalizeText(base.artist_name || display.artist_name || related.artist_name || track && track.artist_name || media && media.artist_name);
+        if (fallback && !out.length) {
+          fallback.split(/\s*\/\s*|\s*,\s*|\s*&\s*/).forEach((name) => {
+            name = normalizeText(name);
+            if (name) out.push({ id: "", name, mid: "" });
+          });
+        }
+        return out;
+      }
+      function qishuiTranslationIsChinese(item, text5) {
+        const lang = String(item && (item.language || item.lang || item.language_code || item.lang_code) || "").toLowerCase();
+        if (/^(zh|cn|zh-cn|zh_cn|zhs|cht|zh-tw|zh_tw|中文|简体|繁体|普通话|汉语)$/.test(lang.trim())) return true;
+        return /[\u4e00-\u9fff]/.test(String(text5 || ""));
+      }
+      function qishuiLyricPayload(display, track, base, id) {
+        const lyricInfo = pickObject(display.lyric_info, track.lyric_info, base.lyric_info);
+        const lyricEntity = pickObject(lyricInfo.lyric_entity, lyricInfo.lyric, lyricInfo.original_lyric);
+        const lyric = normalizeLyricBody(lyricEntity.content || lyricInfo.content || lyricInfo.lyric || lyricInfo.lyric_text || "");
+        const translations = pickArray(lyricInfo.lang_translations, lyricInfo.translations, lyricInfo.translation);
+        let tlyric = "";
+        let fallbackTlyric = "";
+        for (const item of translations) {
+          const entity = pickObject(item && item.lyric_entity, item);
+          const text5 = normalizeLyricBody(entity.content || item && (item.content || item.lyric || item.lyric_text));
+          if (!text5) continue;
+          if (qishuiTranslationIsChinese(item, text5)) {
+            tlyric = text5;
+            break;
+          }
+          if (!fallbackTlyric) fallbackTlyric = text5;
+        }
+        if (!tlyric) tlyric = fallbackTlyric;
+        cacheQishuiLyric(id, lyric, tlyric, "qishui-openapi-cache");
+        return { lyric, tlyric };
+      }
+      function cacheQishuiLyric(id, lyric, tlyric, source) {
+        id = normalizeText(id);
+        const primary = qishuiConvertLyric(lyric);
+        const translated = qishuiConvertLyric(tlyric);
+        lyric = primary.lyric;
+        tlyric = translated.lyric;
+        if (!id || !lyric && !tlyric) return null;
+        const payload = {
+          provider: "qishui",
+          lyric,
+          tlyric,
+          yrc: primary.yrc,
+          ytlrc: translated.yrc,
+          source: source || "qishui-cache",
+          cachedAt: Date.now()
+        };
+        qishuiLyricCache.set(id, payload);
+        return payload;
+      }
+      function mapQishuiMedia(raw, index, query, opts) {
+        opts = opts || {};
+        raw = raw || {};
+        const entity = pickObject(raw.entity, raw.data, raw);
+        const media = pickObject(entity.media, raw.media, entity);
+        const wrapper = pickObject(entity.track_wrapper, media.track_wrapper, raw.track_wrapper);
+        const track = pickObject(wrapper.track, media.track_entity, raw.track_entity, media.track, raw.track, media);
+        const base = pickObject(track.base_info, media.base_info, raw.base_info, track);
+        const display = pickObject(track.display_info, media.display_info, raw.display_info);
+        const related = pickObject(track.related_info, media.related_info, raw.related_info);
+        const id = normalizeText(
+          base.id || track.id || media.id || raw.id || raw.media_id || raw.item_id || raw.song_id || raw.vid || "qishui-" + index + "-" + query
+        );
+        const name = normalizeText(base.name || base.title || track.name || track.title || media.name || raw.name || raw.title);
+        if (!id || !name) return null;
+        const artists = qishuiArtists(related, base, display, track, media);
+        const artist = artists.map((a) => a.name).filter(Boolean).join(" / ") || normalizeText(base.author || raw.author || "");
+        const albumLink = pickObject(related.album_link, related.album, base.album, display.album, track.album, media.album);
+        const album = normalizeText(albumLink.name || albumLink.title || base.album_name || display.album_name || "");
+        const albumId = normalizeText(albumLink.id || albumLink.album_id || albumLink.albumId || "");
+        const cover = qishuiFirstImageUrl(
+          "~c5_375x375.jpg",
+          display.cover_url,
+          display.url_cover,
+          base.cover_url,
+          base.url_cover,
+          albumLink.cover_url,
+          albumLink.url_cover,
+          track.url_cover,
+          track.cover_url,
+          media.cover_url,
+          media.url_cover,
+          raw.cover_url,
+          raw.cover,
+          raw.url_cover
+        );
+        const durationMs = Number(base.duration_ms || base.duration || track.duration_ms || track.duration || media.duration_ms || media.duration || raw.duration || 0) || 0;
+        const lyricData = qishuiLyricPayload(display, track, base, id);
+        const directPlayable = !!opts.directPlayable;
+        return {
+          provider: "qishui",
+          source: "qishui",
+          type: "qishui",
+          id,
+          providerSongId: id,
+          name,
+          artist,
+          artists,
+          album,
+          album_id: albumId,
+          albumId,
+          cover,
+          duration: qishuiNormalizeDurationSeconds(durationMs),
+          popularity: Number(raw.popularity || raw.hot || raw.heat || raw.play_count || raw.playCount || related.play_count || related.playCount || 0) || 0,
+          fee: track.label_info && track.label_info.only_vip_playable ? 1 : 0,
+          playable: directPlayable,
+          playbackMode: directPlayable ? "direct-url" : "recommend-match",
+          recommendationSource: directPlayable ? "qishui-pc-session" : "qishui-openapi",
+          qishuiRank: index,
+          qishuiQuery: query || "",
+          lyric: lyricData.lyric,
+          tlyric: lyricData.tlyric,
+          restriction: qishuiRestriction("provider_limited", "汽水音乐当前作为推荐/匹配源接入，播放时会自动寻找其它可播版本。", "switch_source")
+        };
+      }
+      function qishuiWebCommonParams(extra, opts) {
+        if (opts && opts.noDefaultParams) return Object.assign({}, extra || {});
+        return Object.assign({}, QISHUI_WEB_DEFAULT_PARAMS, extra || {});
+      }
+      function qishuiPcAppParams(extra) {
+        const now = Date.now();
+        const deviceId = String(now);
+        return Object.assign({
+          aid: "386088",
+          app_name: "luna_pc",
+          region: "cn",
+          geo_region: "cn",
+          os_region: "cn",
+          sim_region: "",
+          device_id: deviceId,
+          cdid: "",
+          iid: String(now + 1),
+          version_name: "3.3.0",
+          version_code: "30030000",
+          channel: "official",
+          build_mode: "master",
+          network_carrier: "",
+          ac: "wifi",
+          tz_name: "Asia/Shanghai",
+          resolution: "",
+          device_platform: "windows",
+          device_type: "Windows",
+          os_version: "Windows 11",
+          fp: deviceId
+        }, extra || {});
+      }
+      function qishuiWebHeaders(cookieText, opts) {
+        const cookie = opts && opts.sessionOnly ? qishuiSessionCookieHeader(cookieText) : normalizeQishuiCookieInput(cookieText);
+        const headers = {
+          "Accept": "application/json,text/plain,*/*",
+          "Content-Type": "application/json; charset=utf-8",
+          "User-Agent": opts && opts.pcApp ? QISHUI_PC_APP_UA : QISHUI_WEB_UA
+        };
+        if (opts && opts.pcApp) {
+          headers["x-luna-background-type"] = "foreground";
+          headers["x-luna-is-background-req"] = "0";
+          headers["x-luna-is-local-user"] = "1";
+        }
+        if (cookie) headers.Cookie = cookie;
+        return headers;
+      }
+      async function qishuiWebRequestJson(apiPath, params, cookieText, opts) {
+        opts = opts || {};
+        const bases = Array.isArray(opts.bases) && opts.bases.length ? opts.bases : QISHUI_WEB_API_BASES;
+        const method = String(opts.method || "GET").toUpperCase();
+        const body = opts.body == null ? null : String(opts.body);
+        let lastErr = null;
+        for (const base of bases) {
+          const target = /^https?:\/\//i.test(apiPath) ? apiPath : String(base || "").replace(/\/+$/, "") + apiPath;
+          const targetUrl = urlWithParams(target, qishuiWebCommonParams(params, opts));
+          const headers = Object.assign(qishuiWebHeaders(cookieText, opts), opts.headers || {});
+          if (opts.referer) headers.Referer = String(opts.referer);
+          try {
+            const officialBridge = opts.signed === false ? null : getQishuiOfficialBridge();
+            let json;
+            if (opts.pcApp && officialBridge) {
+              let signedResponseBody = "";
+              let signedResponseStatus = null;
+              try {
+                const response = await officialBridge.requestOfficial(method, targetUrl, {
+                  headers,
+                  body,
+                  timeoutMs: opts.timeoutMs || 8e3
+                });
+                signedResponseBody = response && response.body || "";
+                signedResponseStatus = response && response.status;
+                try {
+                  json = JSON.parse(String(response && response.body || ""));
+                } catch (parseError) {
+                  const error = new Error("Invalid JSON from Qishui official signed API");
+                  error.code = "QISHUI_OFFICIAL_INVALID_JSON";
+                  error.cause = parseError;
+                  throw error;
+                }
+              } catch (signedError) {
+                lastErr = signedError;
+                if (__foliaProcessEnv.QISHUI_DEBUG_SIGNED === "1") {
+                  console.warn("[QishuiSignedRequest]", signedError && signedError.code || signedError && signedError.name || "error");
+                }
+                qishuiDiagLog("signed_request_failed", {
+                  code: signedError && signedError.code,
+                  message: String(signedError && signedError.message || signedError),
+                  body: String(signedResponseBody || "").slice(0, 3e3),
+                  status: signedResponseStatus
+                });
+                json = null;
+              }
+            }
+            if (!json) {
+              json = await requestJson(targetUrl, {
+                method,
+                timeoutMs: opts.timeoutMs || 8e3,
+                headers
+              }, body);
+            }
+            const err = qishuiPcStatusError(json, "QISHUI_WEB_REQUEST_FAILED");
+            if (err) throw err;
+            return json;
+          } catch (err) {
+            lastErr = err;
+            if (err && (err.statusCode === 401 || err.statusCode === 403)) break;
+          }
+        }
+        throw lastErr || new Error("QISHUI_WEB_REQUEST_FAILED");
+      }
+      async function fetchQishuiPlaybackMembership(cookieText) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) {
+          return qishuiUnknownMembership("QISHUI_COOKIE_REQUIRED");
+        }
+        const cacheKey = "membership|" + qishuiCookieFingerprint(cookie);
+        return qishuiMembershipCache.wrap(cacheKey, qishuiMembershipCacheTtlMs, async () => {
+          try {
+            const json = await qishuiWebRequestJson("/luna/pc/me", qishuiPcAppParams(), cookie, {
+              bases: [QISHUI_WEB_PC_API_BASE],
+              noDefaultParams: true,
+              sessionOnly: true,
+              pcApp: true,
+              timeoutMs: 6500
+            });
+            const data = json && json.data || json || {};
+            const profile = qishuiProfileFromMeData(data);
+            return qishuiApplyMembershipObservation(cacheKey, {
+              membershipKnown: !!profile.membershipKnown,
+              vipType: Number(profile.vipType) || 0,
+              vipLevel: profile.vipLevel || "none",
+              isVip: !!profile.isVip,
+              isSvip: !!profile.isSvip,
+              vipLabel: profile.vipLabel || "无VIP",
+              expiresAt: Number(profile.expiresAt) || 0,
+              sessionValidated: !!profile.profileReady,
+              userId: profile.userId || "",
+              entitlementSource: "official-pc-me"
+            });
+          } catch (err) {
+            return qishuiApplyMembershipObservation(
+              cacheKey,
+              qishuiUnknownMembership(err && err.message || "QISHUI_MEMBERSHIP_CHECK_FAILED")
+            );
+          }
+        });
+      }
+      function qishuiUnknownMembership(error) {
+        return {
+          membershipKnown: false,
+          membershipStatus: "unknown",
+          reason: "membership_unknown",
+          vipType: 0,
+          vipLevel: "unknown",
+          isVip: false,
+          isSvip: false,
+          vipLabel: "未知会员状态",
+          expiresAt: 0,
+          sessionValidated: false,
+          error: normalizeText(error || "QISHUI_MEMBERSHIP_UNKNOWN")
+        };
+      }
+      function qishuiApplyMembershipObservation(historyKey, membership, now) {
+        historyKey = normalizeText(historyKey);
+        membership = membership && typeof membership === "object" ? Object.assign({}, membership) : qishuiUnknownMembership("QISHUI_MEMBERSHIP_UNKNOWN");
+        now = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+        const membershipKnown = !!membership.membershipKnown;
+        const expiresAt = Number(membership.expiresAt) || 0;
+        const positive = membershipKnown && !!(membership.isVip || membership.isSvip);
+        if (membershipKnown) {
+          if (historyKey) qishuiMembershipPositiveHistory.delete(historyKey);
+          if (positive && expiresAt > now && historyKey) {
+            const retainedUntil = Math.min(expiresAt, now + QISHUI_MEMBERSHIP_POSITIVE_GRACE_MS);
+            qishuiMembershipPositiveHistory.set(historyKey, {
+              membership: Object.assign({}, membership, {
+                membershipStatus: membership.isSvip ? "svip" : "vip"
+              }),
+              observedAt: now,
+              expiresAt,
+              retainedUntil
+            });
+            while (qishuiMembershipPositiveHistory.size > 48) {
+              const oldestKey = qishuiMembershipPositiveHistory.keys().next().value;
+              if (!oldestKey) break;
+              qishuiMembershipPositiveHistory.delete(oldestKey);
+            }
+          }
+          return Object.assign(membership, {
+            membershipStatus: positive ? membership.isSvip ? "svip" : "vip" : "free"
+          });
+        }
+        const previous = historyKey ? qishuiMembershipPositiveHistory.get(historyKey) : null;
+        if (previous && previous.expiresAt > now && previous.retainedUntil > now && previous.membership && previous.membership.membershipKnown) {
+          return Object.assign({}, previous.membership, {
+            retainedOfficialPositive: true,
+            retainedUntil: previous.retainedUntil,
+            entitlementSource: "recent-official-positive",
+            membershipCheckError: membership.error || membership.reason || "membership_unknown"
+          });
+        }
+        if (previous && historyKey) qishuiMembershipPositiveHistory.delete(historyKey);
+        return Object.assign(qishuiUnknownMembership(membership.error || membership.reason), membership, {
+          membershipKnown: false,
+          membershipStatus: "unknown",
+          reason: "membership_unknown",
+          vipType: 0,
+          vipLevel: "unknown",
+          isVip: false,
+          isSvip: false,
+          vipLabel: "未知会员状态",
+          expiresAt: 0
+        });
+      }
+      function qishuiMembershipCacheTtlMs(membership, now) {
+        now = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+        if (!(membership && membership.membershipKnown)) return 1;
+        if (!(membership.isVip || membership.isSvip)) return QISHUI_MEMBERSHIP_POSITIVE_CACHE_MS;
+        const expiresAt = Number(membership && membership.expiresAt) || 0;
+        if (expiresAt <= 0) return 1;
+        let remainingMs = expiresAt - now;
+        const retainedUntil = Number(membership.retainedUntil) || 0;
+        if (retainedUntil > 0) remainingMs = Math.min(remainingMs, retainedUntil - now);
+        if (remainingMs <= 0) return 1;
+        return Math.max(1, Math.min(QISHUI_MEMBERSHIP_POSITIVE_CACHE_MS, remainingMs - 250));
+      }
+      async function qishuiPcPostJson(apiPath, payload, cookieText, opts) {
+        opts = opts || {};
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) {
+          const err = new Error("QISHUI_COOKIE_REQUIRED");
+          err.code = "QISHUI_COOKIE_REQUIRED";
+          throw err;
+        }
+        const body = JSON.stringify(payload || {});
+        const json = await qishuiWebRequestJson(apiPath, qishuiPcAppParams(opts.params), cookie, {
+          bases: [QISHUI_WEB_PC_API_BASE],
+          noDefaultParams: true,
+          sessionOnly: true,
+          pcApp: true,
+          method: "POST",
+          body,
+          referer: "https://www.qishui.com/",
+          timeoutMs: opts.timeoutMs || 9e3
+        });
+        const statusError = qishuiPcStatusError(json, opts.errorCode || "QISHUI_PC_WRITE_FAILED");
+        if (statusError) throw statusError;
+        return json;
+      }
+      function invalidateQishuiLibraryCaches() {
+        qishuiWebLibraryCache.clear();
+        qishuiWebPlaylistCache.clear();
+        qishuiWebPlaylistCursorCache.clear();
+      }
+      function dedupeQishuiSongs(songs) {
+        const seen = /* @__PURE__ */ new Set();
+        const out = [];
+        (songs || []).forEach((song) => {
+          if (!song || !song.id) return;
+          const key = String(song.providerSongId || song.id);
+          if (seen.has(key)) return;
+          seen.add(key);
+          out.push(song);
+        });
+        return out;
+      }
+      function mapQishuiMediaList(rawItems, query, opts) {
+        return dedupeQishuiSongs((rawItems || []).map((item, index) => mapQishuiMedia(item, index, query, opts)).filter(Boolean));
+      }
+      function qishuiPlaylistLikeName(name) {
+        const text5 = String(name || "");
+        return /喜欢|收藏|favorite|liked/i.test(text5) || text5.indexOf("喜欢") >= 0 || text5.indexOf("收藏") >= 0;
+      }
+      function qishuiPlaylistPrimaryLikeName(name) {
+        const text5 = String(name || "");
+        return /favorite|liked/i.test(text5) || text5.indexOf("喜欢") >= 0;
+      }
+      function qishuiPlaylistIdFromItem(item) {
+        item = item || {};
+        return normalizeText(
+          item.playlist_id || item.playlistId || item.collection_id || item.collectionId || item.id || item.item_id || item.resource_id || item.object_id || item.server_id || ""
+        );
+      }
+      function qishuiPlaylistNameFromItem(item) {
+        item = item || {};
+        return normalizeText(
+          item.title || item.public_title || item.publicTitle || item.name || item.display_title || item.display_name || item.playlist_name || item.collection_name || ""
+        );
+      }
+      function qishuiPlaylistCoverFromItem(item) {
+        item = item || {};
+        return qishuiFirstImageUrl(
+          "~c5_300x300.jpg",
+          item.cover_url,
+          item.cover,
+          item.cover_uri,
+          item.image,
+          item.image_url,
+          item.url_cover,
+          item.icon,
+          item.avatar
+        );
+      }
+      function qishuiPlaylistTrackCountFromItem(item) {
+        item = item || {};
+        return Number(
+          item.count_tracks || item.track_count || item.media_count || item.count || item.total || item.song_count || 0
+        ) || 0;
+      }
+      function extractQishuiPlaylistCards(payload) {
+        const data = payload && payload.data || payload || {};
+        const out = [];
+        const seen = /* @__PURE__ */ new Set();
+        function visit(node, depth) {
+          if (!node || depth > 6) return;
+          if (Array.isArray(node)) {
+            node.forEach((item) => visit(item, depth + 1));
+            return;
+          }
+          if (typeof node !== "object") return;
+          const candidates = [
+            node.playlist,
+            node.playlist_info,
+            node.collection,
+            node.collect_playlist,
+            node.fav_playlist,
+            node.resource,
+            node
+          ].filter((item) => item && typeof item === "object" && !Array.isArray(item));
+          candidates.forEach((item) => {
+            const id = qishuiPlaylistIdFromItem(item);
+            const name = qishuiPlaylistNameFromItem(item);
+            const count = qishuiPlaylistTrackCountFromItem(item);
+            const type = normalizeText(item.type || item.card_type || item.resource_type || node.type || "");
+            if (!id || !name) return;
+            if (!count && !qishuiPlaylistLikeName(name) && !/playlist|collection|fav|songlist|歌单/i.test(type + " " + name)) return;
+            const key = id + "|" + name;
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push({
+              provider: "qishui",
+              source: "qishui",
+              type: "playlist",
+              id,
+              name,
+              cover: qishuiPlaylistCoverFromItem(item),
+              trackCount: count,
+              playCount: Number(item.play_count || item.playCount || 0) || 0,
+              creator: normalizeText(item.creator_name || item.author_name || item.owner_name || item.owner && (item.owner.nickname || item.owner.public_name) || "汽水音乐"),
+              subscribed: true,
+              virtual: false,
+              webSession: true,
+              isLiked: qishuiPlaylistLikeName(name),
+              playbackMode: "recommend-match"
+            });
+          });
+          Object.keys(node).slice(0, 80).forEach((key) => visit(node[key], depth + 1));
+        }
+        visit(data, 0);
+        return out;
+      }
+      function buildQishuiVirtualPlaylist(id, name, songs, extra) {
+        songs = Array.isArray(songs) ? songs : [];
+        extra = extra || {};
+        return {
+          provider: "qishui",
+          source: "qishui",
+          type: "playlist",
+          id,
+          name,
+          cover: extra.cover || songs.map((song) => song && song.cover).find(Boolean) || "",
+          trackCount: Number(extra.trackCount || songs.length || 0) || 0,
+          playCount: Number(extra.playCount || 0) || 0,
+          creator: extra.creator || "汽水音乐",
+          subscribed: !!extra.subscribed,
+          shelfPane: extra.shelfPane || "",
+          owned: !!extra.owned,
+          virtual: true,
+          webSession: !!extra.webSession,
+          playbackMode: "recommend-match"
+        };
+      }
+      async function fetchQishuiWebFeedSongs(cookieText, limit) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) return { provider: "qishui", configured: false, webSession: false, songs: [], error: "QISHUI_COOKIE_REQUIRED" };
+        limit = Math.max(1, Math.min(50, Number(limit) || 8));
+        const cacheKey = "web-feed|" + qishuiCookieFingerprint(cookie) + "|" + limit;
+        return qishuiFeedCache.wrap(cacheKey, 90 * 1e3, async () => {
+          const candidates = [
+            { path: "/luna/feed/song-tab", params: { cursor: 0, cnt: limit, count: limit } },
+            { path: "/luna/pc/feed/song-tab", params: { cursor: 0, cnt: limit, count: limit } }
+          ];
+          let lastErr = null;
+          for (const item of candidates) {
+            try {
+              const json = await qishuiWebRequestJson(item.path, item.params, cookie, { timeoutMs: 8e3 });
+              const rawItems = extractQishuiMediaList(json);
+              const songs = mapQishuiMediaList(rawItems, "web-feed", { directPlayable: true }).slice(0, limit);
+              if (songs.length) return { provider: "qishui", configured: true, webSession: true, songs, rawCount: rawItems.length };
+            } catch (err) {
+              lastErr = err;
+            }
+          }
+          try {
+            const fallback = await fetchQishuiWebLibraryFeedFallback(cookie, limit);
+            if (fallback && fallback.songs && fallback.songs.length) return fallback;
+          } catch (fallbackErr) {
+            lastErr = fallbackErr || lastErr;
+          }
+          return { provider: "qishui", configured: true, webSession: true, songs: [], rawCount: 0, error: lastErr && lastErr.message || "" };
+        });
+      }
+      async function fetchQishuiWebLibraryFeedFallback(cookieText, limit) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        limit = Math.max(1, Math.min(50, Number(limit) || 8));
+        const library = await fetchQishuiWebLibrary(cookie);
+        let songs = dedupeQishuiSongs([].concat(library.likedTracks || []).concat(library.recentTracks || []));
+        const detailCandidates = [].concat(library.likedCard ? [library.likedCard] : []).concat((library.playlists || []).filter((pl) => pl && pl.id));
+        for (let i = 0; songs.length < limit && i < detailCandidates.length && i < 4; i += 1) {
+          const pl = detailCandidates[i];
+          if (!pl || !pl.id) continue;
+          try {
+            const detail = await fetchQishuiWebPlaylistTracks(pl.id, cookie, { limit: Math.max(limit, 12), offset: 0 });
+            songs = dedupeQishuiSongs(songs.concat(detail && detail.tracks || []));
+          } catch (_) {
+          }
+        }
+        songs = songs.slice(0, limit);
+        return {
+          provider: "qishui",
+          configured: true,
+          webSession: true,
+          songs,
+          rawCount: songs.length,
+          source: "qishui-web-library-fallback",
+          fallback: true,
+          error: songs.length ? "" : (library.errors || []).join("; ") || "QISHUI_WEB_FEED_EMPTY"
+        };
+      }
+      async function fetchQishuiWebLibrary(cookieText) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) {
+          return { provider: "qishui", loggedIn: false, webSession: false, playlists: [], likedTracks: [], recentTracks: [] };
+        }
+        const cacheKey = "library|" + qishuiCookieFingerprint(cookie);
+        return qishuiWebLibraryCache.wrap(cacheKey, 90 * 1e3, async () => {
+          const playlists = [];
+          const likedTracks = [];
+          const recentTracks = [];
+          const cardTracks = [];
+          const errors = [];
+          const addSongs = (target, songs) => {
+            target.push(...dedupeQishuiSongs(songs || []));
+          };
+          const tryRead = async (label, apiPath, params, requestOpts) => {
+            requestOpts = requestOpts || {};
+            try {
+              const json = await qishuiWebRequestJson(apiPath, params || {}, cookie, Object.assign({
+                bases: [QISHUI_WEB_PC_API_BASE],
+                noDefaultParams: true,
+                sessionOnly: true,
+                timeoutMs: 6500
+              }, requestOpts));
+              if (/created|collection|collect/i.test(label)) {
+                extractQishuiPlaylistCards(json).forEach((pl) => {
+                  const primaryLike = qishuiPlaylistPrimaryLikeName(pl && pl.name);
+                  if (/created/i.test(label) || primaryLike) {
+                    pl.shelfPane = "mine";
+                    pl.owned = true;
+                    pl.subscribed = false;
+                  } else {
+                    pl.shelfPane = "fav";
+                    pl.owned = false;
+                    pl.subscribed = true;
+                  }
+                  playlists.push(pl);
+                });
+              }
+              const songs = mapQishuiMediaList(extractQishuiMediaList(json), label, { directPlayable: true });
+              if (/recent/i.test(label)) addSongs(recentTracks, songs);
+              else if (/liked|favorite|collect/i.test(label)) addSongs(likedTracks, songs);
+              else addSongs(cardTracks, songs);
+              return json;
+            } catch (err) {
+              if (!requestOpts.optional) errors.push(label + ":" + (err && err.message || "failed"));
+              return null;
+            }
+          };
+          const pcRequestOpts = { pcApp: true };
+          const meJson = await tryRead("me", "/luna/pc/me", qishuiPcAppParams(), pcRequestOpts);
+          const meData = meJson && meJson.data || meJson || {};
+          const profile = qishuiProfileFromMeData(meData);
+          const userId = profile.userId;
+          await Promise.all([
+            userId ? tryRead("created", "/luna/pc/user/playlist", qishuiPcAppParams({
+              user_id: userId,
+              cursor: "",
+              count: 50
+            }), pcRequestOpts) : Promise.resolve(null),
+            tryRead("collection", "/luna/pc/me/collection/mixed", qishuiPcAppParams({
+              cursor: "",
+              count: 50
+            }), Object.assign({ optional: true }, pcRequestOpts)),
+            tryRead("recent", "/luna/pc/me/recently-played-media", qishuiPcAppParams({
+              cursor: "",
+              count: 50
+            }), Object.assign({ optional: true }, pcRequestOpts))
+          ]);
+          if (!userId) errors.push("me:missing-user-id");
+          const uniquePlaylists = [];
+          const seenPlaylists = /* @__PURE__ */ new Set();
+          playlists.forEach((pl) => {
+            if (!pl || !pl.id || seenPlaylists.has(pl.id)) return;
+            seenPlaylists.add(pl.id);
+            uniquePlaylists.push(pl);
+          });
+          const likedCard = uniquePlaylists.find((pl) => pl && pl.isLiked && qishuiPlaylistPrimaryLikeName(pl.name)) || uniquePlaylists.find((pl) => pl && pl.isLiked);
+          return {
+            provider: "qishui",
+            loggedIn: true,
+            configured: true,
+            webSession: true,
+            playlists: uniquePlaylists,
+            likedCard,
+            likedTracks: dedupeQishuiSongs(likedTracks),
+            recentTracks: dedupeQishuiSongs(recentTracks),
+            profile,
+            errors
+          };
+        });
+      }
+      async function handleQishuiStatus(cookieText) {
+        const status = getQishuiStatus(cookieText);
+        if (!status.webSession) return status;
+        try {
+          const library = await fetchQishuiWebLibrary(cookieText);
+          const profile = library && library.profile || {};
+          if (profile.profileReady) {
+            status.userId = profile.userId || status.userId;
+            status.nickname = profile.nickname || status.nickname;
+            status.avatar = profile.avatar || status.avatar;
+            status.douyinId = profile.douyinId || "";
+            status.vipType = profile.vipType || 0;
+            status.vipLevel = profile.vipLevel || "none";
+            status.isVip = !!profile.isVip;
+            status.isSvip = !!profile.isSvip;
+            status.vipLabel = profile.vipLabel || (status.vipLevel === "svip" ? "SVIP" : status.vipLevel === "vip" ? "VIP" : "无VIP");
+            status.membershipKnown = !!profile.membershipKnown;
+            status.profileReady = true;
+          }
+          status.libraryReady = true;
+          status.libraryErrors = library && library.errors || [];
+        } catch (err) {
+          status.profileReady = false;
+          status.profileError = err && err.message || "QISHUI_PROFILE_FAILED";
+        }
+        return status;
+      }
+      async function fetchQishuiWebPlaylistTracks(playlistId, cookieText, opts) {
+        opts = opts || {};
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        const id = normalizeText(String(playlistId || "").replace(/^qishui:/i, ""));
+        if (!qishuiCookieHasLogin(cookie) || !id) {
+          return { provider: "qishui", configured: false, webSession: false, tracks: [], total: 0, error: "QISHUI_COOKIE_REQUIRED" };
+        }
+        const limit = Math.max(1, Math.min(50, Number(opts.limit) || 50));
+        const offset = Math.max(0, Number(opts.offset) || 0);
+        const cacheKey = "playlist|" + qishuiCookieFingerprint(cookie) + "|" + id + "|" + limit + "|" + offset;
+        return qishuiWebPlaylistCache.wrap(cacheKey, 90 * 1e3, async () => {
+          const targetCount = offset + limit;
+          const cursorKey = qishuiCookieFingerprint(cookie) + "|" + id;
+          let cursorState = qishuiWebPlaylistCursorCache.get(cursorKey);
+          if (!cursorState || Date.now() - cursorState.updatedAt > 10 * 60 * 1e3) {
+            cursorState = { rawItems: [], cursor: "", hasMore: true, lastJson: null, updatedAt: Date.now(), promise: null };
+            qishuiWebPlaylistCursorCache.set(cursorKey, cursorState);
+          }
+          while (cursorState.rawItems.length < targetCount && cursorState.hasMore) {
+            if (!cursorState.promise) {
+              cursorState.promise = qishuiWebRequestJson("/luna/pc/playlist/detail", qishuiPcAppParams({
+                playlist_id: id,
+                cursor: cursorState.cursor,
+                count: Math.min(100, Math.max(1, targetCount - cursorState.rawItems.length))
+              }), cookie, {
+                bases: [QISHUI_WEB_PC_API_BASE],
+                noDefaultParams: true,
+                sessionOnly: true,
+                pcApp: true,
+                timeoutMs: 9e3
+              }).then((json) => {
+                cursorState.lastJson = json;
+                const pageRawItems = extractQishuiMediaList(json);
+                cursorState.rawItems.push(...pageRawItems);
+                const pageData = json && json.data || json || {};
+                const nextCursor = normalizeText(pageData.next_cursor || pageData.nextCursor || json && json.next_cursor || "");
+                cursorState.cursor = nextCursor;
+                cursorState.hasMore = !!(pageData.has_more || pageData.hasMore || json && json.has_more) && !!nextCursor;
+                cursorState.updatedAt = Date.now();
+                if (!pageRawItems.length) cursorState.hasMore = false;
+              }).finally(() => {
+                cursorState.promise = null;
+              });
+            }
+            await cursorState.promise;
+          }
+          while (qishuiWebPlaylistCursorCache.size > 12) qishuiWebPlaylistCursorCache.delete(qishuiWebPlaylistCursorCache.keys().next().value);
+          const allRawItems = cursorState.rawItems;
+          const lastJson = cursorState.lastJson;
+          const upstreamHasMore = cursorState.hasMore;
+          const data = lastJson && lastJson.data || lastJson || {};
+          const meta = pickObject(data.playlist, lastJson && lastJson.playlist, data.playlist_info, lastJson && lastJson.playlist_info);
+          const playlistCover = qishuiPlaylistCoverFromItem(meta);
+          const allTracks = mapQishuiMediaList(allRawItems, "web-playlist", { directPlayable: true }).map((song) => song && !song.cover && playlistCover ? Object.assign({}, song, { cover: playlistCover }) : song);
+          const tracks = allTracks.slice(offset, offset + limit);
+          const total = Number(meta.count_tracks || meta.track_count || data.total || data.count || data.total_num || allRawItems.length || allTracks.length) || allTracks.length;
+          const playlist = buildQishuiVirtualPlaylist(id, qishuiPlaylistNameFromItem(meta) || "汽水歌单", tracks, {
+            cover: playlistCover,
+            trackCount: total,
+            subscribed: true,
+            webSession: true
+          });
+          playlist.virtual = false;
+          return {
+            provider: "qishui",
+            loggedIn: true,
+            configured: true,
+            webSession: true,
+            playlist,
+            tracks,
+            total,
+            offset,
+            limit,
+            nextOffset: offset + tracks.length,
+            hasMore: upstreamHasMore || offset + tracks.length < total,
+            rawCount: allRawItems.length
+          };
+        });
+      }
+      function mapQishuiPublicItem(raw, index, query) {
+        raw = raw || {};
+        const author = pickObject(raw.author_info, raw.author, raw.artist);
+        const album = pickObject(raw.album_info, raw.album);
+        const id = normalizeText(raw.item_id || raw.id || raw.song_id || raw.music_id || "qishui-public-" + index + "-" + query);
+        const name = normalizeText(raw.title || raw.name || raw.song_name);
+        if (!id || !name) return null;
+        const artistName = normalizeText(author.name || raw.author_name || raw.artist_name || raw.singer || "");
+        const lyricInfo = pickObject(raw.lyric_info, raw.lyric);
+        const lyric = normalizeLyricBody(lyricInfo.lyric_text || lyricInfo.content || lyricInfo.lyric || raw.lyric_text || "");
+        cacheQishuiLyric(id, lyric, "", "qishui-public-search-cache");
+        return {
+          provider: "qishui",
+          source: "qishui",
+          type: "qishui",
+          id,
+          providerSongId: id,
+          name,
+          artist: artistName,
+          artists: artistName ? [{ id: normalizeText(author.id || author.author_id), name: artistName, mid: normalizeText(author.id || author.author_id) }] : [],
+          album: normalizeText(album.name || raw.album_name || ""),
+          cover: firstUrl(raw.cover_url || raw.cover || raw.artwork || album.cover_url),
+          duration: Number(raw.duration || raw.duration_ms || 0) > 1e4 ? Math.round(Number(raw.duration || raw.duration_ms) / 1e3) : Number(raw.duration || raw.duration_ms || 0) || 0,
+          fee: raw.qishui_label_info && raw.qishui_label_info.only_vip_playable ? 1 : 0,
+          playable: false,
+          playbackMode: "recommend-match",
+          recommendationSource: "qishui-public-catalog",
+          qishuiRank: index,
+          qishuiQuery: query || "",
+          lyric,
+          tlyric: "",
+          restriction: qishuiRestriction("provider_limited", "汽水音乐当前作为搜索/匹配源接入，播放时会自动寻找其它可播版本。", "switch_source")
+        };
+      }
+      function qishuiSearchComparable(value) {
+        return normalizeText(value).normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+      }
+      function qishuiPublicSearchScore(song, keywords) {
+        song = song || {};
+        const query = qishuiSearchComparable(keywords);
+        if (!query) return 0;
+        const name = qishuiSearchComparable(song.name);
+        const artist = qishuiSearchComparable(song.artist);
+        const album = qishuiSearchComparable(song.album);
+        let score = 0;
+        if (name === query) score += 180;
+        else if (name.includes(query)) score += 120;
+        else if (name && query.includes(name) && name.length >= 2) score += 70;
+        if (artist === query) score += 150;
+        else if (artist.includes(query)) score += 105;
+        if (album === query) score += 80;
+        else if (album.includes(query)) score += 45;
+        const tokens = normalizeText(keywords).split(/\s+/).map(qishuiSearchComparable).filter((token) => token.length >= 2);
+        tokens.forEach((token) => {
+          if (name.includes(token)) score += 28;
+          if (artist.includes(token)) score += 22;
+          if (album.includes(token)) score += 10;
+        });
+        return score;
+      }
+      function rankQishuiPublicSongs(songs, keywords, limit) {
+        const scored = (Array.isArray(songs) ? songs : []).map((song, index) => ({
+          song,
+          index,
+          score: qishuiPublicSearchScore(song, keywords)
+        }));
+        const matched = scored.filter((item) => item.score > 0);
+        const source = matched.length ? matched : scored;
+        return source.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, Math.max(1, Number(limit) || 8)).map((item) => item.song);
+      }
+      async function handleQishuiPublicSearch(keywords, limit, cookieText, offset) {
+        offset = Math.max(0, Number(offset) || 0);
+        const requestLimit = Math.min(100, Math.max(offset + (Number(limit) * 3 || 0), 36));
+        const url = urlWithParams(QISHUI_PUBLIC_SEARCH_URL, {
+          keyword: keywords,
+          search_type: "music",
+          limit: requestLimit,
+          // The public catalogue endpoint currently repeats nearly the same first
+          // page for non-zero real_offset. Fetch a bounded candidate window once and
+          // paginate the locally ranked set so scroll loading never loops duplicates.
+          real_offset: 0,
+          search_source: "qishui"
+        });
+        const json = await requestJson(url, { timeoutMs: 8e3, headers: QISHUI_PUBLIC_HEADERS });
+        const list = json && json.data && Array.isArray(json.data.list) ? json.data.list : [];
+        const mappedSongs = list.map((item, index) => mapQishuiPublicItem(item, index, keywords)).filter(Boolean);
+        const rankedSongs = rankQishuiPublicSongs(mappedSongs, keywords, requestLimit);
+        const songs = rankedSongs.slice(offset, offset + limit);
+        const status = getQishuiStatus(cookieText);
+        return {
+          provider: "qishui",
+          configured: status.configured,
+          loggedIn: status.loggedIn,
+          webSession: status.webSession,
+          publicCatalog: true,
+          songs,
+          rawCount: list.length,
+          offset,
+          limit,
+          nextOffset: offset + songs.length,
+          hasMore: songs.length >= limit && (offset + songs.length < rankedSongs.length || requestLimit < 100),
+          message: songs.length ? "" : "汽水公开搜索暂时没有返回匹配结果。"
+        };
+      }
+      async function fetchQishuiPublicDetail(id) {
+        id = normalizeText(id);
+        if (!id) return null;
+        return qishuiPublicDetailCache.wrap(id, 30 * 60 * 1e3, async () => {
+          const url = urlWithParams(QISHUI_PUBLIC_CONTENTS_URL, {
+            sources: "qishui",
+            need_author: true,
+            need_album: true,
+            need_ugc: true,
+            need_stat: true,
+            item_ids: id
+          });
+          const json = await requestJson(url, { timeoutMs: 8e3, headers: QISHUI_PUBLIC_HEADERS });
+          const item = json && json.data && Array.isArray(json.data.list) ? json.data.list[0] : null;
+          if (!item) return null;
+          const lyricInfo = pickObject(item.lyric_info, item.lyric);
+          const lyric = normalizeLyricBody(
+            lyricInfo.lyric_text || lyricInfo.content || lyricInfo.lyric || lyricInfo.lyric_entity && lyricInfo.lyric_entity.content || ""
+          );
+          const tlyric = normalizeLyricBody(lyricInfo.translated_lyric || lyricInfo.translation || lyricInfo.tlyric || "");
+          cacheQishuiLyric(id, lyric, tlyric, "qishui-public-detail");
+          return { item, lyric, tlyric };
+        });
+      }
+      function extractQishuiPcSearchItems(payload) {
+        const data = payload && payload.data || payload || {};
+        const groups = pickArray(
+          data.result_groups,
+          data.resultGroups,
+          data.search_result && data.search_result.result_groups,
+          payload && payload.result_groups
+        );
+        const items = [];
+        groups.forEach((group) => {
+          const groupData = group && (group.data || group.items || group.list || group.result);
+          if (Array.isArray(groupData)) items.push(...groupData);
+          else items.push(...extractQishuiMediaList(groupData));
+        });
+        return items.length ? items : extractQishuiMediaList(data);
+      }
+      async function handleQishuiPcSearch(keywords, limit, cookieText, offset) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) throw new Error("QISHUI_COOKIE_REQUIRED");
+        const requestCount = Math.max(1, Math.min(50, Number(limit) || 8));
+        offset = Math.max(0, Number(offset) || 0);
+        const json = await qishuiWebRequestJson("/luna/pc/search/track", qishuiPcAppParams({
+          q: keywords,
+          cursor: String(offset),
+          count: requestCount,
+          search_method: "input"
+        }), cookie, {
+          bases: [QISHUI_WEB_PC_API_BASE],
+          noDefaultParams: true,
+          sessionOnly: true,
+          pcApp: true,
+          timeoutMs: 8500
+        });
+        const rawItems = extractQishuiPcSearchItems(json);
+        const songs = mapQishuiMediaList(rawItems, keywords, { directPlayable: true }).slice(0, limit);
+        const data = json && json.data || json || {};
+        const resultData = pickObject(data.search_result, data.searchResult, data);
+        const nextCursor = normalizeText(
+          resultData.next_cursor || resultData.nextCursor || data.next_cursor || data.nextCursor || ""
+        );
+        const hasMoreFlag = resultData.has_more;
+        const hasMore = typeof hasMoreFlag === "boolean" ? hasMoreFlag : Number(hasMoreFlag) > 0 || !!nextCursor || songs.length >= limit;
+        return {
+          provider: "qishui",
+          configured: true,
+          loggedIn: true,
+          webSession: true,
+          source: "qishui-pc-search",
+          songs,
+          rawCount: rawItems.length,
+          offset,
+          limit,
+          nextOffset: offset + songs.length,
+          nextCursor,
+          hasMore
+        };
+      }
+      async function handleQishuiSearch(keywords, limit, cookieText, offset) {
+        keywords = normalizeText(keywords);
+        limit = Math.max(1, Math.min(18, Number(limit) || 8));
+        offset = Math.max(0, Number(offset) || 0);
+        const status = getQishuiStatus(cookieText);
+        if (!keywords) return { provider: "qishui", songs: [], configured: status.configured, message: status.message };
+        if (!status.webSession && !status.tokenConfigured && !QISHUI_PUBLIC_ENABLED) {
+          return {
+            provider: "qishui",
+            configured: false,
+            songs: [],
+            error: "QISHUI_TOKEN_REQUIRED",
+            reason: "missing_access_token",
+            message: status.message
+          };
+        }
+        const cacheKey = keywords.toLowerCase() + "|" + limit + "|" + offset + "|" + (status.webSession ? qishuiCookieFingerprint(cookieText) : status.tokenConfigured ? "token" : "public");
+        return qishuiSearchCache.wrap(cacheKey, 2 * 60 * 1e3, async () => {
+          let pcSearchError = "";
+          if (status.webSession) {
+            try {
+              return await handleQishuiPcSearch(keywords, limit, cookieText, offset);
+            } catch (err) {
+              pcSearchError = err && err.message || String(err);
+            }
+          }
+          if (!status.tokenConfigured || offset > 0) {
+            if (!QISHUI_PUBLIC_ENABLED) {
+              const err = new Error(pcSearchError || "QISHUI_SEARCH_UNAVAILABLE");
+              err.code = "QISHUI_SEARCH_UNAVAILABLE";
+              throw err;
+            }
+            const fallback = await handleQishuiPublicSearch(keywords, limit, cookieText, offset);
+            if (pcSearchError) fallback.pcSearchError = pcSearchError;
+            return fallback;
+          }
+          const payload = {
+            search_query: keywords,
+            played_media: [],
+            count: limit,
+            common_params: {
+              trigger_name: "mineradio_search",
+              scene: "search",
+              source: "mineradio"
+            }
+          };
+          try {
+            const json = await qishuiPost(QISHUI_RELATED_MEDIA_PATH, payload);
+            const rawItems = extractQishuiMediaList(json);
+            const songs = rawItems.map((item, index) => mapQishuiMedia(item, index, keywords)).filter(Boolean).slice(0, limit);
+            return {
+              provider: "qishui",
+              configured: true,
+              songs,
+              rawCount: rawItems.length,
+              offset,
+              limit,
+              nextOffset: songs.length,
+              hasMore: rawItems.length >= limit,
+              pcSearchError
+            };
+          } catch (err) {
+            if (!QISHUI_PUBLIC_ENABLED) throw err;
+            const fallback = await handleQishuiPublicSearch(keywords, limit, cookieText, offset);
+            fallback.officialError = err && err.message || String(err);
+            if (pcSearchError) fallback.pcSearchError = pcSearchError;
+            return fallback;
+          }
+        });
+      }
+      function qishuiArtistNames(song) {
+        song = song || {};
+        const names = [];
+        const artists = Array.isArray(song.artists) ? song.artists : [];
+        artists.forEach((artist) => {
+          const name = normalizeText(artist && (artist.name || artist.display_name || artist.title));
+          if (name && !names.includes(name)) names.push(name);
+        });
+        const fallback = normalizeText(song.artist || "");
+        fallback.split(/\s*\/\s*|\s*,\s*|、|\s*&\s*|\s+feat\.?\s+|\s+ft\.?\s+/i).forEach((name) => {
+          name = normalizeText(name);
+          if (name && !names.includes(name)) names.push(name);
+        });
+        return names;
+      }
+      function qishuiArtistSongMatches(song, artistId, artistName) {
+        song = song || {};
+        const targetId = normalizeText(artistId);
+        const targetName = qishuiSearchComparable(artistName);
+        const artists = Array.isArray(song.artists) ? song.artists : [];
+        const ids = artists.map((artist) => normalizeText(artist && (artist.id || artist.artist_id || artist.mid))).filter(Boolean);
+        if (targetId) {
+          if (ids.some((id) => id === targetId)) return true;
+          if (ids.length) return false;
+        }
+        if (!targetName) return !targetId;
+        return qishuiArtistNames(song).some((name) => {
+          const comparable = qishuiSearchComparable(name);
+          return comparable === targetName || comparable.includes(targetName) || targetName.includes(comparable);
+        });
+      }
+      async function handleQishuiArtistDetail(opts, cookieText) {
+        opts = opts || {};
+        const artistId = normalizeText(opts.artistId || opts.id || opts.mid || "");
+        const artistName = normalizeText(opts.artistName || opts.name || "");
+        const limit = Math.max(10, Math.min(50, parseInt(opts.limit || "36", 10) || 36));
+        if (!artistId && !artistName) {
+          return { provider: "qishui", error: "MISSING_ARTIST_ID_OR_NAME", artist: null, songs: [] };
+        }
+        if (!artistName) {
+          return { provider: "qishui", error: "MISSING_ARTIST_NAME", artist: { provider: "qishui", id: artistId, name: "" }, songs: [] };
+        }
+        const pageSize = 18;
+        const maxPages = Math.min(5, Math.max(1, Math.ceil(limit / pageSize) + 1));
+        const seen = /* @__PURE__ */ new Set();
+        const matches = [];
+        let offset = 0;
+        let pages = 0;
+        let source = "";
+        let lastError = "";
+        let hasMore = false;
+        for (let page = 0; page < maxPages; page += 1) {
+          let result;
+          try {
+            result = await handleQishuiSearch(artistName, pageSize, cookieText, offset);
+          } catch (err) {
+            lastError = err && err.message || String(err);
+            break;
+          }
+          pages += 1;
+          source = source || normalizeText(result && (result.source || (result.publicCatalog ? "qishui-public-catalog" : "")));
+          if (result && result.error && !lastError) lastError = normalizeText(result.error);
+          const pageSongs = Array.isArray(result && result.songs) ? result.songs : [];
+          pageSongs.forEach((song) => {
+            const id = normalizeText(song && (song.providerSongId || song.id || song.songId));
+            if (!id || seen.has(id) || !qishuiArtistSongMatches(song, artistId, artistName)) return;
+            seen.add(id);
+            matches.push(song);
+          });
+          hasMore = !!(result && result.hasMore);
+          if (!hasMore || !pageSongs.length) break;
+          const nextOffset = Number(result.nextOffset);
+          if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+          offset = nextOffset;
+        }
+        const ranked = matches.map((song, index) => ({ song, index })).sort((a, b) => {
+          const popularityDiff = (Number(b.song && b.song.popularity) || 0) - (Number(a.song && a.song.popularity) || 0);
+          return popularityDiff || a.index - b.index;
+        }).map((item) => item.song).slice(0, limit);
+        const firstArtist = ranked.reduce((found, song) => {
+          if (found) return found;
+          const artists = Array.isArray(song && song.artists) ? song.artists : [];
+          return artists.find((artist) => {
+            const id = normalizeText(artist && (artist.id || artist.artist_id || artist.mid));
+            const name = qishuiSearchComparable(artist && artist.name);
+            return artistId && id === artistId || !artistId && name === qishuiSearchComparable(artistName);
+          }) || null;
+        }, null);
+        const status = getQishuiStatus(cookieText);
+        const output = {
+          provider: "qishui",
+          configured: !!status.configured,
+          loggedIn: !!status.loggedIn,
+          webSession: !!status.webSession,
+          source: "qishui-artist-search",
+          searchSource: source || "qishui-search",
+          ordering: matches.some((song) => Number(song && song.popularity) > 0) ? "popularity" : "search-order",
+          artist: {
+            provider: "qishui",
+            id: normalizeText(firstArtist && (firstArtist.id || firstArtist.artist_id || firstArtist.mid)) || artistId,
+            name: normalizeText(firstArtist && firstArtist.name) || artistName,
+            avatar: ""
+          },
+          songs: ranked,
+          total: ranked.length,
+          searchedPages: pages,
+          hasMore
+        };
+        if (!ranked.length && lastError) {
+          output.error = "QISHUI_ARTIST_SEARCH_FAILED";
+          output.message = lastError;
+        }
+        return output;
+      }
+      async function fetchQishuiFeedSongs(limit, cookieText) {
+        limit = Math.max(1, Math.min(50, Number(limit) || 8));
+        const status = getQishuiStatus(cookieText);
+        if (!status.tokenConfigured && status.webSession) return fetchQishuiWebFeedSongs(cookieText, limit);
+        if (!status.tokenConfigured) return { provider: "qishui", configured: false, songs: [], error: "QISHUI_TOKEN_REQUIRED", message: status.message };
+        const cacheKey = "feed|" + limit;
+        return qishuiFeedCache.wrap(cacheKey, 90 * 1e3, async () => {
+          const json = await qishuiPost(QISHUI_FEED_SONG_TAB_PATH, {
+            count: limit,
+            played_media: [],
+            common_params: {
+              trigger_name: "mineradio_feed",
+              scene: "feed",
+              source: "mineradio"
+            }
+          });
+          const rawItems = extractQishuiMediaList(json);
+          const songs = rawItems.map((item, index) => mapQishuiMedia(item, index, "feed")).filter(Boolean).slice(0, limit);
+          return { provider: "qishui", configured: true, songs, rawCount: rawItems.length };
+        });
+      }
+      async function handleQishuiFeed(limit, cookieText) {
+        return fetchQishuiFeedSongs(Math.max(1, Math.min(18, Number(limit) || 8)), cookieText);
+      }
+      function buildQishuiFeedPlaylist(songs) {
+        songs = Array.isArray(songs) ? songs : [];
+        const firstCover = songs.map((song) => song && song.cover).find(Boolean) || "";
+        return {
+          provider: "qishui",
+          source: "qishui",
+          type: "playlist",
+          id: QISHUI_VIRTUAL_FEED_PLAYLIST_ID,
+          name: "汽水推荐",
+          cover: firstCover,
+          trackCount: songs.length,
+          playCount: 0,
+          creator: "汽水音乐",
+          subscribed: false,
+          virtual: true,
+          playbackMode: "recommend-match"
+        };
+      }
+      async function handleQishuiUserPlaylists(cookieText) {
+        const status = getQishuiStatus(cookieText);
+        if (status.webSession) {
+          try {
+            const library = await fetchQishuiWebLibrary(cookieText);
+            const feed = await fetchQishuiFeedSongs(24, cookieText).catch(() => ({ songs: [], rawCount: 0 }));
+            const likedTracks = library.likedTracks || [];
+            const likedCard = library.likedCard || {};
+            const profile = library.profile || {};
+            const recentTracks = library.recentTracks || [];
+            const playlists = [
+              buildQishuiVirtualPlaylist(QISHUI_WEB_LIKED_PLAYLIST_ID, "汽水我的喜欢", likedTracks, {
+                subscribed: false,
+                shelfPane: "mine",
+                owned: true,
+                webSession: true,
+                cover: likedCard.cover,
+                trackCount: likedTracks.length || likedCard.trackCount || 0,
+                creator: profile.nickname || likedCard.creator
+              })
+            ];
+            (library.playlists || []).forEach((pl) => {
+              if (!pl || !pl.id || playlists.some((item) => item.id === pl.id)) return;
+              playlists.push(pl);
+            });
+            if (recentTracks.length) {
+              playlists.push(buildQishuiVirtualPlaylist(QISHUI_WEB_RECENT_PLAYLIST_ID, "汽水最近播放", recentTracks, {
+                subscribed: false,
+                shelfPane: "mine",
+                owned: true,
+                webSession: true
+              }));
+            }
+            playlists.push(buildQishuiFeedPlaylist(feed && feed.songs || []));
+            return {
+              provider: "qishui",
+              loggedIn: true,
+              configured: true,
+              webSession: true,
+              playlists,
+              tracksPreview: likedTracks.slice(0, 8),
+              rawCount: feed && feed.rawCount || 0,
+              libraryErrors: library.errors || [],
+              profile,
+              userId: profile.userId || "",
+              nickname: profile.nickname || "",
+              avatar: profile.avatar || ""
+            };
+          } catch (err) {
+            return {
+              provider: "qishui",
+              loggedIn: true,
+              configured: true,
+              webSession: true,
+              playlists: [
+                buildQishuiVirtualPlaylist(QISHUI_WEB_LIKED_PLAYLIST_ID, "汽水我的喜欢", [], { subscribed: false, shelfPane: "mine", owned: true, webSession: true }),
+                buildQishuiFeedPlaylist([])
+              ],
+              error: err && err.message || "QISHUI_WEB_LIBRARY_FAILED",
+              message: "汽水账号已登录，但歌单同步暂时失败，请稍后重试。"
+            };
+          }
+        }
+        if (!status.configured) {
+          return {
+            provider: "qishui",
+            loggedIn: false,
+            configured: false,
+            playlists: [],
+            error: "QISHUI_TOKEN_REQUIRED",
+            message: status.message
+          };
+        }
+        try {
+          const feed = await fetchQishuiFeedSongs(24, cookieText);
+          const playlist = buildQishuiFeedPlaylist(feed.songs || []);
+          return {
+            provider: "qishui",
+            loggedIn: true,
+            configured: true,
+            playlists: [playlist],
+            tracksPreview: (feed.songs || []).slice(0, 8),
+            rawCount: feed.rawCount || 0
+          };
+        } catch (err) {
+          return {
+            provider: "qishui",
+            loggedIn: true,
+            configured: true,
+            playlists: [],
+            error: err && err.message || "QISHUI_FEED_FAILED",
+            message: "汽水推荐歌单暂时同步失败，请稍后重试。"
+          };
+        }
+      }
+      async function handleQishuiPlaylistTracks(playlistId, opts, cookieText) {
+        opts = opts || {};
+        const status = getQishuiStatus(cookieText);
+        const id = normalizeText(String(playlistId || "").replace(/^qishui:/i, ""));
+        const limit = Math.max(1, Math.min(50, Number(opts.limit) || 50));
+        const offset = Math.max(0, Number(opts.offset) || 0);
+        if (status.webSession) {
+          if (id === QISHUI_WEB_LIKED_PLAYLIST_ID || id === "liked" || id === "favorite") {
+            const library = await fetchQishuiWebLibrary(cookieText);
+            let allSongs2 = library.likedTracks || [];
+            if (!allSongs2.length && library.likedCard && library.likedCard.id) {
+              const detail = await fetchQishuiWebPlaylistTracks(library.likedCard.id, cookieText, opts).catch(() => null);
+              if (detail && detail.tracks) {
+                const playlist3 = buildQishuiVirtualPlaylist(QISHUI_WEB_LIKED_PLAYLIST_ID, "汽水我的喜欢", detail.tracks, {
+                  subscribed: false,
+                  shelfPane: "mine",
+                  owned: true,
+                  webSession: true,
+                  cover: library.likedCard.cover || detail.playlist && detail.playlist.cover,
+                  trackCount: detail.total || library.likedCard.trackCount || detail.tracks.length,
+                  creator: library.profile && library.profile.nickname
+                });
+                return {
+                  provider: "qishui",
+                  loggedIn: true,
+                  configured: true,
+                  webSession: true,
+                  playlist: playlist3,
+                  tracks: detail.tracks,
+                  total: detail.total || detail.tracks.length,
+                  offset,
+                  limit,
+                  nextOffset: detail.nextOffset,
+                  hasMore: !!detail.hasMore
+                };
+              }
+            }
+            const tracks2 = allSongs2.slice(offset, offset + limit);
+            const playlist2 = buildQishuiVirtualPlaylist(QISHUI_WEB_LIKED_PLAYLIST_ID, "汽水我的喜欢", allSongs2, {
+              subscribed: false,
+              shelfPane: "mine",
+              owned: true,
+              webSession: true,
+              cover: library.likedCard && library.likedCard.cover,
+              trackCount: allSongs2.length || library.likedCard && library.likedCard.trackCount || 0,
+              creator: library.profile && library.profile.nickname
+            });
+            return {
+              provider: "qishui",
+              loggedIn: true,
+              configured: true,
+              webSession: true,
+              playlist: playlist2,
+              tracks: tracks2,
+              total: allSongs2.length,
+              offset,
+              limit,
+              nextOffset: offset + tracks2.length,
+              hasMore: offset + tracks2.length < allSongs2.length
+            };
+          }
+          if (id === QISHUI_WEB_RECENT_PLAYLIST_ID || id === "recent") {
+            const library = await fetchQishuiWebLibrary(cookieText);
+            const allSongs2 = library.recentTracks || [];
+            const tracks2 = allSongs2.slice(offset, offset + limit);
+            const playlist2 = buildQishuiVirtualPlaylist(QISHUI_WEB_RECENT_PLAYLIST_ID, "汽水最近播放", allSongs2, {
+              subscribed: false,
+              shelfPane: "mine",
+              owned: true,
+              webSession: true
+            });
+            return {
+              provider: "qishui",
+              loggedIn: true,
+              configured: true,
+              webSession: true,
+              playlist: playlist2,
+              tracks: tracks2,
+              total: allSongs2.length,
+              offset,
+              limit,
+              nextOffset: offset + tracks2.length,
+              hasMore: offset + tracks2.length < allSongs2.length
+            };
+          }
+          if (id && id !== QISHUI_VIRTUAL_FEED_PLAYLIST_ID && id !== "feed") {
+            return fetchQishuiWebPlaylistTracks(id, cookieText, opts);
+          }
+        }
+        if (!status.configured) {
+          return {
+            provider: "qishui",
+            loggedIn: false,
+            configured: false,
+            playlist: buildQishuiFeedPlaylist([]),
+            tracks: [],
+            total: 0,
+            error: "QISHUI_TOKEN_REQUIRED",
+            message: status.message
+          };
+        }
+        if (id && id !== QISHUI_VIRTUAL_FEED_PLAYLIST_ID && id !== "feed") {
+          return {
+            provider: "qishui",
+            loggedIn: true,
+            configured: true,
+            playlist: buildQishuiFeedPlaylist([]),
+            tracks: [],
+            total: 0,
+            error: "QISHUI_PLAYLIST_NOT_FOUND",
+            message: "当前汽水接入只支持官方推荐歌单。"
+          };
+        }
+        const fetchCount = Math.max(limit, Math.min(50, offset + limit));
+        const feed = await fetchQishuiFeedSongs(fetchCount, cookieText);
+        const allSongs = feed.songs || [];
+        const tracks = allSongs.slice(offset, offset + limit);
+        const playlist = buildQishuiFeedPlaylist(allSongs);
+        return {
+          provider: "qishui",
+          loggedIn: true,
+          configured: true,
+          playlist,
+          tracks,
+          total: allSongs.length,
+          offset,
+          limit,
+          nextOffset: offset + tracks.length,
+          hasMore: false,
+          rawCount: feed.rawCount || allSongs.length
+        };
+      }
+      function qishuiCollectionIds(value) {
+        const values = Array.isArray(value) ? value : String(value == null ? "" : value).split(",");
+        const seen = /* @__PURE__ */ new Set();
+        const ids = [];
+        values.forEach((item) => {
+          const id = normalizeText(item && typeof item === "object" ? item.id || item.trackId || item.track_id || item.providerSongId : item);
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          ids.push(id);
+        });
+        return ids;
+      }
+      function qishuiWriteEnabled(value) {
+        if (value === false || value === 0) return false;
+        return !/^(?:false|0|off|no)$/i.test(normalizeText(value));
+      }
+      async function handleQishuiCheckTracksLiked(trackIds, cookieText) {
+        const ids = qishuiCollectionIds(trackIds);
+        if (!ids.length) return { provider: "qishui", loggedIn: qishuiCookieHasLogin(cookieText), ids: [], liked: {}, complete: true };
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) {
+          return { provider: "qishui", loggedIn: false, ids, liked: {}, complete: false, error: "QISHUI_COOKIE_REQUIRED" };
+        }
+        const library = await fetchQishuiWebLibrary(cookie);
+        let knownTracks = dedupeQishuiSongs(library.likedTracks || []);
+        let complete = false;
+        if (library.likedCard && library.likedCard.id) {
+          const detail = await fetchQishuiWebPlaylistTracks(library.likedCard.id, cookie, { limit: 50, offset: 0 }).catch(() => null);
+          if (detail && Array.isArray(detail.tracks)) {
+            knownTracks = dedupeQishuiSongs(knownTracks.concat(detail.tracks));
+            complete = !detail.hasMore;
+          } else {
+            complete = false;
+          }
+        }
+        const knownLiked = new Set(knownTracks.map((song) => String(song.providerSongId || song.id || "")).filter(Boolean));
+        const liked = {};
+        ids.forEach((id) => {
+          liked[id] = knownLiked.has(id);
+        });
+        return {
+          provider: "qishui",
+          loggedIn: true,
+          ids,
+          liked,
+          complete,
+          checkedCount: knownLiked.size
+        };
+      }
+      async function handleQishuiSetTrackLiked(trackId, liked, cookieText) {
+        const id = normalizeText(trackId);
+        if (!id) throw new Error("Missing Qishui track id");
+        liked = qishuiWriteEnabled(liked);
+        const apiPath = liked ? "/luna/pc/me/collection/media" : "/luna/pc/me/collection/media/delete";
+        await qishuiPcPostJson(apiPath, {
+          media: [{ type: "track", id }],
+          scene: ""
+        }, cookieText, { errorCode: liked ? "QISHUI_LIKE_FAILED" : "QISHUI_UNLIKE_FAILED" });
+        invalidateQishuiLibraryCaches();
+        return { provider: "qishui", loggedIn: true, id, liked, ok: true };
+      }
+      async function handleQishuiSetPlaylistCollected(playlistId, collected, cookieText) {
+        const id = normalizeText(String(playlistId || "").replace(/^qishui:/i, ""));
+        if (!id) throw new Error("Missing Qishui playlist id");
+        collected = qishuiWriteEnabled(collected);
+        await qishuiPcPostJson(
+          collected ? "/luna/pc/me/collection/playlist" : "/luna/pc/me/collection/playlist/delete",
+          { playlist_ids: [id] },
+          cookieText,
+          { errorCode: collected ? "QISHUI_PLAYLIST_COLLECT_FAILED" : "QISHUI_PLAYLIST_UNCOLLECT_FAILED" }
+        );
+        invalidateQishuiLibraryCaches();
+        return { provider: "qishui", loggedIn: true, id, collected, ok: true };
+      }
+      async function handleQishuiPlaylistAddSong(playlistId, track, cookieText) {
+        const playlistIdValue = normalizeText(String(playlistId || "").replace(/^qishui:/i, ""));
+        const trackId = normalizeText(track && typeof track === "object" ? track.providerSongId || track.trackId || track.track_id || track.id : track);
+        if (!playlistIdValue || !trackId) throw new Error("Missing Qishui playlist or track id");
+        await qishuiPcPostJson("/luna/pc/me/playlist/media/append", {
+          playlist_id: playlistIdValue,
+          media: [{ id: trackId, type: "track" }]
+        }, cookieText, { errorCode: "QISHUI_PLAYLIST_ADD_FAILED" });
+        invalidateQishuiLibraryCaches();
+        return {
+          provider: "qishui",
+          loggedIn: true,
+          pid: playlistIdValue,
+          id: trackId,
+          success: true,
+          ok: true
+        };
+      }
+      async function handleQishuiSetAlbumCollected(albumId, collected, cookieText) {
+        const id = normalizeText(albumId);
+        if (!id) throw new Error("Missing Qishui album id");
+        collected = qishuiWriteEnabled(collected);
+        await qishuiPcPostJson(
+          collected ? "/luna/pc/me/collection/album" : "/luna/pc/me/collection/album/delete",
+          { album_ids: [id] },
+          cookieText,
+          { errorCode: collected ? "QISHUI_ALBUM_COLLECT_FAILED" : "QISHUI_ALBUM_UNCOLLECT_FAILED" }
+        );
+        invalidateQishuiLibraryCaches();
+        return { provider: "qishui", loggedIn: true, id, collected, ok: true };
+      }
+      async function handleQishuiReportRecentlyPlayed(trackId, cookieText) {
+        const id = normalizeText(trackId);
+        if (!id) throw new Error("Missing Qishui track id");
+        await qishuiPcPostJson("/luna/pc/me/recently-played-media", {
+          media: [{ type: "track", id }]
+        }, cookieText, { errorCode: "QISHUI_RECENT_PLAY_REPORT_FAILED", timeoutMs: 6500 });
+        qishuiWebLibraryCache.clear();
+        return { provider: "qishui", loggedIn: true, id, reported: true, ok: true };
+      }
+      function extractQishuiCommentList(payload) {
+        const data = payload && payload.data || payload || {};
+        return pickArray(
+          data.comments,
+          data.comment_list,
+          data.commentList,
+          data.items,
+          data.list,
+          payload && payload.comments
+        );
+      }
+      function mapQishuiComment(raw) {
+        raw = raw && typeof raw === "object" ? raw : {};
+        const comment = pickObject(raw.comment, raw.comment_info, raw.commentInfo, raw);
+        const user = pickObject(
+          comment.user,
+          comment.user_info,
+          comment.userInfo,
+          comment.author,
+          raw.user,
+          raw.user_info,
+          raw.author
+        );
+        const timeRaw = Number(
+          comment.create_time || comment.createTime || comment.created_at || comment.createdAt || comment.time || raw.create_time || raw.time || 0
+        ) || 0;
+        return {
+          id: normalizeText(comment.id || comment.comment_id || comment.commentId || raw.id || ""),
+          content: normalizeLyricBody(comment.text || comment.content || comment.comment_text || comment.commentText || ""),
+          likedCount: Number(comment.like_count || comment.likeCount || comment.digg_count || comment.diggCount || comment.liked_count || 0) || 0,
+          time: timeRaw && timeRaw < 1e10 ? timeRaw * 1e3 : timeRaw,
+          user: {
+            id: normalizeText(user.id || user.user_id || user.userId || user.uid || ""),
+            nickname: normalizeText(user.nickname || user.nick_name || user.nickName || user.name || ""),
+            avatar: qishuiFirstImageUrl(
+              "~c5_100x100.jpg",
+              user.avatar_url,
+              user.avatarUrl,
+              user.avatar,
+              user.medium_avatar_url,
+              user.larger_avatar_url
+            )
+          }
+        };
+      }
+      async function handleQishuiComments(trackId, opts, cookieText) {
+        const id = normalizeText(trackId);
+        if (!id) return { provider: "qishui", id: "", comments: [], total: 0, error: "Missing Qishui track id" };
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        if (!qishuiCookieHasLogin(cookie)) {
+          return { provider: "qishui", id, loggedIn: false, comments: [], total: 0, error: "QISHUI_COOKIE_REQUIRED" };
+        }
+        opts = opts || {};
+        const count = Math.max(1, Math.min(30, Number(opts.count || opts.limit) || 20));
+        const cursor = normalizeText(opts.cursor != null ? opts.cursor : opts.offset || "");
+        const json = await qishuiWebRequestJson("/luna/pc/comments", qishuiPcAppParams({
+          group_id: id,
+          cursor,
+          count,
+          group_type: 0
+        }), cookie, {
+          bases: [QISHUI_WEB_PC_API_BASE],
+          noDefaultParams: true,
+          sessionOnly: true,
+          pcApp: true,
+          timeoutMs: 8500
+        });
+        const rawComments = extractQishuiCommentList(json);
+        const comments = rawComments.map(mapQishuiComment).filter((comment) => comment.content);
+        const data = json && json.data || json || {};
+        const nextCursor = normalizeText(data.next_cursor || data.nextCursor || data.cursor || json && (json.next_cursor || json.cursor) || "");
+        const total = Number(data.total || data.total_count || data.totalCount || data.count || json && (json.total || json.count) || comments.length) || comments.length;
+        return {
+          provider: "qishui",
+          id,
+          loggedIn: true,
+          comments,
+          total,
+          cursor,
+          nextCursor,
+          hasMore: !!(data.has_more || data.hasMore || nextCursor)
+        };
+      }
+      async function handleQishuiCreateComment(trackId, text5, cookieText) {
+        const id = normalizeText(trackId);
+        text5 = normalizeLyricBody(text5);
+        if (!id) throw new Error("Missing Qishui track id");
+        if (!text5) throw new Error("Missing Qishui comment text");
+        const json = await qishuiPcPostJson("/luna/pc/comments/create", {
+          group_id: id,
+          text: text5,
+          group_type: 0
+        }, cookieText, { errorCode: "QISHUI_COMMENT_CREATE_FAILED" });
+        const rawComments = extractQishuiCommentList(json);
+        const comment = rawComments.length ? mapQishuiComment(rawComments[0]) : mapQishuiComment(json && json.data || json);
+        return {
+          provider: "qishui",
+          id,
+          loggedIn: true,
+          created: true,
+          ok: true,
+          comment: comment.content ? comment : null
+        };
+      }
+      function qishuiLyricTextFromNode(value) {
+        value = qishuiMaybeParseJson(value);
+        if (typeof value === "string") {
+          const text5 = normalizeLyricBody(value);
+          return /^https?:\/\//i.test(text5) ? "" : text5;
+        }
+        if (!value || typeof value !== "object") return "";
+        const entity = pickObject(
+          value.lyric_entity,
+          value.lyricEntity,
+          value.original_lyric,
+          value.originalLyric,
+          value
+        );
+        for (const key of ["content", "lyric_text", "lyricText", "text", "original_content", "originalContent"]) {
+          const text5 = qishuiLyricTextFromNode(entity[key]);
+          if (text5) return text5;
+        }
+        if (entity !== value) return qishuiLyricTextFromNode(entity);
+        return "";
+      }
+      function extractQishuiLyrics(payload) {
+        const found = { lyric: "", tlyric: "" };
+        const seen = /* @__PURE__ */ new Set();
+        let visitedNodes = 0;
+        function visit(node, pathText, depth) {
+          if (!node || depth > 7 || visitedNodes >= 600 || found.lyric && found.tlyric) return;
+          node = qishuiMaybeParseJson(node);
+          if (!node || typeof node !== "object") return;
+          if (seen.has(node)) return;
+          seen.add(node);
+          visitedNodes += 1;
+          Object.keys(node).slice(0, 120).forEach((key) => {
+            const child = node[key];
+            const childPath = pathText ? pathText + "." + key : key;
+            if (/lyric|lyrics|tlyric|translation/i.test(key)) {
+              const text5 = qishuiLyricTextFromNode(child);
+              if (text5) {
+                if (/translat|tlyric|lang_translation|translated/i.test(childPath)) {
+                  if (!found.tlyric) found.tlyric = text5;
+                } else if (!found.lyric) {
+                  found.lyric = text5;
+                }
+              }
+            }
+            if (/^(album_tracks|artist_tracks|chart_tracks|comments|prompts|recommend_media_list)$/i.test(key)) return;
+            visit(child, childPath, depth + 1);
+          });
+        }
+        visit(payload, "", 0);
+        return found;
+      }
+      async function fetchQishuiSeoTrack(trackId) {
+        return requestJson(urlWithParams("https://beta-luna.douyin.com/luna/h5/seo_track", {
+          track_id: trackId,
+          device_platform: "web"
+        }), {
+          timeoutMs: 8e3,
+          headers: {
+            "Accept": "application/json,text/plain,*/*",
+            "User-Agent": QISHUI_WEB_UA,
+            "Referer": "https://www.douyin.com/"
+          }
+        });
+      }
+      function qishuiSeoTrackFromPayload(payload) {
+        const seo = pickObject(payload && payload.seo_track, payload && payload.seoTrack);
+        const data = pickObject(payload && payload.data);
+        return pickObject(
+          seo.track,
+          payload && payload.track,
+          data.track,
+          data.track_info,
+          payload && payload.track_info
+        );
+      }
+      function qishuiSongFromSeoTrack(track, fallbackId) {
+        track = track && typeof track === "object" ? track : {};
+        const album = pickObject(track.album, track.album_info, track.albumInfo);
+        const id = normalizeText(track.id || track.track_id || track.trackId || fallbackId);
+        const name = normalizeText(track.name || track.title || track.song_name);
+        if (!id || !name) return null;
+        const artists = pickArray(track.artists, track.artist_list, track.artistList).map((item) => ({
+          id: normalizeText(item && (item.id || item.artist_id || item.artistId)),
+          name: normalizeText(item && (item.name || item.display_name || item.simple_display_name || item.title)),
+          mid: normalizeText(item && (item.id || item.artist_id || item.artistId))
+        })).filter((item) => item.name);
+        const artist = artists.map((item) => item.name).join(" / ") || normalizeText(track.artist || track.artist_name || "");
+        const albumId = normalizeText(album.id || album.album_id || album.albumId);
+        return {
+          provider: "qishui",
+          source: "qishui-public-seo",
+          type: "qishui",
+          id,
+          providerSongId: id,
+          name,
+          artist,
+          artists,
+          album: normalizeText(album.name || album.title || album.album_name || ""),
+          album_id: albumId,
+          albumId,
+          cover: qishuiFirstImageUrl("~c5_375x375.jpg", album.url_cover, album.cover_url, album.cover, track.url_cover, track.cover_url),
+          duration: qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0),
+          playable: false,
+          playbackMode: "recommend-match",
+          recommendationSource: "qishui-public-seo",
+          lyric: "",
+          tlyric: "",
+          restriction: qishuiRestriction("provider_limited", "汽水音乐当前作为推荐/匹配源接入，播放时会自动寻找其它可播版本。", "switch_source")
+        };
+      }
+      async function handleQishuiSongDetail(trackId) {
+        const id = normalizeText(trackId);
+        if (!id) return { provider: "qishui", error: "MISSING_QISHUI_TRACK_ID", song: null };
+        try {
+          const track = qishuiSeoTrackFromPayload(await fetchQishuiSeoTrack(id));
+          const song = qishuiSongFromSeoTrack(track, id);
+          if (!song) return { provider: "qishui", error: "QISHUI_TRACK_DETAIL_EMPTY", song: null };
+          return { provider: "qishui", song, album: song.album ? {
+            provider: "qishui",
+            id: song.albumId,
+            albumId: song.albumId,
+            name: song.album,
+            artist: song.artist,
+            cover: song.cover,
+            type: "album"
+          } : null };
+        } catch (e) {
+          return { provider: "qishui", error: e.message || "QISHUI_TRACK_DETAIL_FAILED", song: null };
+        }
+      }
+      async function handleQishuiLyric(id, cookieText) {
+        id = normalizeText(id);
+        if (!id) return { provider: "qishui", lyric: "", tlyric: "", source: "none", error: "Missing Qishui id" };
+        const cached = qishuiLyricCache.get(id);
+        if (cached) return cached;
+        const errors = [];
+        try {
+          const seoPayload = await fetchQishuiSeoTrack(id);
+          const lyrics = extractQishuiLyrics(seoPayload);
+          const cachedSeo = cacheQishuiLyric(id, lyrics.lyric, lyrics.tlyric, "qishui-beta-seo-track");
+          if (cachedSeo) return cachedSeo;
+        } catch (err) {
+          errors.push("seo:" + (err && err.message || String(err)));
+        }
+        if (qishuiCookieHasLogin(normalizeQishuiCookieInput(cookieText))) {
+          try {
+            const trackPayload = await fetchQishuiPcTrackV2Get(id, cookieText);
+            const lyrics = extractQishuiLyrics(trackPayload);
+            const cachedTrack = cacheQishuiLyric(id, lyrics.lyric, lyrics.tlyric, "qishui-pc-track-v2");
+            if (cachedTrack) return cachedTrack;
+          } catch (err) {
+            errors.push("track-v2:" + (err && err.message || String(err)));
+          }
+        }
+        if (QISHUI_PUBLIC_ENABLED) {
+          try {
+            const detail = await fetchQishuiPublicDetail(id);
+            const fresh = qishuiLyricCache.get(id);
+            if (fresh) return fresh;
+            if (detail && (detail.lyric || detail.tlyric)) {
+              const cachedPublic = cacheQishuiLyric(id, detail.lyric, detail.tlyric, "qishui-public-detail");
+              if (cachedPublic) return cachedPublic;
+            }
+          } catch (err) {
+            errors.push("public:" + (err && err.message || String(err)));
+          }
+        }
+        return {
+          provider: "qishui",
+          lyric: "",
+          tlyric: "",
+          yrc: "",
+          ytlrc: "",
+          source: "none",
+          error: errors.join("; ")
+        };
+      }
+      function qishuiPrimaryTrackFromV2(payload) {
+        const data = payload && payload.data || payload || {};
+        return pickObject(data.track, data.track_info, data.trackInfo, payload && payload.track, payload && payload.track_info, payload && payload.trackInfo);
+      }
+      function qishuiTrackPlayerFromV2(payload, track) {
+        const data = payload && payload.data || payload || {};
+        return pickObject(
+          data.track_player,
+          data.trackPlayer,
+          payload && payload.track_player,
+          payload && payload.trackPlayer,
+          track && track.track_player,
+          track && track.trackPlayer
+        );
+      }
+      function qishuiAudioEffectKeysFromV2(payload, track) {
+        const player = qishuiTrackPlayerFromV2(payload, track) || {};
+        const raw = player.audio_effects || player.audioEffects || track && (track.audio_effects || track.audioEffects) || {};
+        let effects = raw;
+        if (typeof effects === "string") effects = qishuiMaybeParseJson(effects);
+        if (!effects || typeof effects !== "object" || Array.isArray(effects)) return [];
+        return Object.keys(effects).map((key) => normalizeText(key)).filter((key, index, list) => key && key.length <= 64 && list.indexOf(key) === index).slice(0, 32);
+      }
+      async function fetchQishuiPcTrackV2Post(trackId, cookieText) {
+        const body = JSON.stringify({
+          track_id: trackId,
+          media_type: "track",
+          queue_type: "favorite_track_playlist",
+          scene_name: "library"
+        });
+        const json = await qishuiWebRequestJson("/luna/pc/track_v2", qishuiPcAppParams(), cookieText, {
+          bases: [QISHUI_WEB_PC_API_BASE],
+          noDefaultParams: true,
+          sessionOnly: true,
+          pcApp: true,
+          method: "POST",
+          body,
+          referer: "https://www.qishui.com/",
+          timeoutMs: 1e4
+        });
+        const err = qishuiPcStatusError(json, "QISHUI_PC_TRACK_V2_FAILED");
+        if (err) throw err;
+        return json;
+      }
+      async function fetchQishuiPcTrackV2Get(trackId, cookieText) {
+        const json = await qishuiWebRequestJson("/luna/pc/track_v2", qishuiPcAppParams({
+          track_id: trackId,
+          media_type: "track"
+        }), cookieText, {
+          bases: [QISHUI_WEB_PC_API_BASE],
+          noDefaultParams: true,
+          sessionOnly: true,
+          pcApp: true,
+          referer: "https://www.qishui.com/",
+          timeoutMs: 1e4
+        });
+        const err = qishuiPcStatusError(json, "QISHUI_PC_TRACK_V2_GET_FAILED");
+        if (err) throw err;
+        return json;
+      }
+      async function fetchQishuiPcTrackV2(trackId, cookieText) {
+        const cookie = normalizeQishuiCookieInput(cookieText);
+        const cacheKey = "track-v2-meta|" + qishuiCookieFingerprint(cookie) + "|" + normalizeText(trackId);
+        return qishuiTrackMetadataCache.wrap(cacheKey, 20 * 1e3, async () => {
+          try {
+            return await fetchQishuiPcTrackV2Post(trackId, cookie);
+          } catch (postError) {
+            try {
+              return await fetchQishuiPcTrackV2Get(trackId, cookie);
+            } catch (getError) {
+              getError.postError = postError && postError.message || String(postError);
+              throw getError;
+            }
+          }
+        });
+      }
+      function qishuiDiagPlayerInfoStreams(list, context) {
+        try {
+          const items = (list || []).slice(0, 20).map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const q = normalizeText(
+              qishuiObjectString(item, ["quality", "Quality", "definition", "Definition", "quality_type", "QualityType", "gear_des_key", "GearDesKey"]) || ""
+            );
+            const fmt = normalizeText(qishuiObjectString(item, ["format", "Format", "vtype", "VType", "file_format", "FileFormat"]) || "");
+            const br = qishuiNormalizeBitrateKbps(
+              qishuiObjectNumber(item, ["bitrate", "Bitrate", "real_bitrate", "RealBitrate", "br", "BR", "bit_rate", "BitRate"]) || 0
+            );
+            const dur = qishuiNormalizeDurationSeconds(qishuiObjectNumber(item, ["duration", "Duration"]) || 0);
+            return { quality: q, format: fmt, bitrate: br, duration: dur, hasUrl: !!qishuiStreamUrlFrom(item) };
+          }).filter(Boolean);
+          qishuiDiagLog("player_info_streams", Object.assign({
+            listLen: list.length,
+            items
+          }, context || {}));
+        } catch (e) {
+          qishuiDiagLog("player_info_streams_error", { message: String(e && e.message || e) });
+        }
+      }
+      async function fetchQishuiPlayerInfoStreams(playerInfoUrl, cookieText) {
+        playerInfoUrl = normalizeText(playerInfoUrl);
+        if (!/^https?:\/\//i.test(playerInfoUrl)) return [];
+        const json = await requestJson(playerInfoUrl, {
+          timeoutMs: 1e4,
+          headers: qishuiHeadersWithCookie({
+            "Accept": "application/json,text/plain,*/*",
+            "User-Agent": QISHUI_WEB_UA,
+            "Referer": "https://api.qishui.com/"
+          }, cookieText)
+        });
+        const result = pickObject(json && json.Result, json && json.result);
+        const data = pickObject(result.Data, result.data, json && json.Data, json && json.data);
+        const list = pickArray(data.PlayInfoList, data.playInfoList, data.play_info_list, json && json.PlayInfoList);
+        qishuiDiagPlayerInfoStreams(list, { source: "fetchQishuiPlayerInfoStreams" });
+        const streams = list.map((item) => qishuiStreamFromObject(item)).filter(Boolean);
+        if (streams.length) return streams;
+        const error = pickObject(json && json.ResponseMetadata && json.ResponseMetadata.Error, json && json.responseMetadata && json.responseMetadata.error);
+        if (error && (error.Message || error.message)) throw new Error(normalizeText(error.Message || error.message));
+        return [];
+      }
+      function qishuiDiagTrackV2Shape(payload) {
+        try {
+          const track = qishuiPrimaryTrackFromV2(payload) || {};
+          const player = qishuiTrackPlayerFromV2(payload, track) || {};
+          const audioInfo = pickObject(track.audio_info, track.audioInfo, payload && payload.audio_info, payload && payload.audioInfo) || {};
+          const playInfoList = pickArray(audioInfo.play_info_list, audioInfo.PlayInfoList, audioInfo.playInfoList) || [];
+          const playerPlayInfoList = pickArray(player.play_info_list, player.PlayInfoList, player.playInfoList) || [];
+          const bitRates = pickArray(
+            track.bit_rates,
+            track.bitRates,
+            audioInfo.bit_rates,
+            audioInfo.bitRates,
+            payload && payload.bit_rates,
+            payload && payload.bitRates
+          ) || [];
+          const videoModelRaw = player.video_model || player.VideoModel || player.videoModel || track.video_model || track.VideoModel || payload && payload.video_model || "";
+          const labelinfo = pickObject(track.label_info, track.labelinfo, track.labelInfo, payload.label_info, payload.labelinfo, payload.labelInfo) || {};
+          const qualitymap = pickObject(labelinfo.qualitymap, labelinfo.qualityMap, labelinfo.quality_map) || {};
+          const spatialKeys = [];
+          const walkKeys = (node, path2) => {
+            if (!node || typeof node !== "object" || path2.length > 6) return;
+            if (Array.isArray(node)) {
+              node.slice(0, 60).forEach((it, i) => walkKeys(it, path2.concat("[" + i + "]")));
+              return;
+            }
+            for (const k of Object.keys(node).slice(0, 150)) {
+              const lk = String(k).toLowerCase();
+              if (/spatial|atmos|dolby|immersive/.test(lk)) spatialKeys.push(path2.concat(k).join("."));
+              walkKeys(node[k], path2.concat(k));
+            }
+          };
+          walkKeys(payload, []);
+          const qualityOf = (it) => qishuiObjectString(it, ["quality", "Quality", "definition", "Definition", "quality_type", "QualityType", "gear_des_key", "GearDesKey"]) || "";
+          const vm = qishuiMaybeParseJson(videoModelRaw);
+          const vmInfo = typeof vm === "string" ? { vmType: "string-unparsed", vmLen: vm.length } : vm && typeof vm === "object" ? { vmType: "object", vmKeys: Object.keys(vm).slice(0, 30) } : { vmType: typeof vm };
+          const sanitizeSample = (it) => {
+            if (!it || typeof it !== "object") return it;
+            const out = {};
+            Object.keys(it).slice(0, 40).forEach((k) => {
+              const lk = String(k).toLowerCase();
+              if (/url|auth|token|cookie|key|secret|signature|spade/i.test(lk)) return;
+              const v = it[k];
+              if (v && typeof v === "object") {
+                out[k] = Object.keys(v).slice(0, 10);
+              } else if (typeof v === "string" && v.length > 80) {
+                out[k] = v.slice(0, 40) + "...";
+              } else {
+                out[k] = v;
+              }
+            });
+            return out;
+          };
+          const bitRateSamples = bitRates.slice(0, 3).map(sanitizeSample);
+          const bitRateKeys = bitRates.length ? Object.keys(bitRates[0]).slice(0, 40) : [];
+          const hasUrlInBitRates = bitRates.some((it) => !!qishuiStreamUrlFrom(it));
+          qishuiDiagLog("track_v2_shape", {
+            trackId: String(track.id || track.track_id || payload && payload.track_id || "").slice(0, 24),
+            audioInfoKeys: Object.keys(audioInfo),
+            playInfoListLen: playInfoList.length,
+            playInfoQualities: playInfoList.map(qualityOf).filter(Boolean),
+            playerPlayInfoListLen: playerPlayInfoList.length,
+            playerPlayInfoQualities: playerPlayInfoList.map(qualityOf).filter(Boolean),
+            bitRatesLen: bitRates.length,
+            bitRateKeys,
+            bitRateQualities: bitRates.map(qualityOf).filter(Boolean),
+            bitRateSamples,
+            hasUrlInBitRates,
+            vmInfo,
+            qualitymapKeys: Object.keys(qualitymap),
+            trackSpatialKeys: Object.keys(track).filter((k) => /spatial|atmos|dolby/i.test(k)),
+            spatialKeysFound: spatialKeys.slice(0, 40)
+          });
+        } catch (e) {
+          qishuiDiagLog("track_v2_shape_error", { message: String(e && e.message || e) });
+        }
+      }
+      function collectQishuiTrackV2Streams(payload) {
+        qishuiDiagTrackV2Shape(payload);
+        const track = qishuiPrimaryTrackFromV2(payload);
+        const player = qishuiTrackPlayerFromV2(payload, track);
+        const audioInfo = pickObject(track.audio_info, track.audioInfo, payload && payload.audio_info, payload && payload.audioInfo);
+        const playInfoList = pickArray(audioInfo.play_info_list, audioInfo.PlayInfoList, audioInfo.playInfoList);
+        const streams = playInfoList.map((item) => qishuiStreamFromObject(item)).filter(Boolean);
+        const videoModel = player.video_model || player.VideoModel || player.videoModel || track.video_model || track.VideoModel || "";
+        qishuiCollectVideoModelStreams(videoModel, "", {}, streams);
+        const bitRates = pickArray(
+          track.bit_rates,
+          track.bitRates,
+          audioInfo.bit_rates,
+          audioInfo.bitRates,
+          payload && payload.bit_rates,
+          payload && payload.bitRates
+        );
+        const fallbackStreams = bitRates.map((item) => qishuiStreamFromObject(item)).filter(Boolean);
+        return { track, player, streams, fallbackStreams };
+      }
+      async function resolveQishuiDownloadInfo(trackId, payload, cookieText, membership, requestedQuality) {
+        const collected = collectQishuiTrackV2Streams(payload);
+        const playerInfoUrl = qishuiObjectString(collected.player, ["url_player_info", "URLPlayerInfo", "urlPlayerInfo"]);
+        if (playerInfoUrl) {
+          try {
+            const streams = await fetchQishuiPlayerInfoStreams(playerInfoUrl, cookieText);
+            if (streams.length) collected.streams.push(...streams);
+          } catch (err) {
+            collected.playerInfoError = err && err.message || String(err);
+          }
+        }
+        const needVipMap = qishuiQualityMapNeedVip(payload);
+        const allStreams = (collected.streams || []).concat(collected.fallbackStreams || []);
+        const requestedTier = requestedQuality ? qishuiNormalizeAppQuality(requestedQuality) : "";
+        let best = null;
+        if (requestedTier && allStreams.length) {
+          const matched = allStreams.filter((s) => qishuiStreamAppTier(s) === requestedTier);
+          const allowed = matched.filter((s) => qishuiStreamAllowedWithMap(s, membership, needVipMap));
+          if (allowed.length) best = qishuiBestStreamCandidate(allowed);
+        }
+        if (!best) {
+          best = qishuiBestForMembershipMap(collected.streams, membership, needVipMap) || qishuiBestForMembershipMap(collected.fallbackStreams, membership, needVipMap);
+        }
+        if (!best) {
+          const unrestricted = qishuiBestStreamCandidate(collected.streams) || qishuiBestStreamCandidate(collected.fallbackStreams);
+          const requiredTier = unrestricted ? qishuiStreamRequiredTier(unrestricted) : "free";
+          const entitlementLimited = !!(unrestricted && !qishuiRequiredTierAllowed(requiredTier, membership));
+          let errorCode = "QISHUI_AUDIO_SOURCE_EMPTY";
+          if (entitlementLimited && !(membership && membership.membershipKnown)) {
+            errorCode = "QISHUI_MEMBERSHIP_UNKNOWN";
+          } else if (entitlementLimited && requiredTier === "svip") {
+            errorCode = "QISHUI_SVIP_REQUIRED";
+          } else if (entitlementLimited && requiredTier === "vip") {
+            errorCode = "QISHUI_VIP_REQUIRED";
+          }
+          const err = new Error(errorCode === "QISHUI_AUDIO_SOURCE_EMPTY" ? collected.playerInfoError || errorCode : errorCode);
+          err.code = errorCode;
+          err.requiredTier = requiredTier;
+          throw err;
+        }
+        const availableQualities = qishuiBuildAvailableQualities(allStreams, needVipMap);
+        qishuiDiagLog("resolve_streams", {
+          trackId: String(collected.track && (collected.track.id || collected.track.track_id) || "").slice(0, 24),
+          requestedTier,
+          streamCount: (collected.streams || []).length,
+          fallbackCount: (collected.fallbackStreams || []).length,
+          allStreamTiers: allStreams.map((s) => ({
+            tier: qishuiStreamAppTier(s),
+            quality: String(s.quality || "").slice(0, 24),
+            format: String(s.format || "").slice(0, 16),
+            br: qishuiNormalizeBitrateKbps(s.bitrate),
+            hasUrl: !!s.url
+          })),
+          bestTier: best ? qishuiStreamAppTier(best) : null,
+          bestQuality: best ? String(best.quality || "").slice(0, 24) : null,
+          bestFormat: best ? String(best.format || "").slice(0, 16) : null,
+          bestBr: best ? qishuiNormalizeBitrateKbps(best.bitrate) : 0,
+          availableQualities
+        });
+        return Object.assign(collected, { best, availableQualities });
+      }
+      function qishuiQualityMapNeedVip(payload) {
+        const track = qishuiPrimaryTrackFromV2(payload) || {};
+        const labelinfo = pickObject(track.label_info, track.labelinfo, track.labelInfo, payload.label_info, payload.labelinfo, payload.labelInfo) || {};
+        const qualitymap = pickObject(labelinfo.qualitymap, labelinfo.qualityMap, labelinfo.quality_map) || {};
+        const APP_TO_QS = {
+          standard: ["medium", "higher", "standard"],
+          exhigh: ["highest", "high", "exhigh"],
+          lossless: ["lossless", "sq"],
+          hires: ["hires", "hi-res", "hi_res", "highres", "master"],
+          atmos: ["spatial", "atmos", "dolby"]
+        };
+        const VIP_KEYS = ["needvip", "needVip", "need_vip", "vipRequired", "vip_required", "viprequired"];
+        const map = {};
+        Object.keys(APP_TO_QS).forEach((appTier) => {
+          let need = false;
+          let known = false;
+          APP_TO_QS[appTier].forEach((qsKey) => {
+            const entry = qualitymap[qsKey] || qualitymap[String(qsKey).toLowerCase()];
+            if (!entry || typeof entry !== "object") return;
+            const pd = pickObject(entry.playdetail, entry.play_detail, entry.playDetail, entry.PlayDetail) || {};
+            VIP_KEYS.forEach((k) => {
+              if (!Object.prototype.hasOwnProperty.call(pd, k)) return;
+              known = true;
+              const raw = qishuiObjectString(pd, [k]);
+              if (raw === "1" || raw === "true" || raw === true) need = true;
+              if (qishuiExplicitPositive(pd && pd[k])) need = true;
+            });
+          });
+          if (known) map[appTier] = need;
+        });
+        return map;
+      }
+      function qishuiStreamEffRequiredTier(stream, needVipMap) {
+        const tier = qishuiStreamAppTier(stream);
+        let requiredTier = qishuiStreamRequiredTier(stream);
+        if (needVipMap && Object.prototype.hasOwnProperty.call(needVipMap, tier)) {
+          requiredTier = qishuiHigherRequiredTier(requiredTier, needVipMap[tier] ? "vip" : "free");
+        }
+        return requiredTier;
+      }
+      function qishuiStreamAllowedWithMap(stream, membership, needVipMap) {
+        if (!stream || !stream.url) return false;
+        return qishuiRequiredTierAllowed(qishuiStreamEffRequiredTier(stream, needVipMap), membership);
+      }
+      function qishuiBestForMembershipMap(candidates, membership, needVipMap) {
+        return qishuiBestStreamCandidate((candidates || []).filter((s) => qishuiStreamAllowedWithMap(s, membership, needVipMap)));
+      }
+      function qishuiBuildAvailableQualities(streams, needVipMap) {
+        const tiers = ["standard", "exhigh", "lossless", "hires", "atmos"];
+        const byTier = {};
+        (streams || []).forEach((s) => {
+          const tier = qishuiStreamAppTier(s);
+          if (!tier) return;
+          if (!byTier[tier]) byTier[tier] = { key: tier, br: 0, requiredTier: "free" };
+          const br = qishuiNormalizeBitrateKbps(s.bitrate);
+          if (br > byTier[tier].br) byTier[tier].br = br;
+          const streamTier = qishuiStreamEffRequiredTier(s, needVipMap);
+          if (QISHUI_TIER_RANK[streamTier] > QISHUI_TIER_RANK[byTier[tier].requiredTier]) {
+            byTier[tier].requiredTier = streamTier;
+          }
+        });
+        return tiers.map((t) => {
+          const info = byTier[t];
+          let requiredTier = needVipMap && needVipMap[t] ? "vip" : "free";
+          if (info && QISHUI_TIER_RANK[info.requiredTier] > QISHUI_TIER_RANK[requiredTier]) {
+            requiredTier = info.requiredTier;
+          }
+          return {
+            key: t,
+            present: !!info,
+            requiredTier,
+            needvip: requiredTier !== "free",
+            br: info ? info.br * 1e3 : 0
+          };
+        });
+      }
+      function qishuiUrlWithAuth(url, auth) {
+        url = normalizeText(url);
+        auth = normalizeText(auth);
+        if (!url || !auth || /#auth=/.test(url)) return url;
+        return url + "#auth=" + encodeURIComponent(auth);
+      }
+      async function handleQishuiSongUrl(opts, cookieText) {
+        opts = opts && typeof opts === "object" ? opts : { id: opts };
+        const id = normalizeText(opts.id || opts.trackId || opts.track_id || "");
+        const cookie = normalizeQishuiCookieInput(cookieText || opts.cookie || "");
+        if (!id) return qishuiUnavailable("Missing Qishui track id", "missing_id", { loggedIn: qishuiCookieHasLogin(cookie), playbackKeyReady: false });
+        if (!qishuiCookieHasLogin(cookie)) {
+          return qishuiUnavailable("Qishui playback requires the local SodaMusic PC login state.", "login_required", {
+            loggedIn: false,
+            playbackKeyReady: false
+          });
+        }
+        const requestedQuality = normalizeText(opts.quality || "");
+        let payload;
+        try {
+          payload = await fetchQishuiPcTrackV2(id, cookie);
+        } catch (err) {
+          return qishuiUnavailable("Qishui did not return track playback metadata: " + (err && err.message || String(err)), "source_unavailable", {
+            loggedIn: true,
+            playbackKeyReady: false,
+            membershipKnown: false,
+            vipType: 0,
+            vipLevel: "none",
+            isVip: false,
+            isSvip: false,
+            vipLabel: "无VIP",
+            rawError: err && err.message || String(err)
+          });
+        }
+        let membership = qishuiPlaybackMembershipFromPayload(payload);
+        if (!membership.membershipKnown) membership = await fetchQishuiPlaybackMembership(cookie);
+        const membershipKey = membership.isSvip ? "svip" : membership.isVip ? "vip" : membership.membershipKnown ? "free" : "unknown";
+        const cacheKey = "track-v2|" + qishuiCookieFingerprint(cookie) + "|" + membershipKey + "|" + id + "|" + requestedQuality;
+        return qishuiPlaybackCache.wrap(cacheKey, 4 * 60 * 1e3, async () => {
+          try {
+            const resolved = await resolveQishuiDownloadInfo(id, payload, cookie, membership, requestedQuality);
+            const track = resolved.track || {};
+            const stream = resolved.best;
+            const duration = stream.duration || qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0);
+            const level = qishuiStreamAppTier(stream);
+            const fullDuration = qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0);
+            const availableQualities = resolved.availableQualities || [];
+            const audioEffectKeys = qishuiAudioEffectKeysFromV2(payload, track);
+            const QISHUI_QUALITY_RANK = { standard: 1, exhigh: 2, lossless: 3, hires: 4, atmos: 5 };
+            let qualityCeiling = "";
+            availableQualities.forEach((q) => {
+              if (q.present && qishuiRequiredTierAllowed(q.requiredTier, membership)) {
+                if ((QISHUI_QUALITY_RANK[q.key] || 0) > (QISHUI_QUALITY_RANK[qualityCeiling] || 0)) qualityCeiling = q.key;
+              }
+            });
+            const trial = !!(duration > 0 && fullDuration > 0 && duration + 5 < fullDuration);
+            return {
+              provider: "qishui",
+              playbackMode: "direct-url",
+              url: qishuiUrlWithAuth(stream.url, stream.auth),
+              playable: true,
+              trial,
+              loggedIn: true,
+              playbackKeyReady: true,
+              membershipKnown: !!membership.membershipKnown,
+              vipType: membership.vipType || 0,
+              vipLevel: membership.vipLevel || "none",
+              isVip: !!membership.isVip,
+              isSvip: !!membership.isSvip,
+              vipLabel: membership.vipLabel || (membership.isVip ? "VIP" : "无VIP"),
+              level,
+              availableQualities,
+              qualityCeiling,
+              quality: normalizeText(stream.quality || stream.format || level),
+              requiredTier: qishuiStreamRequiredTier(stream),
+              audioEffectKeys,
+              intelligentAudioEffectAvailable: audioEffectKeys.indexOf("intelligent") >= 0,
+              br: qishuiBitrateForUi(stream.bitrate),
+              size: Number(stream.size) || 0,
+              duration,
+              requestedQuality,
+              source: "qishui-pc-track-v2",
+              encrypted: !!stream.auth
+            };
+          } catch (err) {
+            const entitlementReason = err && err.code === "QISHUI_MEMBERSHIP_UNKNOWN" ? "membership_unknown" : err && err.code === "QISHUI_SVIP_REQUIRED" ? "svip_required" : err && err.code === "QISHUI_VIP_REQUIRED" ? "vip_required" : "";
+            const message = entitlementReason === "membership_unknown" ? "汽水音乐暂时无法验证当前账号的会员状态，请稍后重试。" : entitlementReason === "svip_required" ? "汽水音乐仅返回了需要 SVIP 权益的音质。" : entitlementReason === "vip_required" ? "汽水音乐仅返回了需要 VIP 权益的音质。" : "Qishui did not return a playable audio source: " + (err && err.message || String(err));
+            return qishuiUnavailable(
+              message,
+              entitlementReason || "source_unavailable",
+              {
+                loggedIn: true,
+                playbackKeyReady: true,
+                requiredTier: err && err.requiredTier || "free",
+                membershipKnown: !!membership.membershipKnown,
+                vipType: membership.vipType || 0,
+                vipLevel: membership.vipLevel || "none",
+                isVip: !!membership.isVip,
+                isSvip: !!membership.isSvip,
+                vipLabel: membership.vipLabel || (membership.isVip ? "VIP" : "无VIP"),
+                rawError: err && err.message || String(err)
+              }
+            );
+          }
+        });
+      }
+      async function qishuiAlbumDetailFromSeoTrack(albumId, trackId) {
+        const track = qishuiSeoTrackFromPayload(await fetchQishuiSeoTrack(trackId));
+        const song = qishuiSongFromSeoTrack(track, trackId);
+        if (!song || !song.albumId || albumId && song.albumId !== albumId) return null;
+        return {
+          provider: "qishui",
+          source: "qishui-public-seo",
+          partial: true,
+          album: {
+            provider: "qishui",
+            id: song.albumId,
+            albumId: song.albumId,
+            name: song.album || "未知专辑",
+            artist: song.artist,
+            cover: song.cover,
+            type: "album"
+          },
+          songs: [song]
+        };
+      }
+      async function handleQishuiAlbumDetail(albumId, cookieText, limit, trackId) {
+        const id = normalizeText(albumId);
+        const num = Math.max(10, Math.min(120, parseInt(limit || "80", 10) || 80));
+        if (!id && !normalizeText(trackId)) return { provider: "qishui", error: "MISSING_ALBUM_ID", album: null, songs: [] };
+        let officialError = "";
+        try {
+          const cookie = normalizeQishuiCookieInput(cookieText);
+          if (qishuiCookieHasLogin(cookie) && id) {
+            const json = await qishuiWebRequestJson("/luna/pc/album/detail", qishuiPcAppParams({
+              id,
+              album_id: id,
+              albumId: id,
+              cursor: 0,
+              count: num,
+              cnt: num
+            }), cookie, {
+              bases: [QISHUI_WEB_PC_API_BASE],
+              noDefaultParams: true,
+              sessionOnly: true,
+              pcApp: true,
+              referer: "https://www.qishui.com/",
+              timeoutMs: 9e3
+            });
+            const data = json && json.data || json || {};
+            const album = pickObject(
+              data.album,
+              data.info,
+              data.album_info,
+              data.album_detail,
+              json && json.album,
+              json && json.album_info
+            );
+            const rawSongs = extractQishuiMediaList(json);
+            const songs = mapQishuiMediaList(rawSongs, "qishui-album", { directPlayable: false }).slice(0, num);
+            if (songs.length) {
+              return {
+                provider: "qishui",
+                album: {
+                  provider: "qishui",
+                  id,
+                  albumId: id,
+                  name: normalizeText(album.name || album.title || album.album_name || album.albumName || ""),
+                  artist: normalizeText(album.artist || album.artist_name || album.artistName || ""),
+                  cover: qishuiFirstImageUrl("~c5_375x375.jpg", album.cover_url, album.cover, album.cover_uri, album.url_cover, album.img),
+                  type: "album"
+                },
+                songs
+              };
+            }
+            officialError = "QISHUI_ALBUM_DETAIL_EMPTY";
+          } else {
+            officialError = "QISHUI_COOKIE_REQUIRED";
+          }
+        } catch (e) {
+          officialError = e.message || "QISHUI_ALBUM_DETAIL_FAILED";
+        }
+        if (trackId) {
+          try {
+            const fallback = await qishuiAlbumDetailFromSeoTrack(id, normalizeText(trackId));
+            if (fallback) return Object.assign(fallback, { officialError });
+          } catch (e) {
+            officialError = officialError || e.message || "QISHUI_PUBLIC_DETAIL_FAILED";
+          }
+        }
+        return { provider: "qishui", error: officialError || "QISHUI_ALBUM_DETAIL_FAILED", album: null, songs: [] };
+      }
+      module.exports = {
+        getQishuiStatus,
+        handleQishuiStatus,
+        normalizeQishuiCookieInput,
+        qishuiCookieHasLogin,
+        getQishuiOAuthConfig,
+        buildQishuiOAuthAuthorizeUrl,
+        exchangeQishuiOAuthCode,
+        saveQishuiAccessToken,
+        clearQishuiAccessToken,
+        handleQishuiSearch,
+        handleQishuiArtistDetail,
+        handleQishuiSongDetail,
+        handleQishuiAlbumDetail,
+        handleQishuiFeed,
+        handleQishuiUserPlaylists,
+        handleQishuiPlaylistTracks,
+        handleQishuiCheckTracksLiked,
+        handleQishuiSetTrackLiked,
+        handleQishuiSetPlaylistCollected,
+        handleQishuiPlaylistAddSong,
+        handleQishuiSetAlbumCollected,
+        handleQishuiReportRecentlyPlayed,
+        handleQishuiComments,
+        handleQishuiCreateComment,
+        handleQishuiLyric,
+        handleQishuiSongUrl,
+        qishuiUnavailable,
+        _test: {
+          qishuiPublicSearchScore,
+          rankQishuiPublicSongs,
+          qishuiConvertLyric,
+          extractQishuiLyrics,
+          collectQishuiTrackV2Streams,
+          qishuiMembershipFromData,
+          qishuiPlaybackMembershipFromPayload,
+          qishuiMembershipCacheTtlMs,
+          qishuiUnknownMembership,
+          qishuiApplyMembershipObservation,
+          qishuiTrackPlaybackRestriction,
+          qishuiTrackRequiresVip,
+          qishuiStreamRequiredTier,
+          qishuiStreamAppTier,
+          qishuiQualityMapNeedVip,
+          qishuiStreamEffRequiredTier,
+          qishuiBuildAvailableQualities,
+          qishuiMembershipTier,
+          qishuiRequiredTierAllowed,
+          qishuiStreamAllowedForMembership,
+          qishuiBestStreamCandidateForMembership,
+          qishuiAudioEffectKeysFromV2,
+          clearQishuiRuntimeCaches
+        }
+      };
+    }
+  });
+
+  // src/entry.js
+  init_globals();
+
+  // src/car/api.js
+  init_globals();
+
+  // src/car/client.js
+  init_globals();
+
+  // src/car/protocol.js
+  init_globals();
+
   // src/car/bytes.js
-  function utf8Bytes(text3) {
-    return new TextEncoder().encode(String(text3));
+  init_globals();
+  function utf8Bytes(text5) {
+    return new TextEncoder().encode(String(text5));
   }
   function bytesToBase64(bytes) {
     let binary = "";
@@ -37,8 +4524,8 @@ ${lines.join("\n")}
 `;
   }
   function bytesFromPem(pem) {
-    const text3 = String(pem || "");
-    const body = text3.replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
+    const text5 = String(pem || "");
+    const body = text5.replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
     return base64ToBytes(body);
   }
   function randomDigits19() {
@@ -47,8 +4534,8 @@ ${lines.join("\n")}
     for (const byte of bytes) value = value << 8n | BigInt(byte);
     return (value % 9000000000000000000n + 1000000000000000000n).toString();
   }
-  function randomHex(byteLength) {
-    const bytes = randomBytes(byteLength);
+  function randomHex(byteLength2) {
+    const bytes = randomBytes(byteLength2);
     let out = "";
     for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
     return out;
@@ -67,6 +4554,7 @@ ${lines.join("\n")}
   }
 
   // src/car/guard.js
+  init_globals();
   var subtle = () => {
     const cryptoRef = (typeof globalThis !== "undefined" ? globalThis.crypto : null) || (typeof window !== "undefined" ? window.crypto : null);
     if (!cryptoRef || !cryptoRef.subtle) throw new Error("WebCrypto is unavailable in this runtime");
@@ -104,11 +4592,11 @@ ${lines.join("\n")}
   async function importPrivateKeyPem(pem) {
     return subtle().importKey("pkcs8", bytesFromPem(pem), EC_ALGORITHM, true, ["sign"]);
   }
-  async function signTextDerBase64(privateKey, text3) {
+  async function signTextDerBase64(privateKey, text5) {
     const raw = new Uint8Array(await subtle().sign(
       { name: "ECDSA", hash: "SHA-256" },
       privateKey,
-      utf8Bytes(text3)
+      utf8Bytes(text5)
     ));
     return bytesToBase64(rawSignatureToDer(raw));
   }
@@ -133,11 +4621,11 @@ ${lines.join("\n")}
       privateKey,
       info
     ));
-    const request2 = der(48, info, algorithm, der(3, new Uint8Array([0]), rawSignatureToDer(signature)));
+    const request3 = der(48, info, algorithm, der(3, new Uint8Array([0]), rawSignatureToDer(signature)));
     return {
       privateKey,
       guardKey: await exportPrivateKeyPem(privateKey),
-      csr: bytesToBase64(utf8Bytes(pemFromBytes("CERTIFICATE REQUEST", request2)))
+      csr: bytesToBase64(utf8Bytes(pemFromBytes("CERTIFICATE REQUEST", request3)))
     };
   }
 
@@ -386,7 +4874,7 @@ ${lines.join("\n")}
       }
       const account = credential || sessions.get();
       const revision = sessions.revision;
-      const request2 = async (headers) => {
+      const request3 = async (headers) => {
         const { data } = await http(query(`${QISHUI_DOUYIN_HOST}${QISHUI_PREFIX}${path}`, {}, account?.deviceId), {
           body: { ...body, common_params: { ...account?.userId ? { user_id: account.userId } : {} } },
           headers
@@ -394,7 +4882,7 @@ ${lines.join("\n")}
         if (!data.data || typeof data.data !== "object") throw new QishuiError("invalid-response", "Qishui data is missing");
         return data.data;
       };
-      if (credential) return request2(await qishuiGuardHeaders(credential, path));
+      if (credential) return request3(await qishuiGuardHeaders(credential, path));
       let token = clientToken();
       for (let attempt = 0; ; attempt++) {
         const headers = { "access-token": await token.task };
@@ -402,7 +4890,7 @@ ${lines.join("\n")}
           throw new QishuiError("unavailable", "Qishui account changed during the request");
         }
         try {
-          return await request2(headers);
+          return await request3(headers);
         } catch (error) {
           if (!(error instanceof QishuiError) || error.upstreamCode !== "28001008") throw error;
           if (tokenEntry === token) tokenEntry = void 0;
@@ -423,7 +4911,11 @@ ${lines.join("\n")}
     return { http, query, platform, command, sessions };
   }
 
+  // src/car/auth.js
+  init_globals();
+
   // src/car/storage.js
+  init_globals();
   var PREFIX = "folia:qishui:car:";
   var memory = /* @__PURE__ */ new Map();
   function native() {
@@ -469,11 +4961,11 @@ ${lines.join("\n")}
     const host = native();
     if (host) {
       try {
-        const text3 = host.getStore(key);
-        if (text3) {
+        const text5 = host.getStore(key);
+        if (text5) {
           lastRead = "native";
           try {
-            return JSON.parse(text3);
+            return JSON.parse(text5);
           } catch (error) {
             lastParseError = `native/${key}: ${error?.message || error}`;
           }
@@ -484,11 +4976,11 @@ ${lines.join("\n")}
     const target = local();
     if (target) {
       try {
-        const text3 = target.getItem(PREFIX + key);
-        if (text3 != null) {
+        const text5 = target.getItem(PREFIX + key);
+        if (text5 != null) {
           lastRead = "local";
           try {
-            return JSON.parse(text3);
+            return JSON.parse(text5);
           } catch (error) {
             lastParseError = `local/${key}: ${error?.message || error}`;
           }
@@ -504,12 +4996,12 @@ ${lines.join("\n")}
     return fallback;
   }
   function writeJson(key, value) {
-    const text3 = JSON.stringify(value == null ? null : value);
+    const text5 = JSON.stringify(value == null ? null : value);
     memory.set(key, value);
     const host = native();
     if (host) {
       try {
-        host.putStore(key, text3);
+        host.putStore(key, text5);
         lastWrite = "native";
       } catch (_) {
       }
@@ -517,7 +5009,7 @@ ${lines.join("\n")}
     const target = local();
     if (target) {
       try {
-        target.setItem(PREFIX + key, text3);
+        target.setItem(PREFIX + key, text5);
         if (lastWrite !== "native") lastWrite = "local";
       } catch (_) {
       }
@@ -582,7 +5074,7 @@ ${lines.join("\n")}
       }
     };
   }
-  function createAuth(client, { log = () => {
+  function createAuth(client, { log: log2 = () => {
   } } = {}) {
     const pending = /* @__PURE__ */ new Map();
     let generation = 0;
@@ -674,7 +5166,7 @@ ${lines.join("\n")}
         if (mine !== generation) throw new QishuiError("unavailable", "Sign-in was cancelled");
         const key = newQrKey();
         pending.set(key, { token: data.token, qr: `data:image/png;base64,${data.qrcode}`, expires: Date.now() + QR_TTL_MS });
-        log("[Qishui] Sign-in QR created");
+        log2("[Qishui] Sign-in QR created");
         return { key, imageUrl: `data:image/png;base64,${data.qrcode}` };
       },
       qr(key) {
@@ -710,7 +5202,7 @@ ${lines.join("\n")}
           if (pending.get(key) !== value || sessions.revision !== revision) return { state: "expired" };
           sessions.set({ ...credential, userId: user.id, user });
           pending.delete(key);
-          log("[Qishui] Sign-in confirmed; account stored");
+          log2("[Qishui] Sign-in confirmed; account stored");
           return { state: "confirmed" };
         };
         value.task = run().finally(() => {
@@ -725,7 +5217,7 @@ ${lines.join("\n")}
         generation++;
         pending.clear();
         sessions.clear();
-        log("[Qishui] Signed out");
+        log2("[Qishui] Signed out");
       },
       status() {
         if (!refreshing) refreshing = renew().finally(() => {
@@ -736,7 +5228,11 @@ ${lines.join("\n")}
     };
   }
 
+  // src/car/catalog.js
+  init_globals();
+
   // src/car/shape.js
+  init_globals();
   var text = (value) => value == null ? "" : String(value);
   function coverFromUrlInfo(info) {
     if (!info || typeof info !== "object") return "";
@@ -1029,6 +5525,7 @@ ${lines.join("\n")}
   }
 
   // src/car/feed.js
+  init_globals();
   function createFeed({ platform }) {
     const queues = /* @__PURE__ */ new Map();
     let total = 0;
@@ -1104,6 +5601,7 @@ ${lines.join("\n")}
   }
 
   // src/car/library.js
+  init_globals();
   var MAX_BATCH = 100;
   var PAGE_SIZE = 100;
   var PAGE_LIMIT = 500;
@@ -1238,6 +5736,7 @@ ${lines.join("\n")}
   }
 
   // src/car/playback.js
+  init_globals();
   var levels = { medium: "standard", higher: "high", highest: "high", lossless: "lossless", hi_res: "hires" };
   var rank = (value) => ["standard", "high", "lossless", "hires"].indexOf(value);
   var encrypted = (item) => Boolean(item.encrypt_info?.encrypt || item.encrypt_info?.spade_a || item.PlayAuth || Number(item.Encrypt || 0));
@@ -1301,6 +5800,7 @@ ${lines.join("\n")}
   }
 
   // src/car/transport.js
+  init_globals();
   var DEFAULT_TIMEOUT_MS = 25e3;
   function headerLookup(headers, name) {
     if (!headers) return null;
@@ -1310,19 +5810,19 @@ ${lines.join("\n")}
     }
     return null;
   }
-  function wrapResponse(native2) {
-    const headers = native2 && native2.headers || {};
+  function wrapResponse(native3) {
+    const headers = native3 && native3.headers || {};
     return {
-      ok: Number(native2 && native2.status) >= 200 && Number(native2 && native2.status) < 300,
-      status: Number(native2 && native2.status) || 0,
+      ok: Number(native3 && native3.status) >= 200 && Number(native3 && native3.status) < 300,
+      status: Number(native3 && native3.status) || 0,
       // names() 只给键名不给值：诊断要能看出「头到没到」，但不把凭据带出去。
       headers: { get: (name) => headerLookup(headers, name), names: () => Object.keys(headers || {}) },
-      text: async () => String(native2 && native2.body || ""),
-      json: async () => JSON.parse(String(native2 && native2.body || "{}"))
+      text: async () => String(native3 && native3.body || ""),
+      json: async () => JSON.parse(String(native3 && native3.body || "{}"))
     };
   }
   function createFetch(transport) {
-    const resolve = () => {
+    const resolve2 = () => {
       if (transport && typeof transport.request === "function") return transport;
       const host = typeof window !== "undefined" ? window.__foliaHttpTransport : null;
       if (host && typeof host.request === "function") return host;
@@ -1337,13 +5837,13 @@ ${lines.join("\n")}
         body: options.body == null ? null : String(options.body),
         timeoutMs: DEFAULT_TIMEOUT_MS
       };
-      let native2;
+      let native3;
       try {
-        native2 = await resolve().request(payload);
+        native3 = await resolve2().request(payload);
       } catch (error) {
         throw new Error("network");
       }
-      return wrapResponse(native2);
+      return wrapResponse(native3);
     };
   }
 
@@ -1355,9 +5855,9 @@ ${lines.join("\n")}
     const fetcher = options.fetch || createFetch(options.transport);
     const sessions = options.sessions || createSessions();
     const client = createClient({ sessions, fetch: fetcher });
-    const log = options.log || (() => {
+    const log2 = options.log || (() => {
     });
-    const auth = createAuth(client, { log });
+    const auth = createAuth(client, { log: log2 });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
     const library = createLibrary(client);
@@ -1405,7 +5905,7 @@ ${lines.join("\n")}
         await auth.status();
         return Boolean(sessions.get()?.ticket);
       } catch (error) {
-        log(`[Qishui] renew failed (${error?.code || error?.message || error})`);
+        log2(`[Qishui] renew failed (${error?.code || error?.message || error})`);
         return false;
       }
     }
@@ -1416,14 +5916,14 @@ ${lines.join("\n")}
         return { track: await catalog.track(id, { credential }), account: true };
       } catch (error) {
         const reason = error instanceof QishuiError ? `${error.code}${error.stage ? "/" + error.stage : ""}` : String(error?.code || error?.message || error);
-        log(`[Qishui] account track read failed (${reason}), renewing once before giving up`);
+        log2(`[Qishui] account track read failed (${reason}), renewing once before giving up`);
         const renewed = await renewOnce();
         if (renewed) {
           try {
             return { track: await catalog.track(id, { credential: sessions.get() }), account: true, renewed };
           } catch (retryError) {
             const retryReason = retryError instanceof QishuiError ? `${retryError.code}${retryError.stage ? "/" + retryError.stage : ""}` : String(retryError?.code || retryError?.message || retryError);
-            log(`[Qishui] the account read still fails after renewing (${retryReason})`);
+            log2(`[Qishui] the account read still fails after renewing (${retryReason})`);
             return { track: await catalog.track(id), account: false, accountError: `${reason} → renewed → ${retryReason}` };
           }
         }
@@ -1555,7 +6055,7 @@ ${lines.join("\n")}
         }
         sessions.set(value);
         coverCache.clear();
-        log("[Qishui] the session kept by the app was put back into the bridge");
+        log2("[Qishui] the session kept by the app was put back into the bridge");
         return { provider: "qishui", restored: true };
       },
       logout() {
@@ -1767,8 +6267,699 @@ ${lines.join("\n")}
     };
   }
 
+  // src/phone/api.js
+  init_globals();
+  var import_qishui_web_api = __toESM(require_qishui_web_api(), 1);
+
+  // src/phone/auth.js
+  init_globals();
+
+  // src/phone/protocol.js
+  init_globals();
+  var QISHUI_PHONE_API_BASE = "https://api.qishui.com";
+  var QISHUI_PHONE_WEB_BASE = "https://www.qishui.com";
+  var QISHUI_PHONE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.2.1 Chrome/136.0.7103.59 Electron/36.4.0-rs.22.release.main.1 TTElectron/36.4.0-rs.22.release.main.1 Safari/537.36";
+  var PASSPORT_AID = "386088";
+  var PASSPORT_APP_VERSION = "3.5.2";
+  var PASSPORT_SDK_VERSION = "2.4.13";
+  var PASSPORT_SECURE_SDK_VERSION = "3.3.5";
+  var PASSPORT_VERIFY_SDK_VERSION = "1.0.29";
+  var PASSPORT_BDMS_VERSION = "1.0.0.41";
+  var QR_TTL_MS2 = 5 * 60 * 1e3;
+  function randomDigits(length, firstMax = 9) {
+    let value = String(Math.floor(Math.random() * Math.max(2, firstMax + 1)));
+    while (value.length < length) value += String(Math.floor(Math.random() * 10));
+    return value;
+  }
+  function randomHex2(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes; i++) out += Math.floor(Math.random() * 256).toString(16).padStart(2, "0");
+    return out;
+  }
+  function passportCommonParams(identity, extra = {}) {
+    return {
+      passport_jssdk_version: PASSPORT_SDK_VERSION,
+      passport_jssdk_type: "normal",
+      is_from_ttaccountsdk: "1",
+      aid: PASSPORT_AID,
+      language: "zh",
+      account_sdk_source: "web",
+      p_js_v: PASSPORT_SDK_VERSION,
+      p_js_t: "pro",
+      p_zt: PASSPORT_SECURE_SDK_VERSION,
+      p_ver: PASSPORT_VERIFY_SDK_VERSION,
+      request_host: "app%3A%2F%2Fresources",
+      p_bd: PASSPORT_BDMS_VERSION,
+      biz_trace_id: randomHex2(4),
+      is_new_login: "1",
+      is_from_iesaccountsaas: "1",
+      device_id: identity.deviceId,
+      install_id: identity.installId,
+      did: identity.deviceId,
+      iid: identity.installId,
+      device_platform: "PC",
+      version_code: PASSPORT_APP_VERSION,
+      ...extra
+    };
+  }
+  function passportHeaders(identity, bizTraceId) {
+    const traceId = randomHex2(16);
+    return {
+      Accept: "application/json, text/javascript",
+      "User-Agent": QISHUI_PHONE_UA,
+      "x-tt-passport-verify-portrait": identity.verifyPortraitId,
+      "x-tt-passport-trace-id": bizTraceId,
+      "x-tt-trace-id": `00-${traceId}-${traceId.slice(0, 16)}-01`
+    };
+  }
+  async function passportRequest(fetcher, { identity, method = "GET", path, params = {}, body = null }) {
+    const query = passportCommonParams(identity, params);
+    const url = new URL(path, QISHUI_PHONE_API_BASE);
+    for (const [name, value] of Object.entries(query)) {
+      if (value != null) url.searchParams.set(name, String(value));
+    }
+    const headers = passportHeaders(identity, String(query.biz_trace_id || ""));
+    let encoded = null;
+    if (body != null) {
+      const form = new URLSearchParams();
+      for (const [name, value] of Object.entries(body)) {
+        if (value != null) form.set(name, typeof value === "object" ? JSON.stringify(value) : String(value));
+      }
+      encoded = form.toString();
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+    }
+    const response = await fetcher(url.toString(), { method, headers, body: encoded });
+    const text5 = await response.text();
+    let json = null;
+    try {
+      json = JSON.parse(text5);
+    } catch (_) {
+      json = null;
+    }
+    if (!response.ok || !json) {
+      const error = new Error(`Qishui passport ${path} failed (HTTP ${response.status})`);
+      error.code = "invalid-response";
+      throw error;
+    }
+    const setCookie = response.headers && typeof response.headers.get === "function" ? String(response.headers.get("set-cookie") || "") : "";
+    return { json, setCookie };
+  }
+  function parseCookieString(raw) {
+    const result = {};
+    String(raw || "").split(";").forEach((pair) => {
+      const index = pair.indexOf("=");
+      if (index > 0) result[pair.slice(0, index).trim()] = pair.slice(index + 1).trim();
+    });
+    return result;
+  }
+  function buildCookieString(values) {
+    return Object.entries(values || {}).filter(([name, value]) => name && value !== void 0 && value !== null && String(value) !== "").map(([name, value]) => `${name}=${String(value)}`).join("; ");
+  }
+  var QISHUI_LOGIN_COOKIE_KEYS = ["sessionid", "sessionid_ss", "sid_guard", "sid_tt", "uid_tt", "uid_tt_ss"];
+  function hasLoginCookie(text5) {
+    const values = parseCookieString(text5);
+    return QISHUI_LOGIN_COOKIE_KEYS.some((name) => Boolean(values[name]));
+  }
+  function cookieFromSetCookie(raw) {
+    return String(raw || "").split(/,(?=[^;]+=)/).map((part) => part.split(";")[0].trim()).filter(Boolean).join("; ");
+  }
+  function hostCookie(url) {
+    try {
+      const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+      if (!host || typeof host.getCookie !== "function") return "";
+      return String(host.getCookie(url) || "");
+    } catch (_) {
+      return "";
+    }
+  }
+  function hostCookies() {
+    return [hostCookie(`${QISHUI_PHONE_API_BASE}/`), hostCookie(`${QISHUI_PHONE_WEB_BASE}/`)].filter(Boolean).join("; ");
+  }
+
+  // src/phone/storage.js
+  init_globals();
+  var PREFIX3 = "folia:qishui:phone:";
+  var memory3 = /* @__PURE__ */ new Map();
+  function native2() {
+    try {
+      const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+      if (!host || typeof host.getStore !== "function" || typeof host.putStore !== "function") return null;
+      return host;
+    } catch (_) {
+      return null;
+    }
+  }
+  function local2() {
+    try {
+      return typeof window !== "undefined" ? window.localStorage : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  var lastRead2 = "none";
+  var lastWrite2 = "none";
+  var lastParseError2 = "";
+  var storageMode2 = () => lastRead2;
+  var storageWriteMode2 = () => lastWrite2;
+  var storageParseError2 = () => lastParseError2;
+  function whereIs2(key) {
+    const host = native2();
+    if (host) {
+      try {
+        if (host.getStore(key)) return "native";
+      } catch (_) {
+      }
+    }
+    const target = local2();
+    if (target) {
+      try {
+        if (target.getItem(PREFIX3 + key) != null) return "local";
+      } catch (_) {
+      }
+    }
+    return memory3.has(key) ? "memory" : "none";
+  }
+  function readJson2(key, fallback = null) {
+    const host = native2();
+    if (host) {
+      try {
+        const text5 = host.getStore(key);
+        if (text5) {
+          lastRead2 = "native";
+          try {
+            return JSON.parse(text5);
+          } catch (error) {
+            lastParseError2 = `native/${key}: ${error?.message || error}`;
+          }
+        }
+      } catch (_) {
+      }
+    }
+    const target = local2();
+    if (target) {
+      try {
+        const text5 = target.getItem(PREFIX3 + key);
+        if (text5 != null) {
+          lastRead2 = "local";
+          try {
+            return JSON.parse(text5);
+          } catch (error) {
+            lastParseError2 = `local/${key}: ${error?.message || error}`;
+          }
+        }
+      } catch (_) {
+      }
+    }
+    if (memory3.has(key)) {
+      lastRead2 = "memory";
+      return memory3.get(key);
+    }
+    lastRead2 = "none";
+    return fallback;
+  }
+  function writeJson2(key, value) {
+    const text5 = JSON.stringify(value == null ? null : value);
+    memory3.set(key, value);
+    const host = native2();
+    if (host) {
+      try {
+        host.putStore(key, text5);
+        lastWrite2 = "native";
+      } catch (_) {
+      }
+    }
+    const target = local2();
+    if (target) {
+      try {
+        target.setItem(PREFIX3 + key, text5);
+        if (lastWrite2 !== "native") lastWrite2 = "local";
+      } catch (_) {
+      }
+    }
+    if (lastWrite2 === "none") lastWrite2 = "memory";
+  }
+  function remove2(key) {
+    memory3.delete(key);
+    const host = native2();
+    if (host) {
+      try {
+        host.putStore(key, null);
+      } catch (_) {
+      }
+    }
+    const target = local2();
+    if (target) {
+      try {
+        target.removeItem(PREFIX3 + key);
+      } catch (_) {
+      }
+    }
+  }
+  var DEVICE_KEY2 = "phone-device-id";
+  var SESSION_KEY2 = "phone-session";
+
+  // src/phone/auth.js
+  var text3 = (value) => value == null ? "" : String(value);
+  function createIdentity() {
+    let identity = readJson2(DEVICE_KEY2, null);
+    const reused = Boolean(identity && /^\d{19}$/.test(text3(identity.deviceId)));
+    if (!reused) {
+      identity = {
+        deviceId: randomDigits(19),
+        installId: randomDigits(15),
+        verifyPortraitId: `${randomHex2(8)}.login`
+      };
+      writeJson2(DEVICE_KEY2, identity);
+    }
+    return { ...identity, reused };
+  }
+  function createAuth2(fetcher, { log: log2 = () => {
+  } } = {}) {
+    const identity = createIdentity();
+    const pending = /* @__PURE__ */ new Map();
+    const readSession = () => {
+      const value = readJson2(SESSION_KEY2, null);
+      return value && typeof value === "object" ? value : null;
+    };
+    const writeSession = (value) => value ? writeJson2(SESSION_KEY2, value) : remove2(SESSION_KEY2);
+    const cookie = () => text3(readSession()?.cookie);
+    const mergeCookie = (parts) => {
+      const merged = parseCookieString(cookie());
+      for (const part of parts) {
+        Object.assign(merged, parseCookieString(part));
+      }
+      const next = buildCookieString(merged);
+      const session = readSession() || {};
+      writeSession({ ...session, cookie: next, savedAt: Date.now() });
+      return hasLoginCookie(next);
+    };
+    const harvestRedirect = async (url) => {
+      const target = text3(url);
+      if (!/^https?:\/\//i.test(target)) return "";
+      try {
+        const response = await fetcher(target, {
+          method: "GET",
+          headers: {
+            Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.2.1 Chrome/136.0.7103.59 Safari/537.36"
+          }
+        });
+        await response.text().catch(() => "");
+        return hostCookies();
+      } catch (_) {
+        return "";
+      }
+    };
+    const collectAfterConfirm = async (data, envelope, setCookie) => {
+      const parts = [];
+      const direct = {};
+      for (const key of QISHUI_LOGIN_COOKIE_KEYS) {
+        const value = data[key] ?? envelope[key];
+        if (typeof value === "string" && value) direct[key] = value;
+      }
+      if (text3(data.session_cookie)) parts.push(data.session_cookie);
+      if (Object.keys(direct).length) parts.push(buildCookieString(direct));
+      if (setCookie) parts.push(cookieFromSetCookie(setCookie));
+      parts.push(hostCookies());
+      const redirect = text3(data.redirect_url || data.redirect);
+      if (redirect) parts.push(await harvestRedirect(redirect));
+      return mergeCookie(parts);
+    };
+    const clean = () => {
+      for (const [key, value] of pending) {
+        if (value.expiresAt <= Date.now()) pending.delete(key);
+      }
+    };
+    return {
+      identity,
+      cookie,
+      /** 登录判定：手里有没有真的会话 Cookie（不只是 sid_tt 那种跟踪键）。 */
+      isLoggedIn: () => hasLoginCookie(cookie()),
+      /**
+       * 诊断用：两个登录键各在不在。
+       *
+       * 「有 sid_tt 但没 sessionid」是这一路最会骗人的中间态 —— 扫码前 sid_tt
+       * 就已经下发，登录判定只认「任一登录键命中」就会被它骗过。
+       */
+      loginKeys: () => {
+        const values = parseCookieString(cookie());
+        return QISHUI_LOGIN_COOKIE_KEYS.map((name) => `${name}${values[name] ? "=y" : "=n"}`).join(" ");
+      },
+      cookieKeys: () => Object.keys(parseCookieString(cookie())).join(",") || "(empty)",
+      async start() {
+        clean();
+        const { json, setCookie } = await passportRequest(fetcher, {
+          identity,
+          method: "GET",
+          path: "/passport/web/get_qrcode/",
+          params: { next: QISHUI_PHONE_API_BASE, need_logo: "false", need_short_url: "false" }
+        });
+        const data = json?.data || {};
+        if (json?.message !== "success" || Number(data.error_code) !== 0) {
+          const error = new Error(`汽水二维码生成失败：code=${data.error_code} ${text3(data.description)}`);
+          error.code = "invalid-response";
+          throw error;
+        }
+        if (setCookie) mergeCookie([cookieFromSetCookie(setCookie), hostCookies()]);
+        const imageUrl = text3(data.qrcode);
+        const key = text3(data.token);
+        if (!key || !imageUrl) {
+          const error = new Error("汽水二维码返回不完整（缺 token 或 qrcode）");
+          error.code = "invalid-response";
+          throw error;
+        }
+        const expireSeconds = Number(data.expire_time);
+        const expiresAt = Number.isFinite(expireSeconds) && expireSeconds > 1e9 ? expireSeconds * 1e3 : Date.now() + QR_TTL_MS2;
+        pending.set(key, { imageUrl, expiresAt });
+        return { key, imageUrl, expiresAt, copywriting: text3(data.copywriting), webName: text3(data.web_name) };
+      },
+      qr(key) {
+        const entry = pending.get(text3(key));
+        if (!entry) {
+          const error = new Error("QISHUI_QR_TOKEN_REQUIRED");
+          error.code = "invalid-response";
+          throw error;
+        }
+        return { imageUrl: entry.imageUrl, expiresAt: entry.expiresAt };
+      },
+      async check(key) {
+        const token = text3(key);
+        if (!token) {
+          const error = new Error("QISHUI_QR_TOKEN_REQUIRED");
+          error.code = "invalid-response";
+          throw error;
+        }
+        const { json, setCookie } = await passportRequest(fetcher, {
+          identity,
+          method: "POST",
+          path: "/passport/web/check_qrconnect/",
+          body: {
+            need_logo: "false",
+            need_short_url: "false",
+            is_frontier: "true",
+            token,
+            is_new_login: "1",
+            next: QISHUI_PHONE_API_BASE
+          }
+        });
+        const data = json?.data || {};
+        const errorCode = Number(data.error_code || 0);
+        const rawStatus = text3(data.status).trim().toLowerCase();
+        if (errorCode === 2046) {
+          return { state: "error", failure: { case: "refused", message: "汽水要求设备二次验证，请改用其它登录方式" } };
+        }
+        const confirmed = rawStatus === "3" || rawStatus === "confirmed" || Boolean(data.session_cookie);
+        if (confirmed) {
+          const ready = await collectAfterConfirm(data, json, setCookie);
+          if (!ready) return { state: "scanned", waitingForCookie: true };
+          pending.delete(token);
+          return { state: "confirmed" };
+        }
+        if (errorCode === 2 || /^(4|5|expired|timeout)$/.test(rawStatus)) return { state: "expired" };
+        if (errorCode === 7) return { state: "error", failure: { case: "rate-limited", message: "扫码过于频繁，请稍后再试" } };
+        if (/^(2|scanned|scan)$/.test(rawStatus)) return { state: "scanned" };
+        return { state: "waiting" };
+      },
+      cancel(key) {
+        pending.delete(text3(key));
+      },
+      logout() {
+        pending.clear();
+        remove2(SESSION_KEY2);
+        try {
+          const host = typeof window !== "undefined" ? window.FoliaQishuiHost : null;
+          if (host && typeof host.clearCookies === "function") host.clearCookies();
+        } catch (_) {
+        }
+        return { provider: "qishui", loggedIn: false };
+      },
+      /** 交给渲染层在 App 侧再存一份（跨重启用，与车机那套同一条理由）。 */
+      exportSession() {
+        const session = readSession();
+        return { provider: "qishui", protocol: "passport-web", credential: session?.cookie ? session : null };
+      },
+      /**
+       * 灌回一份会话。
+       *
+       * ⚠ 不是无条件覆盖：渲染层每次查登录态都会先灌一次，而桥这份可能是刚确认过的。
+       * 只在「桥现在没有」或「灌进来的这份更晚」时才真的写。
+       */
+      importSession(credential) {
+        const value = credential && typeof credential === "object" ? credential : null;
+        if (!value || !hasLoginCookie(text3(value.cookie))) {
+          return { provider: "qishui", restored: false, reason: "the saved session has no login cookie" };
+        }
+        const current = readSession();
+        if (hasLoginCookie(text3(current?.cookie)) && Number(value.savedAt || 0) <= Number(current?.savedAt || 0)) {
+          return { provider: "qishui", restored: false, kept: true, reason: "the bridge already holds this session" };
+        }
+        writeSession(value);
+        log2("[Qishui] the phone-protocol session kept by the app was put back into the bridge");
+        return { provider: "qishui", restored: true };
+      },
+      /** 直接给一段 Cookie（手动粘贴那一条路：跳过扫码，直接把会话灌进来）。 */
+      importCookie(raw) {
+        const ready = mergeCookie([text3(raw)]);
+        if (!ready) return { provider: "qishui", restored: false, reason: "the pasted cookie has no login key" };
+        return { provider: "qishui", restored: true };
+      }
+    };
+  }
+
+  // src/phone/api.js
+  var text4 = (value) => value == null ? "" : String(value);
+  var STATUS_ENRICH_BUDGET_MS = 15e3;
+  var withBudget = async (promise, ms) => {
+    let timer = null;
+    const timeout = new Promise((resolve2) => {
+      timer = setTimeout(() => resolve2(null), ms);
+    });
+    try {
+      return await Promise.race([Promise.resolve(promise).catch(() => null), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  function createQishuiPhone(options = {}) {
+    const fetcher = options.fetch || createFetch(options.transport);
+    const log2 = options.log || (() => {
+    });
+    const auth = options.auth || createAuth2(fetcher, { log: log2 });
+    const requireSession = () => {
+      const cookie = auth.cookie();
+      if (!hasLoginCookie(cookie)) {
+        throw new QishuiError("auth-required", "Qishui phone protocol needs a signed-in session cookie");
+      }
+      return cookie;
+    };
+    return {
+      sessions: { get: () => auth.isLoggedIn() ? { cookie: auth.cookie() } : null },
+      /**
+       * 登录态：只认手里有没有会话 Cookie。
+       *
+       * 字段与车机那一份对齐（storage / store / cookieKeys / loginKeys），
+       * 诊断面板与「重启后账号没了」的排查两边能互相印证。
+       */
+      async status() {
+        const cookie = auth.cookie();
+        const loggedIn = hasLoginCookie(cookie);
+        const base = {
+          provider: "qishui",
+          configured: true,
+          loggedIn,
+          webSession: loggedIn,
+          cookieReady: loggedIn,
+          protocol: "passport-web",
+          cookieKeys: auth.cookieKeys(),
+          loginKeys: auth.loginKeys(),
+          storage: storageMode2(),
+          store: {
+            read: storageMode2(),
+            write: storageWriteMode2(),
+            session: whereIs2("phone-session"),
+            deviceId: whereIs2("phone-device-id"),
+            deviceIdReused: auth.identity.reused === true,
+            ...storageParseError2() ? { parseError: storageParseError2() } : {}
+          },
+          userId: "",
+          libraryReady: loggedIn,
+          libraryErrors: []
+        };
+        if (!loggedIn) {
+          return { ...base, profileReady: false, profile: null, message: "未登录：请用汽水/抖音 App 扫码（手机协议）" };
+        }
+        const enriched = await withBudget(import_qishui_web_api.default.handleQishuiStatus(cookie), STATUS_ENRICH_BUDGET_MS);
+        if (!enriched) {
+          return {
+            ...base,
+            profileReady: false,
+            profile: null,
+            profileError: "the profile read did not finish in time"
+          };
+        }
+        const profile = enriched.profile || {};
+        return {
+          ...base,
+          userId: text4(profile.userId || enriched.userId),
+          profileReady: Boolean(profile.profileReady),
+          profile: profile.profileReady ? {
+            id: text4(profile.userId),
+            nickname: text4(profile.nickname),
+            avatarUrl: text4(profile.avatar),
+            ...Number.isFinite(Number(profile.vipType)) ? { vipType: Number(profile.vipType) } : {}
+          } : null,
+          ...Array.isArray(enriched.libraryErrors) && enriched.libraryErrors.length ? { libraryErrors: enriched.libraryErrors.map((item) => String(item)) } : {}
+        };
+      },
+      async startLogin() {
+        const result = await auth.start();
+        return { key: result.key, qrDataUrl: result.imageUrl, expiresAt: result.expiresAt };
+      },
+      qr: (key) => auth.qr(key).imageUrl,
+      checkLogin: (key) => auth.check(key),
+      cancelLogin: (key) => {
+        auth.cancel(key);
+      },
+      exportSession: () => auth.exportSession(),
+      importSession: (credential) => auth.importSession(credential),
+      /** 手动粘贴 Cookie 那一条路：跳过扫码，直接把会话灌进来。 */
+      importCookie: (raw) => auth.importCookie(raw),
+      logout() {
+        auth.logout();
+        return { provider: "qishui", loggedIn: false, webSession: false, cookieReady: false, configured: true };
+      },
+      async search(keywords, limit, offset) {
+        const cookie = auth.cookie();
+        const data = await import_qishui_web_api.default.handleQishuiSearch(keywords, limit, cookie, offset);
+        return { provider: "qishui", ...data, offset, limit };
+      },
+      async songDetail(id) {
+        const data = await import_qishui_web_api.default.handleQishuiSongDetail(text4(id));
+        if (!data?.song) {
+          throw new QishuiError("invalid-response", text4(data?.error) || "Qishui phone protocol has no such track");
+        }
+        return { provider: "qishui", ...data };
+      },
+      async lyrics(id) {
+        const data = await import_qishui_web_api.default.handleQishuiLyric(text4(id), auth.cookie());
+        return {
+          provider: "qishui",
+          lyric: text4(data?.lyric),
+          tlyric: text4(data?.tlyric),
+          // 手机协议只有整行歌词，没有逐字（yrc）：渲染层认没有 yrc 的情况。
+          source: text4(data?.source) || "none"
+        };
+      },
+      async audio(id, quality) {
+        const cookie = requireSession();
+        const data = await import_qishui_web_api.default.handleQishuiSongUrl({ id: text4(id), quality: text4(quality || "standard") }, cookie);
+        return {
+          provider: "qishui",
+          ...data,
+          audioMeta: {
+            account: true,
+            protocol: "passport-web",
+            gotFull: data?.trial === false,
+            ...data?.restriction?.category ? { category: String(data.restriction.category) } : {}
+          }
+        };
+      },
+      async userPlaylists(limit, offset) {
+        const cookie = requireSession();
+        const data = await import_qishui_web_api.default.handleQishuiUserPlaylists(cookie);
+        const playlists = Array.isArray(data?.playlists) ? data.playlists : [];
+        return {
+          provider: "qishui",
+          ...data,
+          playlists: playlists.slice(offset, offset + limit),
+          total: playlists.length,
+          nextOffset: offset + Math.min(limit, Math.max(0, playlists.length - offset)),
+          hasMore: offset + limit < playlists.length
+        };
+      },
+      async playlistTracks(id, limit, offset) {
+        const cookie = requireSession();
+        const data = await import_qishui_web_api.default.handleQishuiPlaylistTracks(text4(id), { limit, offset }, cookie);
+        return { provider: "qishui", ...data, songs: data?.tracks || [] };
+      },
+      /**
+       * 歌手页：官方没有「按 id 取歌手」的端点，桌面端那一份是**用歌手名搜索再聚合**，
+       * 所以 artistName 是必填（渲染层从搜索结果里记住了名字再传回来，
+       * 见 qishuiNormalize 的 rememberQishuiArtist）。
+       */
+      async artist(artistId, limit, offset, artistName = "") {
+        const cookie = requireSession();
+        const data = await import_qishui_web_api.default.handleQishuiArtistDetail(
+          { artistId: text4(artistId), artistName: text4(artistName), limit: limit || 36 },
+          cookie
+        );
+        if (data?.error && !Array.isArray(data.songs)) {
+          throw new QishuiError("invalid-response", text4(data.error));
+        }
+        return { provider: "qishui", ...data, total: Array.isArray(data?.songs) ? data.songs.length : 0 };
+      },
+      async feed(limit) {
+        const cookie = requireSession();
+        const data = await import_qishui_web_api.default.handleQishuiFeed(limit, cookie);
+        return { provider: "qishui", ...data };
+      },
+      likedSongs() {
+        const cookie = requireSession();
+        return import_qishui_web_api.default.handleQishuiPlaylistTracks("liked", { limit: 50, offset: 0 }, cookie);
+      },
+      recentPlayed(limit, offset) {
+        const cookie = requireSession();
+        return import_qishui_web_api.default.handleQishuiPlaylistTracks("recent", { limit: limit || 50, offset: offset || 0 }, cookie).then((data) => ({ provider: "qishui", songs: data?.tracks || [], hasMore: Boolean(data?.hasMore) }));
+      },
+      checkTracks(ids) {
+        const cookie = requireSession();
+        return import_qishui_web_api.default.handleQishuiCheckTracksLiked(ids, cookie);
+      },
+      likeSong(id, liked) {
+        const cookie = requireSession();
+        return import_qishui_web_api.default.handleQishuiSetTrackLiked(text4(id), liked !== false, cookie).then(() => ({ provider: "qishui", success: true }));
+      },
+      addSongs(playlistId, ids) {
+        const cookie = requireSession();
+        return Promise.all((ids || []).map((trackId) => import_qishui_web_api.default.handleQishuiPlaylistAddSong(
+          text4(playlistId),
+          { id: text4(trackId) },
+          cookie
+        ))).then(() => ({ provider: "qishui", success: true }));
+      },
+      removeSongs(playlistId, ids) {
+        throw new QishuiError("unsupported", "Qishui phone protocol cannot remove tracks from a playlist");
+      },
+      dislikeSong(id, disliked) {
+        throw new QishuiError("unsupported", "Qishui phone protocol has no dislike endpoint");
+      }
+    };
+  }
+
   // src/entry.js
-  var car = createQishuiCar({ log: (message) => console.info(message) });
+  var CAR = "luna-car";
+  var PHONE = "passport-web";
+  var log = (message) => console.info(message);
+  var car = createQishuiCar({ log });
+  var phone = null;
+  var protocol = CAR;
+  var normalizeProtocol = (value) => String(value || "").trim().toLowerCase() === PHONE ? PHONE : CAR;
+  var api = () => {
+    if (protocol === PHONE) {
+      if (!phone) phone = createQishuiPhone({ log });
+      return phone;
+    }
+    return car;
+  };
+  var altStatus = () => {
+    if (protocol === PHONE) return { protocol: CAR, loggedIn: Boolean(car.sessions.get()?.ticket) };
+    try {
+      if (!phone) phone = createQishuiPhone({ log });
+      return { protocol: PHONE, loggedIn: Boolean(phone.sessions.get()?.cookie) };
+    } catch (_) {
+      return { protocol: PHONE, loggedIn: false };
+    }
+  };
   function qishuiErrorCode(value) {
     return String(value == null ? "" : value).trim().toLowerCase().replace(/[_\s]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
   }
@@ -1797,9 +6988,50 @@ ${lines.join("\n")}
     return failureEnvelope(code || "qishui-error", message);
   }
   var handlers = {
-    status: () => car.status(),
+    // 登录态按**当前协议**问，并顺带给出另一套有没有会话（`alt`）：切了协议之后
+    // 「这一套没登录」不等于「这个平台没账号」，渲染层靠 alt 决定认哪一套。
+    status: async () => ({ ...await api().status(), alt: altStatus() }),
+    /** 当前用的哪一套协议，以及有哪些可选（渲染层据此画「车机 / 手机」的选择）。 */
+    "protocol.get": () => ({ provider: "qishui", protocol, available: [CAR, PHONE] }),
+    /**
+     * 换协议。只在真的换成功时才动状态，并返回换完之后的两套会话情况 ——
+     * 渲染层据此决定要不要提示「另一套还登着」。
+     */
+    "protocol.use": (params) => {
+      const wanted = normalizeProtocol(params && params.protocol || "");
+      const changed = wanted !== protocol;
+      protocol = wanted;
+      return { provider: "qishui", protocol, changed, alt: altStatus() };
+    },
+    /**
+     * 手动粘贴 Cookie（手机协议专用）：跳过扫码，直接把一段会话灌进手机协议。
+     *
+     * 给的是「从汽水客户端 / 浏览器导出来的完整会话」，协议层只认里面有没有
+     * sessionid 那几个登录键；没有就明确拒绝，别让用户以为登录成功了。
+     */
+    "login.cookie": async (params) => {
+      const raw = String(params && params.cookie || "").trim();
+      if (!raw) {
+        return failureEnvelope("missing-cookie", "汽水会话 Cookie 是空的");
+      }
+      protocol = PHONE;
+      const applied = api().importCookie(raw);
+      if (!applied?.restored) {
+        return failureEnvelope("login-required", String(applied?.reason || "汽水会话 Cookie 里没有登录凭据"));
+      }
+      const statusData = await api().status();
+      return Object.assign({}, statusData, {
+        provider: "qishui",
+        ok: true,
+        loggedIn: true,
+        status: "confirmed",
+        errorCode: 0,
+        error_code: 0,
+        message: "登录成功"
+      });
+    },
     "login.qr": async () => {
-      const result = await car.startLogin();
+      const result = await api().startLogin();
       return {
         provider: "qishui",
         token: result.key,
@@ -1815,14 +7047,14 @@ ${lines.join("\n")}
         const keys = Object.keys(params && typeof params === "object" ? params : {}).join(",") || "(empty)";
         throw Object.assign(new Error("二维码登录 token 缺失（params keys: " + keys + "）"), { code: "missing-token" });
       }
-      const result = await car.checkLogin(token);
+      const result = await api().checkLogin(token);
       if (result.state === "error" && result.failure?.case === "refused") {
         return { provider: "qishui", status: "error", errorCode: 0, message: "授权被拒绝，请重试" };
       }
       const statusMap = { waiting: "waiting", scanned: "scanned", confirmed: "confirmed", expired: "expired" };
       const status = statusMap[result.state] || "waiting";
       if (result.state === "confirmed") {
-        const statusData = await car.status();
+        const statusData = await api().status();
         return Object.assign({}, statusData, {
           provider: "qishui",
           ok: true,
@@ -1842,27 +7074,27 @@ ${lines.join("\n")}
         message: status === "expired" ? "二维码已过期，请重新生成" : ""
       };
     },
-    "login.logout": () => car.logout(),
+    "login.logout": () => api().logout(),
     // 凭据在 App 侧也留一份（跨重启用）：桥自己那份存储读不回来时，启动时灌回去。
-    "session.export": () => car.exportSession(),
-    "session.import": (params) => car.importSession(params && params.credential),
+    "session.export": () => api().exportSession(),
+    "session.import": (params) => api().importSession(params && params.credential),
     search: (params) => {
       const p = params || {};
       const keywords = String(p.keywords || p.query || "");
       const limit = qishuiClampInt(p.limit, 12, 4, 20);
       const offset = qishuiClampInt(p.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-      return car.search(keywords, limit, offset);
+      return api().search(keywords, limit, offset);
     },
     // 车机没有专辑端点；专辑入口在这里明确拒绝（上层把它显示为「暂不支持」，
     // 比静默空列表诚实）。单曲详情可以回，专辑聚合不行。
     album: () => {
       throw Object.assign(new Error("汽水车机协议没有专辑接口"), { code: "unsupported" });
     },
-    "song.detail": (params) => car.songDetail(String(params && params.id || "")),
-    lyric: (params) => car.lyrics(String(params && params.id || "")),
+    "song.detail": (params) => api().songDetail(String(params && params.id || "")),
+    lyric: (params) => api().lyrics(String(params && params.id || "")),
     "song.url": async (params) => {
       const p = params || {};
-      return car.audio(String(p.id || ""), String(p.quality || "standard"));
+      return api().audio(String(p.id || ""), String(p.quality || "standard"));
     },
     artist: (params) => {
       const p = params || {};
@@ -1871,21 +7103,21 @@ ${lines.join("\n")}
         throw Object.assign(new Error("汽水音乐需要艺人 ID"), { code: "missing-artist-id" });
       }
       const limit = qishuiClampInt(p.limit, 36, 10, 50);
-      return car.artist(artistId, limit, 0);
+      return api().artist(artistId, limit, 0, String((p || {}).artistName || ""));
     },
-    feed: (params) => car.feed(qishuiClampInt((params || {}).limit, 8, 4, 12)),
-    "user.playlists": () => car.userPlaylists(500, 0),
+    feed: (params) => api().feed(qishuiClampInt((params || {}).limit, 8, 4, 12)),
+    "user.playlists": () => api().userPlaylists(500, 0),
     "playlist.tracks": (params) => {
       const p = params || {};
       const id = String(p.id || "") || QISHUI_FEED_ID;
       const limit = qishuiClampInt(p.limit, 50, 1, Number.MAX_SAFE_INTEGER);
       const offset = qishuiClampInt(p.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-      return car.playlistTracks(id, limit, offset);
+      return api().playlistTracks(id, limit, offset);
     },
     "track.liked": async (params) => {
       const raw = Array.isArray((params || {}).ids) ? params.ids.join(",") : String((params || {}).ids || "");
       const ids = raw.split(",").map((value) => value.trim()).filter(Boolean);
-      const result = await car.checkTracks(ids);
+      const result = await api().checkTracks(ids);
       return {
         provider: "qishui",
         statuses: result.statuses
@@ -1894,14 +7126,14 @@ ${lines.join("\n")}
     "track.like": async (params) => {
       const p = params || {};
       const liked = String(p.liked != null ? p.liked : "true") !== "false";
-      return car.likeSong(String(p.id || ""), liked);
+      return api().likeSong(String(p.id || ""), liked);
     },
     "playlist.collect": () => {
       throw Object.assign(new Error("汽水车机协议不支持收藏歌单"), { code: "unsupported" });
     },
     "playlist.addSong": async (params) => {
       const p = params || {};
-      return car.addSongs(String(p.playlistId || ""), [String(p.trackId || "")].filter(Boolean));
+      return api().addSongs(String(p.playlistId || ""), [String(p.trackId || "")].filter(Boolean));
     },
     "album.collect": () => {
       throw Object.assign(new Error("汽水车机协议不支持收藏专辑"), { code: "unsupported" });
@@ -1926,7 +7158,7 @@ ${lines.join("\n")}
     }
     return {};
   }
-  async function request(operation, params) {
+  async function request2(operation, params) {
     const name = String(operation || "");
     if (!Object.prototype.hasOwnProperty.call(handlers, name)) {
       return failureEnvelope("unsupported", "Unsupported qishui operation: " + name);
@@ -1943,7 +7175,7 @@ ${lines.join("\n")}
   }
   window.__foliaQishui = {
     async start(operation, params, ticket) {
-      const envelope = await request(operation, normalizeParams(params));
+      const envelope = await request2(operation, normalizeParams(params));
       const host = window.FoliaQishuiHost;
       if (host && typeof host.resolve === "function") {
         try {

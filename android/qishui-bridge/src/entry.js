@@ -19,11 +19,52 @@
 // 对外入口不变：window.__foliaQishui.start(operation, paramsJson, ticket)，
 // 结果经 FoliaQishuiHost.resolve(ticket, envelopeJson) 回原生，信封仍是
 // { ok, data } / { ok, error }，渲染层零改动。
+//
+// ⚠ 两套协议（车机 / 手机）共用这一套 operation 名，**选哪套由渲染层在运行时说**
+// （`protocol.use`，记在模块里；默认车机）。两套的凭据各自独立：切协议等于换一套
+// 会话，登录态互不相认 —— 车机是 ticket-guard，手机是 passport 会话 Cookie。
 
 import { createQishuiCar } from './car/api.js';
 import { QISHUI_FEED_ID, QISHUI_LIKED_ID } from './car/api.js';
+import { createQishuiPhone } from './phone/api.js';
 
-const car = createQishuiCar({ log: message => console.info(message) });
+const CAR = 'luna-car';
+const PHONE = 'passport-web';
+
+const log = message => console.info(message);
+const car = createQishuiCar({ log });
+
+// 手机协议那一份懒建：它要把桌面端协议层一起初始化（缓存、设备身份读档），
+// 只用汽水车机协议时不该付这一笔。
+let phone = null;
+let protocol = CAR;
+
+const normalizeProtocol = value => (String(value || '').trim().toLowerCase() === PHONE ? PHONE : CAR);
+const api = () => {
+    if (protocol === PHONE) {
+        if (!phone) phone = createQishuiPhone({ log });
+        return phone;
+    }
+    return car;
+};
+
+/**
+ * 另一套协议此刻有没有会话（**不问网络**，只看它自己那份凭据在不在）。
+ *
+ * status 把它带进 `alt`，渲染层据此决定「当前协议没登录时，要不要认另一套」——
+ * 少了它，切一下协议就会把已经登录的账号从界面上抹掉（accountRead 把
+ * 「这一套没登录」当成「这个平台没账号」）。
+ */
+const altStatus = () => {
+    if (protocol === PHONE) return { protocol: CAR, loggedIn: Boolean(car.sessions.get()?.ticket) };
+    try {
+        // 手机协议的登录判定只读 Cookie，不联网；懒建一份来问是安全的。
+        if (!phone) phone = createQishuiPhone({ log });
+        return { protocol: PHONE, loggedIn: Boolean(phone.sessions.get()?.cookie) };
+    } catch (_) {
+        return { protocol: PHONE, loggedIn: false };
+    }
+};
 
 // ---- 信封与失败归一（字段与渲染层 qishuiTransport 的错误码表对齐）-----------
 
@@ -76,10 +117,49 @@ function envelopeFromCarError(error, operation) {
 // 不静默返回空。
 
 const handlers = {
-    status: () => car.status(),
+    // 登录态按**当前协议**问，并顺带给出另一套有没有会话（`alt`）：切了协议之后
+    // 「这一套没登录」不等于「这个平台没账号」，渲染层靠 alt 决定认哪一套。
+    status: async () => ({ ...(await api().status()), alt: altStatus() }),
+
+    /** 当前用的哪一套协议，以及有哪些可选（渲染层据此画「车机 / 手机」的选择）。 */
+    'protocol.get': () => ({ provider: 'qishui', protocol, available: [CAR, PHONE] }),
+
+    /**
+     * 换协议。只在真的换成功时才动状态，并返回换完之后的两套会话情况 ——
+     * 渲染层据此决定要不要提示「另一套还登着」。
+     */
+    'protocol.use': params => {
+        const wanted = normalizeProtocol((params && params.protocol) || '');
+        const changed = wanted !== protocol;
+        protocol = wanted;
+        return { provider: 'qishui', protocol, changed, alt: altStatus() };
+    },
+
+    /**
+     * 手动粘贴 Cookie（手机协议专用）：跳过扫码，直接把一段会话灌进手机协议。
+     *
+     * 给的是「从汽水客户端 / 浏览器导出来的完整会话」，协议层只认里面有没有
+     * sessionid 那几个登录键；没有就明确拒绝，别让用户以为登录成功了。
+     */
+    'login.cookie': async params => {
+        const raw = String((params && params.cookie) || '').trim();
+        if (!raw) {
+            return failureEnvelope('missing-cookie', '汽水会话 Cookie 是空的');
+        }
+        protocol = PHONE;
+        const applied = api().importCookie(raw);
+        if (!applied?.restored) {
+            return failureEnvelope('login-required', String(applied?.reason || '汽水会话 Cookie 里没有登录凭据'));
+        }
+        const statusData = await api().status();
+        return Object.assign({}, statusData, {
+            provider: 'qishui', ok: true, loggedIn: true, status: 'confirmed',
+            errorCode: 0, error_code: 0, message: '登录成功',
+        });
+    },
 
     'login.qr': async () => {
-        const result = await car.startLogin();
+        const result = await api().startLogin();
         return {
             provider: 'qishui',
             token: result.key,
@@ -97,7 +177,7 @@ const handlers = {
             throw Object.assign(new Error('二维码登录 token 缺失（params keys: ' + keys + '）'), { code: 'missing-token' });
         }
         // 状态词表与渲染层一致：confirmed 之外的状态原样映射，未知状态继续等。
-        const result = await car.checkLogin(token);
+        const result = await api().checkLogin(token);
         if (result.state === 'error' && result.failure?.case === 'refused') {
             return { provider: 'qishui', status: 'error', errorCode: 0, message: '授权被拒绝，请重试' };
         }
@@ -105,7 +185,7 @@ const handlers = {
         const status = statusMap[result.state] || 'waiting';
         if (result.state === 'confirmed') {
             // 确认即凭据已入库（auth.check 内完成），这里补一次 status 让上层立刻有账号。
-            const statusData = await car.status();
+            const statusData = await api().status();
             return Object.assign({}, statusData, {
                 provider: 'qishui',
                 ok: true,
@@ -126,18 +206,18 @@ const handlers = {
         };
     },
 
-    'login.logout': () => car.logout(),
+    'login.logout': () => api().logout(),
 
     // 凭据在 App 侧也留一份（跨重启用）：桥自己那份存储读不回来时，启动时灌回去。
-    'session.export': () => car.exportSession(),
-    'session.import': params => car.importSession(params && params.credential),
+    'session.export': () => api().exportSession(),
+    'session.import': params => api().importSession(params && params.credential),
 
     search: params => {
         const p = params || {};
         const keywords = String(p.keywords || p.query || '');
         const limit = qishuiClampInt(p.limit, 12, 4, 20);
         const offset = qishuiClampInt(p.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-        return car.search(keywords, limit, offset);
+        return api().search(keywords, limit, offset);
     },
 
     // 车机没有专辑端点；专辑入口在这里明确拒绝（上层把它显示为「暂不支持」，
@@ -146,15 +226,15 @@ const handlers = {
         throw Object.assign(new Error('汽水车机协议没有专辑接口'), { code: 'unsupported' });
     },
 
-    'song.detail': params => car.songDetail(String((params && params.id) || '')),
+    'song.detail': params => api().songDetail(String((params && params.id) || '')),
 
-    lyric: params => car.lyrics(String((params && params.id) || '')),
+    lyric: params => api().lyrics(String((params && params.id) || '')),
 
     'song.url': async params => {
         const p = params || {};
         // 渲染层的音质档（standard/high/ultra/lossless/hires）直接下传，
         // playback.js 内部会折算到车机的档位。
-        return car.audio(String(p.id || ''), String(p.quality || 'standard'));
+        return api().audio(String(p.id || ''), String(p.quality || 'standard'));
     },
 
     artist: params => {
@@ -164,25 +244,26 @@ const handlers = {
             throw Object.assign(new Error('汽水音乐需要艺人 ID'), { code: 'missing-artist-id' });
         }
         const limit = qishuiClampInt(p.limit, 36, 10, 50);
-        return car.artist(artistId, limit, 0);
+        // 歌手名由渲染层从搜索结果里记住再传回来（手机协议只能按名字搜，见 phone/api.js）。
+        return api().artist(artistId, limit, 0, String((p || {}).artistName || ''));
     },
 
-    feed: params => car.feed(qishuiClampInt((params || {}).limit, 8, 4, 12)),
+    feed: params => api().feed(qishuiClampInt((params || {}).limit, 8, 4, 12)),
 
-    'user.playlists': () => car.userPlaylists(500, 0),
+    'user.playlists': () => api().userPlaylists(500, 0),
 
     'playlist.tracks': params => {
         const p = params || {};
         const id = String(p.id || '') || QISHUI_FEED_ID;
         const limit = qishuiClampInt(p.limit, 50, 1, Number.MAX_SAFE_INTEGER);
         const offset = qishuiClampInt(p.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-        return car.playlistTracks(id, limit, offset);
+        return api().playlistTracks(id, limit, offset);
     },
 
     'track.liked': async params => {
         const raw = Array.isArray((params || {}).ids) ? params.ids.join(',') : String((params || {}).ids || '');
         const ids = raw.split(',').map(value => value.trim()).filter(Boolean);
-        const result = await car.checkTracks(ids);
+        const result = await api().checkTracks(ids);
         // 渲染层要的形状：{ id, liked }[]（risk_result 0 = 无风险即可播/已收藏口径
         // 车机不给，统一按「可播」回，喜欢状态由 likedSongs 单独拉）。
         return {
@@ -194,7 +275,7 @@ const handlers = {
     'track.like': async params => {
         const p = params || {};
         const liked = String(p.liked != null ? p.liked : 'true') !== 'false';
-        return car.likeSong(String(p.id || ''), liked);
+        return api().likeSong(String(p.id || ''), liked);
     },
 
     'playlist.collect': () => {
@@ -203,7 +284,7 @@ const handlers = {
 
     'playlist.addSong': async params => {
         const p = params || {};
-        return car.addSongs(String(p.playlistId || ''), [String(p.trackId || '')].filter(Boolean));
+        return api().addSongs(String(p.playlistId || ''), [String(p.trackId || '')].filter(Boolean));
     },
 
     'album.collect': () => {
