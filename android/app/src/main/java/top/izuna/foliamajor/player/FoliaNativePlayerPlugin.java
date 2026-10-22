@@ -6,6 +6,9 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import android.os.Handler;
+import android.os.Looper;
+
 import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
 
 /**
@@ -25,6 +28,9 @@ public class FoliaNativePlayerPlugin extends Plugin {
 
     private static final String EVENT = "foliaNativePlayer";
 
+    /** 过桥回到主线程用（播放器那条线程不能直接碰监听器表）。 */
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
     /**
      * 服务那边（通知栏 / 锁屏 / 耳机）要能直接碰到播放器，只能走静态引用 ——
      * 与 FoliaPlaybackPlugin 同一个路子：Activity 可能已经不在了，插件实例也可能换过。
@@ -36,10 +42,15 @@ public class FoliaNativePlayerPlugin extends Plugin {
     @Override
     public void load() {
         instance = this;
-        // 播放器要在主线程上建（ExoPlayer 的线程约束），load() 已经在主线程。
+        // load() 在主线程上跑，但播放器自己会起一条专用线程（见 FoliaNativePlayer
+        // 文件头的「线程」那一节）—— 这里只是把壳子建出来。
         player = new FoliaNativePlayer(getContext(), new FoliaNativePlayer.Listener() {
             @Override
             public void onEvent(String type, long positionMs, long durationMs, String message) {
+                /*
+                 * ⚠️ 这一下是**播放器线程**上跑的（播放循环在那条专用线程上，见
+                 * FoliaNativePlayer 文件头的「线程」那一节），不在主线程。
+                 */
                 JSObject payload = new JSObject();
                 payload.put("type", type);
                 payload.put("positionMs", (double) positionMs);
@@ -47,30 +58,22 @@ public class FoliaNativePlayerPlugin extends Plugin {
                 if (message != null) {
                     payload.put("message", message);
                 }
-                notifyListeners(EVENT, payload);
                 /*
-                 * 桌面歌词（壁纸 / 悬浮小窗 / 锁屏）的时间轴锚点：由播放器自己给。
-                 *
-                 * 那边存的不是「当前行」，而是「整条时间轴 + 一个锚点」，段内按墙钟自己
-                 * 往前推（WallpaperLyricsState.positionMs）。所以只要锚点是真的，JS 被
-                 * 节流、被挂起都照走。而 Web 那条锚点来自 motion signal（rAF 写的），
-                 * 页面一藏就被 Chromium 停掉 —— 锚点冻住，歌词停在原地。
-                 *
-                 * 只在这几种事件上写：暂停之后就没有 position 了，paused 带的是停住的位置。
+                 * 桌面歌词（壁纸 / 悬浮小窗 / 锁屏）的时间轴锚点：由播放器自己给，
+                 * **就在这里写**，不再绕一次主线程 —— 锚点记的是「收到这个位置的那一刻」，
+                 * 晚一点写（哪怕只是排到下一轮主线程消息）都会让外推偏慢一截。
+                 * `WallpaperLyricsState` 那几个字段是 volatile 的，跨线程写没问题。
                  */
                 if ("position".equals(type) || "playing".equals(type)
                     || "paused".equals(type) || "ready".equals(type)) {
-                    /*
-                     * ⚠️ 这里只能把 paused 当成「没在播」。
-                     *
-                     * 早先写成 `"playing".equals(type)` —— 于是每 250ms 那一次 `position`
-                     * 就把 playing 写成 false。而 `WallpaperLyricsState.playing = false` 的
-                     * 意思是「暂停」，叠层据此收起自己（设置里那条「暂停时自动隐藏」），
-                     * 表现就是「桌面歌词整层不见了」。position 只在真的在播时才发
-                     * （暂停时 tick 就停了），所以它本身就是「在播」的证据。
-                     */
                     WallpaperLyricsState.setAnchor(positionMs, !"paused".equals(type));
                 }
+                /*
+                 * 过桥那一下回主线程：`notifyListeners` 里的监听器表不是为并发写的
+                 * （`Plugin.eventListeners` 是个普通 HashMap，加 / 删监听器在 JS 那一侧）。
+                 * 一次 post 而已 —— 位置本来就只有 250ms 一次。
+                 */
+                MAIN.post(() -> notifyListeners(EVENT, payload));
             }
         });
     }

@@ -2,6 +2,7 @@ package top.izuna.foliamajor.player;
 
 import android.content.Context;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 
 import androidx.annotation.Nullable;
@@ -29,9 +30,20 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 // 之后从别的线程碰它就抛 IllegalStateException（未捕获 = 进程直接死，界面上就是闪退）。
 //
 // 所以这里两件事都是硬性的：
-//   1. 播放器显式建在主线程（`.setLooper(Looper.getMainLooper())`）；
-//   2. 每一个入口都经 `runOnMain` 回到主线程 —— 包括建播放器、装地址、播停跳、音量。
-// 顺带：位置上报那个 250ms 的定时器也挂在主线程，于是它和播放器是同一个线程。
+//   1. 播放器建在**自己那条专用线程**上（下面 `playbackThread` 的 Looper）；
+//   2. 每一个入口都经 `runOnPlayer` 回到同一条线程 —— 包括建播放器、装地址、播停跳、音量。
+// 位置上报那个 250ms 的定时器也挂在同一条上，于是它和播放器是同一个线程。
+//
+// ⚠️ **为什么不是主线程**（2026-10-22 实测出来的坑）：
+// ExoPlayer 的播放循环（`doSomeWork`：取缓冲、喂解码器、推进位置）就跑在 `setLooper`
+// 给的那条线程上。钉在主线程时，它每几毫秒到几十毫秒就要占一次主线程，与 UI 抢 ——
+// 用户看到的就是「放着放着卡那么一下」。而受它影响最大的不是播放页，是**桌面歌词**：
+//   · 精简（原生渲染器）跑自己的渲染线程，看不出来；
+//   · **跟随播放页**那一档是叠层 WebView 里在跑完整视觉器，JS 与光栅都在主线程一侧，
+//     主线程一被播放器挤，它就掉到四五帧、一顿一顿像在跟着同步。
+// 关掉「原生播放」就丝滑，就是这个差别的对照。挪到专用线程后主线程只剩「把事件交给
+// WebView」那一下（`Bridge.eval` 自己会 post 回主线程，所以 `notifyListeners` 从这条
+// 线程上直接调是安全的）。
 //
 // 绝不做「Web 侧每秒问一次位置」：Capacitor 的桥只有一条，轮询会跟别的东西抢。
 //
@@ -56,13 +68,27 @@ public final class FoliaNativePlayer {
     private static final String BROWSER_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
 
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    /**
+     * 播放器专用那一条线程。
+     *
+     * 见文件头「线程」那一节：播放循环不能落在主线程上。起一条而不是复用 Capacitor 的
+     * 桥线程，是因为桥上还跑着歌词、封面、批量拉取那些活，播放循环挤过去一样会互相拖。
+     */
+    private final HandlerThread playbackThread = new HandlerThread("folia-native-player");
+    private final Handler handler;
+    private final Looper playerLooper;
     private final Context context;
     private final Listener listener;
 
     @Nullable private ExoPlayer player;
-    /** 最后一首的地址：播放器被回收后重建时靠它装回去（系统控件要能直接拉起播放）。 */
-    @Nullable private String lastUrl;
+    /** release 过就不再收播放器（线程已经 quit，再 post 会崩）。 */
+    private volatile boolean released = false;
+    /**
+     * 最后一首的地址：播放器被回收后重建时靠它装回去（系统控件要能直接拉起播放）。
+     *
+     * 播放器线程写、别的线程读（hasMedia），所以要 volatile。
+     */
+    @Nullable private volatile String lastUrl;
     private boolean tickScheduled = false;
     private float requestedVolume = 1f;
     private float requestedSpeed = 1f;
@@ -93,12 +119,15 @@ public final class FoliaNativePlayer {
     public FoliaNativePlayer(Context context, Listener listener) {
         this.context = context.getApplicationContext();
         this.listener = listener;
+        playbackThread.start();
+        playerLooper = playbackThread.getLooper();
+        handler = new Handler(playerLooper);
     }
 
     /** 装上地址并缓冲。startPositionMs 小于 0 表示从头播。 */
     public void prepare(String url, long startPositionMs) {
         lastUrl = url;
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = ensurePlayer();
             current.setMediaItem(MediaItem.fromUri(url));
             current.setRepeatMode(requestedRepeatMode);
@@ -114,7 +143,7 @@ public final class FoliaNativePlayer {
     }
 
     public void play() {
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = ensurePlayer();
             current.setPlayWhenReady(true);
             cachedPlaying = true;
@@ -122,7 +151,7 @@ public final class FoliaNativePlayer {
     }
 
     public void pause() {
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current == null) return;
             current.setPlayWhenReady(false);
@@ -135,7 +164,7 @@ public final class FoliaNativePlayer {
 
     /** 停下来并丢掉当前媒体（换歌之前的收尾，以及「没有歌了」）。 */
     public void stop() {
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current == null) return;
             current.stop();
@@ -152,7 +181,7 @@ public final class FoliaNativePlayer {
     }
 
     public void seek(long positionMs) {
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current == null) return;
             long target = Math.max(0, positionMs);
@@ -170,7 +199,7 @@ public final class FoliaNativePlayer {
     public void setVolume(float volume) {
         float clamped = Math.max(0f, Math.min(1f, volume));
         requestedVolume = clamped;
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current != null) current.setVolume(requestedVolume);
         });
@@ -179,7 +208,7 @@ public final class FoliaNativePlayer {
     public void setSpeed(float speed) {
         float clamped = Math.max(0.1f, Math.min(4f, speed));
         requestedSpeed = clamped;
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current != null) current.setPlaybackParameters(new PlaybackParameters(requestedSpeed));
         });
@@ -187,14 +216,19 @@ public final class FoliaNativePlayer {
 
     public void setRepeatMode(int repeatMode) {
         requestedRepeatMode = repeatMode;
-        runOnMain(() -> {
+        runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current != null) current.setRepeatMode(requestedRepeatMode);
         });
     }
 
     public void release() {
-        runOnMain(() -> {
+        // 收过一次就别再收：线程 quit 之后再往它的 Handler 上 post 会直接抛
+        // 「sending message to a Handler on a dead thread」，而系统控件（通知栏 / 耳机）
+        // 在插件销毁之后仍可能来碰一次。
+        if (released) return;
+        released = true;
+        handler.post(() -> {
             stopTicking();
             ExoPlayer current = player;
             player = null;
@@ -203,6 +237,8 @@ public final class FoliaNativePlayer {
                 current.removeListener(playerListener);
                 current.release();
             }
+            // 这条线程只是为播放器起的，播放器没了就一并收掉，不留空转。
+            playbackThread.quitSafely();
         });
     }
 
@@ -225,12 +261,13 @@ public final class FoliaNativePlayer {
     }
 
     /**
-     * 所有碰到播放器的动作都回到主线程。
+     * 所有碰到播放器的动作都回到**播放器那条线程**。
      *
-     * 已经就在主线程时直接跑：`prepare` 之后紧接着的 `play` 不该被排到下一帧去
-     * （那一帧的延迟会变成「点播放到出声」的手感）。
+     * 已经就在那条线程上时直接跑：`prepare` 之后紧接着的 `play` 不该被排到下一轮去
+     * （那一轮的延迟会变成「点播放到出声」的手感）。
      */
-    private void runOnMain(Runnable action) {
+    private void runOnPlayer(Runnable action) {
+        if (released) return;
         if (Looper.myLooper() == handler.getLooper()) {
             try {
                 action.run();
@@ -258,9 +295,10 @@ public final class FoliaNativePlayer {
             .setAllowCrossProtocolRedirects(true);
 
         current = new ExoPlayer.Builder(context)
-            // 显式钉在主线程。不写这一句，播放器会绑到「第一次碰它的那个线程」——
-            // 也就是 Capacitor 的桥线程，而位置上报跑在主线程，于是每 250ms 跨线程一次。
-            .setLooper(Looper.getMainLooper())
+            // 显式钉在播放器那条专用线程上。不写这一句，播放器会绑到「第一次碰它的那个
+            // 线程」—— 也就是 Capacitor 的桥线程，而位置上报会跑到别的线程上去，
+            // 于是每 250ms 跨线程碰一次播放器。
+            .setLooper(playerLooper)
             .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory))
             .build();
         // 焦点交给 ExoPlayer 自己管。WebView 那套「把 Chromium 的焦点监听器换成空实现」
