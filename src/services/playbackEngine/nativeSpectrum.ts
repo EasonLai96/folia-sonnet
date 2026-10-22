@@ -25,25 +25,38 @@ let latest: SpectrumSnapshot | null = null;
 let enabled = false;
 let subscribed = false;
 
+/**
+ * 收到的那一帧是**两个字符串**（见 nativePlayerPlugin 的类型注释）：
+ * 频谱走 base64、五个频段是一段逗号分隔的数字。这么打包是为了让桥上每一帧只有一个
+ * 扁平短串要序列化 —— 20 帧/秒 × 128 个数字走 JSON 数组，界面会周期性卡一下。
+ *
+ * ⚠️ 解出来的数组**必须每次新建**：下游 `audioBands.spectrum.set(...)` 走的是
+ * framer-motion 的 motion value，它按**引用**判变化 —— 复用同一份缓冲的话，内容变了
+ * 引用没变，订阅者一次都不会被通知，频谱就整个静止了（Web 那条 spectrumTap 也是
+ * 每帧 new 一个，同一个理由）。128 字节一次、一秒二十次，这笔分配不值得优化。
+ */
+const decodeSpectrum = (encoded: string): Uint8Array<ArrayBuffer> => {
+    const binary = atob(encoded);
+    const out = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        out[index] = binary.charCodeAt(index);
+    }
+    return out;
+};
+
 const subscribeOnce = (): void => {
     if (subscribed) return;
     subscribed = true;
     nativePlaybackEngine.subscribe(event => {
         if (event.type !== 'spectrum' || !event.bands) return;
-        const raw = event.spectrum;
-        const spectrum = new Uint8Array(raw && raw.length > 0 ? raw.length : 128);
-        if (raw) {
-            for (let index = 0; index < raw.length && index < spectrum.length; index += 1) {
-                spectrum[index] = raw[index];
-            }
-        }
+        const parts = String(event.bands).split(',');
         latest = {
-            spectrum,
-            bass: event.bands.bass ?? 0,
-            lowMid: event.bands.lowMid ?? 0,
-            mid: event.bands.mid ?? 0,
-            vocal: event.bands.vocal ?? 0,
-            treble: event.bands.treble ?? 0,
+            spectrum: event.spectrum ? decodeSpectrum(event.spectrum) : new Uint8Array(128),
+            bass: Number(parts[0]) || 0,
+            lowMid: Number(parts[1]) || 0,
+            mid: Number(parts[2]) || 0,
+            vocal: Number(parts[3]) || 0,
+            treble: Number(parts[4]) || 0,
             at: Date.now(),
         };
     });

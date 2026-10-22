@@ -666,9 +666,9 @@ final class LocalAudioServer {
             writeStatus(output, 500, "Store Failed");
             return;
         }
-        // 同一首歌换了个格式（扩展名不同）时旧的那一份要一起走，否则它永远占着地方。
-        removeSiblingCopies(dir, storedName);
-        pruneMediaCache(queryParam(queryString, "limit", -1));
+        // 同一首歌换了个格式（扩展名不同）时旧的那一份要一起走，否则它永远占着地方，
+        // 而且读的时候按 `<名字>.` 前缀找，找错的那一份就是它。
+        maintainMediaCache(dir, storedName, queryParam(queryString, "limit", -1));
         Log.i(TAG, "media cache stored " + storedName + " (" + written + " bytes)");
         writeStatus(output, 200, "OK");
     }
@@ -696,38 +696,46 @@ final class LocalAudioServer {
         writeStatus(output, removed ? 200 : 500, removed ? "OK" : "Delete Failed");
     }
 
-    private static void removeSiblingCopies(File dir, String fileName) {
-        int dot = fileName.lastIndexOf('.');
-        if (dot <= 0) return;
-        String base = fileName.substring(0, dot);
+    /** 裁剪最多这么久做一次。清兄弟文件不受这个限制 —— 那个必须当场清。 */
+    private static final long PRUNE_INTERVAL_MS = 30_000L;
+    private long lastPruneAtMs = 0L;
+
+    /**
+     * 写完一份副本之后的收尾，只做一次遍历。
+     *
+     * ⚠️ 原来这里跑了两遍目录：`removeSiblingCopies` 一遍、`pruneMediaCache` 一遍，
+     * 而后者还要**排序 + 删文件**。缓存里攒到几百份时，每写完一首歌就要做一次
+     * 全目录排序 —— 界面上正是「过一段时间卡一下」（一首歌播完写一次缓存）。
+     *
+     * 现在一次遍历里把三件事办完：清上次写一半的残骸、清同 base 的旧格式、累计总大小；
+     * 只有**确实超了上限**才去排序删最旧的那几份，而且最多 30 秒做一次。
+     */
+    private synchronized void maintainMediaCache(File dir, String storedName, long limit) {
         File[] files = dir.listFiles();
         if (files == null) return;
-        for (File file : files) {
-            String name = file.getName();
-            if (name.equals(fileName) || name.endsWith(".part")) continue;
-            if (name.startsWith(base + ".")) file.delete();
-        }
-    }
-
-    /** 超过上限就删最旧的，和桌面那边的裁剪一个意思。`limit <= 0` 表示不设上限。 */
-    private void pruneMediaCache(long limit) {
-        if (limit <= 0) return;
-        File dir = mediaCacheDirectory();
-        File[] files = dir.listFiles();
-        if (files == null || files.length == 0) return;
+        String base = storedName.substring(0, storedName.lastIndexOf('.'));
         List<File> kept = new ArrayList<>();
         long total = 0;
         for (File file : files) {
+            String name = file.getName();
             if (!file.isFile()) continue;
-            // 上次写一半留下的残骸，顺手清掉，它永远不会被读。
-            if (file.getName().endsWith(".part")) {
+            // 写一半留下的残骸，永远不会被读，顺手清掉。
+            if (name.endsWith(".part")) {
+                file.delete();
+                continue;
+            }
+            // 同一首歌的旧格式：留着会让「按前缀找」找错那一份。
+            if (!name.equals(storedName) && name.startsWith(base + ".")) {
                 file.delete();
                 continue;
             }
             kept.add(file);
             total += file.length();
         }
-        if (total <= limit) return;
+        if (limit <= 0 || total <= limit) return;
+        long now = System.currentTimeMillis();
+        if (now - lastPruneAtMs < PRUNE_INTERVAL_MS) return;
+        lastPruneAtMs = now;
         kept.sort((a, b) -> Long.compare(a.lastModified(), b.lastModified()));
         for (File file : kept) {
             if (total <= limit) break;

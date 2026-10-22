@@ -22,19 +22,12 @@ export type NativePlaybackEvent = {
     durationMs?: number;
     message?: string;
     /**
-     * 频谱的整条（P2）：128 段，0..255，与 `getByteFrequencyData` 同量纲 ——
-     * 于是 `usePlaybackVisualizerBridge` 里那个 `tapped` 分支能原样吃下去。
+     * 频谱的整条（P2）。**base64 编码的 128 个字节**，不是数组 ——
+     * 每秒 20 次把 128 个数字塞进 JSArray 序列化，界面会周期性卡一下。
      */
-    spectrum?: number[];
-    /** 五个频段，同样是 0..255。 */
-    bands?: {
-        bass: number;
-        lowMid: number;
-        mid: number;
-        vocal: number;
-        treble: number;
-        power: number;
-    };
+    spectrum?: string;
+    /** 五个频段，`"bass,lowMid,mid,vocal,treble,power"`，同为 0..255。 */
+    bands?: string;
 };
 
 export type NativePlaybackSnapshot = {
