@@ -3903,6 +3903,7 @@ export default {
     "scanDevice": "Scan device music",
     "scanningDevice": "Scanning device music...",
     "scanDeviceFailed": "Could not scan device music. Make sure audio read permission is granted.",
+    "scanDeviceUnavailable": "This build cannot scan device music: the Android package is missing that capability. Update to the latest version and try again.",
     "importPlaylist": "Import Playlist",
     "importingPlaylist": "Importing playlist...",
     "noLocalMusic": "No local music imported yet",

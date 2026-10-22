@@ -3903,6 +3903,7 @@ export default {
     "scanDevice": "Pindai musik perangkat",
     "scanningDevice": "Memindai musik perangkat...",
     "scanDeviceFailed": "Tidak dapat memindai musik perangkat. Pastikan izin baca audio diberikan.",
+    "scanDeviceUnavailable": "Build ini tidak dapat memindai musik perangkat: paket Android-nya belum punya kemampuan itu. Perbarui ke versi terbaru lalu coba lagi.",
     "importPlaylist": "Impor Playlist",
     "importingPlaylist": "Mengimpor playlist...",
     "noLocalMusic": "Belum ada musik lokal yang diimpor",
