@@ -5,6 +5,7 @@ import { getSongUnavailableLabel, isSongUnavailable } from '../../../../services
 import { canResolveSongCatalogRef } from '../../../../services/onlineMusic/catalogRefs';
 import { resolveTrackAlbumTargetId } from '../../../core/shared/trackLinks';
 import { CARD_TITLE_ATTR, MORPH_FRAME_ATTR } from '../transitions/gridMorphContract';
+import { useCoverDoubleTap } from './coverDoubleTap';
 import {
     formatCardDuration,
     PolaroidCardActions,
@@ -153,6 +154,10 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(
             }
         };
 
+        // 双击封面 = 按那颗播放键（条件与它完全一致：曲目模式、非编辑模式）。横屏时居中那张卡的
+        // 播放键会被底部进度条压住，够不着，这条手势就是那条路的替补。
+        const doubleTapCover = useCoverDoubleTap(mode === 'tracks' && !isEditMode, onSelect);
+
         const editMetadataButton = isFocused && onEditLocalMetadata ? (
             <button
                 type="button"
@@ -183,7 +188,12 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(
                     style={{ width: dynamicWidth, height: dynamicHeight }}
                     onClick={handleCardClick}
                 >
-                    <div className="absolute inset-0 bg-zinc-200/60 dark:bg-zinc-800/60">
+                    {/* 只有封面这一块认双击：整张卡都认的话，点歌名、点专辑名那一下也会被算进来。 */}
+                    <div
+                        data-grid-card-cover
+                        onClick={doubleTapCover}
+                        className="absolute inset-0 bg-zinc-200/60 dark:bg-zinc-800/60"
+                    >
                         <PolaroidCardCover item={item} isUnavailable={isUnavailable} spinnerSize={56} />
                     </div>
 
@@ -265,7 +275,11 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(
                 onClick={handleCardClick}
             >
                 {/* Square Polaroid Photo Area */}
-                <div className="w-full aspect-square rounded-lg overflow-hidden bg-zinc-200/60 dark:bg-zinc-800/60 relative shadow-inner flex items-center justify-center shrink-0">
+                <div
+                    data-grid-card-cover
+                    onClick={doubleTapCover}
+                    className="w-full aspect-square rounded-lg overflow-hidden bg-zinc-200/60 dark:bg-zinc-800/60 relative shadow-inner flex items-center justify-center shrink-0"
+                >
                     <PolaroidCardCover item={item} isUnavailable={isUnavailable} />
 
                     {/* Unavailable Mask/Badge */}
