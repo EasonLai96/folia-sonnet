@@ -10,6 +10,7 @@ import { readFrameTimingSnapshot, runCpuProbe } from '../utils/frameTimingDiagno
 import { readAiThemeAttempts } from '../utils/aiThemeDiagnostics';
 import { readMediaDiagnostics } from '../utils/mediaDiagnostics';
 import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
+import { drainMainLooperLog } from '../platform/foliaNative';
 
 export interface DevDebugLineSnapshot {
     text: string | null;
@@ -620,11 +621,33 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
     const [tick, setTick] = useState(0);
     const [cpu, setCpu] = useState<ReturnType<typeof runCpuProbe> | null>(null);
     const [probing, setProbing] = useState(false);
+    /*
+     * 原生那侧的主线程卡顿日志（**临时诊断**，定位完删）。
+     *
+     * 它是原生 `Log.w`，只在 adb logcat 里；真机常常不在 adb 上，所以由这里每秒去
+     * 原生取一次（取走即清空），用户截图就能给我 —— 这是「主线程有没有被单条消息
+     * 卡住、被谁卡住」的唯一可见渠道。
+     */
+    const [looperLog, setLooperLog] = useState('');
 
     useEffect(() => {
         const handle = window.setInterval(() => setTick(value => value + 1), 1000);
         return () => window.clearInterval(handle);
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        void drainMainLooperLog().then(text => {
+            if (cancelled || !text) return;
+            setLooperLog(previous => {
+                const merged = previous ? `${previous} ¶ ${text}` : text;
+                return merged.split(' ¶ ').slice(-6).join(' ¶ ');
+            });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [tick]);
 
     const perfEnabled = usePerfDiagnosticsStore(state => state.perfDiagnosticsEnabled);
     const frames = useMemo(() => readFrameTimingSnapshot(), [tick]);
@@ -680,6 +703,12 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
                          * 那一段一起删）。行里带堆内存：掉帧那一刻堆要是回落了就是 GC。
                          */}
                         <DebugRow label="hitches" value={formatHitchLog()} />
+                        {/*
+                         * 原生主线程卡顿日志（**临时诊断**，定位完连 FoliaMainLooperWatchdog
+                         * 一起删）。`msg` = 单条主线程消息跑了多久（后面是 handler 与 callback，
+                         * 直接点名是谁）；`frame` = 主线程上两帧之间隔了多久。
+                         */}
+                        <DebugRow label="looper" value={looperLog || 'none'} />
                     </dl>
                     <div className="mt-3 flex items-center gap-3">
                         <button

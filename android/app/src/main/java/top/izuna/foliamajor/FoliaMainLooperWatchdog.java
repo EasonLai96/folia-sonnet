@@ -40,6 +40,19 @@ public final class FoliaMainLooperWatchdog {
     private static long pendingAtMs = 0L;
     private static long lastFrameAtMs = 0L;
 
+    /**
+     * 最近这几条留给**开发者表**读的。
+     *
+     * 真机常常不在 adb 上，而这条日志是原生 `Log.w` —— 只写在 logcat 里的话，
+     * 屏幕上根本看不到。所以这里另外攒一份，由开发者表每秒取走一次（drain），
+     * 用户直接截图就能给我。
+     *
+     * ⚠️ 取走即清空：攒着不取会一直堆在这里，也省得界面上翻到几分钟前的旧账。
+     */
+    private static final int BUFFER_CAPACITY = 12;
+    private static final Object BUFFER_LOCK = new Object();
+    private static final java.util.ArrayDeque<String> BUFFER = new java.util.ArrayDeque<>();
+
     private FoliaMainLooperWatchdog() {}
 
     public static synchronized void install() {
@@ -50,6 +63,42 @@ public final class FoliaMainLooperWatchdog {
         Looper.getMainLooper().setMessageLogging(new Printer());
         new Handler(Looper.getMainLooper()).post(() -> Choreographer.getInstance().postFrameCallback(new FrameWatch()));
         Log.w(TAG, "installed");
+    }
+
+    /** 攒一份给开发者表，见 BUFFER 那段。调用方都在主线程上。 */
+    private static void record(String line) {
+        Log.w(TAG, line);
+        synchronized (BUFFER_LOCK) {
+            BUFFER.addLast(line);
+            while (BUFFER.size() > BUFFER_CAPACITY) {
+                BUFFER.removeFirst();
+            }
+        }
+    }
+
+    /**
+     * 取走攒下的那些（取走即清空）。
+     *
+     * 拼成一个串而不是数组：桥上多一个结构化字段就要多一份类型声明，而这里只是
+     * 「给人看的一行行字」，一个字符串足够，也不必为临时诊断动 `foliaNative.ts` 的类型。
+     */
+    public static String drain() {
+        synchronized (BUFFER_LOCK) {
+            if (BUFFER.isEmpty()) {
+                return "";
+            }
+            StringBuilder joined = new StringBuilder();
+            boolean first = true;
+            for (String line : BUFFER) {
+                if (!first) {
+                    joined.append(" ¶ ");
+                }
+                first = false;
+                joined.append(line);
+            }
+            BUFFER.clear();
+            return joined.toString();
+        }
     }
 
     private static final class Printer implements android.util.Printer {
@@ -66,7 +115,7 @@ public final class FoliaMainLooperWatchdog {
             if (x.startsWith("<<<<<") && pending != null) {
                 long cost = android.os.SystemClock.uptimeMillis() - pendingAtMs;
                 if (cost >= SLOW_MESSAGE_MS) {
-                    Log.w(TAG, "slow message " + cost + "ms | " + shorten(pending));
+                    record("msg " + cost + "ms " + shorten(pending));
                 }
                 pending = null;
             }
@@ -79,6 +128,11 @@ public final class FoliaMainLooperWatchdog {
      */
     private static String shorten(String line) {
         String text = line;
+        // 去掉 ">>>>> Dispatching to " 这个前缀：开发者表那一格只有一两行宽。
+        final String dispatchPrefix = ">>>>> Dispatching to ";
+        if (text.startsWith(dispatchPrefix)) {
+            text = text.substring(dispatchPrefix.length());
+        }
         int brace = text.indexOf('{');
         if (brace >= 0) {
             int end = text.indexOf('}', brace);
@@ -96,7 +150,7 @@ public final class FoliaMainLooperWatchdog {
             if (lastFrameAtMs != 0L) {
                 long gap = nowMs - lastFrameAtMs;
                 if (gap >= SLOW_FRAME_MS) {
-                    Log.w(TAG, "slow frame " + gap + "ms");
+                    record("frame " + gap + "ms");
                 }
             }
             lastFrameAtMs = nowMs;
