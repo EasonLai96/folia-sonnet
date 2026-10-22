@@ -32,6 +32,9 @@ import android.view.WindowManager;
  * 既然注定要占住这块输入，就得自己把出口给用户：
  *  · **上滑退出**（和很多锁屏的解锁手势同向，符合直觉）；
  *  · 底部面板上那个 **ˇ** 直接退出（它是面板的一行，见 LockScreenControlPanel）。
+ *
+ * 另外**点一下空白处**收起 / 放出底部那条 UI：看歌词时想要一整屏，点一下就只剩画面；
+ * 再点一下放回来，不会有点进去了出不来的那条路。收起之后上滑退出照旧（整屏都归这一层）。
  * 退掉之后就是原本的锁屏，照常解锁。
  *
  * 生命周期由 `WallpaperOverlay` 的屏幕广播掌管：息屏时起、解锁（USER_PRESENT）或
@@ -43,6 +46,10 @@ public class LockScreenMusicActivity extends Activity {
     private static final float SWIPE_UP_DP = 72f;
     /** 横向漂移超过这个比例就不算上滑（那是横扫 / 切歌手势）。 */
     private static final float SWIPE_MAX_SIDE_RATIO = 0.6f;
+    /** 一次「点」允许的最大位移：超过就是滑动（上滑退出、拖进度条那类）。 */
+    private static final float TAP_MAX_MOVE_DP = 16f;
+    /** 一次「点」的最长按住时间：超过就是长按，不当成切换 UI。 */
+    private static final long TAP_MAX_DURATION_MS = 400L;
 
     /** 底部的封面 / 歌名 / 时长 / 切歌面板（另开一个子窗口，见 LockScreenControlPanel）。 */
     private LockScreenControlPanel controlPanel = null;
@@ -120,6 +127,11 @@ public class LockScreenMusicActivity extends Activity {
             return;
         }
         controlPanel = new LockScreenControlPanel(this);
+        /*
+         * 面板上那一片没有控件的区域也算"空白"：它自己只负责报告，状态在这一页里翻
+         * （两处共用一个开关，不会面板收了、页面还以为开着，于是再点一下放不回来）。
+         */
+        controlPanel.setBlankTapHandler(this::toggleChrome);
         controlPanel.attach();
         /*
          * 叠层每次重挂都会跑到面板上面去（同级子窗口按添加顺序叠），
@@ -181,6 +193,12 @@ public class LockScreenMusicActivity extends Activity {
                 if (tracking && !gestureConsumed && isSwipeUp(event)) {
                     gestureConsumed = true;
                     dismiss();
+                } else if (tracking && !gestureConsumed
+                        && event.getActionMasked() == MotionEvent.ACTION_UP
+                        && isTap(event)) {
+                    // 只有**抬起**才算点击：CANCEL 是系统把这一串收走了，不是用户点了一下。
+                    gestureConsumed = true;
+                    toggleChrome();
                 }
                 tracking = false;
                 break;
@@ -192,6 +210,34 @@ public class LockScreenMusicActivity extends Activity {
          * 一旦在这里吞掉，面板上的按钮和锁屏自己的手势条都收不到了。
          */
         return super.dispatchTouchEvent(event);
+    }
+
+    /**
+     * 一次「点」：几乎没移动、也不长按 —— 滑动和上滑退出都不算。
+     *
+     * 走到这里的点击**必然落在画面上**：底部那条面板是另一个子窗口，落在它上面的事件
+     * 到不了这里（它自己的 onTouch 先吃掉）；而画歌词那一层叠层是 NOT_TOUCHABLE 的，
+     * 事件照样穿过来。所以不用再去判点击落在哪儿 —— 用户眼里的"空白区域"就是这一整片。
+     */
+    private boolean isTap(MotionEvent event) {
+        float limit = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
+                TAP_MAX_MOVE_DP, getResources().getDisplayMetrics());
+        return Math.abs(event.getRawX() - startX) <= limit
+                && Math.abs(event.getRawY() - startY) <= limit
+                && (event.getEventTime() - event.getDownTime()) <= TAP_MAX_DURATION_MS;
+    }
+
+    /**
+     * 点空白区域：收起 / 放出底部那条 UI。再点一下放回来，不会有一条回不来的死路。
+     *
+     * 状态**只有一份**，就在面板里（这里读它的当前值再翻）：页面与面板两处都能触发，
+     * 各存一份的话重排一次就会对不上，表现是"点一下收了，再点还是收着"。
+     */
+    private void toggleChrome() {
+        if (controlPanel == null) {
+            return;
+        }
+        controlPanel.setChromeHidden(!controlPanel.isChromeHidden(), true);
     }
 
     /** 向上、够远、而且不是横着扫的 —— 才认它是"退出"。 */

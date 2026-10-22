@@ -56,6 +56,9 @@ final class LockScreenControlPanel {
     /** 上滑退出在面板上也照样生效：这一条不设的话，面板那块区域就成了"滑不动的死区"。 */
     private static final float SWIPE_UP_DP = 64f;
     private static final float SWIPE_MAX_SIDE_RATIO = 0.6f;
+    /** 一次「点」允许的最大位移（与锁屏页那条同值，别让两处的手感不一样）。 */
+    private static final float TAP_MAX_MOVE_DP = 16f;
+    private static final long TAP_MAX_DURATION_MS = 400L;
     /**
      * 已喜欢那颗心的颜色：与面板里喜爱按钮按下去的 red-500 同一个色。
      * 通知栏那颗做不到（系统只按 alpha 染色），这条面板是我们自己画的，可以。
@@ -130,6 +133,17 @@ final class LockScreenControlPanel {
     private Animator exitAnimator = null;
     /** 退出动画已经在跑了：再点不该叠加第二遍。 */
     private boolean exiting = false;
+    /** 收起 / 放出这一套 UI 的动画（点锁屏空白处切换）。 */
+    private android.view.ViewPropertyAnimator chromeAnimator = null;
+    /** UI 此刻是不是收起的。重排（detach + attach）之后要照着它复位。 */
+    private boolean chromeHidden = false;
+    /**
+     * 窗口参数：收起时要把它改成**不吃触摸**。
+     *
+     * 窗口那块多半是透明的跑道（卡片已经滑走了），但它照样会吃掉落在上面的事件 ——
+     * 用户点在屏幕下方那一块会毫无反应，而那里看起来明明是空白。
+     */
+    private WindowManager.LayoutParams windowParams = null;
     /** 卡片离屏幕底的常态距离，动画结束后复位要用。 */
     private int baseMarginY = 0;
     private ImageView artworkView = null;
@@ -152,9 +166,21 @@ final class LockScreenControlPanel {
     private boolean gestureConsumed = false;
     private float startX = 0f;
     private float startY = 0f;
+    /**
+     * 点面板上**没有控件**的那一片（封面与文字周围）时走的回调。
+     *
+     * 面板自己不决定"收起"：它只是把这一下报告给锁屏页，由那边统一翻转状态 ——
+     * 面板与页面两处都能收起，状态却只有一份。
+     */
+    private Runnable blankTapHandler = null;
 
     LockScreenControlPanel(Activity activity) {
         this.activity = activity;
+    }
+
+    /** 点面板空白处的回调（锁屏页设进来）。 */
+    void setBlankTapHandler(Runnable handler) {
+        blankTapHandler = handler;
     }
 
     /**
@@ -338,6 +364,11 @@ final class LockScreenControlPanel {
          * 就成了"上滑退不出去"的死区（而底部恰恰是用户最常滑的地方）。
          *
          * 返回 false 是不吃事件：按钮的点击还要照常往下走。
+         *
+         * 顺带这一层还充当「**空白区域**」的探测器：走的是 View 分派的兜底 —— 落在
+         * 播放 / 切歌 / 进度条 / 退出手柄上的事件会被那些控件自己吃掉（返回 true），
+         * 根本到不了外壳；只有落在**没有控件接的地方**（封面、歌名、卡片留白）
+         * 才会退到这里。于是"点空白区域"不用再去逐个 hit-test 控件，省一份会走歪的判定表。
          */
         shell.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
@@ -359,6 +390,11 @@ final class LockScreenControlPanel {
                     if (tracking && !gestureConsumed && isSwipeUp(event)) {
                         gestureConsumed = true;
                         dismissHost();
+                    } else if (tracking && !gestureConsumed
+                            && event.getActionMasked() == MotionEvent.ACTION_UP
+                            && isTap(event)) {
+                        gestureConsumed = true;
+                        reportBlankTap();
                     }
                     tracking = false;
                     break;
@@ -424,7 +460,13 @@ final class LockScreenControlPanel {
             WindowManager manager = (WindowManager) activity.getSystemService(Activity.WINDOW_SERVICE);
             manager.addView(shell, params);
             panel = shell;
+            windowParams = params;
             exiting = false;
+            // 重排（detach + attach 是子窗口唯一的重排手段）之后照着上一次的状态复位，
+            // 否则换宿主那一趟会把收起来的面板又放出来。
+            if (chromeHidden) {
+                setChromeHidden(true, false);
+            }
 
             /*
              * 兜底：上面是按**量出来**的卡片高度估的，真机上字体 / 排版差几 dp 有可能
@@ -472,6 +514,10 @@ final class LockScreenControlPanel {
             exitAnimator.cancel();
             exitAnimator = null;
         }
+        if (chromeAnimator != null) {
+            chromeAnimator.cancel();
+            chromeAnimator = null;
+        }
         exiting = false;
         try {
             ((WindowManager) activity.getSystemService(Activity.WINDOW_SERVICE)).removeView(panel);
@@ -479,6 +525,7 @@ final class LockScreenControlPanel {
             // 已经被摘掉了。
         }
         panel = null;
+        windowParams = null;
         cardView = null;
         exitHeadSpacer = null;
         exitSpacer = null;
@@ -494,6 +541,94 @@ final class LockScreenControlPanel {
         playPauseButton = null;
         seeking = false;
         seekPreviewMs = -1L;
+    }
+
+    /** UI 此刻是不是收起的（点锁屏空白处切换）。 */
+    boolean isChromeHidden() {
+        return chromeHidden;
+    }
+
+    /**
+     * 收起 / 放出这一套 UI：卡片**往下**滑出屏幕并淡出。
+     *
+     * 为什么往下：这一块是从屏幕底部浮上来的（窗口 gravity 是 BOTTOM），退出那一趟也是
+     * 往下甩出屏幕 —— 收起来走同一个方向，读起来才像"同一块东西沉下去"，而不是凭空消失。
+     * 淡出配着位移一起走：只位移的话卡片会在窗口边界上露出一条边（窗口只有跑道那么长）。
+     *
+     * 位移量与退出动画同一条公式（下沿离屏幕底 + 卡片高 + 余量），再多就会被窗口裁掉 ——
+     * 所以末尾再按 runway 夹一次，宁可少走两 dp 也不要被切。
+     */
+    void setChromeHidden(boolean hidden, boolean animate) {
+        chromeHidden = hidden;
+        if (panel == null || cardView == null) {
+            return;
+        }
+        if (chromeAnimator != null) {
+            chromeAnimator.cancel();
+            chromeAnimator = null;
+        }
+        float density = activity.getResources().getDisplayMetrics().density;
+        float travel = Math.min(
+                baseMarginY + cardView.getHeight() + Math.round(ExitMotion.overshoot * density),
+                Math.max(0f, preparedBottomRunway - Math.round(2f * density)));
+        if (!animate) {
+            cardView.setTranslationY(hidden ? travel : 0f);
+            cardView.setAlpha(hidden ? 0f : 1f);
+            applyChromeTouchable(!hidden);
+            return;
+        }
+        // 收起越走越快（ease-in，像被甩出去）；放出末段放缓（ease-out，像浮上来）。
+        Interpolator easing = hidden
+                ? ExitMotion.downEasing
+                : new PathInterpolator(0.16f, 0.84f, 0.3f, 1f);
+        chromeAnimator = cardView.animate()
+                .translationY(hidden ? travel : 0f)
+                .alpha(hidden ? 0f : 1f)
+                .setDuration(hidden ? 260L : 240L)
+                .setInterpolator(easing)
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        chromeAnimator = null;
+                        applyChromeTouchable(!chromeHidden);
+                    }
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        chromeAnimator = null;
+                    }
+                });
+        /*
+         * 收起**立刻**就不吃触摸，不等动画跑完。
+         *
+         * 收起之后整屏都该是"空白区域"，点哪儿都能再放出来；等动画结束才改的话，
+         * 这 260ms 里点在卡片原来的位置上什么也不会发生。
+         */
+        applyChromeTouchable(!hidden);
+    }
+
+    /**
+     * 收起之后把窗口交给后面的窗口（Activity）：那块是透明的跑道，看起来是空白，
+     * 却会吃掉落在上面的事件 —— 少了这一句，"点任意空白区域"就不任意了。
+     */
+    private void applyChromeTouchable(boolean touchable) {
+        if (panel == null || windowParams == null) {
+            return;
+        }
+        int flags = windowParams.flags;
+        int next = touchable
+                ? (flags & ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                : (flags | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        if (next == flags) {
+            return;
+        }
+        windowParams.flags = next;
+        try {
+            WindowManager manager = (WindowManager) activity.getSystemService(Activity.WINDOW_SERVICE);
+            manager.updateViewLayout(panel, windowParams);
+        } catch (Throwable error) {
+            android.util.Log.w("FoliaLockScreen", "Could not change the panel's touch mode", error);
+        }
     }
 
     /** 按当前媒体信息重画一次。服务还没推过信息时显示占位文案。 */
@@ -1054,6 +1189,22 @@ final class LockScreenControlPanel {
         float threshold = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
                 SWIPE_UP_DP, activity.getResources().getDisplayMetrics());
         return dy >= threshold && dx <= dy * SWIPE_MAX_SIDE_RATIO;
+    }
+
+    /** 一次「点」：几乎没移动、也不长按 —— 拖进度条和上滑退出都不算。 */
+    private boolean isTap(MotionEvent event) {
+        float limit = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
+                TAP_MAX_MOVE_DP, activity.getResources().getDisplayMetrics());
+        return Math.abs(event.getRawX() - startX) <= limit
+                && Math.abs(event.getRawY() - startY) <= limit
+                && (event.getEventTime() - event.getDownTime()) <= TAP_MAX_DURATION_MS;
+    }
+
+    /** 面板上的空白被点了一下：交给锁屏页统一翻转（它那边也接整屏的空白）。 */
+    private void reportBlankTap() {
+        if (blankTapHandler != null) {
+            blankTapHandler.run();
+        }
     }
 
     private void dismissHost() {
