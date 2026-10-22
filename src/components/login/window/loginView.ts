@@ -1,6 +1,6 @@
 import type { LibraryLoginPhase } from '../../../library/core/account/account.contract';
 import type { LoginFailure } from '../../../types/loginFailure';
-import type { LoginTexts, ProviderAccountSummary } from '../../../types/onlineMusic';
+import type { LoginMethod, LoginTexts, ProviderAccountSummary } from '../../../types/onlineMusic';
 import type { RowStatus } from '../platformRows';
 import { LOGIN_CASE_TEXTS } from './loginCaseTexts';
 
@@ -123,6 +123,16 @@ export const failureQuote = (failure: LoginFailure, serviceError: string | null)
     const serviceSaid = failure.case.action === 'restart-service' ? serviceError || undefined : undefined;
     return serviceSaid ? { text: serviceSaid } : undefined;
 };
+
+/**
+ * 等用的人选方式时，那一小块上说的是什么：通常是「选了方式之后生成二维码」，但指向密码表单的
+ * 那些方式后面没有二维码可言 —— 那会儿要说「选了方式之后接着填」。
+ */
+export const methodsPendingKey = (methods: readonly LoginMethod[]): string => (
+    methods.length > 0 && methods.every(method => Boolean(method.passwordField))
+        ? 'home.loginMethodPendingPassword'
+        : 'home.loginMethodPending'
+);
 
 export type StepMark = 'code' | 'browser' | 'phone' | 'account';
 

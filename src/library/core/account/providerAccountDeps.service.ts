@@ -37,8 +37,8 @@ export const omniAccountAuthPort: LibraryAccountAuthPort = {
     runLoginSelfCheck: providerId => omni.runLoginSelfCheck(providerId),
     /** 用户名密码登录（飞牛这类自建服务）。 */
     loginWithPassword: (providerId, credentials) => omni.loginWithPassword(providerId, credentials),
-    /** 密码登录表单的预填值（上次填过的服务器地址）。 */
-    getPasswordLoginDefaults: providerId => omni.getPasswordLoginDefaults(providerId),
+    /** 密码登录表单的预填值（上次填过的服务器地址）；按选中的登录方式问。 */
+    getPasswordLoginDefaults: (providerId, methodId) => omni.getPasswordLoginDefaults(providerId, methodId ?? null),
     getProviderCapabilities: providerId => omni.getProviderCapabilities(providerId),
     dropRequestLimits: dropLoginRequestLimits,
 };

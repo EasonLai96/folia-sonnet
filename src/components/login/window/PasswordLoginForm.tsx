@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LogIn, Loader2 } from 'lucide-react';
 import type { LibraryPasswordLoginError } from '../../../library/core/account/account.contract';
-import type { PasswordLoginCredentials } from '../../../types/onlineMusic';
+import type { LoginPasswordField, PasswordLoginCredentials } from '../../../types/onlineMusic';
 import { FIELD_CLASS } from '../../modal/settings/kit/TextField';
 
 // src/components/login/window/PasswordLoginForm.tsx
-// 密码登录的表单（飞牛这类自建服务：没有二维码，要的是地址 + 用户名 + 密码）。
+// 密码登录的表单（没有二维码的自建服务：地址 + 用户名 + 密码）。
+// 第一栏问什么由选中的登录方式说（`field` 是它给的两个 i18n key）：有的要知道整条地址，
+// 有的只要一个 ID。这一层不认得任何一种方式，只是照着翻译。
 // 三个框自己持有状态：提交失败时用户改过的东西必须还在，而登录快照一变整个表单都会重渲染。
 // 提交走账户 controller 的 submitPasswordLogin，失败原因由快照的 `passwordForm.error` 带回来，
 // 界面按它给一句能照做的提示（不是统一的「登录失败」）。
@@ -23,6 +25,11 @@ const ERROR_KEY: Record<LibraryPasswordLoginError, string> = {
 export type PasswordLoginFormProps = {
     /** 表单要先填服务器地址：自建服务每家地址不同，写不进构建期配置。 */
     needsServerUrl: boolean;
+    /**
+     * 那一栏要问什么（标签与占位符的 i18n key）：多方式登录时由选中的那一种给 —— 同一张表单上，
+     * 「只要一个 ID」与「要整条地址」是两种问法。没有时用共用的那两句。界面不知道哪一种是哪一家。
+     */
+    field?: LoginPasswordField | null;
     /** 上次填过的服务器地址（登出不清地址，重登时少填一项）。 */
     serverUrl: string;
     /** 上一次提交失败的原因；还没提交过或上次成功了为 null。 */
@@ -32,7 +39,7 @@ export type PasswordLoginFormProps = {
     onSubmit: (credentials: PasswordLoginCredentials) => void;
 };
 
-export const PasswordLoginForm: React.FC<PasswordLoginFormProps> = ({ needsServerUrl, serverUrl, error, busy, onSubmit }) => {
+export const PasswordLoginForm: React.FC<PasswordLoginFormProps> = ({ needsServerUrl, field, serverUrl, error, busy, onSubmit }) => {
     const { t } = useTranslation();
     const [url, setUrl] = useState(serverUrl);
     const [username, setUsername] = useState('');
@@ -60,14 +67,14 @@ export const PasswordLoginForm: React.FC<PasswordLoginFormProps> = ({ needsServe
         >
             {needsServerUrl && (
                 <label className="flex flex-col gap-1">
-                    <span className="text-xs text-[color:var(--st-t2)]">{t('home.loginServerUrl')}</span>
+                    <span className="text-xs text-[color:var(--st-t2)]">{t(field?.labelKey ?? 'home.loginServerUrl')}</span>
                     <input
                         type="text"
                         className={`${FIELD_CLASS} w-full px-2.5`}
                         value={url}
                         disabled={busy}
                         onChange={event => setUrl(event.target.value)}
-                        placeholder={t('home.loginServerUrlPlaceholder')}
+                        placeholder={field?.placeholderKey ? t(field.placeholderKey) : t('home.loginServerUrlPlaceholder')}
                         autoCapitalize="off"
                         autoCorrect="off"
                         spellCheck={false}

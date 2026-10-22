@@ -64,9 +64,37 @@ export const normalizeFeiniuServerUrl = (value: string): string => (
 );
 
 /**
+ * FN ID 那台 NAS 的域名后缀。
+ *
+ * 飞牛给每台 NAS 发一个「FN ID」，远程访问的地址是 `https://<FN ID>.fnid.cc` —— 域名是一家给的，
+ * 不是用户自己搭的反代，所以在这里补后缀就够了，不需要用户手写整条地址，也不需要那个 5666
+ * 的局域网端口（走 https 就是 443）。例：填 `abcd1234` → `https://abcd1234.fnid.cc`。
+ */
+const FNID_HOST_SUFFIX = 'fnid.cc';
+
+/** 用户在「FN ID」那一栏填的东西（可能带了 https、端口、或者干脆就是整条域名）变成服务器地址。 */
+export const feiniuServerUrlFromFnId = (value: string): string => {
+    const cleaned = normalizeFeiniuServerUrl(value).replace(/^https?:\/\//i, '').toLowerCase();
+    const head = cleaned.split('/')[0] ?? '';
+    if (!head) return '';
+    const [name, maybePort] = head.split(':');
+    const port = /^\d+$/.test(maybePort ?? '') ? `:${maybePort}` : '';
+    const domain = name.includes('.') ? name : `${name}.${FNID_HOST_SUFFIX}`;
+    return `https://${domain}${port}`;
+};
+
+/** 反方向：上次的地址是一条 FN ID 的远程地址时给出它的 ID（用来预填那一栏）；不是就给空串。 */
+export const feiniuFnIdFromServerUrl = (value: string): string => {
+    const head = normalizeFeiniuServerUrl(value).replace(/^https?:\/\//i, '').split('/')[0] ?? '';
+    const host = head.split(':')[0].toLowerCase();
+    if (!host.endsWith(`.${FNID_HOST_SUFFIX}`)) return '';
+    return host.slice(0, -(FNID_HOST_SUFFIX.length + 1));
+};
+
+/**
  * 补 scheme 与默认端口。
  *
- * 只补 http：https 走 443 是普遍约定（反代 / 穿透通常都挂在 443 上），而 http 这一侧
+ * 只补 http：https 走 443 是普遍约定（FN ID 的远程地址反代通常也挂在 443 上），而 http 这一侧
  * 飞牛几乎都跑在 5666 —— 没写端口的 http 地址按 80 去连，连上的多半是 NAS 上别的
  * 服务，回一个 HTML 页面，于是登录报「非 JSON 响应」，看着像是接口坏了。
  */

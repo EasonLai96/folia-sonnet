@@ -38,8 +38,9 @@ const AUTH_MEMBERS: Record<string, string[]> = {
     qishui: [
         'cancelLogin', 'checkLogin', 'createQr', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout', 'startLogin',
     ],
+    // 两种登录方式（FN ID 云连接 / 局域网地址）由 provider 声明：要不要先停在「选择方式」那一屏，由 controller 按它决定。
     feiniu: [
-        'getLoginStatus', 'getLoginTexts', 'getPasswordLoginDefaults', 'loginWithPassword', 'logout',
+        'getLoginMethods', 'getLoginStatus', 'getLoginTexts', 'getPasswordLoginDefaults', 'loginWithPassword', 'logout',
     ],
 };
 

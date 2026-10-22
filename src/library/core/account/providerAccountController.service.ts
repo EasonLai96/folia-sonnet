@@ -1,5 +1,6 @@
 import type {
     LoginMethod,
+    LoginPasswordField,
     LoginTexts,
     OnlineProviderId,
     PasswordLoginCredentials,
@@ -87,8 +88,18 @@ type LoginState = {
     texts: LoginTexts | null;
     stage: 'resolving-methods' | 'choosing-method' | 'password' | 'ready' | 'session';
     sessionId: number | null;
-    /** 只有 password 阶段有：表单要不要服务器地址、上次填的地址、提交中、上一次提交的结果。 */
-    password: { needsServerUrl: boolean; serverUrl: string; submitting: boolean; error: LibraryPasswordLoginError | null } | null;
+    /**
+     * 只有 password 阶段有：表单第一栏要不要填（自建服务的地址每家不同）、那一栏叫什么
+     * （多方式时由选中的方式给，单表单时是 null，界面用共用的那两句）、上次填的值、
+     * 提交中、上一次提交的结果。
+     */
+    password: {
+        needsServerUrl: boolean;
+        field: LoginPasswordField | null;
+        serverUrl: string;
+        submitting: boolean;
+        error: LibraryPasswordLoginError | null;
+    } | null;
 };
 
 type PendingSwitch = {
@@ -147,6 +158,8 @@ const sameLoginSnapshot = (a: LibraryLoginSessionSnapshot, b: LibraryLoginSessio
     && a.failure === b.failure
     && a.selfCheck === b.selfCheck
     && a.passwordForm?.needsServerUrl === b.passwordForm?.needsServerUrl
+    && a.passwordForm?.field?.labelKey === b.passwordForm?.field?.labelKey
+    && a.passwordForm?.field?.placeholderKey === b.passwordForm?.field?.placeholderKey
     && a.passwordForm?.error === b.passwordForm?.error
     && a.backend.failed === b.backend.failed
     && a.backend.detail === b.backend.detail
@@ -220,6 +233,7 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         const passwordForm = login.password
             ? {
                 needsServerUrl: login.password.needsServerUrl,
+                field: login.password.field,
                 serverUrl: login.password.serverUrl,
                 error: login.password.error,
             }
@@ -414,6 +428,31 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         return id;
     };
 
+    /**
+     * 走到密码登录那一幅（飞牛这类没有二维码的自建服务）：把表单的状态备好。
+     *
+     * `method` 为 null 是「这个平台只有一张表单、没有方式可选」；给了方式是多方式里选中的那一种 ——
+     * 表单第一栏要填什么、叫什么，由它说。
+     */
+    const enterPasswordStage = (
+        current: LoginState,
+        sessionId: number,
+        method: LoginMethod | null,
+        needsServerUrl: boolean,
+    ): LoginState => ({
+        ...current,
+        stage: 'password',
+        sessionId,
+        selectedMethodId: method?.id ?? current.selectedMethodId,
+        password: {
+            needsServerUrl,
+            field: method?.passwordField ?? null,
+            serverUrl: String(askSafely(() => auth.getPasswordLoginDefaults?.(current.providerId, method?.id ?? null)?.serverUrl ?? '', '')),
+            submitting: false,
+            error: null,
+        },
+    });
+
     const startLogin = async (providerId: OnlineProviderId): Promise<LibraryStartLoginResult> => {
         if (disposed) return { status: 'superseded', providerId };
         const selection = resolveProviderSelection(findProvider(providerId));
@@ -435,8 +474,6 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             };
             watchLocalService(providerId);
         });
-        // 密码登录的 provider（飞牛这类自建服务）没有二维码：直接进表单，
-        // 不去解析扫码方式 —— 那一步会向后端要码，而这里根本不该发这个请求。
         let capabilities: Pick<ProviderCapabilities, 'auth' | 'passwordLogin' | 'passwordLoginServerUrl'>;
         try {
             capabilities = auth.getProviderCapabilities(providerId);
@@ -446,25 +483,10 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             log('warn', 'login:capabilities-error', { providerId, ...describeLoginError(error) });
             capabilities = { auth: true };
         }
-        if (capabilities.passwordLogin) {
-            if (attempt !== loginSeq || disposed || !login) return { status: 'superseded', providerId };
-            batch(() => {
-                login = {
-                    ...login!,
-                    stage: 'password',
-                    sessionId: attempt,
-                    password: {
-                        needsServerUrl: capabilities.passwordLoginServerUrl === true,
-                        serverUrl: String(auth.getPasswordLoginDefaults?.(providerId)?.serverUrl ?? ''),
-                        submitting: false,
-                        error: null,
-                    },
-                };
-            });
-            return { status: 'started', providerId, sessionId: attempt, step: 'password' };
-        }
         let methods: readonly LoginMethod[];
         try {
+            // 方式自己发现：多方式停在第一步，选定之前不向平台要码，也不去碰那张表单。
+            // 没有二维码的那些平台（密码登录）在这里问一次也无妨：它们的方式是自己声明的，这一问不去网络。
             methods = await auth.resolveLoginMethods(providerId);
         } catch (error) {
             // 方式发现失败时按单步流程开始：开始失败会落到快照里，界面能看到失败与诊断。
@@ -479,6 +501,11 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
             // 多种方式：停在第一步，选定之前不向平台要码。
             batch(() => { login = { ...resolved, stage: 'choosing-method' }; });
             return { status: 'started', providerId, sessionId: attempt, step: 'choosing-method' };
+        }
+        if (capabilities.passwordLogin) {
+            if (attempt !== loginSeq || disposed || !login) return { status: 'superseded', providerId };
+            batch(() => { login = enterPasswordStage(login!, attempt, null, capabilities.passwordLoginServerUrl === true); });
+            return { status: 'started', providerId, sessionId: attempt, step: 'password' };
         }
         if (resolved.inBrowser) {
             // 在浏览器里确认的：等用的人按「打开浏览器」再开始。
@@ -516,7 +543,8 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
         setPassword({ submitting: true, error: null });
         let user: { id: string | number } | null = null;
         try {
-            user = await auth.loginWithPassword(providerId, credentials);
+            // 选了哪一种登录方式也要带上：同一张表单上，第一栏填的东西要按它翻译（FN ID 与整条地址不一样）。
+            user = await auth.loginWithPassword(providerId, { ...credentials, methodId: login.selectedMethodId });
         } catch (error) {
             const reason = describePasswordLoginError(error);
             log('warn', 'login:password-error', { providerId, reason, ...describeLoginError(error) });
@@ -552,7 +580,15 @@ export const createProviderAccountController = (deps: LibraryAccountControllerDe
 
     const selectLoginMethod = async (methodId: string): Promise<LibraryLoginRequestResult> => {
         if (disposed || !login) return { status: 'no-session' };
-        if (!login.methods.some(method => method.id === methodId)) return { status: 'rejected', reason: 'unknown-method' };
+        const method = login.methods.find(entry => entry.id === methodId) ?? null;
+        if (!method) return { status: 'rejected', reason: 'unknown-method' };
+        // 指向一张表单的方式（自建服务）：选完就停在表单前，不去向平台要码 ——
+        // 那一步对没有二维码的平台根本没有意义。
+        if (method.passwordField) {
+            const sessionId = login.id;
+            batch(() => { login = enterPasswordStage(login!, sessionId, method, true); });
+            return { status: 'requested', sessionId };
+        }
         return { status: 'requested', sessionId: beginSession(++loginSeq, login, methodId) };
     };
 

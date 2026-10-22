@@ -566,9 +566,9 @@ export const omni = {
         return auth.loginWithPassword(credentials);
     },
 
-    /** 密码登录表单的预填值（上次填过的服务器地址）；provider 不提供就是空对象。 */
-    getPasswordLoginDefaults(providerId: OmniProviderId): { serverUrl?: string } {
-        return requireOnlineMusicProvider(providerId).auth?.getPasswordLoginDefaults?.() ?? {};
+    /** 密码登录表单的预填值（上次填过的服务器地址）；按选中的登录方式给，provider 不提供就是空对象。 */
+    getPasswordLoginDefaults(providerId: OmniProviderId, methodId?: string | null): { serverUrl?: string } {
+        return requireOnlineMusicProvider(providerId).auth?.getPasswordLoginDefaults?.(methodId ?? null) ?? {};
     },
 
     // 没有这个能力就回空数组，UI 据此走单步流程；netease / kugou 完全不受影响。

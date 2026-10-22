@@ -108,4 +108,20 @@ describe('the password form of a sign-in', () => {
         expect([...place.querySelectorAll('input')].every(field => field.disabled)).toBe(true);
         expect(place.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
     });
+
+    it('asks for what the chosen method asks for, without knowing which method it is', () => {
+        // 同一个平台的一种连接只要一个 ID、另一种要整条地址：第一栏叫什么、例子写什么，都按选中的方式说。
+        draw({ field: { labelKey: 'home.loginFeiniuFnId', placeholderKey: 'home.loginFeiniuFnIdPlaceholder' } });
+        const { url } = fields();
+        expect(place.textContent).toContain('home.loginFeiniuFnId');
+        expect(url?.getAttribute('placeholder')).toBe('home.loginFeiniuFnIdPlaceholder');
+        act(() => {
+            type(url!, 'abcd1234');
+            type(fields().name!, 'someone');
+            type(fields().secret!, 'a-secret');
+        });
+        act(() => place.querySelector('button[type="submit"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+        // 翻译交给平台自己：这里原样交出去，不替它拼域名。
+        expect(submitted).toEqual([{ serverUrl: 'abcd1234', username: 'someone', password: 'a-secret' }]);
+    });
 });

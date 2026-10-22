@@ -16,7 +16,7 @@ import { LOGIN_CASE_TEXTS } from './loginCaseTexts';
 import LoginMessage, { LoginDetails, type MessageAction } from './LoginMessage';
 import LoginTile from './LoginTile';
 import PasswordLoginForm from './PasswordLoginForm';
-import { accountView, failureNoteKey, failureQuote, loginScene, sceneHeadline, stepMarks, type RowLead } from './loginView';
+import { accountView, failureNoteKey, failureQuote, loginScene, methodsPendingKey, sceneHeadline, stepMarks, type RowLead } from './loginView';
 import LoginWindow from './LoginWindow';
 import PlatformColumn from './PlatformColumn';
 
@@ -235,7 +235,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     failedKind={failure?.case.kind ?? null}
                     onRefreshCode={expiredCode && retryOpen ? retry : undefined}
                     refreshLabel={retryLabel}
-                    pendingText={t('home.loginMethodPending')}
+                    pendingText={t(methodsPendingKey(login?.methods ?? []))}
                 />
             )}
             message={(
@@ -257,9 +257,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     />
                     {scene === 'password' && passwordLogin && (
                         <PasswordLoginForm
-                            // 换了一个平台、或者重开一次登录（会话代次变了），就是另一张空表。
-                            key={`${providerId}:${login?.id ?? 0}`}
+                            // 换了一个平台、换了登录方式、或者重开一次登录（会话代次变了），就是另一张空表：
+                            // 方式换了，第一栏问的就不是同一件事，预填的值也得跟着换。
+                            key={`${providerId}:${login?.id ?? 0}:${login?.selectedMethodId ?? ''}`}
                             needsServerUrl={passwordLogin.needsServerUrl}
+                            field={passwordLogin.field}
                             serverUrl={passwordLogin.serverUrl}
                             error={passwordLogin.error}
                             busy={submittingPassword}

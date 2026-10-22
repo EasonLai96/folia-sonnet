@@ -450,6 +450,23 @@ export interface LoginMethod {
     id: string;          // 传给后端的识别值（QQ: 'qq' | 'wechat'）
     labelKey: string;    // i18n key，由 UI 层翻译
     iconKey: string;     // 图标的名字：UI 层按它取 src/assets/providers/ 里同名的文件（svg / png / webp）
+    /**
+     * 选了这种方式不是去取二维码，而是给一张密码登录的表单（自建服务那一类没有二维码）。
+     * 有它时，选完就停在表单那一屏；没有它时照旧走二维码。
+     */
+    passwordField?: LoginPasswordField;
+}
+
+/**
+ * 密码登录表单的第一栏：自建服务的「服务器」每家写法不一样 —— 有的要整条地址，有的只要一个
+ * ID（由平台自己拼成地址）。所以这一栏叫它什么、例子写什么，都由平台自己给 i18n key；
+ * UI 只是照着翻译，不知道哪一种是哪一家。
+ */
+export interface LoginPasswordField {
+    /** 这一栏的标签（i18n key）。 */
+    labelKey: string;
+    /** 这一栏里的示例（i18n key）；没有就不显示占位符。 */
+    placeholderKey?: string;
 }
 
 // 平台的记号：一个字和一种颜色，画在登录窗口、切换器和账号头像的角上。平台自己声明；没有声明的
@@ -552,6 +569,11 @@ export interface PasswordLoginCredentials {
     password: string;
     /** 只在 `capabilities.passwordLoginServerUrl` 为真时由界面填进来。 */
     serverUrl?: string;
+    /**
+     * 这一次选的是哪一种登录方式（多方式时的 `LoginMethod.id`）；单一表单时为 null。
+     * 平台照它把表单第一栏填的东西变成自己的地址：同一种表单上，FN ID 与整条地址要拼成不同的东西。
+     */
+    methodId?: string | null;
 }
 
 export interface OnlineAuthProvider {
@@ -569,8 +591,12 @@ export interface OnlineAuthProvider {
      * 而不是当成「登录态过期」把人踢回起点。
      */
     loginWithPassword?(credentials: PasswordLoginCredentials): Promise<ProviderUser | null>;
-    /** 密码登录表单的预填值（上次填过的服务器地址）；没有就返回空对象。 */
-    getPasswordLoginDefaults?(): { serverUrl?: string };
+    /**
+     * 密码登录表单的预填值（上次填过的服务器地址）。
+     * 多种登录方式时按选中的那一种给：方式不同，第一栏要的东西也不同（整条地址 / 一个 ID），
+     * 把上次整条地址预填进「填 ID」的那一栏只会把人带偏。
+     */
+    getPasswordLoginDefaults?(methodId?: string | null): { serverUrl?: string };
     /**
      * The platform names nobody, or refuses the sign-in, and the account is about to leave the
      * screen: the adapter drops what it keeps of that sign-in and account. Called before the

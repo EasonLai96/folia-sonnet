@@ -4,6 +4,7 @@ import type {
     LoginDiagnosticLine,
     LoginLocalService,
     LoginMethod,
+    LoginPasswordField,
     LoginSelfCheckResult,
     LoginState,
     LoginTexts,
@@ -166,6 +167,11 @@ export type LibraryLoginSessionSnapshot = {
     passwordForm: {
         /** 表单里还要填服务器地址：自建服务每家地址不同，写不进构建期配置。 */
         needsServerUrl: boolean;
+        /**
+         * 这一栏叫什么（标签与占位符的 i18n key）：多方式登录时由选中的那一种给，
+         * 例如「填 FN ID」与「填整条地址」是同一张表单上的两种问法；没有时用共用的那两句。
+         */
+        field: LoginPasswordField | null;
         /** 上次填过的服务器地址（登出不清地址，重登时少填一项）。 */
         serverUrl: string;
         /** 上一次提交失败的原因；还没提交过或上次成功了为 null。 */
@@ -347,8 +353,8 @@ export interface LibraryAccountController {
     confirmSwitch(requestId: number): Promise<LibrarySwitchConfirmResult>;
     cancelSwitch(requestId: number): LibrarySwitchCancelResult;
     /**
-     * 只由登录窗口调用。先停旧会话；解析登录方式（带竞态代次）：多方式停在 choosing-method，在浏览器里确认的停在
-     * ready，其余直接要码。
+     * 只由登录窗口调用。先停旧会话；解析登录方式（带竞态代次）：声明了多种方式的先停在 choosing-method ——
+     * 其中指向一张密码表单的方式，选定之后停在表单那一步；在浏览器里确认的停在 ready，其余直接要码。
      */
     startLogin(providerId: OnlineProviderId): Promise<LibraryStartLoginResult>;
     /** 提交一次用户名密码登录（飞牛这类自建服务）。成功走与扫码确认同一条收尾：刷新账户 → 收起（必要时问激活）。 */
@@ -399,8 +405,8 @@ export type LibraryAccountAuthPort = {
     runLoginSelfCheck(providerId: OnlineProviderId): Promise<LoginSelfCheckResult | null>;
     /** 用户名密码登录（飞牛这类自建服务）；provider 没有这个能力时由调用方先按能力判定拦住。 */
     loginWithPassword(providerId: OnlineProviderId, credentials: PasswordLoginCredentials): Promise<ProviderUser | null>;
-    /** 密码登录表单的预填值（上次填过的服务器地址）；没有时为 null（而不是每次新建的空对象）。 */
-    getPasswordLoginDefaults?(providerId: OnlineProviderId): { serverUrl?: string } | null;
+    /** 密码登录表单的预填值（上次填过的服务器地址）；按选中的登录方式问，没有时为 null（而不是每次新建的空对象）。 */
+    getPasswordLoginDefaults?(providerId: OnlineProviderId, methodId?: string | null): { serverUrl?: string } | null;
     getProviderCapabilities(providerId: OnlineProviderId): Pick<ProviderCapabilities, 'auth' | 'passwordLogin' | 'passwordLoginServerUrl'>;
     /** 此刻还在计时的登录请求不再计时（services/onlineMusic/login/loginRequestLimit）；停下一次登录时调。 */
     dropRequestLimits(): void;

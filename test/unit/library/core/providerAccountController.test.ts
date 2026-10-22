@@ -452,6 +452,47 @@ describe('providerAccountController · the sign-in', () => {
         expect(opsOf('start')).toEqual([['start', 'quill', 'wechat', 'key-1'], ['start', 'quill', 'wechat', 'key-2']]);
     });
 
+    it('stops at choosing-method before the form of a service that has no code, and asks for what the chosen way asks for', async () => {
+        // 自建服务（没有二维码）也可以有好几种连接办法：方式指向表单而不是码，
+        // 选完才停在表单那一步 —— 这种 provider 一次也不能去要码。
+        const WAYS: LoginMethod[] = [
+            { id: 'fnid', labelKey: 'a.fnid', iconKey: 'a', passwordField: { labelKey: 'a.label', placeholderKey: 'a.hint' } },
+            { id: 'server', labelKey: 'a.server', iconKey: 'b', passwordField: { labelKey: 'a.address' } },
+        ];
+        auth.resolveLoginMethods.mockResolvedValueOnce(WAYS);
+        auth.getProviderCapabilities.mockReturnValue({ auth: true, passwordLogin: true, passwordLoginServerUrl: true });
+        auth.getPasswordLoginDefaults = vi.fn((_providerId: OnlineProviderId, methodId?: string | null) => ({
+            serverUrl: methodId === 'fnid' ? 'abcd1234' : 'http://192.168.1.5:5666',
+        }));
+        const controller = createController();
+        await expect(controller.startLogin('gamma')).resolves.toMatchObject({ step: 'choosing-method' });
+        // 还没选：没有表单，也没去向平台要码。
+        expect(controller.getSnapshot().login?.passwordForm).toBeNull();
+        expect(auth.startLogin).not.toHaveBeenCalled();
+
+        await expect(controller.selectLoginMethod('fnid')).resolves.toMatchObject({ status: 'requested' });
+        expect(controller.getSnapshot().login).toMatchObject({
+            phase: 'password',
+            selectedMethodId: 'fnid',
+            passwordForm: { needsServerUrl: true, field: { labelKey: 'a.label', placeholderKey: 'a.hint' }, serverUrl: 'abcd1234', error: null },
+        });
+        expect(auth.startLogin).not.toHaveBeenCalled();
+        expect(auth.getPasswordLoginDefaults).toHaveBeenCalledWith('gamma', 'fnid');
+
+        // 提交要带上选的是哪一种：同一张表单上，第一栏填的东西按它翻译。
+        await controller.submitPasswordLogin({ username: 'someone', password: 'a-secret', serverUrl: 'abcd1234' });
+        expect(auth.loginWithPassword).toHaveBeenCalledWith('gamma', {
+            username: 'someone', password: 'a-secret', serverUrl: 'abcd1234', methodId: 'fnid',
+        });
+
+        // 换了另一种：第一栏问的东西和预填的值都跟着换 —— 方式不同，那一栏填的就不是一回事。
+        await controller.selectLoginMethod('server');
+        expect(controller.getSnapshot().login?.passwordForm).toMatchObject({
+            field: { labelKey: 'a.address' }, serverUrl: 'http://192.168.1.5:5666',
+        });
+        expect(auth.startLogin).not.toHaveBeenCalled();
+    });
+
     it('turns a retry down until the time the platform asked to wait for, and takes it after', async () => {
         auth.checkLogin.mockResolvedValueOnce({ state: 'error', failure: { case: 'retry-later', retryAfterMs: 30_000 } } satisfies LoginState);
         const controller = createController();

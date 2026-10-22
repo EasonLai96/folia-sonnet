@@ -1,4 +1,5 @@
 import type {
+    LoginMethod,
     OnlineMusicProvider,
     OnlinePlaybackReportProvider,
     ProviderAudioSource,
@@ -20,6 +21,8 @@ import {
     feiniuResourceHeaders,
     getFeiniuServerUrl,
     getFeiniuTransportAvailability,
+    feiniuFnIdFromServerUrl,
+    feiniuServerUrlFromFnId,
     readFeiniuUser,
     rememberFeiniuUser,
 } from './feiniuTransport';
@@ -48,6 +51,25 @@ const playbackReports: OnlinePlaybackReportProvider = {
         await reportFeiniuPlayback(song);
     },
 };
+
+/**
+ * 登录飞牛的两种方式：连的是同一套账号，区别只在「 NAS 在哪、你怎么找到它」。
+ *
+ * - `fnid`：FN ID —— 飞牛给这台 NAS 的远程访问 ID，App 只要它就能拼出地址
+ *   （`abcd1234` → `https://abcd1234.fnid.cc`），人在外面也能连回家；
+ * - `server`：局域网地址 —— 自己手写 `IP:端口`（默认 5666），人在家里用。
+ *
+ * 两种方式最后都要用户名 + 密码。
+ */
+const FEINIU_LOGIN_METHODS: LoginMethod[] = [
+    { id: 'fnid', labelKey: 'home.loginMethodFeiniuFnid', iconKey: 'feiniu', passwordField: { labelKey: 'home.loginFeiniuFnId', placeholderKey: 'home.loginFeiniuFnIdPlaceholder' } },
+    { id: 'server', labelKey: 'home.loginMethodFeiniuServer', iconKey: 'feiniu', passwordField: { labelKey: 'home.loginServerUrl', placeholderKey: 'home.loginServerUrlPlaceholder' } },
+];
+
+/** 选了哪一种就把第一栏填的东西翻译成地址：「填 ID」的那一种要拼域名，另一种照原样。 */
+const serverUrlForMethod = (methodId: string | null | undefined, raw: string | undefined): string | undefined => (
+    methodId === 'fnid' ? feiniuServerUrlFromFnId(raw ?? '') : raw
+);
 
 export const feiniuProvider: OnlineMusicProvider = {
     id: 'feiniu',
@@ -140,14 +162,21 @@ export const feiniuProvider: OnlineMusicProvider = {
         async logout() {
             clearFeiniuSession();
         },
-        async loginWithPassword({ username, password, serverUrl }) {
-            const data = await feiniuPasswordLogin(username, password, serverUrl);
+        async loginWithPassword({ username, password, serverUrl, methodId }) {
+            const data = await feiniuPasswordLogin(username, password, serverUrlForMethod(methodId, serverUrl));
             const user = normalizeFeiniuUser(data);
             rememberFeiniuUser(user);
             return user;
         },
-        /** 上次填过的地址预填进表单：登出不清地址，重登时少填一项。 */
-        getPasswordLoginDefaults: () => ({ serverUrl: getFeiniuServerUrl() }),
+        getLoginMethods: () => FEINIU_LOGIN_METHODS,
+        /**
+         * 上次填过的第一栏预填进表单：登出不清地址，重登时少填一项。
+         * 按方式分开：「填 ID」那一种只认上次的 FN ID（上次填的是 IP 就别往那栏里塞），反之同理。
+         */
+        getPasswordLoginDefaults: (methodId) => {
+            const last = getFeiniuServerUrl();
+            return methodId === 'fnid' ? { serverUrl: feiniuFnIdFromServerUrl(last) } : { serverUrl: last };
+        },
     },
 
     catalog: feiniuCatalog,
