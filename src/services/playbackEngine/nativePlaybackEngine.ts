@@ -69,8 +69,14 @@ class NativePlaybackEngine {
         return this.hasSource && this.playing;
     }
 
-    /** 插值出来的领先最多允许多少：采样滞后时的缓冲空间，也是假领先的上限。 */
-    private static readonly MAX_LEAD_MS = 400;
+    /**
+     * 插值出来的领先最多允许多少：采样滞后时的缓冲空间，也是假领先的上限。
+     *
+     * ⚠️ 必须 **大于原生那边的位置过桥间隔**（`FoliaNativePlayerPlugin` 的
+     * `WEB_NOTIFY_INTERVAL_MS`，500ms）：过桥降频之后，两次采样之间要靠这里插值顶着，
+     * 上限比间隔还小的话位置会被夹住、进度条与歌词走走停停。多给 200ms 吃掉抖动。
+     */
+    private static readonly MAX_LEAD_MS = 700;
 
     /** 插值后的当前位置（秒）。没有源时给 0。 */
     getPositionSec(): number {

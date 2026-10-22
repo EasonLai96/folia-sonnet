@@ -8,6 +8,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
 
@@ -38,6 +39,17 @@ public class FoliaNativePlayerPlugin extends Plugin {
      * 改播放器那个 `POSITION_TICK_MS` 时这里要跟着改。
      */
     private static final long POSITION_TICK_MS = 250L;
+
+    /**
+     * 位置过桥的最小间隔：播放器 250ms 报一次，攒两次才往 WebView 发。
+     *
+     * 见下面「位置这一档过桥要降频」那段。改这个值必须同步放宽
+     * `nativePlaybackEngine` 的 `MAX_LEAD_MS`，否则插值会被夹住。
+     */
+    private static final long WEB_NOTIFY_INTERVAL_MS = 500L;
+
+    /** 上一次真的把位置过桥的时刻。只有播放器线程会碰它（onEvent 在那上面跑）。 */
+    private long lastWebNotifyAtMs = 0L;
 
     /** 采样值与「墙钟外推出来的位置」差不到一个采样周期：这一拍没有新信息。 */
     private static boolean anchorStillTrue(long sampledMs) {
@@ -123,9 +135,32 @@ public class FoliaNativePlayerPlugin extends Plugin {
                     }
                 }
                 /*
+                 * ⭐ **位置这一档过桥要降频**，锚点不降。
+                 *
+                 * App 内（主 WebView）每 250ms 就会被 `evaluateJavascript` 灌一次 JS，
+                 * 而叠层那个 WebView 近乎不收推送（它只在签名变了才收，见
+                 * WallpaperOverlay）—— 这就是「原生播放一开，App 内的可视化每几秒顿
+                 * 一下，而 App 外的悬浮小窗 / 叠层一点不卡」的唯一差别。关掉原生播放
+                 * 这条链整个消失，卡顿也就跟着消失。
+                 *
+                 * 这笔开销不在数据量上，在「往 WebView 里塞一次 JS」这件事本身：
+                 * 它要切进 JS 上下文、排到渲染流水线前面，还给 GC 添一份垃圾。
+                 * 攒够两次再发，频率直接减半，别的什么都不动。
+                 *
+                 * ⚠️ 锚点**照旧每 250ms 算一次**（就在上面），壁纸 / 悬浮窗 / 叠层的
+                 * 时间轴精度一点没降 —— 那一侧读的是锚点，不是这条事件。
+                 * ⚠️ Web 侧自己会插值，但插值有上限（nativePlaybackEngine 的
+                 * MAX_LEAD_MS），**改这个值必须同步放宽那个上限**，否则位置会被夹住、
+                 * 进度条走走停停。
+                 */
+                if ("position".equals(type)) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (now - lastWebNotifyAtMs < WEB_NOTIFY_INTERVAL_MS) return;
+                    lastWebNotifyAtMs = now;
+                }
+                /*
                  * 过桥那一下回主线程：`notifyListeners` 里的监听器表不是为并发写的
                  * （`Plugin.eventListeners` 是个普通 HashMap，加 / 删监听器在 JS 那一侧）。
-                 * 一次 post 而已 —— 位置本来就只有 250ms 一次。
                  */
                 MAIN.post(() -> notifyListeners(EVENT, payload));
             }
