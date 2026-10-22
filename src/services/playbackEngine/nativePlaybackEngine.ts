@@ -24,6 +24,17 @@ class NativePlaybackEngine {
     private hasSource = false;
     private rate = 1;
     private updatedAtMs = 0;
+    /**
+     * 上一次对外给过的位置（毫秒）。
+     *
+     * 只进不退 —— 这是「歌词往回抽一下又恢复」的直接解药：位置采样本身会滞后
+     * （ExoPlayer 的位置是按音频轨道推进的，不是连续量），而暂停/缓冲这类事件又会
+     * 让插值那一截凭空消失，于是给出去的值会掉回 250ms 前，再被下一帧追上。
+     *
+     * 但也不能无上限地只进：那样采样一慢，假领先就会一直攒下去。所以再夹一个
+     * 「最多比原始采样领先 MAX_LEAD_MS」，两头一起看。
+     */
+    private lastDeliveredMs = 0;
     private repeatMode = 0;
     private volume = 1;
     private currentUrl: string | null = null;
@@ -58,14 +69,20 @@ class NativePlaybackEngine {
         return this.hasSource && this.playing;
     }
 
+    /** 插值出来的领先最多允许多少：采样滞后时的缓冲空间，也是假领先的上限。 */
+    private static readonly MAX_LEAD_MS = 400;
+
     /** 插值后的当前位置（秒）。没有源时给 0。 */
     getPositionSec(): number {
         if (!this.hasSource) return 0;
-        if (!this.playing) return this.positionMs / 1000;
-        const elapsed = Math.max(0, performance.now() - this.updatedAtMs);
-        const predicted = this.positionMs + elapsed * this.rate;
-        const upper = this.durationMs > 0 ? this.durationMs : Number.MAX_SAFE_INTEGER;
-        return clamp(predicted, 0, upper) / 1000;
+        const raw = this.playing
+            ? this.positionMs + Math.max(0, performance.now() - this.updatedAtMs) * this.rate
+            : this.positionMs;
+        const upper = this.durationMs > 0 ? Math.min(this.positionMs + NativePlaybackEngine.MAX_LEAD_MS, this.durationMs) : this.positionMs + NativePlaybackEngine.MAX_LEAD_MS;
+        // 不许往回走，也不许把假的领先越攒越多。
+        const delivered = Math.min(Math.max(raw, this.lastDeliveredMs), Math.max(upper, this.positionMs));
+        this.lastDeliveredMs = Math.max(0, delivered);
+        return this.lastDeliveredMs / 1000;
     }
 
     getDurationSec(): number {
@@ -80,6 +97,7 @@ class NativePlaybackEngine {
         this.positionMs = options.startPositionMs ?? 0;
         this.durationMs = 0;
         this.updatedAtMs = performance.now();
+        this.lastDeliveredMs = this.positionMs;
         if (typeof options.repeatMode === 'number') this.repeatMode = options.repeatMode;
         await nativePlayer.prepare({
             url,
@@ -105,6 +123,8 @@ class NativePlaybackEngine {
         const targetMs = Math.max(0, Math.round(seconds * 1000));
         this.positionMs = targetMs;
         this.updatedAtMs = performance.now();
+        // 跳是唯一允许「往回走」的动作，所以这里必须把只进不退的基准一起复位。
+        this.lastDeliveredMs = targetMs;
         await nativePlayer.seek(targetMs);
     }
 
@@ -113,6 +133,7 @@ class NativePlaybackEngine {
         this.playing = false;
         this.positionMs = 0;
         this.durationMs = 0;
+        this.lastDeliveredMs = 0;
         this.currentUrl = null;
         await nativePlayer.stop();
     }

@@ -61,6 +61,8 @@ public final class FoliaNativePlayer {
     private final Listener listener;
 
     @Nullable private ExoPlayer player;
+    /** 最后一首的地址：播放器被回收后重建时靠它装回去（系统控件要能直接拉起播放）。 */
+    @Nullable private String lastUrl;
     private boolean tickScheduled = false;
     private float requestedVolume = 1f;
     private float requestedSpeed = 1f;
@@ -96,6 +98,7 @@ public final class FoliaNativePlayer {
 
     /** 装上地址并缓冲。startPositionMs 小于 0 表示从头播。 */
     public void prepare(String url, long startPositionMs) {
+        lastUrl = url;
         runOnMain(() -> {
             ExoPlayer current = ensurePlayer();
             current.setMediaItem(MediaItem.fromUri(url));
@@ -139,6 +142,8 @@ public final class FoliaNativePlayer {
             current.stop();
             current.setPlayWhenReady(false);
             current.clearMediaItems();
+            // 真的停了：系统控件就不该再把它拉起来。
+            lastUrl = null;
             cachedPlaying = false;
             cachedPositionMs = 0L;
             cachedDurationMs = 0L;
@@ -201,6 +206,11 @@ public final class FoliaNativePlayer {
                 current.release();
             }
         });
+    }
+
+    /** 手上有没有还在播的那一首（系统控件该不该直接碰它，就问这个）。 */
+    public boolean hasMedia() {
+        return lastUrl != null;
     }
 
     /** 缓存值：调用方可能在插件线程上，这里绝不去碰播放器。 */
@@ -267,6 +277,20 @@ public final class FoliaNativePlayer {
         current.addListener(playerListener);
         cachedAudioSessionId = current.getAudioSessionId();
         player = current;
+        /*
+         * 播放器被回收过（Activity 重建 / 进程里那一层被拆掉）而 JS 那边还当它在播：
+         * 这时候从系统控件点「播放」拿到的就是一个空播放器，点下去什么都不会发生。
+         * 记住最后一首，重建时顺手装回去 —— 位置用缓存的最后一次上报。
+         */
+        if (lastUrl != null && current.getMediaItemCount() == 0) {
+            current.setMediaItem(MediaItem.fromUri(lastUrl));
+            current.setRepeatMode(requestedRepeatMode);
+            current.setVolume(requestedVolume);
+            current.prepare();
+            if (cachedPositionMs > 0) {
+                current.seekTo(cachedPositionMs);
+            }
+        }
         return current;
     }
 
@@ -299,7 +323,6 @@ public final class FoliaNativePlayer {
         public void onIsPlayingChanged(boolean isPlaying) {
             ExoPlayer current = player;
             if (current == null) return;
-            cachedPlaying = isPlaying;
             cachedPositionMs = current.getCurrentPosition();
             if (isPlaying) {
                 cachedAudioSessionId = current.getAudioSessionId();
@@ -308,17 +331,22 @@ public final class FoliaNativePlayer {
                 return;
             }
             /*
-             * 缓冲时 ExoPlayer 也会报 `isPlaying = false`，而歌其实没停。
-             * 这时候要是发 "paused"，Web 侧会把播放标记清掉：进度条停住、歌词不动，
-             * 缓冲一结束又猛跳一段 —— 用起来就是「一直在抽搐」。
-             * 缓冲照旧上报位置（它本来不前进），只是不装作已经停了。
+             * ⚠️ `isPlaying = false` **不等于暂停**。
+             *
+             * ExoPlayer 的语义是「此刻有没有在出声」：缓冲、音频焦点被短暂抢走、
+             * 音轨欠载都会翻成 false，而歌并没有停。那时候要是发 "paused"，Web 侧会把
+             * 播放标记清掉 —— 插值那一截凭空没了，进度条与歌词掉回 250ms 前的采样值，
+             * 再被下一帧追上来，看起来就是「往回抽一下又恢复」。
+             *
+             * 所以只有**真的按了暂停**（playWhenReady = false）才发 paused；其余一律
+             * 当作 buffering：位置照报、计时照走，只是这一刻没有出声。
              */
-            if (current.getPlaybackState() == Player.STATE_BUFFERING) {
-                emit("buffering", cachedPositionMs, cachedDurationMs, null);
+            if (!current.getPlayWhenReady()) {
+                stopTicking();
+                emit("paused", cachedPositionMs, cachedDurationMs, null);
                 return;
             }
-            stopTicking();
-            emit("paused", cachedPositionMs, cachedDurationMs, null);
+            emit("buffering", cachedPositionMs, cachedDurationMs, null);
         }
 
         @Override

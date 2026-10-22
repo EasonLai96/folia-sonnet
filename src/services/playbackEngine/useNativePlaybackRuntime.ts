@@ -101,7 +101,9 @@ export const useNativePlaybackRuntime = ({
              */
             const pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
             if (pageHidden && typeof event.positionMs === 'number' && event.type !== 'ready') {
-                currentTime.set(Math.max(0, event.positionMs) / 1000);
+                // 走引擎而不是直接写采样值：它那里有「只进不退」的夹子，
+                // 直接写采样会把 250ms 前的旧值塞回去，回来前台时正好抽一下。
+                currentTime.set(nativePlaybackEngine.getPositionSec());
             }
             switch (event.type) {
                 case 'ready':

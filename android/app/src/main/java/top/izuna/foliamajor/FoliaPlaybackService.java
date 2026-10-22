@@ -200,6 +200,19 @@ public class FoliaPlaybackService extends android.app.Service {
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
+                /*
+                 * 原生播放（P1）：命令同时**直接**给原生播放器一份。
+                 *
+                 * 老路是「广播 → 插件 → JS → resumePlayback」，而挂了很久之后 WebView 那侧的
+                 * JS 会被节流甚至整个挂起 —— 用户原话：「长时间暂停后，通知中心点播放还是
+                 * 拉不起来」。原生这一路不吃那条限制。JS 那条命令照样发：界面、歌词、
+                 * 以及 Web 那条链路还得靠它。两边各管一半，重复一次 play 不会有副作用。
+                 */
+                try {
+                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem();
+                } catch (Throwable ignored) {
+                    // 原生播放器不在（没开原生播放 / 插件没编进来）：交给 Web 那条路。
+                }
                 sendCommand("play");
                 /*
                  * 锚点**这里就切回播放**，不等 Web 层回话 —— 原因见 onSeekTo 那条注释。
@@ -226,6 +239,12 @@ public class FoliaPlaybackService extends android.app.Service {
 
             @Override
             public void onPause() {
+                // 同上（见 onPlay 那条注释）：直接停原生播放器，别只指望后台里那侧 JS。
+                try {
+                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.pauseFromSystem();
+                } catch (Throwable ignored) {
+                    // 同上。
+                }
                 sendCommand("pause");
                 // 暂停按下就撤回那次乐观播放的确认：方向相反，不需要再等，也不会再补发。
                 playConfirmPending = false;

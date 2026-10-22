@@ -23,10 +23,17 @@ public class FoliaNativePlayerPlugin extends Plugin {
 
     private static final String EVENT = "foliaNativePlayer";
 
+    /**
+     * 服务那边（通知栏 / 锁屏 / 耳机）要能直接碰到播放器，只能走静态引用 ——
+     * 与 FoliaPlaybackPlugin 同一个路子：Activity 可能已经不在了，插件实例也可能换过。
+     */
+    private static volatile FoliaNativePlayerPlugin instance;
+
     private FoliaNativePlayer player;
 
     @Override
     public void load() {
+        instance = this;
         // 播放器要在主线程上建（ExoPlayer 的线程约束），load() 已经在主线程。
         player = new FoliaNativePlayer(getContext(), (type, positionMs, durationMs, message) -> {
             JSObject payload = new JSObject();
@@ -46,7 +53,31 @@ public class FoliaNativePlayerPlugin extends Plugin {
             player.release();
             player = null;
         }
+        instance = null;
         super.handleOnDestroy();
+    }
+
+    /**
+     * 通知栏 / 锁屏按了「播放」之后，服务直接把这一下交给原生播放器。
+     *
+     * 不能只靠「广播 → 插件 → JS」那条老路：挂了很久之后，WebView 那侧的 JS 会被
+     * 节流甚至整个挂起，`resumePlayback` 压根跑不起来 —— 表现就是
+     * 「通知中心点了播放，一点反应都没有」。原生这一路不受那条限制。
+     *
+     * 只有在**确实是用原生在播**时才动手（手上有一首歌），否则交给 Web 那边照旧。
+     * JS 那条命令照样会发：它负责界面与歌词，两边各管一半，不冲突。
+     */
+    public static void resumeFromSystem() {
+        FoliaNativePlayerPlugin current = instance;
+        if (current == null || current.player == null || !current.player.hasMedia()) return;
+        current.player.play();
+    }
+
+    /** 同上，方向相反。 */
+    public static void pauseFromSystem() {
+        FoliaNativePlayerPlugin current = instance;
+        if (current == null || current.player == null || !current.player.hasMedia()) return;
+        current.player.pause();
     }
 
     @PluginMethod
