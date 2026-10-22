@@ -131,10 +131,6 @@ public final class WallpaperAudioTap {
      */
     private volatile boolean failed = false;
 
-    public WallpaperAudioTap(Listener listener) {
-        this.listener = listener;
-    }
-
     /** 叠层挂上去之后调用。重复调用无害。 */
     public void start() {
         if (running || failed) {

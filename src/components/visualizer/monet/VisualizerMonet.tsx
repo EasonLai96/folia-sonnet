@@ -44,7 +44,6 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         hideCoverArt = false,
         staticMode = false,
         isPreviewMode = false,
-        isWallpaperSurface = false,
         monetTuning = DEFAULT_MONET_TUNING,
         monetPortraitImage = null,
         onMonetTuningChange,
@@ -562,7 +561,16 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 </div>
             </div>
 
-            {!isWallpaperSurface && showText && monetTuning.showAudioVisualization && (
+            {/*
+              * 底部频谱。以前这里还有一道 `!isWallpaperSurface`：叠层（桌面歌词那一层）上
+              * 一律不画。当时是因为叠层根本拿不到音频 —— 它在**另一个 WebView** 里，
+              * 读不到主应用那张 Web Audio 图，频谱恒为 0，画出来只是一条平线。
+              *
+              * 现在两条路都能喂它了（原生 WallpaperAudioTap 推 session 混音 / 原生播放器
+              * 的 session），所以不再按「在哪一层画」来砍，只跟着设置走：
+              * 桌面歌词那边的开关和播放页是同一个 `showAudioVisualization`，默认开。
+              */}
+            {showText && monetTuning.showAudioVisualization && (
                 <motion.div
                     key={`audio-${introKey}`}
                     initial={{ opacity: 0, y: 15 }}
