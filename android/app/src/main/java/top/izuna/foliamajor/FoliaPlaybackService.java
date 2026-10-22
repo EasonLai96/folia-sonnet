@@ -786,7 +786,7 @@ public class FoliaPlaybackService extends android.app.Service {
     private void applyPlaybackState() {
         PlaybackStateCompat.Builder builder = new PlaybackStateCompat.Builder()
                 .setActions(supportedActions())
-                .setState(cachedState, cachedPositionMs, cachedSpeed);
+                .setState(cachedState, resolvePlaybackPositionMs(), cachedSpeed);
         // ColorOS 锁屏歌词：有翻译 lane 时把 Bridge 的公共「翻译」按钮挂上。
         //
         // CustomAction.Builder 强制要求一个**非零**图标资源 id，传 0 会直接构造失败；
@@ -863,8 +863,25 @@ public class FoliaPlaybackService extends android.app.Service {
 
     private void publishSnapshot() {
         lastSnapshot = new MediaSnapshot(cachedTitle, cachedArtist, cachedAlbum,
-                cachedArtwork, cachedDurationMs, cachedPositionMs, cachedPlaying,
+                cachedArtwork, cachedDurationMs, resolvePlaybackPositionMs(), cachedPlaying,
                 cachedLiked, cachedCanLike);
+    }
+
+    /**
+     * 通知栏 / 锁屏那条进度条该显示的位置。
+     *
+     * 原生在放的时候直接问播放器：它的位置就是真值。Web 报上来的那一份要过 Chromium 的
+     * 定时器节流 —— 挂着不动久了，那一推可能几十秒才来一次，通知栏就停着、或者一直是 00。
+     * 其余情况照旧用 Web 报的位置：`<audio>` 播到哪只有它知道。
+     */
+    private long resolvePlaybackPositionMs() {
+        if (top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+            long nativePosition = top.izuna.foliamajor.player.FoliaNativePlayerPlugin.currentPositionMs();
+            if (nativePosition >= 0L) {
+                return nativePosition;
+            }
+        }
+        return cachedPositionMs;
     }
 
     /**

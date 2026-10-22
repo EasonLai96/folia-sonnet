@@ -13,13 +13,28 @@ export type NativePlaybackEventType =
     | 'position'
     | 'buffering'
     | 'error'
-    | 'idle';
+    | 'idle'
+    | 'spectrum';
 
 export type NativePlaybackEvent = {
     type: NativePlaybackEventType;
     positionMs?: number;
     durationMs?: number;
     message?: string;
+    /**
+     * 频谱的整条（P2）：128 段，0..255，与 `getByteFrequencyData` 同量纲 ——
+     * 于是 `usePlaybackVisualizerBridge` 里那个 `tapped` 分支能原样吃下去。
+     */
+    spectrum?: number[];
+    /** 五个频段，同样是 0..255。 */
+    bands?: {
+        bass: number;
+        lowMid: number;
+        mid: number;
+        vocal: number;
+        treble: number;
+        power: number;
+    };
 };
 
 export type NativePlaybackSnapshot = {
@@ -44,6 +59,8 @@ interface FoliaNativePlayerPlugin {
     setSpeed(options: { speed: number }): Promise<void>;
     getSnapshot(): Promise<NativePlaybackSnapshot>;
     release(): Promise<void>;
+    /** 频谱采集的开关（P2）。关着的时候原生一个字节都不推。 */
+    setSpectrumEnabled(options: { enabled: boolean }): Promise<void>;
     addListener(
         eventName: 'foliaNativePlayer',
         listener: (event: NativePlaybackEvent) => void,
@@ -75,6 +92,7 @@ export const nativePlayer = {
     setSpeed: (speed: number) => FoliaNativePlayer.setSpeed({ speed }),
     getSnapshot: () => FoliaNativePlayer.getSnapshot(),
     release: () => FoliaNativePlayer.release(),
+    setSpectrumEnabled: (enabled: boolean) => FoliaNativePlayer.setSpectrumEnabled({ enabled }),
     addListener: (listener: (event: NativePlaybackEvent) => void) =>
         FoliaNativePlayer.addListener('foliaNativePlayer', listener),
 };

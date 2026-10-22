@@ -1,10 +1,14 @@
 package top.izuna.foliamajor.player;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import top.izuna.foliamajor.wallpaper.WallpaperAudioTap;
+import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
 
 /**
  * 原生播放内核的桥（P1）。
@@ -35,15 +39,59 @@ public class FoliaNativePlayerPlugin extends Plugin {
     public void load() {
         instance = this;
         // 播放器要在主线程上建（ExoPlayer 的线程约束），load() 已经在主线程。
-        player = new FoliaNativePlayer(getContext(), (type, positionMs, durationMs, message) -> {
-            JSObject payload = new JSObject();
-            payload.put("type", type);
-            payload.put("positionMs", (double) positionMs);
-            payload.put("durationMs", (double) durationMs);
-            if (message != null) {
-                payload.put("message", message);
+        player = new FoliaNativePlayer(getContext(), new FoliaNativePlayer.Listener() {
+            @Override
+            public void onEvent(String type, long positionMs, long durationMs, String message) {
+                JSObject payload = new JSObject();
+                payload.put("type", type);
+                payload.put("positionMs", (double) positionMs);
+                payload.put("durationMs", (double) durationMs);
+                if (message != null) {
+                    payload.put("message", message);
+                }
+                notifyListeners(EVENT, payload);
+                /*
+                 * 桌面歌词（壁纸 / 悬浮小窗 / 锁屏）的时间轴锚点：由播放器自己给。
+                 *
+                 * 那边存的不是「当前行」，而是「整条时间轴 + 一个锚点」，段内按墙钟自己
+                 * 往前推（WallpaperLyricsState.positionMs）。所以只要锚点是真的，JS 被
+                 * 节流、被挂起都照走。而 Web 那条锚点来自 motion signal（rAF 写的），
+                 * 页面一藏就被 Chromium 停掉 —— 锚点冻住，歌词停在原地。
+                 *
+                 * 只在这几种事件上写：暂停之后就没有 position 了，paused 带的是停住的位置。
+                 */
+                if ("position".equals(type) || "playing".equals(type)
+                    || "paused".equals(type) || "ready".equals(type)) {
+                    WallpaperLyricsState.setAnchor(positionMs, "playing".equals(type));
+                }
             }
-            notifyListeners(EVENT, payload);
+
+            /**
+             * 频谱（P2）。20 帧/秒，每帧 128 段。
+             *
+             * 只在 Web 侧开着采集的时候才有 —— 后台画给谁看，那条路一藏就关掉了。
+             */
+            @Override
+            public void onSpectrum(WallpaperAudioTap.Frame frame) {
+                JSArray spectrum = new JSArray();
+                if (frame.spectrum != null) {
+                    for (int value : frame.spectrum) {
+                        spectrum.put(value);
+                    }
+                }
+                JSObject bands = new JSObject();
+                bands.put("bass", frame.bass);
+                bands.put("lowMid", frame.lowMid);
+                bands.put("mid", frame.mid);
+                bands.put("vocal", frame.vocal);
+                bands.put("treble", frame.treble);
+                bands.put("power", frame.power);
+                JSObject payload = new JSObject();
+                payload.put("type", "spectrum");
+                payload.put("spectrum", spectrum);
+                payload.put("bands", bands);
+                notifyListeners(EVENT, payload);
+            }
         });
     }
 
@@ -78,6 +126,28 @@ public class FoliaNativePlayerPlugin extends Plugin {
         FoliaNativePlayerPlugin current = instance;
         if (current == null || current.player == null || !current.player.hasMedia()) return;
         current.player.pause();
+    }
+
+    /**
+     * 原生手上有没有正在放的一首。
+     *
+     * 壁纸那边靠它决定「位置该由谁给」：原生在放的时候，Web 推下来的那个位置是插值出来的，
+     * 与播放器自己报的采样值交替写入，时间轴会被拽得来回抖 —— 所以那时 Web 那份要让位。
+     */
+    public static boolean hasActiveMedia() {
+        FoliaNativePlayerPlugin current = instance;
+        return current != null && current.player != null && current.player.hasMedia();
+    }
+
+    /**
+     * 原生播放器此刻的位置（毫秒）；没有播放器时给 -1。
+     *
+     * 通知栏 / 锁屏那条进度条用它：原生在放的时候位置只有播放器知道，而 Web 那一推
+     * 要过 Chromium 的定时器节流 —— 挂久了就是「进度条不动」「一直是 00」。
+     */
+    public static long currentPositionMs() {
+        FoliaNativePlayerPlugin current = instance;
+        return current != null && current.player != null ? current.player.getPositionMs() : -1L;
     }
 
     @PluginMethod
@@ -181,6 +251,24 @@ public class FoliaNativePlayerPlugin extends Plugin {
         result.put("playing", current.isPlaying());
         result.put("audioSessionId", current.getAudioSessionId());
         call.resolve(result);
+    }
+
+    /**
+     * 频谱采集的开关（P2）。
+     *
+     * ⚠️ 必须能关：开着就是每秒 20 帧 × 128 段过桥，而页面藏起来之后既没人看，
+     * 也没有意义。Web 侧按可见性开关，不需要它的时候一个字节都不推。
+     */
+    @PluginMethod
+    public void setSpectrumEnabled(PluginCall call) {
+        FoliaNativePlayer current = player;
+        if (current == null) {
+            call.reject("The player is not ready.");
+            return;
+        }
+        Boolean enabled = call.getBoolean("enabled");
+        current.setSpectrumEnabled(Boolean.TRUE.equals(enabled));
+        call.resolve();
     }
 
     @PluginMethod

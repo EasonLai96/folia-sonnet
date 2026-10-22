@@ -15,6 +15,8 @@ import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 
+import top.izuna.foliamajor.wallpaper.WallpaperAudioTap;
+
 // 当前文件：Folia 在安卓上的原生播放内核（P1：最小闭环）。
 //
 // 只做「把这一个地址解码并出声」，不碰任何音效：均衡器、音效链、淡入淡出、automix
@@ -42,6 +44,14 @@ public final class FoliaNativePlayer {
     public interface Listener {
         /** type: ready | playing | paused | ended | position | buffering | error */
         void onEvent(String type, long positionMs, long durationMs, @Nullable String message);
+
+        /**
+         * 频谱的一帧（P2）。只在采集开着的时候来，20 次/秒。
+         *
+         * 量纲与壁纸叠层那一份完全一致（同一套 5 段边界、同一条 shape 曲线），
+         * 于是 Web 侧 `usePlaybackVisualizerBridge` 里那个 `tapped` 分支能原样吃下去。
+         */
+        void onSpectrum(top.izuna.foliamajor.wallpaper.WallpaperAudioTap.Frame frame);
     }
 
     private static final long POSITION_TICK_MS = 250L;
@@ -73,6 +83,20 @@ public final class FoliaNativePlayer {
     private volatile long cachedDurationMs = 0L;
     private volatile boolean cachedPlaying = false;
     private volatile int cachedAudioSessionId = 0;
+
+    /*
+     * 频谱采集（P2）。
+     *
+     * 原生出声之后，WebView 那张 Web Audio 图是断的（createMediaElementSource 单向不可逆），
+     * 于是 AudioWorklet 那个频谱抽头抽到的是空信号 —— 播放页的柱子全趴下。所以频谱只能
+     * 在原生这边采：`Visualizer(audioSessionId)`，只采这一首歌。
+     *
+     * 由 Web 侧显式开关：只有前台真的在画频谱时才开，页面一藏就关（后台画给谁看）。
+     */
+    private boolean spectrumRequested = false;
+    @Nullable private WallpaperAudioTap spectrumTap;
+    /** 当前这个 tap 挂在哪个 session 上：session 一变（播放器重建）就得重挂。 */
+    private int spectrumTapSession = 0;
 
     private final Runnable positionTick = new Runnable() {
         @Override
@@ -119,6 +143,7 @@ public final class FoliaNativePlayer {
             ExoPlayer current = ensurePlayer();
             current.setPlayWhenReady(true);
             cachedPlaying = true;
+            startSpectrum();
         });
     }
 
@@ -128,6 +153,8 @@ public final class FoliaNativePlayer {
             if (current == null) return;
             current.setPlayWhenReady(false);
             cachedPlaying = false;
+            // 停了就没声音可采：继续采只会每 50ms 推一帧全 0 过桥。
+            stopSpectrum();
             stopTicking();
             cachedPositionMs = current.getCurrentPosition();
             emit("paused", cachedPositionMs, cachedDurationMs, null);
@@ -147,6 +174,7 @@ public final class FoliaNativePlayer {
             cachedPlaying = false;
             cachedPositionMs = 0L;
             cachedDurationMs = 0L;
+            stopSpectrum();
             stopTicking();
             emit("idle", 0L, 0L, null);
         });
@@ -197,6 +225,7 @@ public final class FoliaNativePlayer {
     public void release() {
         runOnMain(() -> {
             stopTicking();
+            stopSpectrum();
             ExoPlayer current = player;
             player = null;
             cachedPlaying = false;
@@ -206,6 +235,46 @@ public final class FoliaNativePlayer {
                 current.release();
             }
         });
+    }
+
+    /** 频谱采集的开关（P2）。开着时 20 帧/秒，所以只有前台真的在画的时候才开。 */
+    public void setSpectrumEnabled(boolean enabled) {
+        runOnMain(() -> {
+            spectrumRequested = enabled;
+            if (enabled) {
+                startSpectrum();
+            } else {
+                stopSpectrum();
+            }
+        });
+    }
+
+    /**
+     * 挂上采集。
+     *
+     * 幂等，且 session 变了会重挂：播放器重建（Activity 重建 / 系统控件拉起）之后
+     * audioSessionId 是另一个，旧的那个 Visualizer 采的是一条已经没有声音的路。
+     */
+    private void startSpectrum() {
+        if (!spectrumRequested) return;
+        int session = cachedAudioSessionId;
+        // 还没出声就没有 session：等 STATE_READY / onIsPlayingChanged 再来一次。
+        if (session == 0) return;
+        if (spectrumTap != null && spectrumTapSession == session) return;
+        stopSpectrum();
+        spectrumTapSession = session;
+        spectrumTap = new WallpaperAudioTap(frame -> {
+            if (listener != null) listener.onSpectrum(frame);
+        }, session);
+        spectrumTap.start();
+    }
+
+    private void stopSpectrum() {
+        if (spectrumTap != null) {
+            spectrumTap.stop();
+            spectrumTap = null;
+        }
+        spectrumTapSession = 0;
     }
 
     /** 手上有没有还在播的那一首（系统控件该不该直接碰它，就问这个）。 */
@@ -304,6 +373,7 @@ public final class FoliaNativePlayer {
                     long duration = current.getDuration();
                     cachedDurationMs = duration > 0 ? duration : 0L;
                     cachedAudioSessionId = current.getAudioSessionId();
+                    startSpectrum();
                     emit("ready", current.getCurrentPosition(), cachedDurationMs, null);
                     break;
                 case Player.STATE_ENDED:
@@ -326,6 +396,7 @@ public final class FoliaNativePlayer {
             cachedPositionMs = current.getCurrentPosition();
             if (isPlaying) {
                 cachedAudioSessionId = current.getAudioSessionId();
+                startSpectrum();
                 startTicking();
                 emit("playing", cachedPositionMs, cachedDurationMs, null);
                 return;

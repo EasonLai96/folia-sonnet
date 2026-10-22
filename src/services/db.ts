@@ -35,6 +35,7 @@ import {
   cancelLocalCoverAssetMigration,
   resetLocalCoverAssetRuntime,
 } from './localCoverAssetService';
+import { clearNativeMediaCache, getNativeMediaCacheStats } from './mediaCacheStore';
 
 // src/services/db.ts
 // Keeps the historical storage API stable while delegating every IndexedDB operation to Dexie repositories.
@@ -145,6 +146,7 @@ export const clearCache = async (preserveKeys: string[] = []): Promise<void> => 
     if (hasElectronAudioCacheBridge() && !preserveKeys.some(key => key.startsWith('audio_'))) {
       await window.electron!.clearAudioCache();
     }
+    if (!preserveKeys.some(key => key.startsWith('audio_'))) await clearNativeMediaCache();
     if (!preserveKeys.some(key => key.startsWith('cover_'))) await clearCoverAssets();
   } catch (error) {
     console.error('Clear cache failed', error);
@@ -168,6 +170,12 @@ export const getCacheUsageByCategory = async (): Promise<{
     } else if (hasElectronAudioCacheBridge()) {
       usage.media += await window.electron!.getAudioCacheUsage();
     }
+    // 安卓：副本在 App 私有目录里，按数据库算出来的是 0，要另外问一次。
+    const nativeStats = await getNativeMediaCacheStats();
+    if (nativeStats) {
+      usage.media += nativeStats.size;
+      usage.mediaCount += nativeStats.count;
+    }
     usage.cover += await getCoverAssetUsage();
     return usage;
   } catch {
@@ -181,6 +189,7 @@ export const clearCacheByCategory = async (category: CacheCategory): Promise<voi
     if (category === 'media' && hasElectronAudioCacheBridge()) {
       await window.electron!.clearAudioCache();
     }
+    if (category === 'media') await clearNativeMediaCache();
     if (category === 'cover') await clearCoverAssets();
   } catch (error) {
     console.error('Failed to clear cache by category', error);
@@ -240,6 +249,7 @@ export const deleteLocalSongs = async (ids: string[]): Promise<void> => {
 export const clearAllData = async (): Promise<void> => {
   try {
     if (hasElectronAudioCacheBridge()) await window.electron!.clearAudioCache();
+    await clearNativeMediaCache();
     await clearCoverAssets();
     await cancelLocalCoverAssetMigration();
     await clearLocalCoverBinaries();

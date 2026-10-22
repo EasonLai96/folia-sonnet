@@ -252,8 +252,9 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     // 默认关：常亮等于放弃系统那套自动熄屏，该由用户点头，不该替他决定。
     keepScreenOnWhilePlaying: getStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, false),
     mixWithOtherAudio: getStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, false),
-    // 默认关：原生播放会让均衡器 / 音效 / 频谱整体失效，这是能听见的代价。
-    nativePlaybackEnabled: getStoredBoolean(NATIVE_PLAYBACK_KEY, false),
+    // 默认开：切后台更稳、更省电，也少一层撕裂。代价是均衡器 / 音效 / 频谱整体失效，
+    // 所以设置里仍留着开关 —— 想回到网页那张音频图，拨一下就行。
+    nativePlaybackEnabled: getStoredBoolean(NATIVE_PLAYBACK_KEY, true),
     audioOutputDeviceId: readStoredAudioOutputDeviceId(),
     audioEqualizerSettings: readStoredAudioEqualizerSettings(),
     isAudioEqualizerOpen: false,

@@ -15,6 +15,7 @@ import Home from './components/app/Home';
 import PlayerPanel from './components/app/PlayerPanel';
 import ThemeQuickEditorHost from './components/panelTab/ThemeQuickEditor';
 import AppDialogs from './components/app/dialogs/AppDialogs';
+import MediaCacheMigrationNotice from './components/app/MediaCacheMigrationNotice';
 import { useProviderSignOut } from './components/app/dialogs/useProviderSignOut';
 import LoginHost from './components/login/LoginHost';
 import { useSettingsDialogModel } from './components/app/dialogs/useSettingsDialogModel';
@@ -1571,7 +1572,10 @@ export default function App() {
     // 壁纸是另一个组件，读不到 React 状态，只能由这里主动推过去。
     useLyricsWallpaperFeed({
         lyrics,
-        getCurrentTime: () => currentTime.get(),
+        // 原生播放时位置只在播放器手里：`currentTime` 那个 motion signal 由 rAF 写，
+        // 后台一藏就被 Chromium 停掉，锚点会冻在最后一次前台读数上。桌面歌词（壁纸 /
+        // 悬浮）靠的正是这个锚点，所以取数要原生优先。
+        getCurrentTime: () => (nativeTakesRef.current ? nativePlaybackEngine.getPositionSec() : currentTime.get()),
         title: displaySong?.name ?? null,
         artist: displaySong ? getSongArtistLabel(displaySong) : null,
         coverUrl: displayCoverUrl ?? cachedCoverUrl,
@@ -1599,7 +1603,7 @@ export default function App() {
     // Android 专有：把当前歌曲与歌词推给状态栏歌词（Lyricon）。
     useLyriconFeed({
         lyrics,
-        getCurrentTime: () => currentTime.get(),
+        getCurrentTime: () => (nativeTakesRef.current ? nativePlaybackEngine.getPositionSec() : currentTime.get()),
         title: displaySong?.name ?? null,
         artist: displaySong ? getSongArtistLabel(displaySong) : null,
         // id 在部分音源上是数字，Lyricon 只用它判断换没换歌，统一成字符串即可。
@@ -3306,6 +3310,8 @@ export default function App() {
             />
 
             <AppDialogs model={appDialogsModel} />
+            {/* 启动那一次：把上一版的媒体缓存搬进私有目录，搬的时候给一条提示。 */}
+            <MediaCacheMigrationNotice />
             <FreeSoftwareNoticeModal
                 isOpen={startupExperience.isFreeSoftwareNoticeOpen}
                 isDaylight={isDaylight}

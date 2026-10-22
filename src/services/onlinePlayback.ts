@@ -13,6 +13,7 @@ import { omni } from './onlineMusic/omni';
 import { autoRetryDelaysMs, logOnlineFailure, onlineFailureOf, type OnlineFailure } from './onlineMusic/failure/onlineFailureCase';
 import { noteOnlineRequestCooldown, onlineRequestCooldown } from './onlineMusic/failure/onlineRequestCooldown';
 import { getSongResourceCacheKey } from './onlineMusic/resourceKeys';
+import { readNativeMediaCacheUrl } from './mediaCacheStore';
 import { deleteCachedSongAudio, getCachedSongAudioBlob, getCachedSongReplayGain, getSongCacheWithLegacyMigration } from './onlineMusic/resourceCache';
 import { measureSongAudio, notTheSongWhy } from './wholeSongCheck';
 import { isCachedSongAudioDistrusted } from './playbackRecovery/mediaCacheGuard';
@@ -91,8 +92,7 @@ export async function loadOnlineSongAudioSource(
     };
     const playCopy = async (copy: Blob | null) => {
         const blob = await wholeCopy(copy);
-        const blobUrl = blob && createSafeObjectUrl(blob);
-        if (!blobUrl) return null;
+        if (!blob) return null;
         // Nothing on this path ever asks the provider again, so the stored gain is the only
         // one a cached track can have. Without it every cached track reaches the fader at 0dB.
         let replayGain = song.replayGain ?? prefetched?.replayGain;
@@ -100,6 +100,17 @@ export async function loadOnlineSongAudioSource(
             replayGain = await getCachedSongReplayGain(song);
             if (replayGain) console.log(`[Cache] ReplayGain recovered for "${song.name}" from the store, not the provider`);
         }
+        /*
+         * 副本在私有目录里时，播的是它的回环地址，不再包一层 `blob:`。
+         *
+         * `blob:` 原生播放器吃不下，那首歌就整首回落 <audio>（均衡器照旧有声，
+         * 看上去正是「开了原生播放没生效」）。而 `http://127.0.0.1:<port>/media-cache/…`
+         * 两边都读得动 —— 原生播放关着的时候也一样用得上这份缓存。
+         */
+        const cachedUrl = await readNativeMediaCacheUrl(getSongResourceCacheKey('audio', song));
+        if (cachedUrl) return { kind: 'ok' as const, audioSrc: cachedUrl, replayGain };
+        const blobUrl = createSafeObjectUrl(blob);
+        if (!blobUrl) return null;
         return { kind: 'ok' as const, audioSrc: blobUrl, blobUrl, replayGain };
     };
     // Where no URL can be had (offline, a sign-in that has ended, a song taken down), the copy that

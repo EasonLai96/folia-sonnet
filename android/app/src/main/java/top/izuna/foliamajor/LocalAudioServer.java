@@ -12,6 +12,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -21,8 +22,10 @@ import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -50,6 +53,14 @@ final class LocalAudioServer {
     private static final String AUDIO_PATH_PREFIX = "/audio/";
     private static final String REMOTE_AUDIO_PATH_PREFIX = "/remote-audio/";
     private static final String VIDEO_LAYER_PATH_PREFIX = "/video-layer/";
+    /*
+     * 媒体缓存（在线歌的本地副本）存放的那一路。
+     *
+     * 以前这些字节躺在 WebView 的 IndexedDB 里，取出来只能变成 blob: 地址，而原生播放器
+     * 吃不下 blob: —— 于是「有缓存的歌」恰恰是原生播放接管的那些，反而整首回落到 <audio>。
+     * 现在副本写进 App 私有目录，播放时拿回环地址，ExoPlayer 和 <audio> 都能读。
+     */
+    private static final String MEDIA_CACHE_PATH_PREFIX = "/media-cache/";
     private static final String IMPORTED_PREFIX = "imported-";
     /** 直接按绝对路径流原文件的 ref 前缀（文件系统兜底扫描出来的歌，不复制进私有目录）。 */
     private static final String FILE_PREFIX = "file-";
@@ -180,6 +191,57 @@ final class LocalAudioServer {
         return dir;
     }
 
+    /** 媒体缓存副本存放位置（在线歌的字节，见 MEDIA_CACHE_PATH_PREFIX）。 */
+    File mediaCacheDirectory() {
+        File dir = new File(context.getFilesDir(), "media-cache");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    /** `{总字节数, 份数}`。设置页的「媒体缓存」那一栏读它 —— 字节搬出 IndexedDB 之后，
+     *  那边按数据库算出来的占用会恒为 0，看起来像「缓存没了」。 */
+    synchronized long[] mediaCacheStats() {
+        File[] files = mediaCacheDirectory().listFiles();
+        long size = 0;
+        long count = 0;
+        if (files != null) {
+            for (File file : files) {
+                if (!file.isFile() || file.getName().endsWith(".part")) continue;
+                size += file.length();
+                count += 1;
+            }
+        }
+        return new long[] { size, count };
+    }
+
+    /** 清空整个媒体缓存目录（设置页的「清除媒体缓存」）。 */
+    synchronized void clearMediaCache() {
+        File[] files = mediaCacheDirectory().listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.isFile()) file.delete();
+        }
+    }
+
+    /**
+     * 缓存副本的文件名长什么样：`<key 的 base64url>.<扩展名>`。
+     *
+     * key 里可能有歌名（中文、空格、斜杠），所以不能直接拿它拼路径 —— Web 侧先编码成
+     * base64url，这里再用白名单收口，路径穿越（`/`、`..`）在拼路径之前就被挡掉。
+     */
+    private static boolean isMediaCacheNameAllowed(String name) {
+        if (name == null || name.isEmpty() || name.length() > 220) return false;
+        if (name.contains("/") || name.contains("\\") || name.contains("..")) return false;
+        if (name.startsWith(".")) return false;
+        for (int i = 0; i < name.length(); i += 1) {
+            char c = name.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || c == '-' || c == '_' || c == '.';
+            if (!ok) return false;
+        }
+        return true;
+    }
+
     private void handle(Socket socket) {
         try (Socket client = socket;
              BufferedInputStream input = new BufferedInputStream(client.getInputStream());
@@ -201,9 +263,10 @@ final class LocalAudioServer {
                 }
             }
 
-            String path = requestParts[1];
-            int query = path.indexOf('?');
-            if (query >= 0) path = path.substring(0, query);
+            String rawPath = requestParts[1];
+            int queryAt = rawPath.indexOf('?');
+            String queryString = queryAt >= 0 ? rawPath.substring(queryAt + 1) : "";
+            String path = queryAt >= 0 ? rawPath.substring(0, queryAt) : rawPath;
             /*
              * 预检（OPTIONS）必须自己答。
              *
@@ -215,8 +278,8 @@ final class LocalAudioServer {
             if ("OPTIONS".equals(requestParts[0])) {
                 String response = "HTTP/1.1 204 No Content\r\n"
                     + "Access-Control-Allow-Origin: *\r\n"
-                    + "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
-                    + "Access-Control-Allow-Headers: range, content-range, content-length\r\n"
+                    + "Access-Control-Allow-Methods: GET, HEAD, PUT, DELETE, OPTIONS\r\n"
+                    + "Access-Control-Allow-Headers: range, content-range, content-length, content-type\r\n"
                     + "Access-Control-Expose-Headers: range, content-range, content-length, accept-ranges\r\n"
                     + "Access-Control-Max-Age: 86400\r\n"
                     + "Content-Length: 0\r\nConnection: close\r\n\r\n";
@@ -230,6 +293,18 @@ final class LocalAudioServer {
             }
             if (path.startsWith(VIDEO_LAYER_PATH_PREFIX)) {
                 streamVideoLayerFile(output, requestParts, headers);
+                return;
+            }
+            if (path.startsWith(MEDIA_CACHE_PATH_PREFIX)) {
+                String name = URLDecoder.decode(path.substring(MEDIA_CACHE_PATH_PREFIX.length()), "UTF-8");
+                String method = requestParts[0];
+                if ("PUT".equals(method) || "POST".equals(method)) {
+                    writeMediaCacheFile(input, output, headers, name, queryString);
+                } else if ("DELETE".equals(method)) {
+                    deleteMediaCacheFile(output, name, queryString);
+                } else {
+                    streamMediaCacheFile(output, requestParts, headers, name);
+                }
                 return;
             }
             if (!path.startsWith(AUDIO_PATH_PREFIX)) {
@@ -476,6 +551,209 @@ final class LocalAudioServer {
             VideoLayerFile.mimeType(context),
             () -> new FileInputStream(target)
         );
+    }
+
+    /**
+     * 读一份媒体缓存副本。原生播放器与 <audio> 都从这里取字节，所以 Range 与 CORS
+     * 一样都不能少 —— 复用 writeResponse 就是为了这两件事只写一遍。
+     */
+    private void streamMediaCacheFile(
+        BufferedOutputStream output,
+        String[] requestParts,
+        Map<String, String> headers,
+        String fileName
+    ) throws IOException {
+        File target = mediaCacheFile(fileName);
+        if (target == null) {
+            // 不存在与「名字不合法」都走 404：名字来自 URL，不给它区别对待的理由。
+            Log.w(TAG, "media cache copy missing: " + fileName);
+            writeStatus(output, 404, "Not Found");
+            return;
+        }
+        writeResponse(
+            output,
+            requestParts,
+            headers,
+            target.length(),
+            guessMimeType(fileName),
+            () -> new FileInputStream(target)
+        );
+    }
+
+    /**
+     * 定位一份副本。
+     *
+     * 名字是 key 的 base64url，**不带扩展名**：读的时候（播放）调用方并不知道那份副本
+     * 当初是什么格式，只有写的时候知道。所以这里按 `<名字>.` 前缀找，找到谁就是谁 ——
+     * 同一个 key 永远只有一份（写入时会清掉同 base 的别的格式）。
+     */
+    private File mediaCacheFile(String fileName) {
+        if (!isMediaCacheNameAllowed(fileName)) return null;
+        File dir = mediaCacheDirectory();
+        File direct = new File(dir, fileName);
+        if (direct.isFile()) return direct;
+        if (fileName.indexOf('.') >= 0) return null;
+        File[] files = dir.listFiles();
+        if (files == null) return null;
+        for (File file : files) {
+            if (file.isFile() && file.getName().startsWith(fileName + ".")) return file;
+        }
+        return null;
+    }
+
+    /** 按 Content-Type 决定扩展名，只为让 writeResponse 能给出像样的 Content-Type。 */
+    private static String extensionForMime(String mime) {
+        String lower = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        if (lower.contains("flac")) return "flac";
+        if (lower.contains("mp4") || lower.contains("m4a") || lower.contains("aac")) return "m4a";
+        if (lower.contains("wav")) return "wav";
+        if (lower.contains("ogg") || lower.contains("opus")) return "ogg";
+        if (lower.contains("ape")) return "ape";
+        if (lower.contains("wma")) return "wma";
+        return "mp3";
+    }
+
+    /**
+     * 存一份媒体缓存副本。
+     *
+     * 字节走 HTTP 请求体而不是 Capacitor 桥：桥只有一条，几 MB 的 base64 压上去，
+     * 别的平台会集体超时（本地导入那边的拷贝也是因此被挪到别的线程上做的）。
+     *
+     * 先写 `.part` 再 rename：写一半被杀不能留下一份坏的副本，而坏副本正是下一次播放
+     * 会读到的那份 —— 症状是「这首歌播到一半断了，之后永远播不了」。
+     */
+    private void writeMediaCacheFile(
+        BufferedInputStream input,
+        BufferedOutputStream output,
+        Map<String, String> headers,
+        String fileName,
+        String queryString
+    ) throws IOException {
+        // 名字只认 key 的 base64url（无点）：扩展名由 Content-Type 决定，不给调用方拼的机会。
+        if (!isMediaCacheNameAllowed(fileName) || fileName.indexOf('.') >= 0) {
+            Log.w(TAG, "media cache name refused: " + fileName);
+            writeStatus(output, 404, "Not Found");
+            return;
+        }
+        long declared = parseLongOr(headers.get("content-length"), -1);
+        if (declared <= 0) {
+            writeStatus(output, 411, "Length Required");
+            return;
+        }
+        String storedName = fileName + "." + extensionForMime(headers.get("content-type"));
+        File dir = mediaCacheDirectory();
+        File target = new File(dir, storedName);
+        File temp = new File(dir, storedName + ".part");
+        long written = 0;
+        try (OutputStream fileOut = new BufferedOutputStream(new FileOutputStream(temp))) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while (written < declared
+                && (read = input.read(buffer, 0, (int) Math.min(buffer.length, declared - written))) != -1) {
+                fileOut.write(buffer, 0, read);
+                written += read;
+            }
+        }
+        if (written != declared) {
+            temp.delete();
+            Log.w(TAG, "media cache write short: " + written + "/" + declared);
+            writeStatus(output, 400, "Incomplete Body");
+            return;
+        }
+        if (!temp.renameTo(target)) {
+            temp.delete();
+            Log.w(TAG, "media cache rename failed: " + fileName);
+            writeStatus(output, 500, "Store Failed");
+            return;
+        }
+        // 同一首歌换了个格式（扩展名不同）时旧的那一份要一起走，否则它永远占着地方。
+        removeSiblingCopies(dir, storedName);
+        pruneMediaCache(queryParam(queryString, "limit", -1));
+        Log.i(TAG, "media cache stored " + storedName + " (" + written + " bytes)");
+        writeStatus(output, 200, "OK");
+    }
+
+    /**
+     * 删一份副本。带 `size` 时只在这个长度上才删：调用方要删的是它读到的那一份，
+     * 期间被写进来的新副本不是（见 Web 侧 removeAudioBlob 的 size 校验）。
+     */
+    private void deleteMediaCacheFile(
+        BufferedOutputStream output,
+        String fileName,
+        String queryString
+    ) throws IOException {
+        File target = mediaCacheFile(fileName);
+        if (target == null) {
+            writeStatus(output, 404, "Not Found");
+            return;
+        }
+        long size = queryParam(queryString, "size", -1);
+        if (size > 0 && target.length() != size) {
+            writeStatus(output, 409, "Conflict");
+            return;
+        }
+        boolean removed = target.delete();
+        writeStatus(output, removed ? 200 : 500, removed ? "OK" : "Delete Failed");
+    }
+
+    private static void removeSiblingCopies(File dir, String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        if (dot <= 0) return;
+        String base = fileName.substring(0, dot);
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (name.equals(fileName) || name.endsWith(".part")) continue;
+            if (name.startsWith(base + ".")) file.delete();
+        }
+    }
+
+    /** 超过上限就删最旧的，和桌面那边的裁剪一个意思。`limit <= 0` 表示不设上限。 */
+    private void pruneMediaCache(long limit) {
+        if (limit <= 0) return;
+        File dir = mediaCacheDirectory();
+        File[] files = dir.listFiles();
+        if (files == null || files.length == 0) return;
+        List<File> kept = new ArrayList<>();
+        long total = 0;
+        for (File file : files) {
+            if (!file.isFile()) continue;
+            // 上次写一半留下的残骸，顺手清掉，它永远不会被读。
+            if (file.getName().endsWith(".part")) {
+                file.delete();
+                continue;
+            }
+            kept.add(file);
+            total += file.length();
+        }
+        if (total <= limit) return;
+        kept.sort((a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (File file : kept) {
+            if (total <= limit) break;
+            long size = file.length();
+            if (file.delete()) total -= size;
+        }
+    }
+
+    private static long parseLongOr(String raw, long fallback) {
+        if (raw == null) return fallback;
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    /** 从 `a=1&b=2` 里取一个数；没有或不是数就给 fallback。 */
+    private static long queryParam(String queryString, String key, long fallback) {
+        if (queryString == null || queryString.isEmpty()) return fallback;
+        for (String pair : queryString.split("&")) {
+            int at = pair.indexOf('=');
+            if (at <= 0 || !key.equals(pair.substring(0, at))) continue;
+            return parseLongOr(pair.substring(at + 1), fallback);
+        }
+        return fallback;
     }
 
     private interface StreamSupplier {

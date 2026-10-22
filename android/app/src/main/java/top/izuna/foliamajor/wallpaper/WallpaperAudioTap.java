@@ -92,7 +92,24 @@ public final class WallpaperAudioTap {
     }
 
     private final Listener listener;
+    /**
+     * 采集哪一路音频。
+     *
+     * 0 是全局混音（叠层用这个：它拿不到主应用 WebView 里那个 AnalyserNode）。
+     * 播放内核（P2）传的是 ExoPlayer 自己的 `getAudioSessionId()` —— 只采这一首歌，
+     * 比起全局混音不会被别的App 的声音混进来，量纲两边共用一套，画出来形状一致。
+     */
+    private final int audioSessionId;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    public WallpaperAudioTap(Listener listener) {
+        this(listener, 0);
+    }
+
+    public WallpaperAudioTap(Listener listener, int audioSessionId) {
+        this.listener = listener;
+        this.audioSessionId = audioSessionId;
+    }
 
     private HandlerThread thread;
     private Handler worker;
@@ -154,7 +171,7 @@ public final class WallpaperAudioTap {
         }
         Visualizer probe = null;
         try {
-            probe = new Visualizer(0);
+            probe = new Visualizer(audioSessionId);
             int[] range = Visualizer.getCaptureSizeRange();
             // 捕获长度越大频率越细，但上限是 1024（Visualizer 的硬规定），
             // 也就是 512 个频点 —— 比页面侧的 1024 个粗一倍，够画 72 根柱子。

@@ -19,6 +19,7 @@ import { getTransitionHandoffProgress } from '../../../../services/automix/trans
 import { tickBeatFx } from '../../../../services/beatFx/beatFxLive';
 import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
 import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
+import { readNativeSpectrum, setNativeSpectrumEnabled } from '../../../../services/playbackEngine/nativeSpectrum';
 import { readIncomingLyricClock } from './incomingLyricClock';
 
 // src/components/app/playback/bridges/usePlaybackVisualizerBridge.ts
@@ -191,7 +192,7 @@ export function usePlaybackVisualizerBridge({
          *
          * 第一条接不上（没有 AudioWorklet、或 WebView 不给加载）时自动落到第二条。
          */
-        const tapped = readLatestSpectrum();
+        const tapped = readLatestSpectrum() ?? readNativeSpectrum();
         // 取成局部变量：ref 上的 .current 进不了分支条件的窄化，后面要直接用它。
         const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
@@ -417,4 +418,27 @@ export function usePlaybackVisualizerBridge({
             }
         };
     }, [animationFrameRef, updateLoop]);
+
+    /*
+     * 原生频谱的开关（P2）。
+     *
+     * 开着就是每秒 20 帧 × 128 段过桥，所以只在「前台 + 原生手上确实有歌」时才开，
+     * 页面一藏立刻关。`ownsPlayback()` 不是响应式的值，这里用一次 2 秒的巡检去对齐它 ——
+     * 开关本身是幂等的（状态没变时一个字节都不过桥），这点代价可以忽略。
+     */
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        const sync = () => {
+            const wanted = document.visibilityState === 'visible' && nativePlaybackEngine.ownsPlayback();
+            void setNativeSpectrumEnabled(wanted);
+        };
+        sync();
+        document.addEventListener('visibilitychange', sync);
+        const timer = window.setInterval(sync, 2000);
+        return () => {
+            document.removeEventListener('visibilitychange', sync);
+            window.clearInterval(timer);
+            void setNativeSpectrumEnabled(false);
+        };
+    }, []);
 }

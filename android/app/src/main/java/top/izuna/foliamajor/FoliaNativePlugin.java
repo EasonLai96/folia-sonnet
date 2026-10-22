@@ -1177,6 +1177,38 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     /*
+     * 媒体缓存（App 私有目录）。
+     *
+     * 字节读写走回环服务的 /media-cache 路由（见 LocalAudioServer）：几 MB 的东西过不了桥，
+     * 桥只有一条，压上去别的平台会集体超时。这两个方法只传数字，很轻。
+     */
+
+    @PluginMethod
+    public void mediaCacheStats(PluginCall call) {
+        try {
+            if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
+            long[] stats = localAudioServer.mediaCacheStats();
+            JSObject result = new JSObject();
+            result.put("size", (double) stats[0]);
+            result.put("count", (int) stats[1]);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage(), error);
+        }
+    }
+
+    @PluginMethod
+    public void clearMediaCache(PluginCall call) {
+        try {
+            if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
+            localAudioServer.clearMediaCache();
+            call.resolve();
+        } catch (Exception error) {
+            call.reject(error.getMessage(), error);
+        }
+    }
+
+    /*
      * 歌词后方「视频层」的本地视频。
      *
      * WebView 里没有 File System Access API：`<input type=file>` 挑出来的 File 只能变成

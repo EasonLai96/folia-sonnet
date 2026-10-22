@@ -1,6 +1,13 @@
 import { getFromCache, removeFromCache, saveToCache } from './db';
 import { isBlob } from '../utils/blobGuards';
 import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
+import {
+    deleteNativeMediaCache,
+    hasNativeMediaCache,
+    readNativeMediaCacheBlob,
+    statNativeMediaCache,
+    writeNativeMediaCache,
+} from './mediaCacheStore';
 
 /**
  * The ceiling the desktop cache is pruned back to after each write, in bytes.
@@ -36,12 +43,29 @@ const toBlob = (entry: ElectronAudioCacheEntry): Blob | null => {
   return new Blob([blobData], { type: mimeType });
 };
 
+/*
+ * 三条后端，按先后试：桌面（Electron 文件缓存）、安卓（App 私有目录，经回环服务）、
+ * 兜底（IndexedDB）。
+ *
+ * 安卓这一层不能省：IndexedDB 里的字节只能变成 `blob:` 地址，而原生播放器吃不下
+ * `blob:` —— 有缓存的歌反而整首回落到 <audio>，看上去就是「原生播放没生效」。
+ */
 export async function getCachedAudioBlob(cacheKey: string): Promise<Blob | null> {
   if (isElectronAudioCacheAvailable()) {
     const electronEntry = await window.electron!.getAudioCache(cacheKey);
     const electronBlob = toBlob(electronEntry);
     if (electronBlob) {
       return electronBlob;
+    }
+  }
+
+  if (await hasNativeMediaCache()) {
+    const nativeBlob = await readNativeMediaCacheBlob(cacheKey);
+    if (nativeBlob) {
+      // 字节已经在私有目录里了，IndexedDB 那份旧条目只剩占地方（迁移没跑到它，
+      // 或它是这一版之前写的）。读到就顺手清掉，不用等迁移那一遍。
+      await removeFromCache(cacheKey);
+      return nativeBlob;
     }
   }
 
@@ -73,6 +97,9 @@ export async function hasCachedAudio(cacheKey: string): Promise<boolean> {
       return true;
     }
   }
+
+  // HEAD 一下就知道在不在，不把整首歌读进内存。
+  if (await hasNativeMediaCache() && await statNativeMediaCache(cacheKey) > 0) return true;
 
   const indexedDbValue = await getFromCache<unknown>(cacheKey);
   if (isBlob(indexedDbValue)) return true;
@@ -124,6 +151,9 @@ export async function saveAudioBlob(cacheKey: string, blob: Blob): Promise<void>
   if (isElectronAudioCacheAvailable()) {
     const buffer = await blob.arrayBuffer();
     await window.electron!.saveAudioCache(cacheKey, buffer, blob.type || 'audio/mpeg', cacheLimitBytes());
+  } else if (await writeNativeMediaCache(cacheKey, blob, cacheLimitBytes())) {
+    // 字节已经落到私有目录，IndexedDB 里那条旧的（这一版之前写的）只剩占地方。
+    await removeFromCache(cacheKey);
   } else {
     await saveToCache(cacheKey, blob);
   }
@@ -141,6 +171,8 @@ export async function removeAudioBlob(cacheKey: string, size: number): Promise<b
   let removed = false;
   if (isElectronAudioCacheAvailable()) {
     removed = await window.electron!.removeAudioCache(cacheKey, size);
+  } else if (await deleteNativeMediaCache(cacheKey, size)) {
+    removed = true;
   }
   const stored = await getFromCache<unknown>(cacheKey);
   if (isBlob(stored) && stored.size === size) {
