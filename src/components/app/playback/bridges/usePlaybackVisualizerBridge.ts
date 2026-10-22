@@ -77,6 +77,8 @@ type UsePlaybackVisualizerBridgeParams = {
 const SPECTRUM_READ_INTERVAL_MS = 33;
 /** 掉帧打点：两帧间隔超过这么久才记一条（临时诊断用，定位完删）。 */
 const HITCH_LOG_THRESHOLD_MS = 80;
+/** 定时器探针的节拍（临时诊断，见文件末尾那个 effect）。 */
+const TICK_PROBE_INTERVAL_MS = 16;
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -466,4 +468,36 @@ export function usePlaybackVisualizerBridge({
             }
         };
     }, [animationFrameRef, updateLoop]);
+
+    /*
+     * 掉帧打点的另一半：**定时器探针**（临时诊断，定位完删）。
+     *
+     * 现在已知的事实是 `workMs` 恒为 0 —— rAF 回调自己一毫秒都没花，也就是说
+     * 「等下一帧」的那段时间**不含任何 JS**。这把范围砍成两种，而这两种的修法
+     * 完全不一样：
+     *
+     *   · **渲染进程忙**（样式 / 布局 / 光栅 / 渲染进程自己的 GC 占着它的主线程）
+     *     —— 定时器是宏任务，排在同一条线程上，它跟着一起被推迟 → `[FoliaTick]` 也脏；
+     *   · **渲染进程闲着，只是在等合成器给 BeginFrame**（App 主线程被占、或 GPU 被占）
+     *     —— 定时器照点到达 → `[FoliaTick]` 干净，只有 `[FoliaHitch]` 脏。
+     *
+     * 所以两条一起看：hitch 脏 + tick 干净 = 别再改 JS 与样式，去看 App 主线程 / GPU。
+     */
+    useEffect(() => {
+        let lastTickAtMs = 0;
+        const timer = window.setInterval(() => {
+            const nowMs = performance.now();
+            if (lastTickAtMs !== 0) {
+                const tickGapMs = nowMs - lastTickAtMs;
+                if (tickGapMs >= HITCH_LOG_THRESHOLD_MS) {
+                    console.warn('[FoliaTick]', JSON.stringify({
+                        gapMs: Math.round(tickGapMs),
+                        atMs: Math.round(nowMs),
+                    }));
+                }
+            }
+            lastTickAtMs = nowMs;
+        }, TICK_PROBE_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, []);
 }
