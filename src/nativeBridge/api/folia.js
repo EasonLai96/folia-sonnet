@@ -64,6 +64,11 @@ import {
   qqWechatCheckLoginQr,
   qqWechatCancelLoginQr,
 } from './qq-wechat-login.js';
+import {
+  qqAppGetLoginQr,
+  qqAppCheckLoginQr,
+  qqAppCancelLoginQr,
+} from './qq/appLogin.js';
 import { clearQQPlatformSessionCookies } from './qq-login-qr.js';
 import {
   claimKGYouthDayVip,
@@ -253,9 +258,12 @@ function decodeBridgeKey(value) {
   }
 }
 
-/** 扫码通道归一：只有 wechat 走微信 Web OAuth，其余（含缺省）都按 qq 处理。 */
+/** 扫码通道归一：wechat 走微信 Web OAuth，app 走 QQ 音乐 App 那条（三合一），其余按 qq 处理。 */
 function qqChannelOf(value) {
-  return String(value || '').toLowerCase() === 'wechat' ? 'wechat' : 'qq';
+  const channel = String(value || '').toLowerCase();
+  if (channel === 'wechat') return 'wechat';
+  if (channel === 'qqmusic' || channel === 'app') return 'qqmusic';
+  return 'qq';
 }
 
 /** 只回报主机名：头像 URL 里带着用户 hash，整条写进报告没有必要。 */
@@ -732,8 +740,11 @@ async function handleFoliaQqRequest(input, url) {
 async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
 
   if (operation === 'login_channels') {
-    // 本地桥同时支持两条扫码通道：qq（ptlogin + MQTT）与 wechat（微信 OAuth + musicu）。
-    return { code: 200, data: { channels: ['qq', 'wechat'] } };
+    // 三条扫码通道都有：qq（ptlogin 网页码，只有手机 QQ 能扫）、wechat（微信 OAuth）、
+    // qqmusic（QQ 音乐 App 的码，QQ音乐 App / 手机QQ / 微信 任一款都能扫）。
+    // `sessionMode` 说会话存在本机（不是 Serverless 的 sealed 令牌）—— 前端据此认「桌面/Docker 那种
+    // 后端」，于是不再让人先选通道，直接用三合一那张码。
+    return { code: 200, data: { channels: ['qq', 'wechat', 'qqmusic'], sessionMode: 'stored' } };
   }
   if (operation === 'login_status') {
     const status = await getQQLoginStatus(cookie);
@@ -769,10 +780,23 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
     return { code: 200 };
   }
   if (operation === 'login_qr_key') {
-    const channel = qqChannelOf(firstValue(params.channel, url.searchParams.get('channel')));
-    const qr = channel === 'wechat'
-      ? await qqWechatGetLoginQr()
-      : await handleQQLoginQrCreate();
+    let channel = qqChannelOf(firstValue(params.channel, url.searchParams.get('channel')));
+    let qr;
+    if (channel === 'qqmusic') {
+      // 三合一那张码要一条到 mu.y.qq.com 的 WebSocket（见 qq/appLogin.js）。WebView 里被拦、或上游
+      // 拒收时不能让登录整个不可用：退回手机 QQ 的网页码，照样能登，只是那张码只认手机 QQ。
+      try {
+        qr = await qqAppGetLoginQr();
+      } catch (error) {
+        noteLibraryStep('qq', 'login-qr:app-fallback', {
+          message: error && error.message ? error.message : String(error),
+        });
+        channel = 'qq';
+        qr = await handleQQLoginQrCreate();
+      }
+    } else {
+      qr = channel === 'wechat' ? await qqWechatGetLoginQr() : await handleQQLoginQrCreate();
+    }
     const key = encodeBridgeKey({
       channel,
       qrsig: qr.qrsig,
@@ -795,7 +819,9 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
     const key = decodeBridgeKey(firstValue(params.key, url.searchParams.get('key')));
     const result = key.channel === 'wechat'
       ? await qqWechatCheckLoginQr({ qrsig: key.qrsig, ptqrtoken: key.ptqrtoken })
-      : await handleQQLoginQrCheck(key.qrsig, key.ptqrtoken);
+      : key.channel === 'qqmusic'
+        ? await qqAppCheckLoginQr(key.qrsig)
+        : await handleQQLoginQrCheck(key.qrsig, key.ptqrtoken);
     if (result?.isOk || result?.loggedIn) {
       /*
        * 803 必须**带着会话一起交出去**。
@@ -833,6 +859,7 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
   if (operation === 'login_qr_cancel') {
     const key = decodeBridgeKey(firstValue(params.key, url.searchParams.get('key')));
     if (key.channel === 'wechat') qqWechatCancelLoginQr(key.qrsig);
+    if (key.channel === 'qqmusic') qqAppCancelLoginQr(key.qrsig);
     return { code: 200 };
   }
   if (operation === 'music_play') {
