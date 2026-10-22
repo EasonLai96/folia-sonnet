@@ -19,8 +19,8 @@
 // **只认几何与时间**，不认歌词引擎：独立的「提示词」样式（createPromptPixiRuntime）拿它搭场。
 // 单位是画面 px（不整层缩放），这里写 13 就是屏上的 13px。
 //
-// 商籁里那一种 prompt-field 镜头用的是 sonnet/sonnetPromptField.ts（吃商籁自己的逐字排版），
-// 同一套画法但没共用这一份，改画法要两边一起看。
+// 商籁不再有自己的输入框镜头（原 sonnet/sonnetPromptField.ts 已删）：提示词是独立样式，
+// 有自己的运行时，和商籁那套分镜没有关系。
 
 import { promptVocabIdFor } from './promptTokenId';
 

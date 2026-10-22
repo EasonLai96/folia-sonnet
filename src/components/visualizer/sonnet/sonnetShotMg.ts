@@ -53,14 +53,6 @@ export const buildSonnetShotMg = (
 ) => {
     const { Container } = pixi;
     const container = new Container();
-    /*
-     * prompt-field 的装饰全部由 sonnetPromptField.ts 自己搭（墨色输入框、逐词方括号、
-     * 光标、框上的提示词）。这一层留空：HUD 网格、几何图形和漂浮粒子都会跟那块框打架。
-     */
-    if (kind === 'prompt-field') {
-        (container as any).updateTime = () => {};
-        return container;
-    }
     const primary = colorNumber(pixi, theme.primaryColor);
     const secondary = colorNumber(pixi, theme.secondaryColor);
     const radius = Math.min(width, height);

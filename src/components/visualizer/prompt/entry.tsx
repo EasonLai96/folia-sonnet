@@ -4,8 +4,7 @@ import { defineVisualizer } from '../definition';
 // src/components/visualizer/prompt/entry.tsx
 // 提示词：一句一个输入框 —— 每唱完一句，这个框飞走、下一个框飞进来，框里的词按唱到的位置
 // 逐个落下。它**不依赖商籁**：自己的运行时（createPromptPixiRuntime）、自己的节目单
-// （compilePromptBoxes，一句一框），只有那个框本身（promptBox.ts）是和商籁的 prompt-field
-// 镜头共用的一份几何。
+// （compilePromptBoxes，一句一框）、自己的框几何（promptBox.ts）。
 const VisualizerPrompt = React.lazy(() => import('./VisualizerPrompt'));
 
 export default defineVisualizer({

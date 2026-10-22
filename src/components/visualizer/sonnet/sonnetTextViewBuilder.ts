@@ -87,8 +87,6 @@ interface SonnetTextViewOptions {
     theme: Theme;
     glowEnabled: boolean;
     showFixedGeo: boolean;
-    /** prompt-field 自己在框里画逐词方括号，别再套一层逐字开放框。 */
-    suppressSegmentDecor?: boolean;
     guideLayer: import('pixi.js').Container;
     haloLayer: import('pixi.js').Container;
     textLayer: import('pixi.js').Container;
@@ -403,7 +401,7 @@ export const buildSonnetTextView = (
     }
 
     // Decorative open frame (30% of segments), kept behind the glyphs.
-    const frameDecor = options.suppressSegmentDecor ? null : buildSonnetFrameDecor(pixi, {
+    const frameDecor = buildSonnetFrameDecor(pixi, {
         segment,
         placement,
         theme: options.theme,

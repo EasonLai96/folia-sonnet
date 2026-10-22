@@ -179,7 +179,7 @@ export const resolveSonnetFocusWeights = (
 // PV 风格镜头路径：ExpoOut 快速入场、中段近匀速漂移（速度永不为 0）、末段柔和收尾让速给转场。
 export const resolveShotPathProgress = (kind: SonnetShotKind, progress: number) => {
     const linear = clamp01(progress);
-    if (kind === 'tracking-ribbon' || kind === 'fragment-collage' || kind === 'quiet-tableau' || kind === 'poster-blocks' || kind === 'prompt-field') {
+    if (kind === 'tracking-ribbon' || kind === 'fragment-collage' || kind === 'quiet-tableau' || kind === 'poster-blocks') {
         // Blend a constant-velocity drift into the inout curve so the middle never stalls.
         return linear * 0.55 + easeSonnetInOut(linear) * 0.45;
     }
@@ -238,13 +238,6 @@ export const resolveShotMotionFrame = (
             y: 0.014 - eased * 0.025,
             scale: 1 + eased * 0.028,
             rotation: -0.002 + eased * 0.003,
-        },
-        // 提示词输入框：框自己飞，镜头只做极轻微的推移，整块保持在画面里。
-        'prompt-field': {
-            x: -0.018 + eased * 0.036,
-            y: 0.01 - eased * 0.018,
-            scale: 0.992 + eased * 0.02,
-            rotation: -0.0012 + eased * 0.0024,
         },
     };
     return frames[kind];

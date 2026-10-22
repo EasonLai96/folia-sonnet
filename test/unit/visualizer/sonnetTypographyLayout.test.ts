@@ -738,7 +738,6 @@ describe('Sonnet long multi-line shot layouts', () => {
     const SHOT_KINDS: SonnetShotKind[] = [
         'editorial-column', 'type-impact', 'fragment-collage',
         'tracking-ribbon', 'mask-reveal', 'quiet-tableau', 'poster-blocks',
-        'prompt-field',
     ];
 
     const layoutFor = (shotKind: SonnetShotKind) => resolveSonnetTypographyLayout({
@@ -771,20 +770,6 @@ describe('Sonnet long multi-line shot layouts', () => {
                 }
             }
         });
-    });
-
-    it('lays the prompt field out as one row of equal-size words', () => {
-        const layout = layoutFor('prompt-field');
-        expect(layout.length).toBeGreaterThan(1);
-        // 一根基线：所有词的盒子竖向中心相同
-        const centres = layout.map(item => item.y);
-        centres.forEach(y => expect(y).toBeCloseTo(centres[0], 5));
-        // 同字号
-        const scales = new Set(layout.map(item => item.fontScale.toFixed(3)));
-        expect(scales.size).toBe(1);
-        // 从左到右就是时间顺序
-        const xs = layout.map(item => item.x);
-        expect([...xs].sort((a, b) => a - b)).toEqual(xs);
     });
 
     it('keeps poster-blocks placements inside the poster canvas', () => {
