@@ -1961,6 +1961,41 @@ public class FoliaNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /*
+     * 弹一条**自己画**的悬浮提示条（FoliaOverlayNotice），样子与位置都照 Web 层那条
+     * 顶部提示来做。
+     *
+     * 为什么还要这条路：系统 Toast 在 Android 11 起后台只给纯文本，画不出我们自己的
+     * 圆角条；而「后台自动跳过了下一首」偏偏是最需要在别的应用上面说清楚的一句话。
+     * 悬浮窗能画自己的样子，代价是用户要先在系统设置里给「显示在其他应用上层」。
+     *
+     * 没授权（或窗口令牌失效、ROM 不让画）时这里**什么都不做**，只回 `shown:false`，
+     * 由渲染层退回系统 Toast —— 不去申请权限、也不把用户扔进设置页：一句提示不值得
+     * 打断一次「去设置里授权」的流程。
+     *
+     * 同样是主线程 Handler + Application 上下文：插件方法跑在 Capacitor 自己的线程上，
+     * 而 WindowManager 有线程归属，并且这时 Activity 往往已经 stop。
+     */
+    @PluginMethod
+    public void showOverlayNotice(PluginCall call) {
+        final String text = call.getString("text", "");
+        final String message = text == null ? "" : text;
+        final Long requested = call.getLong("durationMs", 3500L);
+        final long durationMs = requested == null ? 3500L : requested;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            boolean shown = false;
+            try {
+                shown = FoliaOverlayNotice.show(getContext(), message, durationMs);
+            } catch (Throwable error) {
+                // 悬浮窗这层出了任何岔子都只是「没弹出来」，让调用方回退。
+                Log.w("FoliaNativePlugin", "showOverlayNotice failed", error);
+            }
+            JSObject result = new JSObject();
+            result.put("shown", shown);
+            call.resolve(result);
+        });
+    }
+
     @PluginMethod
     public void setScreenAwake(PluginCall call) {
         boolean awake = Boolean.TRUE.equals(call.getBoolean("awake", false));

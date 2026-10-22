@@ -124,6 +124,16 @@ interface FoliaNativePlugin {
      */
     showToast(options: { text: string; long?: boolean }): Promise<void>;
     /**
+     * 弹一条**自己画**的悬浮提示条，样子与位置都照 Web 层那条顶部提示。
+     *
+     * 与 `showToast` 的区别：系统 Toast 从 Android 11 起后台只给纯文本，画不出我们想要
+     * 的样子；这条路能画，但要先有「显示在其他应用上层」的授权。
+     *
+     * 回 `shown`：没授权 / 窗口令牌失效时是 false，调用方据此回退到系统 Toast。
+     * **不是**报错 —— 一句提示弹不出来不该让调用方以为出了故障。
+     */
+    showOverlayNotice(options: { text: string; durationMs?: number }): Promise<{ shown?: boolean }>;
+    /**
      * 歌词后方视频层：挑一个本地视频。
      *
      * 原生拿到 URI 自己拷进 App 私有目录，这里只拿「成没成」和一个回环地址 ——
@@ -278,6 +288,32 @@ export const showNativeToast = async (text: string, options: { long?: boolean } 
         await FoliaNative.showToast({ text, ...(options.long ? { long: true } : {}) });
     } catch (error) {
         console.warn('[FoliaNative] showToast failed', error);
+    }
+};
+
+/**
+ * 弹一条自己画的悬浮提示条。**返回有没有真的挂上去。**
+ *
+ * 为什么要回这个值：悬浮窗要「显示在其他应用上层」的授权，而授权是用户在系统设置里
+ * 给的 —— 没给就是没给。调用方拿 false 就该退回系统 Toast，别让「放不出来」这件事
+ * 因为换了更好看的通道反而说不出口。
+ *
+ * 老包（还没这个方法）/ 桌面端一律 false：那里本来就该走别条路。
+ */
+export const showNativeOverlayNotice = async (
+    text: string,
+    options: { durationMs?: number } = {},
+): Promise<boolean> => {
+    if (!isCapacitorAndroid() || !text) return false;
+    try {
+        const result = await FoliaNative.showOverlayNotice({
+            text,
+            ...(options.durationMs ? { durationMs: options.durationMs } : {}),
+        });
+        return result?.shown === true;
+    } catch {
+        // 插件没这个方法（老包）/ 桥没起来：都不算错误，只是这条路走不通。
+        return false;
     }
 };
 
