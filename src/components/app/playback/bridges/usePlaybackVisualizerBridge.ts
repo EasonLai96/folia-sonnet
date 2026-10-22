@@ -120,6 +120,14 @@ export function usePlaybackVisualizerBridge({
      * `window.__foliaHitchLog` 里，方便在调试叠层里读。
      */
     const lastFrameAtMsRef = useRef(0);
+    /**
+     * 上一帧这一整个回调自己跑了多久（临时诊断，定位完删）。
+     *
+     * 掉帧那一笔的 `gapMs` 是「两帧之间隔了多久」，里面既包含 JS 自己干的活，
+     * 也包含在等别人（合成 / IPC / 别的任务）。两个数一起看才能分得开：
+     * `gapMs` 大而 `workMs` 小 = 时间在 JS 之外花掉了，改 JS 没用。
+     */
+    const lastWorkMsRef = useRef(0);
     // 上一帧真的去问频谱是什么时候。只为那个 ~30Hz 的降频服务（见 SPECTRUM_READ_INTERVAL_MS）。
     const spectrumReadAtMsRef = useRef(0);
     // 智能动感模式: loads the track's beats while it is on; the clock is stepped below. A ref, so
@@ -222,6 +230,12 @@ export function usePlaybackVisualizerBridge({
                 }).memory;
                 const entry = {
                     gapMs: Math.round(frameGapMs),
+                    // 上一帧 JS 自己花了多久（见 lastWorkMsRef）。
+                    workMs: Math.round(lastWorkMsRef.current),
+                    // 距上一次原生位置事件过去多久。一直贴着某个值就说明掉帧跟着过桥事件走。
+                    posAgeMs: nativePlaybackEngine.lastEventAtMs > 0
+                        ? Math.round(nowMsValue - nativePlaybackEngine.lastEventAtMs)
+                        : null,
                     atMs: Math.round(nowMsValue),
                     native: nativePlaybackEngine.ownsPlayback(),
                     heapMB: memory ? Math.round(memory.usedJSHeapSize / 1048576) : null,
@@ -412,6 +426,7 @@ export function usePlaybackVisualizerBridge({
             }
         }
 
+        lastWorkMsRef.current = performance.now() - nowMsValue;
         animationFrameRef.current = requestAnimationFrame(updateLoop);
     }, [
         activePlaybackContext,

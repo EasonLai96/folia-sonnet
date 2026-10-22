@@ -40,6 +40,13 @@ class NativePlaybackEngine {
     private currentUrl: string | null = null;
     private listeners = new Set<(event: NativePlaybackEvent) => void>();
     private subscriptionStarted = false;
+    /**
+     * 最近一次收到原生事件的时刻（performance.now 口径）。
+     *
+     * ⚠️ **临时诊断用**（主界面隔几秒顿一下），定位完删：掉帧打点带上「距上一次
+     * 位置事件过去多久」，一眼就能看出掉帧是不是跟着那笔过桥事件来的。
+     */
+    lastEventAtMs = 0;
 
     /**
      * 这个地址能不能交给原生。
@@ -181,6 +188,7 @@ class NativePlaybackEngine {
 
     private apply(event: NativePlaybackEvent): void {
         const now = performance.now();
+        this.lastEventAtMs = now;
         if (typeof event.positionMs === 'number') {
             this.positionMs = Math.max(0, event.positionMs);
             this.updatedAtMs = now;
