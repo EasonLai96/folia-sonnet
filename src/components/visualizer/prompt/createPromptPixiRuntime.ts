@@ -158,7 +158,8 @@ export class PromptPixiRuntime {
     private highlightTheme: Theme | null = null;
     private highlightColors: Theme['wordColors'] | null = null;
     private highlightCount = 0;
-    private highlightMap = new Map<string, number>();
+    /** 值可以是 null：「这个词没有高亮色」也要缓存住，否则每帧重算一遍。 */
+    private highlightMap = new Map<string, number | null>();
     private destroyed = false;
     private resizeObserver: ResizeObserver | null = null;
     private lastWidth = 0;
