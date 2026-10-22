@@ -5,6 +5,7 @@ import type { LocalSong } from '../../types';
 import type { LocalLibraryAssignment } from '../../types/localLibrary';
 import { FolderAutoMatchEditor } from '../local-library-entity/FolderAutoMatchEditor';
 import { LocalSongMetadataMatchDialog } from './LocalSongMetadataMatchDialog';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 // src/components/modal/LocalFolderSongInfoPanel.tsx
 // Hosts explicit folder-scoped automatic and per-song online matching workflows.
@@ -20,6 +21,8 @@ interface LocalFolderSongInfoPanelProps {
 
 export const LocalFolderSongInfoPanel = ({ folderName, songs, assignments, isDaylight, onClose, onChanged }: LocalFolderSongInfoPanelProps) => {
     const { t } = useTranslation();
+    // Esc 与安卓的返回键 / 边缘返回手势都关掉这个面板（嵌套的手动匹配对话框在它上面，先关那个）。
+    useEscapeClose(onClose);
     const [manualMatchSong, setManualMatchSong] = useState<LocalSong | null>(null);
     const assignmentBySongId = useMemo(() => new Map(assignments.map(item => [item.songId, item])), [assignments]);
     const panelTheme = isDaylight ? 'border-black/10 bg-white/90 text-zinc-900' : 'border-white/10 bg-zinc-950/90 text-white';

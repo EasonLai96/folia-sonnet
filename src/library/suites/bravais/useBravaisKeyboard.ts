@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { hasBlockingWindow, isTextEntryTarget } from '../../../utils/keyboardTargets';
+import { hasBlockingWindow, isNativeBackKey, isTextEntryTarget } from '../../../utils/keyboardTargets';
 import { resolveBravaisKey } from './bravaisKeyboardModel';
 import { resolveBravaisHomeKey } from './bravaisHomeKeys';
 import type { BravaisWallKeyAction } from './useBravaisInteractions';
@@ -22,7 +22,18 @@ export const useBravaisKeyboard = (
         if (!active) return;
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.defaultPrevented || event.isComposing || hasBlockingWindow()) return;
-            const action = resolveBravaisKey(event) ?? resolveBravaisHomeKey(event);
+            // 安卓的返回键 / 边缘返回手势也走这里（useNativeBackButton 派发到 window 的一次 Esc）：
+            // 打上标记让 Esc 阶梯按「回退一层」而不是「逐级取消」来走（bravaisKeyboardModel）。
+            const input = {
+                key: event.key,
+                shiftKey: event.shiftKey,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                repeat: event.repeat,
+                nativeBack: isNativeBackKey(event),
+            };
+            const action = resolveBravaisKey(input) ?? resolveBravaisHomeKey(event);
             if (!action) return;
             if (isTextEntryTarget(event.target) && action.type !== 'tab') return;
             if (latest.current(action, event.target)) event.preventDefault();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getWallSlot } from '@/components/wall/wallSlots';
 import { resolveBravaisKey, resolveEscapeStep, type BravaisKeyInput } from '@/library/suites/bravais/bravaisKeyboardModel';
+import { resolveSeamEscapeLevel } from '@/library/suites/bravais/bravaisSeamLevel';
 import { findAdjacentSlot } from '@/library/suites/bravais/bravaisNavigation';
 import { resolveFocusReflow } from '@/library/suites/bravais/bravaisDisplay';
 
@@ -47,6 +48,12 @@ describe('resolveBravaisKey', () => {
         }
         expect(resolveBravaisKey(key({ key: 'Escape' }))).toEqual({ type: 'escape' });
     });
+
+    it('carries the system-back flag: the ladder skips the keyboard focus ring for it', () => {
+        // 安卓返回键 / 边缘返回手势转成的那一次 Esc（useNativeBackButton 派发时打的标记）。
+        expect(resolveBravaisKey(key({ key: 'Escape', nativeBack: true }))).toEqual({ type: 'escape', nativeBack: true });
+        expect(resolveBravaisKey(key({ key: 'Escape' }))).toEqual({ type: 'escape' });
+    });
 });
 
 describe('resolveEscapeStep', () => {
@@ -60,6 +67,24 @@ describe('resolveEscapeStep', () => {
         expect(resolveEscapeStep({ hasFocusCard: false, hasKeyboardFocus: false, canGoBack: true })).toBe('back');
         // 首页没有 onBack：最后一级什么都不做（不吞掉 Esc）。
         expect(resolveEscapeStep({ hasFocusCard: false, hasKeyboardFocus: false, canGoBack: false })).toBeNull();
+    });
+
+    it('folds the expanded seam back after the query and before leaving the layer', () => {
+        const base = { hasFocusCard: false, hasKeyboardFocus: false, canGoBack: true };
+        expect(resolveEscapeStep({ ...base, hasQuery: true, hasSeam: true })).toBe('query');
+        expect(resolveEscapeStep({ ...base, hasSeam: true })).toBe('seam');
+        expect(resolveEscapeStep({ ...base })).toBe('back');
+    });
+});
+
+describe('resolveSeamEscapeLevel', () => {
+    it('folds a seam the user expanded, and leaves the wide default alone', () => {
+        // 窄屏（手机）默认只给书脊：完整信息条是用户自己展开的，Esc / 返回先把它收回去。
+        expect(resolveSeamEscapeLevel('full', 480)).toBe('spine');
+        // 宽屏默认就是完整信息条 —— 那不是「展开过」，收它等于按了返回只动了一下信息条。
+        expect(resolveSeamEscapeLevel('full', 1280)).toBeNull();
+        expect(resolveSeamEscapeLevel('spine', 480)).toBeNull();
+        expect(resolveSeamEscapeLevel('hidden', 480)).toBeNull();
     });
 });
 

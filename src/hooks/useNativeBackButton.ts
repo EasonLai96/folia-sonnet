@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { markNativeBackKey } from '../utils/keyboardTargets';
 
 // src/hooks/useNativeBackButton.ts
 //
@@ -62,6 +63,8 @@ export const useNativeBackButton = (): void => {
                 bubbles: true,
                 cancelable: true,
             });
+            // 打上标记：这一下是「回退一层」而不是键盘上逐级取消的 Esc（见 isNativeBackKey）。
+            markNativeBackKey(event);
             const handled = !window.dispatchEvent(event) || event.defaultPrevented;
             if (!handled) goBackground();
         });

@@ -142,7 +142,10 @@ export default function PosterWall({
     const [cameraScale, setCameraScale] = useState(() => cameraRef.current.scale);
     const reducedMotion = useReducedMotionFor('lattice');
     // 从资料库墙翻牌交接进来（或淡入交叉）：入场由交接代替，不跑抬起落下的波次。
-    const entranceSuppressed = useWallHandoffStore(state => resolveWallHandoffRole(state.session, 'lattice') === 'in');
+    const handoffRole = useWallHandoffStore(state => resolveWallHandoffRole(state.session, 'lattice'));
+    const entranceSuppressed = handoffRole === 'in';
+    // 接安卓返回的那一面墙：交接期间两面墙都在场，出场那一程（role 'out'）归下面的资料库墙，别抢同一次返回。
+    const backEnabled = handoffRole === null || handoffRole === 'in';
     const autoFocusOnSongChange = useLatticeSettingsStore(state => state.autoFocusOnSongChange);
     // 用户的缩放倍率（双指捏合 / Ctrl+滚轮，与 bravais 墙共用一份）。缩放途中不经过这里 ——
     // 那时 useWallPointerPan 直接改 cameraRef 的 scale，手势停下来才把倍率交回来。
@@ -391,6 +394,7 @@ export default function PosterWall({
         tiles,
         worldRef,
         onBack,
+        backEnabled,
     });
 
     // Permanent identities for the two handlers every poster receives. An arrow per poster is

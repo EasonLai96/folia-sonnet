@@ -5,7 +5,7 @@ import {
     useEffect,
     useRef,
     type Dispatch,
-    type KeyboardEvent,
+    type KeyboardEvent as ReactKeyboardEvent,
     type FocusEvent,
     type RefObject,
     type SetStateAction,
@@ -20,6 +20,7 @@ import {
 import { useLatticePosterSelection } from './useLatticePosterSelection';
 import type { LatticeTile } from './latticeModel';
 import type { ActiveLatticePoster } from './useLatticePlaybackFocus';
+import { hasBlockingWindow } from '../../../utils/keyboardTargets';
 
 // Keyboard layer for the wall: Escape clears card focus before leaving, while arrows walk the wall.
 
@@ -44,6 +45,11 @@ type WallKeyboardFocusOptions = {
     tiles: LatticeTile[];
     worldRef: RefObject<HTMLDivElement | null>;
     onBack: () => void;
+    /**
+     * 墙此刻接不接 window 上的 Esc（安卓返回）：翻牌交接的进场方与稳定态接，出场那一程交给下面的资料库墙
+     * ——两面墙同时在场时只有一面该响应一次返回。
+     */
+    backEnabled?: boolean;
 };
 
 export const useWallKeyboardFocus = ({
@@ -59,9 +65,15 @@ export const useWallKeyboardFocus = ({
     tiles,
     worldRef,
     onBack,
+    backEnabled = true,
 }: WallKeyboardFocusOptions) => {
     const [selection, setSelection] = useLatticePosterSelection(tiles, layout);
     const focused = selection?.instance ?? null;
+    // 展开的海报与退出墙的回调：window 上那一级（安卓返回）在事件里读它们，不能读渲染时的闭包。
+    const activePosterRef = useRef<ActiveLatticePoster | null>(activePoster);
+    activePosterRef.current = activePoster;
+    const onBackRef = useRef(onBack);
+    onBackRef.current = onBack;
     // Held arrow keys fire faster than React re-renders, so the next step is computed from a ref;
     // reading state here would recompute the same hop from a value one render behind.
     const focusedRef = useRef<QueueInstance | null>(focused);
@@ -111,19 +123,41 @@ export const useWallKeyboardFocus = ({
         panTo(rendered.get(next.instanceId) ?? next);
     }, [getViewportCenter, instances, layout, metrics, panTo, rendered, setFocused]);
 
-    const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    // 一次 Esc：先收起展开的海报与键盘焦点，没有可收的才退出墙。键盘与安卓返回（window 那一级）共用它。
+    const handleEscape = useCallback(() => {
+        if (activePosterRef.current || focusedRef.current) {
+            setActivePoster(null);
+            setFocused(null);
+            containerRef.current?.focus({ preventScroll: true });
+        } else {
+            onBackRef.current();
+        }
+        return true;
+    }, [containerRef, setActivePoster, setFocused]);
+
+    // 安卓的返回键与边缘返回手势：原生把它转成一次 Escape 派发到 window（useNativeBackButton），而墙的 Esc
+    // 只挂在 .lattice-field 的 React onKeyDown 上 —— 派发到 window 的事件不经过 root container，谁也接不到，
+    // 于是返回在墙上等于「没人接管」，App 直接退到后台。这里补上同一级阶梯。真实键盘的 Esc 仍先由
+    // onKeyDown 处理（它 preventDefault 过，这里因 defaultPrevented 跳过）。
+    useEffect(() => {
+        if (!backEnabled) return undefined;
+        const handleWindowKeyDown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || event.isComposing || event.repeat) return;
+            if (event.key !== 'Escape') return;
+            if (hasBlockingWindow()) return;
+            if (handleEscape()) event.preventDefault();
+        };
+        window.addEventListener('keydown', handleWindowKeyDown);
+        return () => window.removeEventListener('keydown', handleWindowKeyDown);
+    }, [backEnabled, handleEscape]);
+
+    const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
 
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
-            if (activePoster || focusedRef.current) {
-                setActivePoster(null);
-                setFocused(null);
-                containerRef.current?.focus({ preventScroll: true });
-            } else {
-                onBack();
-            }
+            handleEscape();
             return;
         }
 
@@ -134,7 +168,7 @@ export const useWallKeyboardFocus = ({
         event.preventDefault();
         event.stopPropagation();
         moveFocus(direction);
-    }, [activePoster, containerRef, moveFocus, onBack, setActivePoster, setFocused]);
+    }, [containerRef, handleEscape, moveFocus]);
 
     // Mirrors the focused index onto the DOM so the native ring, Enter/Space and screen readers
     // follow it. Depends on `instances` because culling may not have rendered the target yet.

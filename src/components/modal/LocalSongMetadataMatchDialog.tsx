@@ -18,6 +18,7 @@ import { DurationMatchBadge } from './DurationMatchBadge';
 import { getSizedCoverUrl } from '../../utils/coverUrl';
 import { usesImportedSongMetadata } from '../../utils/localSongMetadata';
 import { useConfirmDialog } from '../shared/useConfirmDialog';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 // src/components/modal/LocalSongMetadataMatchDialog.tsx
 // Lets the user search one provider and independently choose its metadata bundle and cover.
@@ -32,6 +33,8 @@ interface LocalSongMetadataMatchDialogProps {
 
 export const LocalSongMetadataMatchDialog = ({ song, assignment, isDaylight, onClose, onChanged }: LocalSongMetadataMatchDialogProps) => {
     const { t } = useTranslation();
+    // Esc 与安卓的返回键 / 边缘返回手势都关掉这个对话框（搜索框里打字时 Esc 归输入框）。
+    useEscapeClose(onClose);
     const [source, setSource] = useState<OnlineMetadataSource>('netease');
     const [query, setQuery] = useState(() => buildLocalSongMetadataSearchQuery(song));
     const [results, setResults] = useState<OnlineMetadataCandidate[]>([]);

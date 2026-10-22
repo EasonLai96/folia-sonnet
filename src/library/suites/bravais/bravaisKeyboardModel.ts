@@ -11,7 +11,8 @@ export type BravaisKeyAction =
     | { type: 'enqueue' }
     | { type: 'open-album' }
     | { type: 'open-artist' }
-    | { type: 'escape' }
+    /** `nativeBack`：这一下 Esc 是安卓的返回键 / 边缘返回手势变的，不是键盘上的 Esc（见 isNativeBackKey）。 */
+    | { type: 'escape'; nativeBack?: boolean }
     | { type: 'first' }
     | { type: 'last' }
     | { type: 'page'; direction: -1 | 1 }
@@ -24,6 +25,8 @@ export type BravaisKeyInput = {
     ctrlKey: boolean;
     metaKey: boolean;
     repeat: boolean;
+    /** 这一下是不是系统返回变的（只影响 Esc 阶梯：见 BravaisKeyAction 的 escape）。 */
+    nativeBack?: boolean;
 };
 
 const ARROWS: Record<string, WallDirection> = {
@@ -42,7 +45,7 @@ export const resolveBravaisKey = (input: BravaisKeyInput): BravaisKeyAction | nu
         return { type: shiftKey ? 'enqueue' : 'enter' };
     }
     if (altKey) return null;
-    if (key === 'Escape') return repeat ? null : { type: 'escape' };
+    if (key === 'Escape') return repeat ? null : { type: 'escape', nativeBack: input.nativeBack };
     if (key === 'Tab') return { type: 'tab', backwards: shiftKey };
     if (shiftKey) return null;
     const direction = ARROWS[key];
@@ -57,8 +60,10 @@ export const resolveBravaisKey = (input: BravaisKeyInput): BravaisKeyAction | nu
 /**
  * Esc 阶梯的一级（设计稿 §10.8：表单态 → 聚焦卡 → 键盘焦点 → 面板 → 过滤词 → onBack）。没有的级别跳过。
  * B9：首页的管理隐藏视图（view）排在面板之后、过滤词之前（两者互斥：有批量的目录没有可隐藏的条目）。
+ * seam：缝被展开成完整信息条（窄屏上这是用户自己打开的）时先把它收回去，再退出这一层。
+ * 系统返回（nativeBack）跳过键盘焦点那一级——它只是一个焦点环，不是一个层。
  */
-export type BravaisEscapeStep = 'form' | 'focus-card' | 'keyboard-focus' | 'panel' | 'view' | 'query' | 'back';
+export type BravaisEscapeStep = 'form' | 'focus-card' | 'keyboard-focus' | 'panel' | 'view' | 'query' | 'seam' | 'back';
 
 export const resolveEscapeStep = ({
     hasForm = false,
@@ -67,6 +72,7 @@ export const resolveEscapeStep = ({
     hasPanel = false,
     hasViewMode = false,
     hasQuery = false,
+    hasSeam = false,
     canGoBack,
 }: {
     hasForm?: boolean;
@@ -75,6 +81,7 @@ export const resolveEscapeStep = ({
     hasPanel?: boolean;
     hasViewMode?: boolean;
     hasQuery?: boolean;
+    hasSeam?: boolean;
     canGoBack: boolean;
 }): BravaisEscapeStep | null => {
     if (hasForm) return 'form';
@@ -83,6 +90,7 @@ export const resolveEscapeStep = ({
     if (hasPanel) return 'panel';
     if (hasViewMode) return 'view';
     if (hasQuery) return 'query';
+    if (hasSeam) return 'seam';
     return canGoBack ? 'back' : null;
 };
 

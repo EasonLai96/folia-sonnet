@@ -12,6 +12,7 @@ import {
   splitEntity,
 } from '../../services/localLibraryCatalogService';
 import { EntityEditorWorkspace } from '../local-library-entity/EntityEditorWorkspace';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 // src/components/modal/LocalLibraryEntityPanel.tsx
 // Orchestrates entity mutations in Folia's context-aware editor.
@@ -49,6 +50,8 @@ export const LocalLibraryEntityPanel = ({
   const closeButtonTheme = isDaylight ? 'hover:bg-zinc-200/50 text-zinc-500 hover:text-zinc-900' : 'hover:bg-white/10 text-zinc-400 hover:text-white';
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<EntityEditorFeedback | null>(null);
+  // Esc 与安卓的返回键 / 边缘返回手势都关掉这个面板（监听挂在 window 上的理由见 hooks/useEscapeClose）。
+  useEscapeClose(onClose);
 
   // Runs one mutation at a time and keeps operation feedback inside the editor.
   const run = async (operation: () => Promise<unknown>, successMessage: string): Promise<boolean> => {
@@ -74,9 +77,6 @@ export const LocalLibraryEntityPanel = ({
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-3 backdrop-blur-xl md:p-6"
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose();
-      }}
-      onKeyDown={event => {
-        if (event.key === 'Escape') onClose();
       }}
     >
       <motion.div

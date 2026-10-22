@@ -15,7 +15,7 @@ import { armBravaisPlayingCard } from './bravaisPlayingCard';
 import { closeBravaisPanel } from './bravaisPanelHistory';
 import { setBravaisWallHoverKey, useBravaisUiStore } from './bravaisUiStore';
 import { setBravaisSearchOpen } from './bravaisHomeUiStore';
-import { useBravaisSeamStore } from './bravaisSeamLevel';
+import { resolveSeamEscapeLevel, useBravaisSeamStore } from './bravaisSeamLevel';
 import { canTakeSeamFocus, resolveSeamEntry, resolveSeamStep } from './bravaisSeamFocus';
 import { BRAVAIS_SEAM_FLIP_ATTRIBUTE } from './bravaisSeamMotion';
 import type { BravaisTileHandlers } from './BravaisTile';
@@ -282,13 +282,19 @@ export const useBravaisInteractions = ({
         // Tab / Shift+Tab 都是「换到另一站」（只有两站，反向也是同一个去处）。
         if (action.type === 'tab') return handleTab(target);
         if (action.type === 'escape') {
+            // 缝被用户展开成完整信息条（窄屏）时算一级：先收回去，再退出这一层。
+            const seam = useBravaisSeamStore.getState();
+            const seamEscape = resolveSeamEscapeLevel(seam.level, seam.viewportWidth);
             const step = resolveEscapeStep({
                 hasForm: Boolean(layer.entries?.hasForm),
                 hasFocusCard: expandedRef.current !== null,
-                hasKeyboardFocus: focusedRef.current !== null,
+                // 系统返回（安卓返回键 / 边缘手势）跳过键盘焦点这一级：那只是一个焦点环，不是一个层，
+                // 停在它上面会让人以为按了返回没反应（键盘 Esc 照旧逐级取消）。
+                hasKeyboardFocus: !action.nativeBack && focusedRef.current !== null,
                 hasPanel: useBravaisUiStore.getState().panelFor === layer.key,
                 hasViewMode: Boolean(layer.entries?.hasViewMode),
                 hasQuery: Boolean(layer.entries?.hasQuery),
+                hasSeam: seamEscape !== null,
                 canGoBack: Boolean(layer.onBack),
             });
             if (step === 'form') layer.entries?.cancelForm?.();
@@ -297,6 +303,7 @@ export const useBravaisInteractions = ({
             else if (step === 'panel') closeBravaisPanel();
             else if (step === 'view') layer.entries?.exitViewMode?.();
             else if (step === 'query') layer.entries?.clearQuery?.();
+            else if (step === 'seam' && seamEscape) useBravaisSeamStore.getState().setLevel(seamEscape);
             else if (step === 'back') layer.onBack!();
             return step !== null;
         }

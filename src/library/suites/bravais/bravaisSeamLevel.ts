@@ -30,6 +30,21 @@ export const defaultSeamLevel = (viewportWidth: number): Exclude<BravaisSeamLeve
     isNarrowViewport(viewportWidth) ? 'spine' : 'full'
 );
 
+/**
+ * Esc / 系统返回这一步把缝收到哪：缝是完整信息条、而当前视口的默认等级是书脊（窄屏）时，这个展开是用户
+ * 自己打开的，收回去；宽屏默认就是完整信息条（那不是「展开过」，收它等于按了返回却只动了一下信息条）。
+ */
+export const resolveSeamEscapeLevel = (
+    level: BravaisSeamLevel,
+    viewportWidth: number,
+): 'spine' | null => {
+    if (level !== 'full') return null;
+    const fallback = defaultSeamLevel(viewportWidth > 0
+        ? viewportWidth
+        : (typeof window === 'undefined' ? 1280 : window.innerWidth));
+    return fallback === 'full' ? null : fallback;
+};
+
 /** 换等级：折叠时记下当前等级；其它等级直接换。 */
 export const applySeamLevel = (state: BravaisSeamLevelState, next: BravaisSeamLevel): BravaisSeamLevelState => {
     if (next === state.level) return state;
