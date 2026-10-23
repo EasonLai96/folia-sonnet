@@ -17,6 +17,23 @@ import { nativePlayer, type NativePlaybackEvent } from './nativePlayerPlugin';
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+/**
+ * ⛔ 原生播放（P1）总闸：**已停用**。
+ *
+ * 只断入口，引擎代码先留着（随时能拨回来）。拨回 `true` 就恢复原来的行为，
+ * 设置里那一项会跟着回来 —— 下面的开关判定和 `nativeTakes` 全都挂在它上面。
+ *
+ * 为什么停：用户实测「开原生播放时 App 内那个歌词可视化页面隔几秒顿一下、关掉就好」，
+ * 关掉之后那套排查（120Hz 下 WebView 每秒 100 次 `syncAndDrawFrame` + 周期性
+ * React 提交）不再需要背着一条额外的变量。⚠️ 但它**不是**唯一嫌疑：关掉状态下也测到过
+ * `busy 335/1011, 307 msgs` 与 1 秒级的 `[FoliaHitch]`，所以别以为停用它就等于治好了。
+ *
+ * ⚠️ 代价：媒体缓存副本与本地歌走 `blob:`，原生吃不下、本来就回落 `<audio>`；
+ * 停用之后**所有**歌都走 `<audio>` + Web Audio 图。这条路是原来就有的，
+ * 只是当初做原生播放就是为了绕开它。
+ */
+export const NATIVE_PLAYBACK_ENABLED: boolean = false;
+
 class NativePlaybackEngine {
     private positionMs = 0;
     private durationMs = 0;

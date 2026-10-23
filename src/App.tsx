@@ -118,7 +118,7 @@ import { usePlaybackAudioBridge } from './components/app/playback/bridges/usePla
 import { usePlayerSwipeGesture } from './hooks/usePlayerSwipeGesture';
 import { useTranscodeFallback } from './hooks/useTranscodeFallback';
 import { useAutomixDecks, type AutomixDeckId } from './services/automix/useAutomixDecks';
-import { nativePlaybackEngine } from './services/playbackEngine/nativePlaybackEngine';
+import { NATIVE_PLAYBACK_ENABLED, nativePlaybackEngine } from './services/playbackEngine/nativePlaybackEngine';
 import { isNativePlayerAvailable } from './services/playbackEngine/nativePlayerPlugin';
 import { useNativePlaybackRuntime } from './services/playbackEngine/useNativePlaybackRuntime';
 import { usePlaybackInteractionBridge } from './components/app/playback/bridges/usePlaybackInteractionBridge';
@@ -595,9 +595,11 @@ export default function App() {
     /*
      * 原生播放（P1）。
      *
-     * 三个层次，别混：
-     *  · `nativePlaybackEnabled` —— 用户开关（设置里那一项）；
-     *  · `nativeActive`          —— 开关开了**且**原生插件真的在（不能靠 `typeof
+     * ⛔ **已停用**：`NATIVE_PLAYBACK_ENABLED` 是总闸（见 nativePlaybackEngine.ts）。
+     * 下面三个层次都保留着，闸一关它们自然全为 false，所以不用逐个去改分支。
+     *
+     *  · `nativePlaybackEnabled` —— 用户开关（设置里那一项，已随停用一起撤掉）；
+     *  · `nativeActive`          —— 总闸 ∧ 开关 ∧ 原生插件真的在（不能靠 `typeof
      *                               plugin.method === 'function'` 判，registerPlugin 给的是代理）；
      *  · `nativeTakes`           —— 这一首真的交给原生：地址还得是原生吃得下的
      *                               （blob 是 WebView 自己的对象 URL，媒体缓存副本就是这种，
@@ -607,7 +609,7 @@ export default function App() {
      * 它们不该因为换了一首歌就换身份。
      */
     const nativePlaybackEnabled = useAudioSettingsStore(state => state.nativePlaybackEnabled);
-    const nativeActive = nativePlaybackEnabled && isNativePlayerAvailable();
+    const nativeActive = NATIVE_PLAYBACK_ENABLED && nativePlaybackEnabled && isNativePlayerAvailable();
     const nativeTakes = nativeActive && nativePlaybackEngine.supports(audioSrc);
     const nativeTakesRef = useRef(false);
     useEffect(() => {
