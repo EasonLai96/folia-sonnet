@@ -1,4 +1,4 @@
-import { type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
+import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
 // 只做字符串校验，走 types/visualizerModes 而不是 registry：后者的 eager glob 会把 13 个
 // renderer（含 three.js）拉进来，而这里读的只是一个 localStorage 字符串。
 // mod 模式在启动时本来就看不到——bootstrap.tsx 的 restoreStoredModVisualizer 在 mods 注册完
@@ -10,6 +10,7 @@ import {
     isBuiltinVisualizerMode,
 } from '../types/visualizerModes';
 import type { StoredTuning } from '../components/visualizer/tuningDefinition';
+import { resolveSmartBeatSettings, type SmartBeatPatch } from '../services/beatFx/smartBeatSettings';
 import { parseVisualizerFrameRate, VISUALIZER_FRAME_RATE_STORAGE_KEY } from '../utils/frameRateLimiter';
 
 import { getStoredString } from './storagePrimitives';
@@ -417,3 +418,20 @@ export const resolveVisualizerBackgroundMode = (
     storedMode: VisualizerBackgroundMode | null | undefined,
     _visualizerMode: VisualizerMode,
 ): VisualizerBackgroundMode => storedMode ?? DEFAULT_VISUALIZER_BACKGROUND_MODE;
+
+export const SMART_BEAT_STORAGE_KEY = 'visualizer_smart_beat';
+
+// 纯逻辑那部分搬去了 services/beatFx/smartBeatSettings.ts：utils 不许 import store（PR #750 复审，2026-10-19）。
+// 三档（off / cached / on）也只在那里定义，这里照原样转出去。
+export { resolveSmartBeatSettings, toStoredSmartBeat, type SmartBeatPatch } from '../services/beatFx/smartBeatSettings';
+
+export const readStoredSmartBeatSettings = (): SmartBeatSettings => {
+    if (typeof window === 'undefined') return DEFAULT_SMART_BEAT_SETTINGS;
+    const saved = localStorage.getItem(SMART_BEAT_STORAGE_KEY);
+    if (!saved) return DEFAULT_SMART_BEAT_SETTINGS;
+    try {
+        return resolveSmartBeatSettings(JSON.parse(saved) as SmartBeatPatch);
+    } catch {
+        return DEFAULT_SMART_BEAT_SETTINGS;
+    }
+};

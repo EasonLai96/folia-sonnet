@@ -257,6 +257,28 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
             postProcessLensDistortion: { kind: 'number', min: 0, max: 2, zh: '镜头畸变' },
         },
     },
+    hanabi: {
+        setter: 'handleSetHanabiTuning',
+        params: {
+            sparkAmount: { kind: 'number', min: 0, max: 2, zh: '火星数量' },
+            ornamentAmount: { kind: 'number', min: 0, max: 2, zh: '装饰数量' },
+            textMotion: { kind: 'number', min: 0, max: 2, zh: '文字动势' },
+            blockOpacity: { kind: 'number', min: 0, max: 1, zh: '色块不透明度' },
+            riseSpeed: { kind: 'number', min: 0, max: 2, zh: '上升速度' },
+            spin: { kind: 'number', min: 0, max: 2, zh: '旋转' },
+            ambient: { kind: 'number', min: 0, max: 2, zh: '环境光' },
+            glow: { kind: 'number', min: 0, max: 2, zh: '辉光' },
+            bloom: { kind: 'number', min: 0, max: 2, zh: '泛光' },
+            chorusBloom: { kind: 'number', min: 0, max: 2, zh: '副歌泛光' },
+            sky: { kind: 'number', min: 0, max: 1, zh: '夜空浓度' },
+            collage: { kind: 'number', min: 0, max: 2, zh: '拼贴密度' },
+            launches: { kind: 'boolean', zh: '升空尾迹' },
+            overlayFrame: { kind: 'boolean', zh: '画面边框' },
+            textOnly: { kind: 'boolean', zh: '仅歌词文字' },
+            colorMode: { kind: 'select', options: ['mixed', 'vivid', 'theme'], zh: '配色' },
+            renderQuality: { kind: 'select', options: ['full', 'balanced', 'low'], zh: '画质' },
+        },
+    },
     lumiere: {
         setter: 'handleSetLumiereTuning',
         params: {

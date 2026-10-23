@@ -27,6 +27,8 @@ import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSet
 import RandomPoolGroup from '../random/RandomPoolGroup';
 import { useRandomPool } from '../random/useRandomPool';
 import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
+import SmartBeatSettingsCard from '../SmartBeatSettingsCard';
+import BeatEffectsGroup from '../BeatEffectsGroup';
 
 // src/components/visualizer/window/VisPlaygroundSettingsPanel.tsx
 // The right column of the lyric style window: five tabs with one "default" action for the open
@@ -314,8 +316,17 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                                     <Row notice={missingStyleNotice} />
                                 </Group>
                             )}
+                            {/* 智能动感模式: a setting of the whole picture, above whichever style's own options. */}
+                            <SmartBeatSettingsCard t={t} />
                             {/* The style's own options: kit groups, stacked as they come. */}
                             <div key={visualizerMode} className="st-page-in">
+                                {/* Its 智能动感模式 effects, each named, switched and scaled on its own. */}
+                                <BeatEffectsGroup
+                                    t={t}
+                                    effects={visualizerEntry.beatEffects}
+                                    onSliderPointerDown={onSliderPointerDown}
+                                    onSliderCommit={onSliderCommit}
+                                />
                                 {stylePanel}
                                 {/* Folium tunings other mods registered for this mode (registries.tunings): cards of the mods' own make. */}
                                 <div className="mt-7 space-y-4 empty:hidden">

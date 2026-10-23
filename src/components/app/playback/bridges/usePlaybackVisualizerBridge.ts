@@ -14,6 +14,8 @@ import {
     lyricCurrentTime,
 } from '../../../../stores/motionSignals';
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
+import { tickBeatFx } from '../../../../services/beatFx/beatFxLive';
+import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
 import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 import { omni } from '../../../../services/onlineMusic/omni';
 import { readIncomingLyricClock } from './incomingLyricClock';
@@ -122,6 +124,8 @@ export function usePlaybackVisualizerBridge({
     const spectrumReadAtMsRef = useRef(0);
     // 智能动感模式: loads the track's beats while it is on; the clock is stepped below. A ref, so
     // switching it does not rebuild the frame loop.
+    const beatFxWantedRef = useRef(false);
+    beatFxWantedRef.current = useBeatFxTrack();
     const handoffLineIndexRef = useRef(-1);
     // The lyric offsets as the loop reads them. The settle moves the displayed one onto the incoming
     // track's as it copies that track's clock: the prop catches up a render later, and a frame read in
@@ -418,6 +422,12 @@ export function usePlaybackVisualizerBridge({
             }
         }
 
+        if (beatFxWantedRef.current) {
+            // 原生播放时元素是空的：节拍那套补偿（beatFx）读的是元素与 AudioContext 的延迟，
+            // 这时候两边都没有意义，传 null 让它待着。
+            tickBeatFx(isActuallyPlaying && !usesNativeClock ? audioElement : null, analyserRef.current?.context);
+        }
+
         // While a blend holds the picture, the active deck is the incoming track: its hand-off, clock
         // and line for the visualizer, off this same frame rather than a second loop.
         const heldElement = getDisplayElement?.() ?? null;
@@ -503,4 +513,5 @@ export function usePlaybackVisualizerBridge({
             setHeldLyricTime(null);
         };
     }, [animationFrameRef, updateLoop]);
+
 }

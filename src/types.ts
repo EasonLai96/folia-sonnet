@@ -601,6 +601,44 @@ export const DEFAULT_SONNET_TUNING: SonnetTuning = {
 };
 
 /**
+ * One beat effect's own setting under 智能动感模式 (services/beatFx/beatEffects.ts): whether it plays,
+ * and its strength, 0..2, 1 being the look it was tuned to.
+ */
+export interface BeatEffectSetting {
+  on: boolean;
+  strength: number;
+}
+
+/** 智能动感模式's three settings (2026-10-17, the user's 全开 / 半开 / 不开):
+ * - `on`: the effects play, and a track with nothing stored is analysed now on the GPU.
+ * - `cached`: the effects play from what is already stored - a track analysed before under `on`, or
+ *   whose beats automix analysed - and nothing is ever started for them: no model run, no decode, no
+ *   stream read. A track with nothing stored keeps its original picture. Runs already in flight
+ *   elsewhere (automix's) are waited for and used, as they cost nothing more. Automix itself is not
+ *   changed by this setting.
+ * - `off`: every picture exactly as it was; nothing read, nothing run.
+ */
+export type SmartBeatMode = 'off' | 'cached' | 'on';
+
+/**
+ * 智能动感模式, one setting for every visualizer and background that draws beat FX, and each effect's
+ * own setting. The effects a picture has are declared on its registry entry (`beatEffects`), each
+ * reading beat_this' beats or htdemucs' drum hits (src/services/beatFx). An effect with nothing
+ * stored plays at strength 1. Read `mode` through `smartBeatActive` / `smartBeatMayAnalyse`
+ * (services/beatFx/beatEffects.ts), never by comparing it in place.
+ */
+export interface SmartBeatSettings {
+  mode: SmartBeatMode;
+  /** Keyed by effect id (`sonnet.lensTear`); only the effects the user has touched. */
+  effects: Readonly<Record<string, BeatEffectSetting>>;
+}
+
+export const DEFAULT_SMART_BEAT_SETTINGS: SmartBeatSettings = {
+  mode: 'off',
+  effects: {},
+};
+
+/**
  * `gradient` fills every tone shape with a four-colour ramp built from the cover art's
  * extracted colours mixed with the theme, instead of a flat tone.
  */
@@ -930,6 +968,7 @@ export type NomandBackgroundDitheringType = '2x2' | '4x4' | '8x8';
 export type NomandBackgroundEffect = 'dithering' | 'fluted-glass' | 'paper-texture' | 'halftone-dots' | 'lens-distortion';
 export type LatentBackgroundDisplayMode = 'dithering' | 'mesh' | 'both';
 export type LatentBackgroundColorSource = 'cover-theme' | 'cover-only';
+export type MonetAudioStyle = 'bar' | 'line';
 export type MonetPortraitSource = 'cover' | 'custom';
 export type BuiltinVisualizerBackgroundMode = 'common' | 'monet' | 'nomand' | 'latent' | 'url' | 'sora';
 export type VisualizerBackgroundMode = BuiltinVisualizerBackgroundMode | (string & {});

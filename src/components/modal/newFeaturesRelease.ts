@@ -1,4 +1,4 @@
-import { Bot, Keyboard, Radio, Shuffle, Sparkles } from 'lucide-react';
+import { Bot, Flame, Keyboard, Radio, Shuffle, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // src/components/modal/newFeaturesRelease.ts
@@ -16,13 +16,13 @@ type NewFeaturesRelease = {
 };
 
 // Defines the current release's cards; their localized text lives under i18nKey in every locale.
-// 本 fork 砍掉了智能动感模式/花火（`60b70efc`），所以上游的 `hanabi` 卡片不在这里；
-// 其余五张与上游 v0.7.22 一致。
+// 与上游 v0.7.22 一致：六张。花火（含它需要的智能动感模式）曾被 60b70efc 砍掉，现已按用户要求恢复。
 export const NEW_FEATURES_RELEASE: NewFeaturesRelease = {
     i18nKey: 'releaseNotes.v0_7_22',
     majorUpdate: { codename: 'Sparkle' },
     features: [
         { id: 'qishui', icon: Radio },
+        { id: 'hanabi', icon: Flame },
         { id: 'randomStyles', icon: Shuffle },
         { id: 'globalShortcuts', icon: Keyboard },
         { id: 'aiProviders', icon: Bot },

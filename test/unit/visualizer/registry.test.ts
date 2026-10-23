@@ -22,6 +22,7 @@ describe('visualizer registry', () => {
             'prompt',
             'tempera',
             'lumiere',
+            'hanabi',
             'classic',
             'cadenza',
             'partita',

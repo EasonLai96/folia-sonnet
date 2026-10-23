@@ -1,4 +1,5 @@
 import React from 'react';
+import type { BeatEffectDef } from '../../services/beatFx/beatEffects';
 import { type MotionValue } from 'framer-motion';
 import {
     type AudioBands,
@@ -244,6 +245,16 @@ export interface VisualizerRegistryEntry {
      * Modes without this field cannot be targeted by `registries.tunings`.
      */
     foliumTunables?: Readonly<Record<string, FoliumTunable>>;
+    /*
+     * The beat effects this mode draws under 智能动感模式 (services/beatFx/beatEffects.ts), each named,
+     * switched and scaled on its own in the mode's settings. An effect reading 'beats' turns the
+     * shared `beatImpact` / `downbeatImpact` signals (services/beatFx) into its picture - Sonnet:
+     * sonnet/sonnetBeatFx.ts, Diorama: diorama/dioramaBeatRipples.ts; one reading 'drums' plays the
+     * track's drum hits off htdemucs' drum stem (services/analysis/drumHits.ts; 时计:
+     * pendolo/usePendoloBeatFx.ts). Each model runs for the playing track only while a live effect on
+     * screen reads it (beatClockTargets.ts).
+     */
+    beatEffects?: readonly BeatEffectDef[];
 }
 
 export interface FoliumTunable {

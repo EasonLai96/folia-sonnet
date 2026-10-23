@@ -18,6 +18,7 @@ import {
     DEFAULT_TEMPERA_TUNING,
     DEFAULT_TILT_TUNING,
 } from '@/types';
+import { DEFAULT_HANABI_TUNING } from '@/components/visualizer/hanabi/types';
 
 // test/unit/visualizer/storedSettingsPins.test.ts
 // Pins what the lyric styles and the backgrounds keep in localStorage: for every one of them, what
@@ -144,6 +145,11 @@ const CURRENT: Record<string, unknown> = {
         lightIntensity: 1.5, fogDensity: 0.4, windowNeighbors: DEFAULT_LUMIERE_TUNING.windowNeighbors === 1 ? 2 : 1, fogOctaves: 3,
         hideTrails: !DEFAULT_LUMIERE_TUNING.hideTrails, themeColorMix: 0.7, renderQuality: 'low',
     },
+    hanabi_tuning: {
+        ...DEFAULT_HANABI_TUNING,
+        colorMode: 'vivid', sparkAmount: 1.5, ornamentAmount: 0.5, textMotion: 1.2, blockOpacity: 0.7, riseSpeed: 0.6,
+        launches: !DEFAULT_HANABI_TUNING.launches, overlayFrame: !DEFAULT_HANABI_TUNING.overlayFrame, sky: 0.4, collage: 1.5,
+    },
     monet_background_tuning: {
         ...DEFAULT_MONET_BACKGROUND_TUNING,
         backgroundSource: 'uploaded-global', backgroundLayout: 'half-pane-gradient', backgroundBlurPx: 24, backgroundOverlayOpacity: 0.3,
@@ -174,7 +180,7 @@ const DEFAULTS: Record<string, unknown> = {
     fume_tuning: DEFAULT_FUME_TUNING, claddagh_tuning: DEFAULT_CLADDAGH_TUNING, cappella_tuning: DEFAULT_CAPPELLA_TUNING,
     tilt_tuning: DEFAULT_TILT_TUNING, diorama_tuning: DEFAULT_DIORAMA_TUNING, monet_tuning: DEFAULT_MONET_TUNING,
     pendolo_tuning: DEFAULT_PENDOLO_TUNING, sonnet_tuning: DEFAULT_SONNET_TUNING, tempera_tuning: DEFAULT_TEMPERA_TUNING,
-    lumiere_tuning: DEFAULT_LUMIERE_TUNING, monet_background_tuning: DEFAULT_MONET_BACKGROUND_TUNING,
+    lumiere_tuning: DEFAULT_LUMIERE_TUNING, hanabi_tuning: DEFAULT_HANABI_TUNING, monet_background_tuning: DEFAULT_MONET_BACKGROUND_TUNING,
     nomand_background_tuning: DEFAULT_NOMAND_BACKGROUND_TUNING, latent_background_tuning: DEFAULT_LATENT_BACKGROUND_TUNING,
     sora_background_tuning: DEFAULT_SORA_BACKGROUND_TUNING,
 };
@@ -220,6 +226,7 @@ describe('what is read at start-up', () => {
             sonnet_tuning: json({ outerFrameMode: 'full' }),
             tempera_tuning: json({ colorMode: 'mono' }),
             lumiere_tuning: json({ renderQuality: 'balanced' }),
+            hanabi_tuning: json({ colorMode: 'theme' }),
             monet_background_tuning: json({ backgroundBlurPx: 10 }),
             nomand_background_tuning: json({ effect: 'dithering' }),
             latent_background_tuning: json({ displayMode: 'dithering' }),
@@ -308,6 +315,10 @@ describe('what is read at start-up', () => {
                 lightIntensity: 9, audioResponse: -1, fogDensity: '1', unlitOpacity: 0, windowNeighbors: 3, fogOctaves: 4.6,
                 lineArt: 'yes', themeColorMix: 4, renderQuality: 'ultra',
             }),
+            hanabi_tuning: json({
+                colorMode: 'neon', sparkAmount: 9, ornamentAmount: -1, textMotion: '1', blockOpacity: 4, riseSpeed: null,
+                launches: 0, overlayFrame: 'no', textOnly: 'yes', sky: -1, collage: 9,
+            }),
             monet_background_tuning: json({
                 backgroundSource: 'web', backgroundLayout: 'tiles', backgroundBlurPx: 999, backgroundOverlayOpacity: -1,
                 backgroundGrayscale: 4, backgroundSaturation: 9, backgroundWash: 'x', backgroundHalfPaneOffsetX: -999,
@@ -378,6 +389,7 @@ const UNITS: Array<{ key: string; field: string; set: string; reset: string; pat
     { key: 'tilt_tuning', field: 'tiltTuning', set: 'handleSetTiltTuning', reset: 'handleResetTiltTuning', patches: [{ splitProbability: 0.2 }, { splitProbability: 4, tiltStyleProbability: -1 }, { colorScheme: 'primaryAll' }] },
     { key: 'diorama_tuning', field: 'dioramaTuning', set: 'handleSetDioramaTuning', reset: 'handleResetDioramaTuning', patches: [{ cameraSpeed: 1.2 }, { geometryVisibility: { rings: false } }, { particleDensity: 1, particleScale: 99, glowIntensity: 0 }, { showParticles: false, soulEnabled: false }] },
     { key: 'monet_tuning', field: 'monetTuning', set: 'handleSetMonetTuning', reset: 'handleResetMonetTuning', patches: [{ fontScale: 1.2 }, { fontScale: 9, portraitOffsetX: 50 }, { portraitSource: 'custom', portraitStyle: 'rectangular', showDescription: false }] },
+    { key: 'hanabi_tuning', field: 'hanabiTuning', set: 'handleSetHanabiTuning', reset: 'handleResetHanabiTuning', patches: [{ sparkAmount: 1.4 }, { sparkAmount: 9, sky: -1, blockOpacity: 4 }, { colorMode: 'theme', launches: false, textOnly: true }, { colorMode: 'neon', riseSpeed: Number.NaN }] },
     { key: 'pendolo_tuning', field: 'pendoloTuning', set: 'handleSetPendoloTuning', reset: 'handleResetPendoloTuning', patches: [{ arcRadius: 0.5 }, { arcRadius: 9, arcAngleDeg: 1, tickSnappiness: 0, activeScale: 9 }, { showGearDecor: 'none', enableLineGlow: true }, { showGearDecor: 'huge', wheelCenterX: '0.2' }] },
     { key: 'sonnet_tuning', field: 'sonnetTuning', set: 'handleSetSonnetTuning', reset: 'handleResetSonnetTuning', patches: [{ cameraIntensity: 1.3 }, { cameraIntensity: 9, textureResolution: 0.1, postProcessGrain: 4 }, { outerFrameMode: 'none', showOnlyText: true, showGuide: false }, { outerFrameMode: 'thick', mgDensity: '2' }] },
     { key: 'tempera_tuning', field: 'temperaTuning', set: 'handleSetTemperaTuning', reset: 'handleResetTemperaTuning', patches: [{ glyphMotion: 1.3 }, { cameraIntensity: 9, layerImageFrequency: 4, textureResolution: 99 }, { colorMode: 'duo', layerImageDepth: 'front', wholeLineLyrics: true }, { layerImages: [{ id: 'p', name: 'P', align: 'free', verticalAlign: 'bottom', scale: 9, opacity: 0.5 }, { name: 'no id' }] }, { colorMode: 'rainbow', layerImageDepth: 'middle' }] },
@@ -416,7 +428,7 @@ describe('what is written', () => {
         fume_tuning: 'notifications.fumeReset', claddagh_tuning: 'notifications.claddaghReset', cappella_tuning: 'notifications.cappellaReset',
         tilt_tuning: 'notifications.tiltReset', diorama_tuning: 'notifications.dioramaReset', monet_tuning: 'notifications.monetReset',
         pendolo_tuning: 'notifications.pendoloReset', sonnet_tuning: 'notifications.sonnetReset', tempera_tuning: 'notifications.temperaReset',
-        lumiere_tuning: 'notifications.lumiereReset', monet_background_tuning: 'notifications.monetBgReset',
+        lumiere_tuning: 'notifications.lumiereReset', hanabi_tuning: 'notifications.hanabiReset', monet_background_tuning: 'notifications.monetBgReset',
         nomand_background_tuning: 'notifications.nomandBgReset', latent_background_tuning: 'notifications.latentBgReset',
         sora_background_tuning: null,
     };

@@ -7,6 +7,7 @@ import {
     DEFAULT_MONET_TUNING,
     DEFAULT_NOMAND_BACKGROUND_TUNING,
     DEFAULT_PENDOLO_TUNING,
+    DEFAULT_SMART_BEAT_SETTINGS,
     DEFAULT_SONNET_TUNING,
     DEFAULT_TEMPERA_TUNING,
     SONNET_CAMERA_INTENSITY_MAX,
@@ -432,6 +433,24 @@ const decompressSonnet = (o: any): any => ({
     postProcessLensDispersion: o.pplx !== undefined ? o.pplx : DEFAULT_SONNET_TUNING.postProcessLensDispersion,
 });
 
+// 智能动感模式 is one setting for every visualizer, not a Sonnet tuning, so it has its own key. Each
+// effect's setting is `[on ? 1 : 0, strength]`; a config from before effects had their own carries
+// the shared 轻拍 / 重拍 pair (`bi` / `dbi`), passed on for the store to fold (resolveSmartBeatSettings).
+const compressSmartBeat = (t: any): any => ({
+    ...(t.mode !== undefined ? { md: t.mode } : {}),
+    on: t.enabled ?? t.mode === 'on',
+    ef: Object.fromEntries(Object.entries(t.effects ?? {}).map(([id, e]: [string, any]) => [id, [e.on ? 1 : 0, e.strength]])),
+});
+const decompressSmartBeat = (o: any): any => ({
+    ...(o.md !== undefined ? { mode: o.md } : {}),
+    enabled: o.on !== undefined ? o.on : DEFAULT_SMART_BEAT_SETTINGS.mode === 'on',
+    ...(o.ef && typeof o.ef === 'object'
+        ? { effects: Object.fromEntries(Object.entries(o.ef).map(([id, e]: [string, any]) => [id, Array.isArray(e) ? { on: e[0] === 1, strength: e[1] } : e])) }
+        : {}),
+    ...(o.bi !== undefined ? { beatIntensity: o.bi } : {}),
+    ...(o.dbi !== undefined ? { downbeatIntensity: o.dbi } : {}),
+});
+
 const compressTempera = (t: any): any => ({
     ci: t.cameraIntensity,
     gm: t.glyphMotion,
@@ -570,6 +589,7 @@ export const compressConfig = (config: any): string => {
     if (config.monetTuning) minified.mt = compressMonet(config.monetTuning);
     if (config.pendoloTuning) minified.pdt = compressPendolo(config.pendoloTuning);
     if (config.sonnetTuning) minified.snt = compressSonnet(config.sonnetTuning);
+    if (config.smartBeat) minified.smb = compressSmartBeat(config.smartBeat);
     if (config.temperaTuning) minified.tmp = compressTempera(config.temperaTuning);
     if (config.lumiereTuning) minified.lmt = compressLumiere(config.lumiereTuning);
     // Folium param values are already plain JSON keyed by scope; stored as-is.
@@ -715,6 +735,7 @@ export const decompressConfig = (str: string): any => {
         if (parsed.mt) decompressed.monetTuning = decompressMonet(parsed.mt);
         if (parsed.pdt) decompressed.pendoloTuning = decompressPendolo(parsed.pdt);
         if (parsed.snt) decompressed.sonnetTuning = decompressSonnet(parsed.snt);
+        if (parsed.smb) decompressed.smartBeat = decompressSmartBeat(parsed.smb);
         if (parsed.tmp) decompressed.temperaTuning = decompressTempera(parsed.tmp);
         if (parsed.lmt) decompressed.lumiereTuning = decompressLumiere(parsed.lmt);
         if (parsed.fp) decompressed.foliumParams = parsed.fp;
@@ -749,7 +770,7 @@ export const decompressConfig = (str: string): any => {
             'subtitleFontFallbackFamilies', 'visualizerTunings', 'classicTuning',
             'cadenzaTuning', 'partitaTuning', 'fumeTuning', 'claddaghTuning', 'cappellaTuning',
             'tiltTuning', 'dioramaTuning', 'monetBackgroundTuning', 'nomandBackgroundTuning', 'latentBackgroundTuning', 'soraBackgroundTuning', 'monetTuning',
-            'pendoloTuning', 'sonnetTuning', 'temperaTuning', 'lumiereTuning', 'foliumParams',
+            'pendoloTuning', 'sonnetTuning', 'smartBeat', 'temperaTuning', 'lumiereTuning', 'foliumParams',
             'urlBackgroundList', 'urlBackgroundSelectedId',
             'songThemeAutoSwitchEnabled', 'songThemeAutoGenerateEnabled', 'themeGenerationSource', 'followSystemTheme',
             'stageTrackPillMode', 'stageTrackPillTimeoutSec', 'stageTrackPillOnHome',

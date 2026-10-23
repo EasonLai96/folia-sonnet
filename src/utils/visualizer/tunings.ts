@@ -1,3 +1,4 @@
+import type { HanabiTuning } from '../../components/visualizer/hanabi/types';
 import type {
     CadenzaTuning,
     CappellaTuning,
@@ -41,6 +42,7 @@ export interface VisualizerTuningMap {
     sonnet: SonnetTuning;
     tempera: TemperaTuning;
     lumiere: LumiereTuning;
+    hanabi: HanabiTuning;
 }
 
 export type VisualizerTuningMode = keyof VisualizerTuningMap;
@@ -66,6 +68,7 @@ export const VISUALIZER_TUNING_KEYS = {
     sonnet: { settingsKey: 'sonnetTuning', settingsSetterKey: 'handleSetSonnetTuning' },
     tempera: { settingsKey: 'temperaTuning', settingsSetterKey: 'handleSetTemperaTuning' },
     lumiere: { settingsKey: 'lumiereTuning', settingsSetterKey: 'handleSetLumiereTuning' },
+    hanabi: { settingsKey: 'hanabiTuning', settingsSetterKey: 'handleSetHanabiTuning' },
 } as const satisfies Record<VisualizerTuningMode, { settingsKey: string; settingsSetterKey: string }>;
 
 export const VISUALIZER_TUNING_MODES = Object.keys(VISUALIZER_TUNING_KEYS) as VisualizerTuningMode[];

@@ -48,10 +48,9 @@ import { resolveHeardAudioEqualizerSettings } from '../../../../utils/audioEqual
  * 真要绕，得改用 `element.captureStream()` + `createMediaStreamSource`（每次新建 stream），
  * 代价大且会带来新的延迟 —— 先不碰。
  *
- * ⚠️ **「后台停频谱」这条路现在不是被壁纸绑住了**：`src/entries/wallpaperSurface.tsx` 那条
- * 壁纸叠层（安卓）从来没有自己的 AudioContext，它的 band 是原生 `WallpaperAudioTap` 用系统
- * `Visualizer` 抓的，跟这边无关；它那份频谱已于 2026-10-24 删掉，不再从这里传任何东西过去。
- * 所以真要省音频线程，卡点只剩应用自己还在读频谱的那几处（OBS 推流、模组接口、诊断面板）。
+ * ⚠️ **为什么不做「后台停频谱」来省音频线程**：`src/entries/wallpaperSurface.tsx` 那条
+ * 壁纸叠层**没有自己的 AudioContext**，它的频谱是从这边 `payload.spectrum` 传过去的。
+ * 而叠层恰恰要在应用退后台时照常画（画在桌面上），一停就把它一起停了。
  *
  * 顺带澄清一笔：`services/spectrumTap` 把频谱搬到音频线程是对的，它解的是
  * 「主线程每帧现算 FFT」那一笔，**跟这里无关** —— 别因为调缓冲有效就以为频谱那条无用。

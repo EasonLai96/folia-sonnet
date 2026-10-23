@@ -3757,10 +3757,14 @@ export default {
       }
     },
     "v0_7_22": {
-      "intro": "Selamat datang di 0.7.22, Sparkle Update—sebuah rilis besar. Rilis ini menambahkan Qishui Music; membiarkan Anda memilih gaya mana yang diacak per lagu; memberi aplikasi desktop pintasan pemutaran global; dan membuat pengaturan AI bisa langsung memilih penyedia dan model.",
+      "intro": "Selamat datang di 0.7.22, Sparkle Update—sebuah rilis besar. Rilis ini menambahkan Qishui Music; menghadirkan Hanabi, gaya lirik kembang api ala Jepang; membiarkan Anda memilih gaya mana yang diacak per lagu; memberi aplikasi desktop pintasan pemutaran global; dan membuat pengaturan AI bisa langsung memilih penyedia dan model.",
       "qishui": {
         "title": "Qishui Music",
         "description": "Qishui Music hadir di desktop: masuk dari jendela login dengan memindai memakai Douyin. Cari, putar (kualitas standar), baca lirik tersinkron per kata dan lagu teratas artis, serta buka playlist Anda sendiri dan \"Terakhir diputar di Qishui\"; feed rekomendasi dan stasiun suasana diputar sebagai FM Pribadi, dan kartu suasana di beranda langsung memutar dengan satu ketukan. Anda bisa menyukai lagu, menambah dan menghapus lagu di playlist buatan sendiri, dan memakai Tidak suka di FM Pribadi. Lagu tanpa sumber yang bisa langsung diputar tidak dapat diputar, dan menjelajah album, membuat playlist, serta menyimpan playlist belum didukung. Lagu lokal yang cocok dengan lagu Qishui juga bisa mengambil liriknya."
+      },
+      "hanabi": {
+        "title": "Hanabi",
+        "description": "Gaya lirik baru bernuansa PV lirik Jepang: setiap baris muncul huruf demi huruf di atas blok warna, ornamen seperti kembang api mekar di sepanjang teks, dan di antara adegan seluruh pemandangan berputar dan naik mengikuti kembang api yang meluncur, dengan potongan film, stiker, dan selotip sebagai hiasan kolase serta cahaya yang menguat saat reff. Kembang api, teks, hiasan, dan warna bisa diatur di pengaturan gaya, dengan tingkat kualitas; di Mode ketukan pintar, kembang api meletus di langit malam setiap ketukan dan kamera mendorong mendekat mengikutinya."
       },
       "randomStyles": {
         "title": "Pilih Gaya Acak Sendiri",
@@ -3776,7 +3780,7 @@ export default {
       },
       "moreDetails": {
         "title": "Peningkatan Lainnya",
-        "description": "Login di setiap platform tidak lagi terhapus setelah mulai ulang hanya karena jaringan atau server sedang bermasalah. Lagu lokal dan Navidrome kini juga mendapat analisis transisi automix; pemindaian lokal mendukung DSD (.dsf dan .dff). Windows mendapat pengaturan GPU render, dan Performa & gerakan menambahkan Pembatasan latar belakang (nonaktif secara bawaan), yang menahan animasi lirik saat jendela diminimalkan atau disembunyikan. Bilah info Bravais bisa otomatis, vertikal, atau horizontal, dan dinding Jelajahi-nya kini menyertakan putaran terakhir. API mod naik ke Folium 1.7."
+        "description": "Login di setiap platform tidak lagi terhapus setelah mulai ulang hanya karena jaringan atau server sedang bermasalah. Mode ketukan pintar mendapat pilihan \"Hanya yang sudah dianalisis\", dan sakelar utamanya pindah ke halaman Global baru di jendela gaya lirik; lagu lokal dan Navidrome kini juga mendapat analisis transisi automix; pemindaian lokal mendukung DSD (.dsf dan .dff). Windows mendapat pengaturan GPU render, dan Performa & gerakan menambahkan Pembatasan latar belakang (nonaktif secara bawaan), yang menahan animasi lirik saat jendela diminimalkan atau disembunyikan. Bilah info Bravais bisa otomatis, vertikal, atau horizontal, dan dinding Jelajahi-nya kini menyertakan putaran terakhir. API mod naik ke Folium 1.7."
       }
     },
     "v0_7_21": {

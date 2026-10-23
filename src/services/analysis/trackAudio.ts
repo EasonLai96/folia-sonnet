@@ -9,9 +9,9 @@ import { whyNotTheSong } from '../wholeSongCheck';
 // A track's audio for analysis: the bytes that are already on this machine, and the decode to the
 // rate a model wants.
 //
-// Two analysers read tracks - automix's profile (automix/profileService.ts) and stem separation
-// (automix/stems.ts). The beat effects (beatFx) that used to read it as well are gone, so this is the
-// "where are this track's bytes" ladder of automix's profile for a local track with no URL; automix keeps
+// Three analysers read tracks - automix's profile (automix/profileService.ts), stem separation
+// (automix/stems.ts) and 智能动感模式 (beatFx/beatFxSource.ts). This is the "where are this track's
+// bytes" ladder of 智能动感模式, and of automix's profile for a local track with no URL; automix keeps
 // its own ladders for the rest, which also weigh what the provider keeps and a copy that is not the
 // whole song (wholeSongCheck.ts, 2026-10-17). A cached copy that is not the song is not read here
 // either: beats measured off a clip would be stored as the song's. Downloading an online track is not on
