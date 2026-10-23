@@ -43,3 +43,19 @@
         inset -1px 0 0 color-mix(in srgb, var(--text-primary, #f7f4ee) 12%, transparent),
         var(--bravais-seam-shadow);
 }
+
+/* ---------- 横条不吃「始终透明」 ----------
+   半透明纱是给**竖着那道窄缝**的：它只占屏幕一条窄边，透出来的是播放页的画面，看着是「纸条压在画面上」。
+   信息条横向时这道缝是一道**横跨整面墙的横条**（首页窄缝 72px、完整信息条 212px），同样透的话，底下的磁贴、
+   块与块之间的缝洞、以及开口下面没有底板的那一片全从纸条里透出来 —— 用户报的就是这个：「变成中间了，但是它是
+   崩坏的，透明的那种」。横条一律用不透明的纸色，发丝线也从上下的边走（竖的缝是左右两条）。
+   透光档（is-see-through）是用户自己选的那一档，那里的半透明纸条照旧。 */
+.lattice-root.bravais-root.has-clear-seam .bravais-seam[data-bravais-seam-axis='y'] {
+    --bravais-seam-paper: color-mix(in srgb, var(--bg-color, #070707) 90%, var(--text-primary, #f7f4ee));
+    --bravais-seam-surface: var(--bravais-seam-paper);
+    backdrop-filter: none;
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--text-primary, #f7f4ee) 12%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--text-primary, #f7f4ee) 12%, transparent),
+        var(--bravais-seam-shadow);
+}
