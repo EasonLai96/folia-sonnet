@@ -100,7 +100,7 @@ describe('highlightWordsPresent', () => {
     expect(highlightWordsPresent(['故事'], '故事的小黄花')).toBe(true);
   });
 
-  /* 不到五个词：差一个就不行（4 个差 1 = 75%）。到了五个才按 80% 放行。 */
+  /* 不到五个词：差一个就不行（4 个差 1 = 75%）。到了五个才给「缺一个」这个宽容。 */
   it('lets a word go missing once there are five of them', () => {
     expect(highlightWordsPresent(['故事', '小黄花', '童年', '不在'], lyric)).toBe(false);
     expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千', '不在歌词里'], lyric)).toBe(true);
@@ -109,6 +109,25 @@ describe('highlightWordsPresent', () => {
 
   it('is not satisfied when a word is missing', () => {
     expect(highlightWordsPresent(['小黄花', '根本不在这首歌里'], lyric)).toBe(false);
+  });
+
+  /*
+   * 词多**不再**等于可以多缺几个。
+   *
+   * 以前按覆盖率放行（≥80%）：10 个词缺 2 个、20 个词缺 4 个照样过。而同一首歌的翻唱 /
+   * 现场 / 各平台 LRC 本来就共享大半的高亮词，于是拿一首近亲的歌词去撞另一首的答案也
+   * 能撞上八成 —— 用户报的正是「明明是另一首歌，居然匹配上了」。现在按**个数**判，
+   * 不管挑了多少个词，最多只缺一个。
+   */
+  it('counts the missing words instead of taking a percentage', () => {
+    const many = '甲乙丙丁戊己庚辛壬癸';
+    const words = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+
+    expect(highlightWordsPresent(words, many)).toBe(true);
+    /* 缺 1 个：同一首歌的两份 LRC 差一个词（口白 / 翻译行）不该整条判死。 */
+    expect(highlightWordsPresent([...words.slice(0, 9), '不在'], many)).toBe(true);
+    /* 缺 2 个：覆盖率正好 80%，旧规则放行，现在不行。 */
+    expect(highlightWordsPresent([...words.slice(0, 8), '不在', '也不在'], many)).toBe(false);
   });
 
   /*

@@ -212,11 +212,8 @@ const flattenForMatch = (value: string): string => (
     String(value ?? '').replace(/\s+/g, '').toLowerCase()
 );
 
-/**
- * 高亮词的**覆盖率**：AI 标的那几个词，你手上这段歌词里找得到几个（0~1）。
- */
-export const highlightWordsCoverage = (words: readonly string[], lyricText: string): number => {
-    if (words.length === 0) return 0;
+/** AI 标的那几个词，你手上这段歌词里**命中了几个**（0 ~ words.length）。 */
+export const countHighlightWordHits = (words: readonly string[], lyricText: string): number => {
     const haystack = flattenForMatch(lyricText);
     if (!haystack) return 0;
     let present = 0;
@@ -224,37 +221,53 @@ export const highlightWordsCoverage = (words: readonly string[], lyricText: stri
         const needle = flattenForMatch(word);
         if (needle.length > 0 && haystack.includes(needle)) present += 1;
     });
-    return present / words.length;
+    return present;
 };
 
 /**
- * 差几个词也放行：低于这个覆盖率就当「这条答案不是照着这首歌做的」。
+ * 高亮词的**覆盖率**：命中数 / 词数（0~1）。
  *
- * 以前是**全有或全无**（every），于是歌词「几乎一模一样」的两份 LRC —— 差一句口白、
- * 翻译行不同、某个词多一个空格之外的差别 —— 一个词缺了就整条判死，用户看到的正是
- * 「歌词明明一样，云缓存就是拉不到」。现在允许差一点点；真正是另一首歌（近亲）时
- * 覆盖率会掉得很低，这一层照样拦得住。
+ * 「一条都不合规时挑最像的那条」那一档用它 —— 那里已经没有是非，只有谁更像；
+ * 判**合不合规**要看个数，不看比例（见 highlightWordsPresent）。
  */
-const HIGHLIGHT_WORD_COVERAGE_MIN = 0.8;
+export const highlightWordsCoverage = (words: readonly string[], lyricText: string): number => {
+    if (words.length === 0) return 0;
+    return countHighlightWordHits(words, lyricText) / words.length;
+};
+
 /**
- * 词到了这个数才按比例放行：不足五个词时差一个就是「差得不止一点」，必须**全中**。
+ * 最多允许缺几个词：不管挑了多少个词，缺超过这个数就当「这条答案不是照着这首歌做的」。
  *
- * 改成 5 之前这里是 3：模型挑三四个词的那条答案差一个（67% / 75%）也能过，于是拉回来
- * 的高亮词跟这首的歌词对不上。
+ * 以前是「覆盖率 ≥ 80%」，那是**按比例**放宽 —— 词越多能缺得越多（10 个词缺 2 个、
+ * 20 个词缺 4 个都过）。同一首歌的翻唱 / 现场 / 各平台 LRC 本来就共享大半的高亮词，
+ * 于是拿一首近亲的歌词去撞另一首的答案也能撞上八成：用户报的正是「明明是另一首歌，
+ * 居然匹配上了」。改成**按个数**之后，差多少就是差多少，词多不再等于可以差更多。
+ *
+ * 仍留着这一个的宽容：同一首歌的两份 LRC 差一个词（一句口白、翻译行不同、多一个空格
+ * 之外的差别）就整条判死，用户看到的是「歌词明明一样，云缓存就是拉不到」。
+ */
+const HIGHLIGHT_WORD_MAX_MISSING = 1;
+/**
+ * 词到了这个数才给「缺一个」这个宽容：不足五个词时必须**全中**。
+ *
+ * 两个词里缺一个就是只中一半 —— 那不是「差一点」，是「这条答案跟这首的关系只有一半」，
+ * 按比例放宽的年代正是这种短词表被放过去的。
  *
  * ⚠️ **别把「词少的答案」一刀切否掉**（试过：少于两个词一律不合规）—— 模型常常就只挑
  * 一两个词，那样一否，十几条近亲**全部**不合规，只好走「强制拿一条」那条路，拿回来的
  * 是高亮词完全不对的一份，上机的结果是**所有歌**的高亮词显示都错。词少照样放行（全中
- * 即可），只是不按比例放宽。
+ * 即可），只是不给「缺一个」这个宽容。
  */
-const HIGHLIGHT_WORD_COVERAGE_MIN_WORDS = 5;
+const HIGHLIGHT_WORD_RELAX_MIN_WORDS = 5;
 
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
-    const coverage = highlightWordsCoverage(words, lyricText);
-    if (coverage >= 1) return true;
-    if (coverage <= 0) return false;   // 一个都没有：没有任何证据说明它属于这首歌。
-    return words.length >= HIGHLIGHT_WORD_COVERAGE_MIN_WORDS
-        && coverage >= HIGHLIGHT_WORD_COVERAGE_MIN;
+    const total = words.length;
+    if (total === 0) return false;
+    const present = countHighlightWordHits(words, lyricText);
+    if (present >= total) return true;
+    if (present <= 0) return false;   // 一个都没有：没有任何证据说明它属于这首歌。
+    return total >= HIGHLIGHT_WORD_RELAX_MIN_WORDS
+        && total - present <= HIGHLIGHT_WORD_MAX_MISSING;
 };
 
 /**
