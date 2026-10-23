@@ -36,6 +36,7 @@ const O = {
     windows: option(BRAVAIS_WALL, 'libraryWallWindows', 'options.libraryWallWindows'),
     stackEdges: option(BRAVAIS_WALL, 'bravaisStackEdges', 'options.bravaisStackEdges'),
     seamDirection: option(BRAVAIS_WALL, 'bravaisSeamDirection', 'options.bravaisSeamDirection'),
+    seamDirectionReverse: option(BRAVAIS_WALL, 'bravaisSeamDirectionReverse', 'options.bravaisSeamDirectionReverse'),
     seamClear: option(BRAVAIS_WALL, 'bravaisSeamClear', 'options.bravaisSeamClear'),
     seamStyle: option(BRAVAIS_WALL, 'bravaisSeamStyle', 'options.bravaisSeamStyle'),
     backdropLyrics: option(BRAVAIS_WALL, 'bravaisBackdropLyrics', 'options.bravaisBackdropLyrics'),
@@ -75,6 +76,7 @@ export const BravaisWallGroup: React.FC = () => {
         backdropLyrics: state.backdropLyrics,
         backdropBlur: state.backdropBlur,
         seamDirection: state.seamDirection,
+        seamDirectionReverse: state.seamDirectionReverse,
         setLook: state.setLook,
         setWindowsPerBlock: state.setWindowsPerBlock,
         setStackEdges: state.setCollectionStackEdges,
@@ -83,6 +85,7 @@ export const BravaisWallGroup: React.FC = () => {
         setBackdropLyrics: state.setBackdropLyrics,
         setBackdropBlur: state.setBackdropBlur,
         setSeamDirection: state.setSeamDirection,
+        setSeamDirectionReverse: state.setSeamDirectionReverse,
     })));
 
     if (!isBravaisActive) return null;
@@ -123,6 +126,12 @@ export const BravaisWallGroup: React.FC = () => {
                     onChange={wall.setSeamDirection}
                 />
             </Row>
+            {/* 反向只翻「自动」那一支：明确选了竖向 / 横向时它不改变结果。 */}
+            <Reveal when={wall.seamDirection === 'auto'}>
+                <Row sub option={O.seamDirectionReverse} note={t('options.bravaisSeamDirectionReverseDesc')}>
+                    <Toggle checked={wall.seamDirectionReverse} onChange={wall.setSeamDirectionReverse} />
+                </Row>
+            </Reveal>
             <Row option={O.seamClear} note={t('options.bravaisSeamClearDesc')}>
                 <Toggle checked={wall.seamClear} onChange={wall.setSeamClear} />
             </Row>

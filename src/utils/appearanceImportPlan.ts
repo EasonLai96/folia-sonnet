@@ -149,6 +149,7 @@ const FIELD_GROUPS: Record<string, ImportGroup> = {
     libraryWallBackdropLyrics: 'libraryWall',
     libraryWallBackdropBlur: 'libraryWall',
     libraryWallSeamDirection: 'libraryWall',
+    libraryWallSeamDirectionReverse: 'libraryWall',
 };
 
 // Fields the import applies only when the incoming value is truthy, so an incoming null means "the

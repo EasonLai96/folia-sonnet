@@ -2211,6 +2211,8 @@ export default {
     "bravaisSeamDirectionVerticalDesc": "Terbuka di antara dua kolom blok; dinding terbelah kiri dan kanan.",
     "bravaisSeamDirectionHorizontal": "Horizontal",
     "bravaisSeamDirectionHorizontalDesc": "Terbuka di antara dua baris blok; dinding terbelah atas dan bawah.",
+    "bravaisSeamDirectionReverse": "Balik",
+    "bravaisSeamDirectionReverseDesc": "Membalik cabang otomatis: kolom pada layar tinggi, baris pada layar lebar. Tidak mengubah apa pun saat arah disetel vertikal atau horizontal.",
     "homeTabsVisibility": "Entri Top Capsule",
     "rememberHomeCardPosition": "Ingat posisi kartu beranda",
     "rememberHomeCardPositionDesc": "Kembali ke kartu terakhir di setiap bagian saat berpindah tab atau keluar dari pemutar. Posisi disimpan hingga aplikasi ditutup atau dimuat ulang.",

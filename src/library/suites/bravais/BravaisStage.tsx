@@ -153,10 +153,11 @@ const BravaisStage: React.FC<LibrarySuiteStageProps> = ({
     const tintIntensity = useLatticeSettingsStore(state => state.latticePosterTintIntensity);
     const stackEdges = useLibraryWallLookStore(state => state.collectionStackEdges);
     const seamDirection = useLibraryWallLookStore(state => state.seamDirection);
+    const seamDirectionReverse = useLibraryWallLookStore(state => state.seamDirectionReverse);
     // 竖着还是横着，按**墙面自己的实测尺寸**判（见 isPortraitWall 的注释：媒体查询在个别
     // WebView 上不派发 change，于是「自动」会一直停在横条那一支）。量到之前按横屏算。
     const portrait = view ? isPortraitWall(view.width, view.height) : false;
-    const seamHorizontal = resolveLibraryWallSeamHorizontal(seamDirection, portrait);
+    const seamHorizontal = resolveLibraryWallSeamHorizontal(seamDirection, portrait, seamDirectionReverse);
     // 换层编排里按层算开口时读最新的（不进回调的依赖）。
     const seamHorizontalRef = useRef(seamHorizontal);
     seamHorizontalRef.current = seamHorizontal;

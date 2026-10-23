@@ -2211,6 +2211,8 @@ export default {
     "bravaisSeamDirectionVerticalDesc": "Opens between two block columns; the wall parts left and right.",
     "bravaisSeamDirectionHorizontal": "Horizontal",
     "bravaisSeamDirectionHorizontalDesc": "Opens between two block rows; the wall parts top and bottom.",
+    "bravaisSeamDirectionReverse": "Reverse",
+    "bravaisSeamDirectionReverseDesc": "Flips the automatic branch: a column on tall screens, a row on wide ones. It changes nothing while the direction is set to vertical or horizontal.",
     "homeTabsVisibility": "Top Capsule Entries",
     "rememberHomeCardPosition": "Remember home card position",
     "rememberHomeCardPositionDesc": "Return to the last card in each section when switching tabs or leaving the player. Positions are kept until you close or reload the app.",

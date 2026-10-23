@@ -99,6 +99,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
     libraryWallBackdropLyrics: 'options.bravaisBackdropLyrics',
     libraryWallBackdropBlur: 'options.bravaisBackdropBlur',
     libraryWallSeamDirection: 'options.bravaisSeamDirection',
+    libraryWallSeamDirectionReverse: 'options.bravaisSeamDirectionReverse',
 };
 
 // The per-renderer tunings borrow the renderer's own display name instead of inventing one.

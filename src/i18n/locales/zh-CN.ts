@@ -2212,6 +2212,8 @@ export default {
     "bravaisSeamDirectionVerticalDesc": "从块与块之间的竖缝裂开，墙左右分开。",
     "bravaisSeamDirectionHorizontal": "横向",
     "bravaisSeamDirectionHorizontalDesc": "从块行之间的横缝裂开，墙上下分开。",
+    "bravaisSeamDirectionReverse": "反向",
+    "bravaisSeamDirectionReverseDesc": "把「自动」那一支反过来：竖着的屏幕用竖缝，横着的用横条。方向明确选了竖向 / 横向时这一项不改变结果。",
     "homeTabsVisibility": "顶部胶囊入口",
     "rememberHomeCardPosition": "记住主页卡片位置",
     "rememberHomeCardPositionDesc": "切换顶部入口或从播放界面返回时，回到各入口上次浏览的卡片。位置仅在本次打开应用期间保留。",

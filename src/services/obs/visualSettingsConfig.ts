@@ -113,6 +113,8 @@ export function buildVisualSettingsConfig(): Record<string, unknown> {
     // Which way the info strip opens (a column split, a row split across the wall, or by the screen's
     // shape): part of the wall's look, no user exception.
     libraryWallSeamDirection: useLibraryWallLookStore.getState().seamDirection,
+    // Whether the automatic branch is flipped (a column on tall screens, a row on wide ones).
+    libraryWallSeamDirectionReverse: useLibraryWallLookStore.getState().seamDirectionReverse,
   };
 }
 

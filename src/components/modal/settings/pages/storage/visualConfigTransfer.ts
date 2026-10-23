@@ -340,4 +340,7 @@ export const applyImportedConfig = (config: any, keys: string[], theme: ConfigTh
     if (has('libraryWallSeamDirection') && isLibraryWallSeamDirection(config.libraryWallSeamDirection)) {
         storeLibraryWall.setSeamDirection(config.libraryWallSeamDirection);
     }
+    if (has('libraryWallSeamDirectionReverse')) {
+        storeLibraryWall.setSeamDirectionReverse(Boolean(config.libraryWallSeamDirectionReverse));
+    }
 };
