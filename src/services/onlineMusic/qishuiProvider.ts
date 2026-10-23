@@ -113,6 +113,17 @@ const QISHUI_LOGIN_METHODS: LoginMethod[] = [
     { id: 'passport-web', labelKey: 'home.loginMethodQishuiPhone', iconKey: 'qishui' },
 ];
 
+/**
+ * 手机协议（passport 扫码换会话 Cookie）**暂时不摆出来**（用户 2026-10-24）：打开汽水的登录
+ * 直接就是车机协议（ticket-guard）的二维码。
+ *
+ * 只是藏起来，不是删掉：两套协议的代码、凭据与退出都还在 —— `protocol.use` 仍认
+ * 'passport-web'，`startLogin` 仍按 methodId 切，登录态与退出仍是两套各问 / 各退一次。
+ * 所以之前用手机协议登着的账号照旧能用，只是登录窗口不再给它入口。
+ * 要放回来就把这个常量改成 true（那一屏会重新变成「车机 / 手机」两步选择）。
+ */
+const PHONE_PROTOCOL_OFFERED = false;
+
 /** 最近一次「灌回去」的结果：真机上再说账号没了，先看这一行。 */
 let lastQishuiSessionNote: string | null = null;
 /** 最近一次「抄出来」的失败原因（成功不记）。 */
@@ -263,8 +274,12 @@ export const qishuiProvider: OnlineMusicProvider = {
          *
          * 返回空数组＝「只有一条路」，登录窗口维持单步流程（直接出车机的码）——
          * 这既是老包的行为，也是桥没起来时的行为。
+         *
+         * 手机协议那条路现在一律不摆出来（PHONE_PROTOCOL_OFFERED），所以这里恒为空：
+         * 「先问桥再决定」这一步也就没有意义了，留着是为了放回来时不用重写。
          */
         async resolveLoginMethods() {
+            if (!PHONE_PROTOCOL_OFFERED) return [];
             try {
                 const data = await requestQishui<any>('protocol.get', {});
                 const available = Array.isArray(data?.available) ? data.available.map(String) : [];
