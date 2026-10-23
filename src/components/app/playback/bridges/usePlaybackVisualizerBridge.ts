@@ -239,6 +239,9 @@ export function usePlaybackVisualizerBridge({
                         ? Math.round(nowMsValue - nativePlaybackEngine.lastEventAtMs)
                         : null,
                     atMs: Math.round(nowMsValue),
+                    // 墙钟后六位：与原生 `FoliaMainLooperWatchdog` 那几行对时间用的
+                    // （`atMs` 是页面自己的时间原点，跟原生那边任何一个钟都对不齐）。
+                    wallMs: Date.now() % 1000000,
                     native: nativePlaybackEngine.ownsPlayback(),
                     heapMB: memory ? Math.round(memory.usedJSHeapSize / 1048576) : null,
                 };
@@ -493,6 +496,7 @@ export function usePlaybackVisualizerBridge({
                     console.warn('[FoliaTick]', JSON.stringify({
                         gapMs: Math.round(tickGapMs),
                         atMs: Math.round(nowMs),
+                        wallMs: Date.now() % 1000000,
                     }));
                 }
             }

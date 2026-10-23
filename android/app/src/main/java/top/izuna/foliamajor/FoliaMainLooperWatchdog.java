@@ -65,8 +65,17 @@ public final class FoliaMainLooperWatchdog {
         Log.w(TAG, "installed");
     }
 
-    /** 攒一份给开发者表，见 BUFFER 那段。调用方都在主线程上。 */
-    private static void record(String line) {
+    /** 攒一份给开发者表 / 控制台，见 BUFFER 那段。调用方都在主线程上。 */
+    private static void record(String body) {
+        /*
+         * 行首带上墙钟的后六位（毫秒）。
+         *
+         * 这份东西最终要跟 JS 侧 `[FoliaTick]` / `[FoliaHitch]` 按时间对上，而那边的
+         * `atMs` 是 `performance.now()`（**页面自己的**时间原点），跟这里任何一个钟都
+         * 对不齐。两边都改成「墙钟后六位」就能直接比 —— 六位够覆盖十几分钟，一次
+         * 排查用不完，也短得能塞进开发者表那一格。
+         */
+        String line = (System.currentTimeMillis() % 1000000L) + " " + body;
         Log.w(TAG, line);
         synchronized (BUFFER_LOCK) {
             BUFFER.addLast(line);

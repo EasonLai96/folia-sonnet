@@ -388,7 +388,14 @@ export const drainMainLooperLog = async (): Promise<string> => {
     if (!isCapacitorAndroid()) return '';
     try {
         const result = await FoliaNative.drainMainLooperLog();
-        return (result.text ?? '').trim();
+        const text = (result.text ?? '').trim();
+        /*
+         * 同时打进控制台：开发者表要 `Alt+Shift+D` 才弹得出来，手机上没有物理键盘
+         * 根本按不了，而用户看的就是控制台。打在这里还能和 `[FoliaTick]` /
+         * `[FoliaHitch]` 的墙钟（`wallMs`，同为后六位）直接对时间。
+         */
+        if (text) console.warn('[FoliaLooper]', text);
+        return text;
     } catch {
         // 探针不在这版包里 / 桥上出意外都不该把开发者表拖崩。
         return '';
