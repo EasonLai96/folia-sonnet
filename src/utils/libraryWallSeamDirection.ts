@@ -27,8 +27,21 @@ export const LIBRARY_WALL_SEAM_DIRECTION_TEXT: Readonly<Record<LibraryWallSeamDi
     horizontal: { label: 'options.bravaisSeamDirectionHorizontal', description: 'options.bravaisSeamDirectionHorizontalDesc' },
 });
 
-/** 「竖着的屏幕」：高 ≥ 宽 × 1.1（宽高比 ≤ 10 / 11）。 */
+/** 「竖着」的阈值：高 ≥ 宽 × 1.1（宽高比 ≤ 10 / 11）。 */
+export const LIBRARY_WALL_PORTRAIT_RATIO = 1.1;
+
+/** 「竖着的屏幕」的媒体查询，留着给只拿得到视口、量不到墙面的地方用。 */
 export const LIBRARY_WALL_PORTRAIT_QUERY = '(max-aspect-ratio: 10/11)';
+
+/**
+ * 这块画面是不是竖着的。舞台用**墙面的实测尺寸**问这一句，不用媒体查询：
+ * 量的是它自己那个盒子（ResizeObserver，转屏 / 分屏 / 抽屉开合都会重新量），
+ * 既不会跟窗口尺寸对不上，也不会因为某个 WebView 没派发 `change` 就卡在一边 ——
+ * 那正是「自动」在横竖两边都开成横条的样子。
+ */
+export const isPortraitWall = (width: number, height: number): boolean => (
+    width > 0 && height > 0 && height >= width * LIBRARY_WALL_PORTRAIT_RATIO
+);
 
 /** 此刻信息条该不该横着开：自动时看屏幕是不是竖着的。 */
 export const resolveLibraryWallSeamHorizontal = (direction: LibraryWallSeamDirection, portrait: boolean): boolean => (

@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { WallSlot } from '../../../components/wall/wallSlots';
 import { BRAVAIS_BLOCK_SHAPE, collectShapeSlots } from './bravaisWallShape';
 import { FLIP_MAX_TILES } from '../../../components/wall/flipPlan';
-import { useDevicePixelRatio, useMediaQuery } from '../../../hooks/useMediaQuery';
-import { LIBRARY_WALL_PORTRAIT_QUERY, resolveLibraryWallSeamHorizontal } from '../../../utils/libraryWallSeamDirection';
+import { useDevicePixelRatio } from '../../../hooks/useMediaQuery';
+import { isPortraitWall, resolveLibraryWallSeamHorizontal } from '../../../utils/libraryWallSeamDirection';
 import { useReducedMotionFor } from '../../../hooks/useReducedMotionFor';
 import { useLatticeSettingsStore } from '../../../stores/useLatticeSettingsStore';
 import { useLibraryWallLookStore } from '../../../stores/useLibraryWallLookStore';
@@ -153,7 +153,9 @@ const BravaisStage: React.FC<LibrarySuiteStageProps> = ({
     const tintIntensity = useLatticeSettingsStore(state => state.latticePosterTintIntensity);
     const stackEdges = useLibraryWallLookStore(state => state.collectionStackEdges);
     const seamDirection = useLibraryWallLookStore(state => state.seamDirection);
-    const portrait = useMediaQuery(LIBRARY_WALL_PORTRAIT_QUERY);
+    // 竖着还是横着，按**墙面自己的实测尺寸**判（见 isPortraitWall 的注释：媒体查询在个别
+    // WebView 上不派发 change，于是「自动」会一直停在横条那一支）。量到之前按横屏算。
+    const portrait = view ? isPortraitWall(view.width, view.height) : false;
     const seamHorizontal = resolveLibraryWallSeamHorizontal(seamDirection, portrait);
     // 换层编排里按层算开口时读最新的（不进回调的依赖）。
     const seamHorizontalRef = useRef(seamHorizontal);
