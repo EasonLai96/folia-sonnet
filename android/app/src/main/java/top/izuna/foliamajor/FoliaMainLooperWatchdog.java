@@ -111,6 +111,7 @@ public final class FoliaMainLooperWatchdog {
                             SAMPLES.removeFirst();
                         }
                     }
+                    sampleGcStats();
                     Thread.sleep(SAMPLE_INTERVAL_MS);
                 } catch (Throwable ignored) {
                     // 采样挂了不该带崩进程，也不该刷屏。
@@ -119,6 +120,82 @@ public final class FoliaMainLooperWatchdog {
         }, "folia-looper-sampler");
         sampler.setDaemon(true);
         sampler.start();
+    }
+
+    // ------------------------------------------------------------ ART 的 GC
+
+    private static long lastGcCount = -1L;
+    private static long lastGcTimeMs = -1L;
+    private static long lastBlockingCount = -1L;
+    private static long lastBlockingTimeMs = -1L;
+
+    /**
+     * 盯 ART 的 GC（**这一条是「主线程干净却还是卡」的唯一解释**）。
+     *
+     * 前面已经把三条路都排除了：不是 GC in 渲染进程（JS 堆恒定不回落）、不是我们的 JS
+     * （`workMs` 恒为 0）、不是 App 主线程（Looper 里除了开页那次 WebView 引擎启动，
+     * 一条慢消息都没有）。剩下一种能同时满足这三条的：
+     *
+     * **App 进程里发生了一次阻塞式 GC。**
+     *
+     * 它停顿的是 App 进程自己的线程，而 WebView 的**浏览器侧**（合成器、帧提交）就跑在
+     * App 进程里 —— 那边一停，渲染进程拿不到提交，rAF 与宏任务定时器一起停，
+     * 于是 JS 侧看到的就是「两帧之间隔了几百毫秒、而自己一毫秒都没花」。
+     * ⭐ 而 Looper 打印机**称不到它**：GC 停顿大多发生在主线程空闲（epoll）的时候，
+     * 不属于任何一条消息的耗时 —— 这正好解释了为什么主线程记录是干净的。
+     *
+     * 判据用 `Debug.getRuntimeStat("art.gc.blocking-gc-count")` 这一对累计值：
+     * 计数跳了就是发生过一次，配 `blocking-gc-time` 的增量就是那一次的总停顿。
+     */
+    private static void sampleGcStats() {
+        long count = parseStat("art.gc.gc-count");
+        long timeMs = parseStat("art.gc.gc-time");
+        long blockingCount = parseStat("art.gc.blocking-gc-count");
+        long blockingTimeMs = parseStat("art.gc.blocking-gc-time");
+        if (count < 0 && blockingCount < 0) {
+            return; // 这个 ROM 不给，认了。
+        }
+        boolean first = lastGcCount < 0 && lastBlockingCount < 0;
+        boolean changed = lastGcCount >= 0 && (count != lastGcCount || blockingCount != lastBlockingCount);
+        if (first) {
+            lastGcCount = count;
+            lastGcTimeMs = timeMs;
+            lastBlockingCount = blockingCount;
+            lastBlockingTimeMs = blockingTimeMs;
+            return;
+        }
+        if (!changed) {
+            return;
+        }
+        long deltaBlocking = blockingTimeMs >= 0 && lastBlockingTimeMs >= 0
+                ? blockingTimeMs - lastBlockingTimeMs : -1L;
+        long deltaTotal = timeMs >= 0 && lastGcTimeMs >= 0 ? timeMs - lastGcTimeMs : -1L;
+        record("gc +" + (blockingCount >= 0 && lastBlockingCount >= 0 ? blockingCount - lastBlockingCount : -1L)
+                + " blocking, pause " + deltaBlocking + "ms (all gc " + deltaTotal + "ms), heap "
+                + heapText());
+        lastGcCount = count;
+        lastGcTimeMs = timeMs;
+        lastBlockingCount = blockingCount;
+        lastBlockingTimeMs = blockingTimeMs;
+    }
+
+    private static long parseStat(String name) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+            return -1L; // getRuntimeStat 是 API 23 才有的。
+        }
+        try {
+            String raw = android.os.Debug.getRuntimeStat(name);
+            return raw == null || raw.isEmpty() ? -1L : Long.parseLong(raw.trim());
+        } catch (Throwable error) {
+            return -1L;
+        }
+    }
+
+    private static String heapText() {
+        Runtime runtime = Runtime.getRuntime();
+        long usedMb = (runtime.totalMemory() - runtime.freeMemory()) / 1048576L;
+        long maxMb = runtime.maxMemory() / 1048576L;
+        return usedMb + "/" + maxMb + "MB";
     }
 
     /** 取离这个时刻最近的一拍栈；没有就给 null。 */
@@ -167,7 +244,16 @@ public final class FoliaMainLooperWatchdog {
 
     // ---------------------------------------------------------------- 记与取
 
-    /** 攒一份给开发者表 / 控制台，见 BUFFER 那段。调用方都在主线程上。 */
+    /**
+     * 攒一份给开发者表 / 控制台，见 BUFFER 那段。
+     *
+     * 调用方有两条线程（主线程与采样线程），所以下面进 buffer 要加锁；不带栈的版本给
+     * GC 那类「跟某条消息无关」的记录用。
+     */
+    private static void record(String body) {
+        record(body, null);
+    }
+
     private static void record(String body, StackTraceElement[] stack) {
         /*
          * 行首带上墙钟的后六位（毫秒）。
@@ -178,7 +264,7 @@ public final class FoliaMainLooperWatchdog {
          * 排查用不完，也短得能塞进开发者表那一格。
          */
         String line = (System.currentTimeMillis() % 1000000L) + " " + body
-                + " | " + formatStack(stack);
+                + (stack == null ? "" : " | " + formatStack(stack));
         Log.w(TAG, line);
         synchronized (BUFFER_LOCK) {
             BUFFER.addLast(line);
