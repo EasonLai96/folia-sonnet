@@ -6,15 +6,21 @@
 // 车机是 ticket-guard（抖音开放平台扫码换 ticket），手机是 passport 会话 Cookie
 // （扫码确认后由 Set-Cookie 下发）。选哪套登录就用哪套拉数据，切协议等于重新登录一次。
 //
-// ⚠ 这一路**没有任何签名**：实测（2026-10）passport 的出码与轮询、以及 /luna/pc/*
-// 的数据接口都不再要求 a_bogus / X-Helios-X-Medusa —— 缺签名时它们要么照常回
-// 数据，要么回「登录状态已失效」这种只看 Cookie 的答案。这是它能在安卓上活着的
-// 前提：车机协议当初就是为了绕开「/luna 只认 bdms.node（Windows x64 原生模块）」
+// ⚠ 这一路**没有 a_bogus / msToken 那种签名**：实测（2026-10）passport 的出码与轮询、
+// 以及 /luna/pc/* 的数据接口都不再要求 a_bogus / X-Helios-X-Medusa —— 缺签名时它们
+// 要么照常回数据，要么回「登录状态已失效」这种只看 Cookie 的答案。这是它能在安卓上
+// 活着的前提：车机协议当初就是为了绕开「/luna 只认 bdms.node（Windows x64 原生模块）」
 // 才换的，而现在上游已经不再校验。桌面的 a_bogus 隐藏窗签名（sdk-glue / bdms）
 // 因此一律不需要，也**不能**再引回来。
 //
+// 但有两样东西**不是签名、却必须有**（对齐桌面端 `qishui-auth-v6.js` 的 request）：
+//   1. `Cookie` —— 出码/确认/轮询必须是同一个 passport 会话，见 passportRequest；
+//   2. POST 的 `x-ss-stub` —— 请求体的 MD5 十六进制大写，上游用它挡空体与重放。
+//
 // 设备指纹（device_id / install_id）只用于 passport 那一侧：生成一次存起来，
 // 每次启动换一套会让上游把扫码判成风险设备。
+
+import { createHash } from 'crypto';
 
 export const QISHUI_PHONE_API_BASE = 'https://api.qishui.com';
 export const QISHUI_PHONE_WEB_BASE = 'https://www.qishui.com';
@@ -47,6 +53,39 @@ export function randomHex(bytes) {
     let out = '';
     for (let i = 0; i < bytes; i++) out += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
     return out;
+}
+
+/**
+ * 二维码里装的那个地址。
+ *
+ * ⚠⚠ **不能用服务端下发的那张 `qrcode` PNG。** 实测（2026-10）它装的是
+ * `bff-pc.qishui.com/ucenter_web/app/sdk-next?…&uc_sdk=scan-auth` 这个**网页**地址：
+ * 汽水 App 扫到它只会去开那个页面，**不会**弹「在电脑上登录」的确认框 ——
+ * 于是 passport 的 check_qrconnect 一直停在「已扫码」，到点前端只能换一张新码。
+ * 用户看到的就是「扫完二维码自己刷新了，什么报错都没有」。
+ *
+ * 桌面端（`electron/qishui/qishui-auth-v6.js` 的 officialScanUrl）是从
+ * `qrcode_index_url` 里取出 token，自己拼 bff-pc 的 **scan_login** 调用地址 ——
+ * 带上 token + os + 机器名，App 才认得这是一次 PC 登录。这里逐字对齐，
+ * 二维码也因此在本地画（见 auth.js），不再用服务端那张图。
+ */
+export const QISHUI_SCAN_LOGIN_URL = 'https://bff-pc.qishui.com/light/invoke/scan_login';
+
+/** 从 qrcode_index_url 里取出 token，拼成 App 认的扫码地址；拿不到 token 时返回空串。 */
+export function buildQishuiScanUrl(indexUrl, computerName) {
+    let token = '';
+    try {
+        token = new URL(String(indexUrl || '')).searchParams.get('token') || '';
+    } catch (_) {
+        return '';
+    }
+    if (!token) return '';
+    const target = new URL(QISHUI_SCAN_LOGIN_URL);
+    target.searchParams.set('token', token);
+    target.searchParams.set('os', 'Windows');
+    target.searchParams.set('computer_name', computerName || 'Windows-PC');
+    // 与桌面端一致：把 + 还原成 %20（服务端会按字面比较机器名）。
+    return target.toString().replace(/\+/g, '%20');
 }
 
 /** passport 每次请求都要带的那一串 SDK 参数。 */
@@ -94,14 +133,24 @@ export function passportHeaders(identity, bizTraceId) {
  * 返回 `{ json, setCookie }`：登录态是 Set-Cookie 下发的（响应体里的 session_cookie
  * 经常是空的），所以调用方要把响应头那一条也并进 cookie 罐 —— 少了它，
  * 「扫码确认了但账号出不来」。
+ *
+ * ⭐ `cookie` 必须带：passport 的扫码是**一个会话**的三步 —— 出码时下发
+ * `passport_csrf_token` / `sid_tt`，确认与轮询要带着它们才算同一台设备上的同一次登录。
+ * 桌面端每一笔 passport 请求都塞 `cookie` 头（`qishui-auth-v6.js` 的 request），
+ * 安卓这边原来一条都不带：出码与轮询在服务端是**两个陌生会话**，扫了码也认不回来。
  */
-export async function passportRequest(fetcher, { identity, method = 'GET', path, params = {}, body = null }) {
+export async function passportRequest(
+    fetcher,
+    { identity, method = 'GET', path, params = {}, body = null, cookie = '' },
+) {
     const query = passportCommonParams(identity, params);
     const url = new URL(path, QISHUI_PHONE_API_BASE);
     for (const [name, value] of Object.entries(query)) {
         if (value != null) url.searchParams.set(name, String(value));
     }
     const headers = passportHeaders(identity, String(query.biz_trace_id || ''));
+    const carried = String(cookie || '').trim();
+    if (carried) headers.Cookie = carried;
     let encoded = null;
     if (body != null) {
         const form = new URLSearchParams();
@@ -110,6 +159,10 @@ export async function passportRequest(fetcher, { identity, method = 'GET', path,
         }
         encoded = form.toString();
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        // 与桌面端一致：POST 的请求体摘要，上游用它挡空体/重放（不是签名，但不给会被怠工）。
+        try {
+            headers['x-ss-stub'] = createHash('md5').update(encoded).digest('hex').toUpperCase();
+        } catch (_) { /* 摘要算不出来不影响请求本身 */ }
     }
     const response = await fetcher(url.toString(), { method, headers, body: encoded });
     const text = await response.text();

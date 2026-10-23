@@ -119,7 +119,12 @@ export function createQishuiPhone(options = {}) {
 
         async startLogin() {
             const result = await auth.start();
-            return { key: result.key, qrDataUrl: result.imageUrl, expiresAt: result.expiresAt };
+            // scanUrl 一起带出去：真机排查时最要紧的一句话是「码里到底装了什么地址」，
+            // 而二维码是一张图，从图上根本看不出来。
+            return {
+                key: result.key, qrDataUrl: result.imageUrl,
+                expiresAt: result.expiresAt, scanUrl: result.scanUrl,
+            };
         },
 
         qr: key => auth.qr(key).imageUrl,

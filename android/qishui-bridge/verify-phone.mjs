@@ -51,9 +51,46 @@ const imageUrl = String(started.qrDataUrl || '');
 check('拿到二维码', imageUrl.startsWith('data:image/'), `${imageUrl.slice(0, 30)}… (${imageUrl.length} 字符)`);
 check('拿到轮询用的 key', String(started.key || '').length > 8, String(started.key).slice(0, 12) + '…');
 
-console.log('— 手机协议：轮询（没有人扫，应当回答等待）—');
-const polled = await phone.checkLogin(started.key);
-check('轮询回答 waiting', polled.state === 'waiting', `state=${polled.state}`);
+// 码里装的是哪个地址：这一行是「扫了没反应」时最先要看的东西。
+console.log('  扫码地址      ', started.scanUrl || '(none)');
+check('二维码里是自己拼的 scan_login 地址', String(started.scanUrl || '').includes('/light/invoke/scan_login'));
+
+if (String(process.env.QISHUI_SCAN || '') === '1') {
+    // 人工扫码：跑这一支，用汽水 App 扫下面这个地址画出来的码。
+    //   QISHUI_SCAN=1 node android/qishui-bridge/verify-phone.mjs
+    // 确认之后会把会话 Cookie 与应用侧能拉到的东西一并打出来 —— 这就是「登录 + 拉数据」
+    // 这条链路最直接的证据。终端里 qrcode 也会顺手打到 stdout（部分终端不显示，仅作参考）。
+    console.log('\n—— 等你扫码确认（最多 180 秒）——');
+    console.log(started.scanUrl);
+    const deadline = Date.now() + 180_000;
+    let state = 'waiting';
+    let lastState = '';
+    while (Date.now() < deadline) {
+        const polled = await phone.checkLogin(started.key).catch(error => ({ state: `error: ${error?.message || error}` }));
+        state = polled.state;
+        if (state !== lastState) {
+            lastState = state;
+            console.log(`  state=${state}${polled.waitingForCookie ? ' (waitingForCookie)' : ''}`);
+        }
+        if (state === 'confirmed' || state === 'expired') break;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    check('扫码确认成功', state === 'confirmed', `state=${state}`);
+    if (state === 'confirmed') {
+        const after = await phone.status();
+        check('应用侧认下了登录态', after.loggedIn === true, `userId=${after.userId || '-'} cookieKeys=${after.cookieKeys}`);
+        console.log('  cookie        ', phone.sessions?.get?.()?.cookie?.replace(/(sessionid\w*=[^;]{6})[^;]*/g, '$1…') || '(none)');
+        const playlists = await phone.userPlaylists(20, 0).catch(error => ({ error: String(error?.message || error) }));
+        check('我的歌单读得到', !playlists.error && Array.isArray(playlists.playlists),
+            playlists.error || `${(playlists.playlists || []).length} 张`);
+        const search = await phone.search('晴天', 5, 0).catch(error => ({ error: String(error?.message || error) }));
+        check('搜索读得到', !search.error && Array.isArray(search.songs), search.error || `${(search.songs || []).length} 首`);
+    }
+} else {
+    console.log('— 手机协议：轮询（没有人扫，应当回答等待）—');
+    const polled = await phone.checkLogin(started.key);
+    check('轮询回答 waiting', polled.state === 'waiting', `state=${polled.state}`);
+}
 
 console.log('— 手机协议：数据接口只认 Cookie（不认签名）—');
 const probe = await fetch('https://api.qishui.com/luna/pc/me', {

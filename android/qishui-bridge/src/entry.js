@@ -168,6 +168,8 @@ const handlers = {
             token: result.key,
             qrcode: result.qrDataUrl,
             qrDataUrl: result.qrDataUrl,
+            // 码里装的那个地址（真机排查用：二维码是一张图，看不出它指向哪）。
+            scanUrl: result.scanUrl,
             expireTime: 300,
             message: '请使用抖音/汽水音乐 App 扫码并确认授权',
         };

@@ -377,7 +377,10 @@ export const qishuiProvider: OnlineMusicProvider = {
             // 免得靠猜「到底该用哪个 App 扫」。
             lastQishuiQrNote = `protocol: ${qishuiText(data?.protocol) || currentProtocol}`
                 + ` / qr copywriting: ${qishuiText(data?.copywriting) || '(none)'}`
-                + ` / webName: ${qishuiText(data?.webName) || '(none)'}`;
+                + ` / webName: ${qishuiText(data?.webName) || '(none)'}`
+                // 手机协议的码里装的是我们自己拼的 scan_login 地址：扫不通时先看这一行，
+                // 它比「扫了没反应」有用得多（服务端原来那张图装的是 sdk-next 网页）。
+                + ` / scan: ${qishuiText(data?.scanUrl) || '-'}`;
             return token;
         },
         async createQr(key) {

@@ -17,14 +17,46 @@
 //      才能把 Set-Cookie 收进罐子（少了这一步，手里只有扫码前就有的 sid_tt，
 //      登录判定会被骗过，而 /luna 回 1000016）。
 
+import QRCode from 'qrcode';
 import {
-    QR_TTL_MS, QISHUI_PHONE_API_BASE, cookieFromSetCookie, hasLoginCookie, hostCookies,
-    parseCookieString, buildCookieString, passportRequest, randomDigits, randomHex,
-    QISHUI_LOGIN_COOKIE_KEYS,
+    QR_TTL_MS, QISHUI_PHONE_API_BASE, QISHUI_PHONE_UA, buildQishuiScanUrl,
+    cookieFromSetCookie, hasLoginCookie, hostCookies, parseCookieString, buildCookieString,
+    passportRequest, randomDigits, randomHex, QISHUI_LOGIN_COOKIE_KEYS,
 } from './protocol.js';
 import { DEVICE_KEY, SESSION_KEY, readJson, writeJson, remove } from './storage.js';
 
 const text = value => (value == null ? '' : String(value));
+
+/**
+ * 机器名：扫码确认时汽水 App 会把它显示出来（「登录到 xxx 的电脑」）。
+ *
+ * 生成一次存进设备身份里，之后每次登录沿用 —— 每次换一个名会被上游当成新设备，
+ * 与「deviceId 不要每次都换」是同一条理由。形如 `DESKTOP-3F9KQ2X`。
+ */
+function makeComputerName() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let suffix = '';
+    for (let i = 0; i < 7; i += 1) suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+    return `DESKTOP-${suffix}`;
+}
+
+/**
+ * 把扫码地址画成图片（SVG data URL）。
+ *
+ * ⚠ 用 `toString({type:'svg'})` 而不是 `toDataURL`：后者要一块 canvas，
+ * 而这段代码既跑在隐藏 WebView 里、也跑在 node 的验证脚本里，SVG 那一路是纯 JS，
+ * 两边都出得来。`<img src>` 认这个 data URL（与原来那张 PNG 是同一个位置）。
+ */
+async function renderQrImage(content) {
+    const svg = await QRCode.toString(content, {
+        type: 'svg',
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 360,
+        color: { dark: '#000000', light: '#ffffff' },
+    });
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 /** 设备身份：生成一次就存起来，每次启动换一套会被上游判成风险设备。 */
 export function createIdentity() {
@@ -35,7 +67,13 @@ export function createIdentity() {
             deviceId: randomDigits(19),
             installId: randomDigits(15),
             verifyPortraitId: `${randomHex(8)}.login`,
+            computerName: makeComputerName(),
         };
+        writeJson(DEVICE_KEY, identity);
+    } else if (!text(identity.computerName)) {
+        // 老身份里没有这一项（它是后加的）：补上并写回 —— 扫码确认时要用它，
+        // 每次都临时生成一个名字等于每次都换设备名。
+        identity = { ...identity, computerName: makeComputerName() };
         writeJson(DEVICE_KEY, identity);
     }
     return { ...identity, reused };
@@ -72,12 +110,13 @@ export function createAuth(fetcher, { log = () => {} } = {}) {
         const target = text(url);
         if (!/^https?:\/\//i.test(target)) return '';
         try {
+            const carried = cookie();
             const response = await fetcher(target, {
                 method: 'GET',
                 headers: {
                     Accept: 'text/html,application/json;q=0.9,*/*;q=0.8',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                        + '(KHTML, like Gecko) SodaMusic/3.2.1 Chrome/136.0.7103.59 Safari/537.36',
+                    'User-Agent': QISHUI_PHONE_UA,
+                    ...(carried ? { Cookie: carried } : {}),
                 },
             });
             await response.text().catch(() => '');
@@ -141,6 +180,7 @@ export function createAuth(fetcher, { log = () => {} } = {}) {
                 method: 'GET',
                 path: '/passport/web/get_qrcode/',
                 params: { next: QISHUI_PHONE_API_BASE, need_logo: 'false', need_short_url: 'false' },
+                cookie: cookie(),
             });
             const data = json?.data || {};
             if (json?.message !== 'success' || Number(data.error_code) !== 0) {
@@ -150,7 +190,21 @@ export function createAuth(fetcher, { log = () => {} } = {}) {
             }
             // get_qrcode 就已经开始下发 Cookie（sid_tt 等），收下来：确认那一步要拿它去换会话。
             if (setCookie) mergeCookie([cookieFromSetCookie(setCookie), hostCookies()]);
-            const imageUrl = text(data.qrcode);
+            // ⭐ 二维码自己画：服务端那张 `qrcode` 装的是 sdk-next 的**网页**地址，
+            // 汽水 App 扫了只会开网页、不弹「在电脑上登录」，扫码就永远确认不下来
+            // （详见 protocol.js 的 buildQishuiScanUrl）。拿不到 token 时才退回那张图。
+            const scanUrl = buildQishuiScanUrl(data.qrcode_index_url, identity.computerName);
+            let imageUrl = text(data.qrcode);
+            if (scanUrl) {
+                try {
+                    imageUrl = await renderQrImage(scanUrl);
+                } catch (renderError) {
+                    log('[Qishui] drawing the scan QR failed, falling back to the image the server sent:',
+                        renderError && renderError.message ? renderError.message : renderError);
+                }
+            } else {
+                log('[Qishui] qrcode_index_url carries no token, so the QR falls back to the server image');
+            }
             const key = text(data.token);
             if (!key || !imageUrl) {
                 const error = new Error('汽水二维码返回不完整（缺 token 或 qrcode）');
@@ -162,7 +216,10 @@ export function createAuth(fetcher, { log = () => {} } = {}) {
             const expiresAt = Number.isFinite(expireSeconds) && expireSeconds > 1e9
                 ? expireSeconds * 1000 : Date.now() + QR_TTL_MS;
             pending.set(key, { imageUrl, expiresAt });
-            return { key, imageUrl, expiresAt, copywriting: text(data.copywriting), webName: text(data.web_name) };
+            return {
+                key, imageUrl, expiresAt, scanUrl,
+                copywriting: text(data.copywriting), webName: text(data.web_name),
+            };
         },
 
         qr(key) {
@@ -194,6 +251,9 @@ export function createAuth(fetcher, { log = () => {} } = {}) {
                     is_new_login: '1',
                     next: QISHUI_PHONE_API_BASE,
                 },
+                // 与出码同一个会话（见 protocol.js 里 passportRequest 的说明）：
+                // 少了它，服务端眼里「扫码确认」与「轮询」是两台陌生设备。
+                cookie: cookie(),
             });
             const data = json?.data || {};
             const errorCode = Number(data.error_code || 0);
