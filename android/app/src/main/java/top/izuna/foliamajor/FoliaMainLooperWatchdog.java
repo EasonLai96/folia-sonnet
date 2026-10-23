@@ -47,6 +47,8 @@ public final class FoliaMainLooperWatchdog {
     private static boolean installed = false;
     /** 当前正在派发的那条消息的描述（Printer 是成对的，中间不会插进别的消息）。 */
     private static String pending = null;
+    /** 上面那条消息的来源 key，见 {@link #targetKey(String)}。 */
+    private static String pendingKey = null;
     private static long pendingAtMs = 0L;
     private static long lastFrameAtMs = 0L;
 
@@ -250,6 +252,20 @@ public final class FoliaMainLooperWatchdog {
     private static long bucketCount = 0L;
     private static long bucketStartMs = 0L;
 
+    /**
+     * 这一桶里**谁**在派发：key → `{条数, 耗时毫秒}`。
+     *
+     * ⭐ 占用率只说得出「主线程很忙」，说不出「忙在谁身上」。而看到 `307 msgs/秒` 之后，
+     * 唯一能省下下一轮瞎猜的办法就是把来源直接列出来 —— `ActivityThread$H` 那种笼统的
+     * 目标名没有信息量，真正有用的是 **callback 的类名**
+     * （`ViewRootImpl$TraversalRunnable` / `FrameDisplayEventReceiver` / 自家的 Runnable）。
+     *
+     * 每桶清空；条目数封顶，免得某个一次性的东西把表撑爆。
+     */
+    private static final java.util.HashMap<String, long[]> bucketTargets = new java.util.HashMap<>();
+    private static final int TARGET_TABLE_CAP = 48;
+    private static final int TARGET_REPORT_TOP = 5;
+
     /** 统计窗口（约 1 秒）与「忙到值得记一行」的下限（20% 以上才算忙）。 */
     private static final long BUSY_BUCKET_MS = 1000L;
     private static final long BUSY_REPORT_MS = 200L;
@@ -264,7 +280,7 @@ public final class FoliaMainLooperWatchdog {
      *   · 渲染进程于是拿不到新帧，rAF 与宏任务定时器一起停 ——
      *     就是 JS 侧看到的那些笔，`posAgeMs` 也会时不时超过 500ms 的通知间隔。
      *
-     * 所以按秒累计「被占用多少毫秒 / 跑了多少条」，忙的秒记一行。
+     * 所以按秒累计「被占用多少毫秒 / 跑了多少条」，忙的秒记一行，并附上**耗时前几名**。
      */
     private static void flushBusyBucket() {
         long nowMs = android.os.SystemClock.uptimeMillis();
@@ -278,11 +294,72 @@ public final class FoliaMainLooperWatchdog {
             return;
         }
         if (bucketBusyMs >= BUSY_REPORT_MS) {
-            record("busy " + bucketBusyMs + "ms/" + elapsed + "ms, " + bucketCount + " msgs");
+            record("busy " + bucketBusyMs + "ms/" + elapsed + "ms, " + bucketCount + " msgs"
+                    + topTargets());
         }
         bucketStartMs = nowMs;
         bucketBusyMs = 0L;
         bucketCount = 0L;
+        bucketTargets.clear();
+    }
+
+    /** 把这一桶里最费时间的那几个来源拼成一串，接在 `busy` 后面。 */
+    @SuppressWarnings("unchecked")
+    private static String topTargets() {
+        if (bucketTargets.isEmpty()) {
+            return "";
+        }
+        java.util.Map.Entry<String, long[]>[] entries =
+                bucketTargets.entrySet().toArray(new java.util.Map.Entry[0]);
+        java.util.Arrays.sort(entries, (left, right) -> Long.compare(right.getValue()[1], left.getValue()[1]));
+        StringBuilder joined = new StringBuilder(" |");
+        int count = Math.min(TARGET_REPORT_TOP, entries.length);
+        for (int i = 0; i < count; i += 1) {
+            joined.append(' ')
+                    .append(entries[i].getKey())
+                    .append(' ')
+                    .append(entries[i].getValue()[1])
+                    .append("ms/")
+                    .append(entries[i].getValue()[0]);
+            if (i < count - 1) {
+                joined.append(',');
+            }
+        }
+        return joined.toString();
+    }
+
+    /**
+     * 从 `>>>>> Dispatching to Handler (com.foo.Bar) {1a2b} null: 159` 里抽出**有信息量的那个名字**。
+     *
+     * Looper 打的是 `msg.target + " " + msg.callback + ": " + msg.what`：
+     *   · **有 callback** 时它才是真正在跑的东西（`ViewRootImpl$TraversalRunnable`、
+     *     `Choreographer$FrameDisplayEventReceiver` …），`what` 恒为 0 —— 这时候答案在 callback 里；
+     *   · **没 callback**（`null`）时只能靠 target + what，两个一起才有意义
+     *     （`ActivityThread$H:159` 是 `EXECUTE_TRANSACTION`，单说 159 谁都认不出来）。
+     */
+    private static String targetKey(String line) {
+        int closeBrace = line.indexOf("} ");
+        int whatColon = line.lastIndexOf(": ");
+        String target = simpleName(slice(line, line.indexOf('(') + 1, line.indexOf(')')));
+        if (closeBrace > 0 && whatColon > closeBrace) {
+            String callback = line.substring(closeBrace + 2, whatColon).trim();
+            if (!callback.isEmpty() && !"null".equals(callback)) {
+                return simpleName(callback);
+            }
+            return target + ":" + line.substring(whatColon + 2).trim();
+        }
+        return target;
+    }
+
+    /** 取 `[from, to)`；下标不合法时给空串（诊断代码不该为一条畸形日志抛异常）。 */
+    private static String slice(String text, int from, int to) {
+        return from > 0 && to > from ? text.substring(from, to) : "?";
+    }
+
+    /** 只留最后一段（`android.view.ViewRootImpl$TraversalRunnable` → `ViewRootImpl$TraversalRunnable`）。 */
+    private static String simpleName(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 ? name.substring(dot + 1) : name;
     }
 
     // ---------------------------------------------------------------- 记与取
@@ -350,6 +427,8 @@ public final class FoliaMainLooperWatchdog {
             }
             if (x.startsWith(">>>>>")) {
                 pending = x;
+                // 在开头就算好 key：结尾那一下要称耗时，别让字符串处理挤进秤上。
+                pendingKey = targetKey(x);
                 pendingAtMs = android.os.SystemClock.uptimeMillis();
                 return;
             }
@@ -357,6 +436,7 @@ public final class FoliaMainLooperWatchdog {
                 long cost = android.os.SystemClock.uptimeMillis() - pendingAtMs;
                 bucketBusyMs += cost;
                 bucketCount += 1L;
+                accumulate(pendingKey, cost);
                 if (cost >= SLOW_MESSAGE_MS) {
                     // 取停顿正中间那一拍：开头那一拍可能还排在前一条消息的尾巴上。
                     record("msg " + cost + "ms " + shorten(pending), stackNear(pendingAtMs + cost / 2));
@@ -364,6 +444,29 @@ public final class FoliaMainLooperWatchdog {
                 pending = null;
             }
         }
+    }
+
+    /** 把这一条计进本桶的来源表。key 为 null 时归到 `?`（不该发生）。 */
+    private static void accumulate(String key, long costMs) {
+        if (key == null) {
+            return;
+        }
+        long[] slot = bucketTargets.get(key);
+        if (slot == null) {
+            // 封顶：一次性的东西太多就别再收新键了，已有的照常累计。
+            if (bucketTargets.size() >= TARGET_TABLE_CAP) {
+                slot = bucketTargets.get("others");
+                if (slot == null) {
+                    slot = new long[2];
+                    bucketTargets.put("others", slot);
+                }
+            } else {
+                slot = new long[2];
+                bucketTargets.put(key, slot);
+            }
+        }
+        slot[0] += 1L;
+        slot[1] += costMs;
     }
 
     /**
