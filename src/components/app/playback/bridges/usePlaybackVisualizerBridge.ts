@@ -84,6 +84,8 @@ const TICK_PROBE_INTERVAL_MS = 16;
 const LOOPER_DRAIN_INTERVAL_MS = 1000;
 /** 空频谱：反复 `new Uint8Array(0)` 只会给堆添垃圾，也白唤醒一遍订阅者。 */
 const EMPTY_SPECTRUM = new Uint8Array(0);
+/** store 变更打点的最短间隔（临时诊断）：同一个键连着抖的时候别刷屏，数在 `dropped` 里。 */
+const STORE_PROBE_MIN_INTERVAL_MS = 120;
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -543,12 +545,59 @@ export function usePlaybackVisualizerBridge({
          * 「这段时间一帧都没掉」。
          */
         const loaf = observeLongAnimationFrames();
+        /*
+         * 第四个探针：**store 变更**（临时诊断）。
+         *
+         * LoAF 已经定出「那 40~175ms 是 React Scheduler 的工作循环（`re`）」—— 也就是
+         * **一次 React 渲染**。可 React 不会自己跑，一定有人 `setState`。而
+         * `usePlaybackStore` 是一次普通 zustand `set`：**每个 `usePlaybackStore(...)`
+         * 都会收到通知**，谁的选择器返回值变了谁就重渲染。
+         *
+         * 所以只要把「哪个键在什么时候变了」记下来，就能跟 `[FoliaLoaf]` 的 `wallMs`
+         * 直接对上：变的是不是 `currentLineIndex`（歌词推进／节拍），还是一堆别的。
+         * 秒几次也一并看得出来 —— 一秒十几次的键，就是那 40~175ms 的元凶。
+         */
+        const offStore = attachStoreProbe();
         return () => {
             window.clearInterval(timer);
             window.clearInterval(drain);
             loaf?.disconnect();
+            offStore();
         };
     }, []);
+}
+
+/**
+ * 把 `usePlaybackStore` 的每次变更打成一行（临时诊断，见调用处那段说明）。
+ *
+ * 只记**引用变了**的键 —— zustand 的 `set` 会合并不变的字段，所以这一份就是
+ * 「谁真的动了」。`dropped` 是被节流的条数：同一个键在 120ms 里抖十次，说明
+ * 它在被高频写，那比「变了几次」更值得看。
+ */
+function attachStoreProbe(): () => void {
+    let lastLoggedAtMs = 0;
+    let dropped = 0;
+    return usePlaybackStore.subscribe((state, previous) => {
+        const current = state as unknown as Record<string, unknown>;
+        const before = previous as unknown as Record<string, unknown>;
+        const changed: string[] = [];
+        for (const key of Object.keys(current)) {
+            if (current[key] !== before[key]) changed.push(key);
+        }
+        if (changed.length === 0) return;
+        const nowMs = performance.now();
+        if (nowMs - lastLoggedAtMs < STORE_PROBE_MIN_INTERVAL_MS) {
+            dropped += 1;
+            return;
+        }
+        lastLoggedAtMs = nowMs;
+        console.warn('[FoliaStore]', JSON.stringify({
+            keys: changed.join(','),
+            dropped,
+            wallMs: Date.now() % 1000000,
+        }));
+        dropped = 0;
+    });
 }
 
 /**
