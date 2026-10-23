@@ -112,6 +112,7 @@ public final class FoliaMainLooperWatchdog {
                         }
                     }
                     sampleGcStats();
+                    flushBusyBucket();
                     Thread.sleep(SAMPLE_INTERVAL_MS);
                 } catch (Throwable ignored) {
                     // 采样挂了不该带崩进程，也不该刷屏。
@@ -242,6 +243,48 @@ public final class FoliaMainLooperWatchdog {
         return joined.toString();
     }
 
+    // ------------------------------------------------------------ 主线程占用率
+
+    /** 这一桶（约 1 秒）里主线程一共被消息占了多少毫秒、跑了多少条。 */
+    private static long bucketBusyMs = 0L;
+    private static long bucketCount = 0L;
+    private static long bucketStartMs = 0L;
+
+    /** 统计窗口（约 1 秒）与「忙到值得记一行」的下限（20% 以上才算忙）。 */
+    private static final long BUSY_BUCKET_MS = 1000L;
+    private static final long BUSY_REPORT_MS = 200L;
+
+    /**
+     * 主线程**占用率**，而不是单条消息的耗时。
+     *
+     * 上面那个 `msg …ms` 只抓单条超过 60ms 的，可主线程完全可能是被**一大堆十几毫秒
+     * 的消息**占满的 —— 那种情况下：
+     *   · 一条 `msg` 都不会记（每条都不够长），主线程记录看着干干净净；
+     *   · 但 App 主线程一直在忙，WebView 的帧提交（`ViewRootImpl.draw`）排不进去；
+     *   · 渲染进程于是拿不到新帧，rAF 与宏任务定时器一起停 ——
+     *     就是 JS 侧看到的那些笔，`posAgeMs` 也会时不时超过 500ms 的通知间隔。
+     *
+     * 所以按秒累计「被占用多少毫秒 / 跑了多少条」，忙的秒记一行。
+     */
+    private static void flushBusyBucket() {
+        long nowMs = android.os.SystemClock.uptimeMillis();
+        if (bucketStartMs == 0L) {
+            bucketStartMs = nowMs;
+            return;
+        }
+        long elapsed = nowMs - bucketStartMs;
+        // 采样线程自己被饿住过（超过 5 秒没轮到）就别报了，那不是主线程的事。
+        if (elapsed < BUSY_BUCKET_MS || elapsed > 5000L) {
+            return;
+        }
+        if (bucketBusyMs >= BUSY_REPORT_MS) {
+            record("busy " + bucketBusyMs + "ms/" + elapsed + "ms, " + bucketCount + " msgs");
+        }
+        bucketStartMs = nowMs;
+        bucketBusyMs = 0L;
+        bucketCount = 0L;
+    }
+
     // ---------------------------------------------------------------- 记与取
 
     /**
@@ -312,6 +355,8 @@ public final class FoliaMainLooperWatchdog {
             }
             if (x.startsWith("<<<<<") && pending != null) {
                 long cost = android.os.SystemClock.uptimeMillis() - pendingAtMs;
+                bucketBusyMs += cost;
+                bucketCount += 1L;
                 if (cost >= SLOW_MESSAGE_MS) {
                     // 取停顿正中间那一拍：开头那一拍可能还排在前一条消息的尾巴上。
                     record("msg " + cost + "ms " + shorten(pending), stackNear(pendingAtMs + cost / 2));
