@@ -8,11 +8,14 @@ const requestMock = vi.hoisted(() => vi.fn());
 vi.mock('@/services/onlineMusic/qq/qqTransport', () => ({
     getQqTransportAvailability: () => ({ configured: true }),
     hasQqSession: () => true,
+    hasUsableQqSession: () => true,
     clearQqSession: vi.fn(),
     requestQq: requestMock,
 }));
 
 vi.mock('@/services/onlineMusic/providerStorage', () => ({
+    readProviderSessionValue: vi.fn(() => null),
+    removeProviderSessionValue: vi.fn(),
     writeProviderSessionValue: vi.fn(),
 }));
 

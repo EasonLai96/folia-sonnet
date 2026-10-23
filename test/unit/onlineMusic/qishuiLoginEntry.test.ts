@@ -59,11 +59,14 @@ describe('Qishui login entry', () => {
         const { key, imageUrl } = await omni.startLogin('qishui');
         expect(key).toBe('tok-1');
         expect(imageUrl).toBe('data:image/png;base64,AAA');
-        expect(calls[0][0]).toBe('login.qr');
+        // ⚠ 出码之前本 fork 先按偏好在桥上选一次协议（protocol.use，见 qishuiProvider 的 useProtocol），
+        // 老包不认这一手时它会抛错并被吞掉，接着照旧走 login.qr，所以这里按顺序断言三步。
+        expect(calls.map(([operation]) => operation)).toEqual(['protocol.use', 'login.qr']);
 
         const state = await omni.checkLogin('qishui', key);
         expect(state.state).toBe('waiting');
-        expect(calls[1]).toEqual(['login.check', { token: 'tok-1' }]);
+        expect(calls[2]).toEqual(['login.check', { token: 'tok-1' }]);
+        expect(calls.map(([operation]) => operation)).toEqual(['protocol.use', 'login.qr', 'login.check']);
     });
 
     it('没有 Electron 桥时登录直接报 unavailable，而不是静默返回一个空二维码', async () => {

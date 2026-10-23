@@ -125,6 +125,8 @@ const resolveProviderErrorReason = (
         // 会话压根没建立起来 —— 按「未登录」处理，不要归到「登录态过期」：后者会引导用户
         // 重新登录，而这里重新登录只会再错一次，真正要的是修正账号密码。
         case 'invalid-credentials':
+        // 需要先在网页里登录（飞牛的云连接）。同属「这次请求没有身份」：引导去登录窗口。
+        case 'web-login-required':
             return 'not-signed-in';
         default: {
             const exhaustive: never = code;

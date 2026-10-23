@@ -11,16 +11,29 @@ import { requestStage } from '@/services/aiStage';
 // cloud 会让刚生成完的用户看到「已从云端拉取缓存」，而这一句本来是留给「白拿别人的」
 // 那种情况。两条链路（主题、导演）共用同一个指纹，撞的就是这一层。
 
-const state = vi.hoisted(() => ({ payload: null as unknown }));
+const state = vi.hoisted(() => ({ payload: null as unknown, candidateKey: 'a'.repeat(32) }));
 
+/*
+ * 云端有两条接口，形状不一样：
+ *  - POST /api/ai-cache/resolve       → { candidates: [{ key, words }] }
+ *  - GET  /api/ai-cache/<kind>/<key>  → { hit: true, entry: { payload } }
+ *
+ * 2026-10-17 起「精确键没中时按歌名捞一条内容合规的」：带歌名又有歌词的请求**先**走候选
+ * 那条，只有没歌名可判时才直接读精确键。所以桩要按地址分开答 —— 只答精确键那种形状，
+ * 候选会一直是空的，于是「云端明明有」也会被判成没命中，测出来的来源永远是 'ai'。
+ */
 vi.mock('@/services/aiNativeFetch', () => ({
-    createAiFetch: () => async () => ({
-        ok: true,
-        status: 200,
-        json: async () => (state.payload === null
-            ? { hit: false }
-            : { hit: true, entry: { payload: state.payload } }),
-    } as unknown as Response),
+    createAiFetch: () => async (url: string) => {
+        const hit = state.payload !== null;
+        const body = url.endsWith('/ai-cache/resolve')
+            ? (hit ? { candidates: [{ key: state.candidateKey, words: ['另一首的第一句'] }] } : { candidates: [] })
+            : (hit ? { hit: true, entry: { payload: state.payload } } : { hit: false });
+        return {
+            ok: true,
+            status: 200,
+            json: async () => body,
+        } as unknown as Response;
+    },
 }));
 
 /* 一台「有密钥、能生成」的机器。 */

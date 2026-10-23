@@ -25,6 +25,8 @@ export type ElectronSettingsState = {
     GEMINI_API_KEY: string;
     /** 自建 / 反代的 Gemini 接口地址（fork：默认 https://generativelanguage.googleapis.co）。 */
     GEMINI_API_URL: string;
+    GEMINI_API_MODEL: string;
+    AI_PROVIDER_PRESET: string;
     OPENAI_API_KEY: string;
     OPENAI_API_URL: string;
     OPENAI_API_MODEL: string;

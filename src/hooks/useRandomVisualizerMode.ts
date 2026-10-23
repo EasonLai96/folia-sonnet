@@ -1,66 +1,53 @@
 import { useEffect, useRef } from 'react';
 import type { SongResult, VisualizerMode } from '../types';
-import { VISUALIZER_REGISTRY } from '../components/visualizer/registry';
-import { readDirectorSettings } from '../services/lyricDirector/state';
-import { isBlockedDirectorMode } from '../services/lyricDirector/catalog';
+import { pickRandomVisualizerMode } from '../utils/randomVisualizerModes';
+import type { SetVisualizerModeOptions } from '../stores/useVisualizerSettingsStore';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 
 // Applies a different registered lyric animation mode when the active track changes.
 //
-// Which ones it may pick is the same question the AI answers, with the same answer: a mode the
-// listener has told the AI never to choose (Settings → AI 导演) is one they do not want to land on,
-// whoever is doing the choosing — `still` looks broken rather than calm, `lumiere` buries the
-// words. So the blocked list is read from the director's own settings rather than copied here,
-// and it stays theirs to edit in one place.
+// Which ones it may pick is the listener's own pool (设置 → 参与随机的样式，上游 v0.7.22)：以前这份
+// 名单抄的是 AI 导演的排除列表，现在用户自己能改，所以这里不再读导演的设置。
 export function useRandomVisualizerMode({
     currentSong,
     enabled,
     visualizerMode,
+    modes,
     setVisualizerMode,
 }: {
     currentSong: SongResult | null;
     enabled: boolean;
     visualizerMode: VisualizerMode;
-    setVisualizerMode: (mode: VisualizerMode, options?: { notify?: boolean }) => void;
+    modes: readonly VisualizerMode[];
+    setVisualizerMode: (mode: VisualizerMode, options?: SetVisualizerModeOptions) => void;
 }) {
     const observedSongIdRef = useRef<string | null>(null);
-    const wasEnabledRef = useRef(enabled);
+    const pendingChoiceRef = useRef<{ songId: string | null; from: VisualizerMode; modes: readonly VisualizerMode[] } | null>(null);
 
     useEffect(() => {
         const songId = currentSong ? getPlaybackSongKey(currentSong) : null;
-        const wasEnabled = wasEnabledRef.current;
-        wasEnabledRef.current = enabled;
-
         if (!enabled) {
             observedSongIdRef.current = songId;
+            pendingChoiceRef.current = null;
             return;
         }
+        const songChanged = songId !== null && observedSongIdRef.current !== null && observedSongIdRef.current !== songId;
+        if (songId !== null) observedSongIdRef.current = songId;
 
-        if (!wasEnabled) {
-            observedSongIdRef.current = songId;
+        // Keep one choice for the whole song. Enabling random or editing its pool only replaces a
+        // style that is outside the selection; StrictMode and refreshed song metadata do not reroll.
+        if (!songChanged && modes.includes(visualizerMode)) {
+            pendingChoiceRef.current = null;
             return;
         }
+        // StrictMode can replay this effect before the selected mode reaches the next render.
+        const pending = pendingChoiceRef.current;
+        if (pending?.songId === songId && pending.from === visualizerMode && pending.modes === modes) return;
+        pendingChoiceRef.current = { songId, from: visualizerMode, modes };
 
-        if (songId === null) {
-            return;
+        const nextMode = pickRandomVisualizerMode(modes, visualizerMode);
+        if (nextMode !== visualizerMode) {
+            setVisualizerMode(nextMode, { notify: false, preserveRandom: true });
         }
-
-        if (observedSongIdRef.current === null) {
-            observedSongIdRef.current = songId;
-            return;
-        }
-
-        if (observedSongIdRef.current === songId) {
-            return;
-        }
-
-        observedSongIdRef.current = songId;
-        const blocked = readDirectorSettings().blockedModes;
-        const candidates = VISUALIZER_REGISTRY
-            .map(entry => entry.mode)
-            // (The one playing stays out as well: a "new" mode that is the same one reads as nothing happened.)
-            .filter(mode => mode !== visualizerMode && !isBlockedDirectorMode(mode, blocked));
-        const nextMode = candidates[Math.floor(Math.random() * candidates.length)] ?? visualizerMode;
-        setVisualizerMode(nextMode, { notify: false });
-    }, [currentSong, enabled, setVisualizerMode, visualizerMode]);
+    }, [currentSong, enabled, modes, setVisualizerMode, visualizerMode]);
 }

@@ -28,6 +28,7 @@ import type { BravaisSeamMenuItem } from './bravaisSeamModels';
 import type { BravaisHomeChrome } from './useBravaisHomeChrome';
 import BravaisHomeDirectory from './BravaisHomeDirectory';
 import LocalSongManagerDialog from '../../shared/LocalSongManagerDialog';
+import { availableLocalTabLabel, localWallHint, onlineWallHint } from './bravaisEmptyWallHint';
 import { useBravaisHomeAccount } from './useBravaisHomeAccount';
 import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { isAndroidNativeRuntime } from '../../../services/nativeLocalMusic';
@@ -90,6 +91,13 @@ export const BravaisHomeOnline: React.FC<BravaisHomeSourceCommonProps & {
     const emptyMessage = online.accountView === 'guest'
         ? (online.needsRelogin ? t('status.loginExpired') : undefined)
         : online.accountView === 'resolving' ? t('home.loadingLibrary') : list.emptyMessage;
+    // 未登录时墙不再整面空白：墙面上写一段背景说明（连接在线平台，或者去本地页签导入文件夹）。
+    const localTab = availableLocalTabLabel(common.chrome.tabs);
+    const { accountView, needsRelogin, providerLabel } = online;
+    const wallHint = useMemo(
+        () => onlineWallHint({ accountView, needsRelogin, providerLabel }, localTab, t),
+        [accountView, localTab, needsRelogin, providerLabel, t],
+    );
     // B10：账户位里的平台切换（account-select / account-logout）。
     const account = useBravaisHomeAccount(accountController, online);
     const latest = useRef({ homeActions, providerId: online.providerId, onOpenGridView });
@@ -107,6 +115,7 @@ export const BravaisHomeOnline: React.FC<BravaisHomeSourceCommonProps & {
             items={showList ? list.items : []}
             isLoading={showList && list.isLoading}
             emptyMessage={emptyMessage}
+            wallHint={wallHint}
             meta={online.providerLabel}
             account={account}
             panelTitle={list.title}
@@ -164,6 +173,9 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
     const runActionRef = useRef(runAction);
     runActionRef.current = runAction;
     const isEmptyLibrary = directoryTrees.loaded && localSongs.length === 0 && directoryTrees.trees.length === 0;
+    // 空曲库时墙面上写一段背景说明（从缝的「⋯」导入文件夹）。
+    const canImportFolder = localActions.some(action => action.id === 'import-folder');
+    const wallHint = useMemo(() => (isEmptyLibrary ? localWallHint(canImportFolder, t) : undefined), [canImportFolder, isEmptyLibrary, t]);
 
     useLibraryHomeListRegistration({
         enabled: !isEmptyLibrary,
@@ -254,6 +266,7 @@ export const BravaisHomeLocal: React.FC<BravaisHomeSourceCommonProps & {
                 items={isEmptyLibrary ? [] : activeSection.cards}
                 isLoading={false}
                 emptyMessage={isEmptyLibrary ? t('localMusic.noLocalMusic') : activeSection.emptyMessage}
+                wallHint={wallHint}
                 meta={meta}
                 sections={isEmptyLibrary ? undefined : sections}
                 onSelectSection={onSelectSection}

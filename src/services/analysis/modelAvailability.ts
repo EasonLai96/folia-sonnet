@@ -88,9 +88,12 @@ export const modelCanRun = (name: AutomixModelName): boolean => present[name];
  * read, so wherever that one is, the drum stem of 智能动感模式 can run too.
  */
 export const refreshModelAvailability = async (): Promise<AutomixModelsPresent> => {
-    let beatThis = false;
-    let htdemucs = false;
-    let htdemucsGpu = false;
+    // 从「现在这份答案」起算，而不是从 false 起算：一次失败的检查不是「文件没了」的证据，
+    // 那条 IPC 通道在窗口重建、主进程忙的时候都会抖一下。旧写法把失败当成「全都没有」，
+    // 于是一次抖动就把正在跑的引擎从徽章和表现模式开关里抹掉，直到下一次刷新才回来。
+    let beatThis = present.beat_this;
+    let htdemucs = present.htdemucs;
+    let htdemucsGpu = present.htdemucs_gpu;
 
     const ask = typeof window !== 'undefined' ? window.electron?.getAutomixModelsPresent : undefined;
     if (typeof ask === 'function') {
@@ -104,6 +107,12 @@ export const refreshModelAvailability = async (): Promise<AutomixModelsPresent> 
         } catch (error) {
             console.warn('[Analysis] could not check which models are installed', error);
         }
+    } else {
+        // 没有桥就没有宿主那份，只剩下面下载来的那份说了算 —— 这里必须清掉旧答案，
+        // 否则「浏览器构建」会沿用上一次（桌面构建时）读到的 true。
+        beatThis = false;
+        htdemucs = false;
+        htdemucsGpu = false;
     }
 
     // The downloaded copy. Read from the snapshot rather than re-reading the cache: modelStore says

@@ -25,7 +25,8 @@ const ICON_CLASS = {
 } as const;
 
 type ButtonProps = {
-    onClick: () => void;
+    /** 不给就是「只是显示状态」的按钮（例如下载中那一档，`disabled` 且没有可做的事）。 */
+    onClick?: () => void;
     /** 不给就是 `fill`（有底那档）。下面的查表也是这么兜的，别把这一项从类型里删掉。 */
     variant?: 'fill' | 'primary' | 'quiet';
     icon?: LucideIcon;

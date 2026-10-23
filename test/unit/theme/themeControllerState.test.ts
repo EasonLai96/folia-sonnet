@@ -224,94 +224,10 @@ describe('themeControllerState', () => {
         expect(model.editableSource).toBe('custom');
     });
 
-    it('preserves visual tokens while using AI foreground in daylight default background mode', () => {
-        const previousTheme: Theme = {
-            ...dualTheme.dark,
-            wordColors: [{ word: 'keep-me', color: '#00ff00' }],
-            lyricsIcons: ['keep-icon']
-        };
-
-        const nextTheme = resolveBgModeTheme({
-            aiTheme: dualTheme,
-            mode: 'default',
-            isDaylight: true,
-            defaultTheme,
-            daylightTheme,
-            previousTheme
-        });
-
-        expect(nextTheme.name).toBe('AI Light');
-        expect(nextTheme.backgroundColor).toBe(daylightTheme.backgroundColor);
-        expect(nextTheme.wordColors).toEqual(previousTheme.wordColors);
-        expect(nextTheme.lyricsIcons).toEqual(previousTheme.lyricsIcons);
-    });
-
-    it('applies the default AI theme when AI background mode is requested without generated AI theme', () => {
-        const previousTheme: Theme = {
-            ...defaultTheme,
-            name: 'Legacy Theme',
-            wordColors: [{ word: 'legacy', color: '#999999' }],
-            lyricsIcons: ['legacy-icon']
-        };
-
-        const nextTheme = resolveBgModeTheme({
-            mode: 'ai',
-            aiTheme: null,
-            isDaylight: false,
-            defaultTheme,
-            daylightTheme,
-            previousTheme
-        });
-
-        expect(nextTheme.name).toBe(FALLBACK_AI_DUAL_THEME.dark.name);
-        expect(nextTheme.backgroundColor).toBe(FALLBACK_AI_DUAL_THEME.dark.backgroundColor);
-        expect(nextTheme.wordColors).toEqual(previousTheme.wordColors);
-        expect(nextTheme.lyricsIcons).toEqual(previousTheme.lyricsIcons);
-    });
-
-    it('switches bg mode back to default while retaining AI foreground tokens', () => {
-        const previousTheme: Theme = {
-            ...dualTheme.dark,
-            wordColors: [{ word: 'persist', color: '#123456' }],
-            lyricsIcons: ['persist-icon']
-        };
-
-        const nextTheme = resolveBgModeTheme({
-            mode: 'default',
-            aiTheme: dualTheme,
-            isDaylight: false,
-            defaultTheme,
-            daylightTheme,
-            previousTheme
-        });
-
-        expect(nextTheme.name).toBe('AI Dark');
-        expect(nextTheme.backgroundColor).toBe(defaultTheme.backgroundColor);
-        expect(nextTheme.wordColors).toEqual(previousTheme.wordColors);
-        expect(nextTheme.lyricsIcons).toEqual(previousTheme.lyricsIcons);
-    });
-
-    it('applies AI background mode while keeping existing visual tokens', () => {
-        const previousTheme: Theme = {
-            ...defaultTheme,
-            wordColors: [{ word: 'persist', color: '#654321' }],
-            lyricsIcons: ['persist-icon']
-        };
-
-        const nextTheme = resolveBgModeTheme({
-            mode: 'ai',
-            aiTheme: dualTheme,
-            isDaylight: false,
-            defaultTheme,
-            daylightTheme,
-            previousTheme
-        });
-
-        expect(nextTheme.name).toBe('AI Dark');
-        expect(nextTheme.backgroundColor).toBe(dualTheme.dark.backgroundColor);
-        expect(nextTheme.wordColors).toEqual(previousTheme.wordColors);
-        expect(nextTheme.lyricsIcons).toEqual(previousTheme.lyricsIcons);
-    });
+    // 以前这里还有四条「高亮词与歌词图标从 previousTheme 继承」的用例。它们钉的是
+    // fa956ee4 之前的形态，而那笔提交正是把继承改掉的那笔（AI 主题生效了、歌词却没有
+    // AI 高亮）：这两项归选中的那份主题，不再继承上一份。同一个文件里两套相反的断言
+    // 不可能同时成立，所以继承那四条按新行为删掉，上面两条钉住现在的做法。
 
     it('builds a built-in dual theme from warm cover colors', () => {
         const builtinTheme = buildBuiltinDualTheme({

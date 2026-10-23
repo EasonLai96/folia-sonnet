@@ -55,6 +55,9 @@ const LATENT_VARIANT_COMMANDS: CommandPaletteCommand[] = [
     },
 ];
 
+// What finds any of 智能动感模式's three commands (Sonnet and Diorama on the beats, Pendolo on the drums).
+const SMART_BEAT_KEYWORDS = ['smart beat', 'beat fx', 'beat this', 'sonnet beat', 'diorama beat', 'pendolo drums', '智能动感模式', '动感', '节拍', '鼓点', '推镜裂光', '水镜涟漪', '仿真鼓面', '商籁动感', '镜台涟漪', '时计'];
+
 export const visualizerCommands: CommandPaletteCommand[] = [
     lyricSegmentationCommand,
     defineCommand({

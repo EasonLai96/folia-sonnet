@@ -29,6 +29,17 @@ const track = {
 
 const qishuiSong = () => normalizeQishuiSong(track);
 
+/*
+ * 按 operation 作答。登录这几条链路的第一次桥调用**不是** status / login.qr —— 进登录前
+ * 一定先 `protocol.use` 把上次选的那一套说一遍（车机 / 手机两套凭据互不相认）。用
+ * mockResolvedValueOnce 排队，第一格就被它吃掉，后面的断言全都对不上。
+ */
+const answerOps = (answers: Record<string, unknown>, fallback: unknown = {}) => {
+    request.mockImplementation(async (operation: string) => (
+        operation in answers ? answers[operation] : fallback
+    ));
+};
+
 beforeEach(() => {
     request.mockReset();
     clearQishuiLibraryCache();
@@ -66,7 +77,8 @@ describe('Qishui provider contract', () => {
         expect(qishuiProvider).toMatchObject({ id: 'qishui', displayName: '汽水音乐', shortName: '汽水' });
         expect(qishuiProvider.capabilities).toMatchObject({
             search: true, playback: true, lyrics: true, wordByWordLyrics: true, auth: true,
-            playlists: true, albums: true, artists: true, recommendations: true,
+            // 专辑整平台关掉：车机协议没有专辑端点，两端能力取交集（见 provider 里那段注释）。
+            playlists: true, albums: false, artists: true, recommendations: true,
             userLibrary: true, likes: true, mutations: true, playlistTrackMutations: true,
         });
         // 汽水没有「我的专辑」列表接口（收藏只能写不能列），播放上报也被 Omni 钉在网易云上。
@@ -161,41 +173,41 @@ describe('Qishui lyrics', () => {
 
 describe('Qishui login', () => {
     it('reads the login state from status only, and never reports a signed-in account as anonymous', async () => {
-        request.mockResolvedValueOnce({ loggedIn: false });
+        answerOps({ status: { loggedIn: false } });
         await expect(qishuiProvider.auth!.getLoginStatus!()).resolves.toBeNull();
 
-        request.mockResolvedValueOnce({ loggedIn: true, userId: '9000000000000000001', nickname: '测试用户', vipType: 1 });
+        answerOps({ status: { loggedIn: true, userId: '9000000000000000001', nickname: '测试用户', vipType: 1 } });
         await expect(qishuiProvider.auth!.getLoginStatus!())
             .resolves.toMatchObject({ id: '9000000000000000001', nickname: '测试用户', vipType: 1 });
 
         // 缺 id 也不能当成未登录，否则整库会被清空。
-        request.mockResolvedValueOnce({ loggedIn: true, nickname: '匿名' });
+        answerOps({ status: { loggedIn: true, nickname: '匿名' } });
         await expect(qishuiProvider.auth!.getLoginStatus!()).resolves.toMatchObject({ id: 'qishui-account' });
     });
 
     it('bridges the one-step QR payload into the two-step getQrKey/createQr contract', async () => {
-        request.mockResolvedValueOnce({ token: 'qr-1', qrcode: 'data:image/png;base64,AAA', expireTime: 0 });
+        answerOps({ 'login.qr': { token: 'qr-1', qrcode: 'data:image/png;base64,AAA', expireTime: 0 } });
         const key = await qishuiProvider.auth!.startLogin!();
         expect(key).toBe('qr-1');
         await expect(qishuiProvider.auth!.createQr!(key)).resolves.toBe('data:image/png;base64,AAA');
         // 上游没给有效期时按 5 分钟兜底。
         expect(qishuiProvider.auth!.getLoginTtlMs!()).toBe(5 * 60 * 1000);
 
-        request.mockResolvedValueOnce({ token: 'qr-2', qrcode: 'data:image/png;base64,BBB', ttlMs: 90_000 });
+        answerOps({ 'login.qr': { token: 'qr-2', qrcode: 'data:image/png;base64,BBB', ttlMs: 90_000 } });
         await qishuiProvider.auth!.startLogin!();
         expect(qishuiProvider.auth!.getLoginTtlMs!()).toBe(90_000);
 
         await expect(qishuiProvider.auth!.createQr!('qr-unknown'))
             .rejects.toMatchObject({ code: 'invalid-response' });
 
-        request.mockResolvedValueOnce({ token: 'qr-3', qrcode: 'data:image/png;base64,CCC' });
+        answerOps({ 'login.qr': { token: 'qr-3', qrcode: 'data:image/png;base64,CCC' } });
         const third = await qishuiProvider.auth!.startLogin!();
         await qishuiProvider.auth!.cancelLogin!(third);
         await expect(qishuiProvider.auth!.createQr!(third)).rejects.toMatchObject({ code: 'invalid-response' });
     });
 
     it('rejects an incomplete QR payload instead of showing a broken dialog', async () => {
-        request.mockResolvedValueOnce({ token: 'qr-4' });
+        answerOps({ 'login.qr': { token: 'qr-4' } });
         await expect(qishuiProvider.auth!.startLogin!()).rejects.toMatchObject({ code: 'invalid-response' });
     });
 
@@ -235,12 +247,17 @@ describe('Qishui login', () => {
         await qishuiProvider.library!.getUserPlaylists!('u1', 10, 10);
         expect(request).toHaveBeenCalledTimes(1);
 
-        request.mockResolvedValue({});
+        answerOps({});
         await qishuiProvider.auth!.logout!();
-        expect(request).toHaveBeenLastCalledWith('login.logout', {});
+        // login.logout 只作用于当前协议，所以车机与手机各退一次（中间靠 protocol.use 切）；
+        // 最后把偏好切回用户选的那一套，别让一次退出改掉登录方式。
+        expect(request.mock.calls.filter(([operation]) => operation === 'login.logout')).toHaveLength(2);
+        expect(request).toHaveBeenLastCalledWith('protocol.use', { protocol: expect.any(String) });
+        // 缓存确实丢了：同一页再问一次，必须重新过桥而不是继续用本地那份。
+        request.mockReset();
         request.mockResolvedValue({ playlists: [{ id: 'p1', name: '汽水我的喜欢' }] });
         await qishuiProvider.library!.getUserPlaylists!('u1', 10, 10);
-        expect(request).toHaveBeenCalledTimes(3);
+        expect(request).toHaveBeenCalledTimes(1);
     });
 });
 

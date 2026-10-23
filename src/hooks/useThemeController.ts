@@ -698,13 +698,15 @@ export function useThemeController({
         if (currentSong) {
             await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, coverTheme);
             saveSyncedThemeWithoutBlocking(currentSong, coverTheme, 'fallback');
-            setCurrentSongHasLocalAiTheme(true);
         }
 
         if (!shouldApply()) {
             return { status: 'generated', applied: false };
         }
 
+        if (currentSong) {
+            setCurrentSongHasLocalAiTheme(true);
+        }
         applyDualTheme(coverTheme);
         const customPreferred = bgMode === 'custom' && customTheme;
         setStatusMsg(origin === 'fallback'
@@ -733,6 +735,13 @@ export function useThemeController({
     ): Promise<GenerateAIThemeResult> => {
         const source = options.source ?? 'manual';
         const songKey = currentSong ? getPlaybackSongKey(currentSong) : '__no_song__';
+        // Read playback at completion time, even before React has rendered the next song.
+        // A late result may populate its own cache, but must not update another song's UI.
+        const shouldApply = () => {
+            const latestSong = usePlaybackStore.getState().currentSong;
+            const latestSongKey = latestSong ? getPlaybackSongKey(latestSong) : '__no_song__';
+            return latestSongKey === songKey && (options.shouldApply?.() ?? true);
+        };
         if (themeGenerationSongKeysRef.current.has(songKey)) {
             return { status: 'skipped', reason: 'in-flight' };
         }
@@ -746,7 +755,7 @@ export function useThemeController({
             if (themeGenerationSource === 'cover') {
                 return await applyCoverDerivedTheme(
                     currentSong,
-                    () => options.shouldApply?.() ?? true,
+                    shouldApply,
                     'chosen',
                 );
             }
@@ -802,14 +811,15 @@ export function useThemeController({
             if (currentSong) {
                 await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, normalizedDualTheme);
                 saveSyncedThemeWithoutBlocking(currentSong, normalizedDualTheme, source === 'auto' ? 'auto' : 'manual');
-                setCurrentSongHasLocalAiTheme(true);
             }
 
-            const shouldApply = options.shouldApply?.() ?? true;
-            if (!shouldApply) {
+            if (!shouldApply()) {
                 return { status: 'generated', applied: false };
             }
 
+            if (currentSong) {
+                setCurrentSongHasLocalAiTheme(true);
+            }
             applyDualTheme(normalizedDualTheme);
 
             /*
@@ -829,12 +839,12 @@ export function useThemeController({
             if (isMissingAiApiKeyError(error)) {
                 return await applyCoverDerivedTheme(
                     currentSong,
-                    () => options.shouldApply?.() ?? true,
+                    shouldApply,
                     'fallback',
                 );
             }
 
-            if (options.shouldApply?.() ?? true) {
+            if (shouldApply()) {
                 setStatusMsg({ type: 'error', text: t('status.themeGenerationFailed') });
             }
             return { status: 'failed' };

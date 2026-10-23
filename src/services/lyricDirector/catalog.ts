@@ -285,6 +285,10 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
         },
     },
     still: { setter: null, params: {} },
+    // 提示词模式自己没有可调的参数（框的几何跟着歌词走），但它是个合法的导演目标 ——
+    // 内建清单里有它，`isKnownDirectorMode` 就会放行，所以这里必须有一格空的，
+    // 否则「AI 选了提示词却拿不到任何参数」是唯一没有登记的模式。与 still 同形。
+    prompt: { setter: null, params: {} },
 };
 
 /* `key` is the switch, `mustBe` the value it needs (or `not` the one that

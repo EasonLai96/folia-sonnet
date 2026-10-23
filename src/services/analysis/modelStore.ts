@@ -239,7 +239,8 @@ const keep = async (name: DownloadableModel, file: Uint8Array): Promise<boolean>
         patch(name, { phase: 'error', progress: 0, error: '这个环境没有可用的缓存存储' });
         return false;
     }
-    await cache.put(urlOf(name), new Response(file, { headers: { 'content-type': 'application/octet-stream' } }));
+    // TS 5.7 起 `Response` 只收 `Uint8Array<ArrayBuffer>`；缓存里存的是同一段字节，转一次类型即可。
+    await cache.put(urlOf(name), new Response(file as unknown as BodyInit, { headers: { 'content-type': 'application/octet-stream' } }));
     await cache.put(metaUrlOf(name), new Response(JSON.stringify({ bytes: file.byteLength })));
     patch(name, { phase: 'ready', progress: 1, bytes: file.byteLength, error: undefined });
     return true;

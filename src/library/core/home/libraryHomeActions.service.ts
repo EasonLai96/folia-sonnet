@@ -1,3 +1,4 @@
+import type { PersonalFmSelection } from '../../../types/personalFm';
 import type { LocalLibraryGroup } from '../../../types';
 import type { NavidromeGridViewCollectionType } from '../collection/collection.contract';
 import type {
@@ -47,9 +48,9 @@ export const createLibraryHomeActions = (port: LibraryHomePort): LibraryHomeActi
         patch({ scan: progress?.active ? progress : null });
     };
 
-    const playPersonalFm = async (): Promise<LibraryHomeActionResult> => {
+    const playPersonalFm = async (selection?: PersonalFmSelection, providerId?: string): Promise<LibraryHomeActionResult> => {
         try {
-            const songs = await port.getPersonalFm();
+            const songs = await port.getPersonalFm(selection, providerId);
             if (songs.length > 0) port.playPersonalFm(songs[0], songs);
             return OK;
         } catch (error) {
@@ -224,7 +225,7 @@ export const createLibraryHomeActions = (port: LibraryHomePort): LibraryHomeActi
          * 于是点 QQ 的那张打开的是当前平台那一份）。
          */
         openOnlineCard: async (card: LibraryHomeCard, providerId: string, open: LibraryHomeOpenCollection) => {
-            if (isPersonalFmCard(card)) return playPersonalFm();
+            if (isPersonalFmCard(card)) return playPersonalFm((card.raw as { personalFm?: PersonalFmSelection } | undefined)?.personalFm, providerId);
             open(port.describeOnlineCollection(onlineCardCollection(card), card.sourceProviderId ?? providerId));
             return OK;
         },

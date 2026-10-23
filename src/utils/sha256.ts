@@ -32,7 +32,10 @@ const toHex = (state: Uint32Array): string => {
 export const sha256HexSync = (input: string): string => {
     const message = new TextEncoder().encode(input);
     // 补位：一个 0x80、若干个 0x00，末尾 8 字节写长度（位），整块凑成 64 字节的整数倍。
-    const paddedLength = (((message.length + 9) >> 6) + 1) << 6;
+    // 向上取整，别写成 `((len + 9) >> 6) + 1`：那会在「本身已经对齐」的那几档（55、119…
+    // 字节，即 len + 9 正好是 64 的倍数）多垫一整个块，长度前缀跟着挪到第二个块尾巴上，
+    // 算出来的摘要与标准不符 —— 而那几档恰恰是块边界的用例。
+    const paddedLength = Math.ceil((message.length + 9) / 64) * 64;
     const buffer = new Uint8Array(paddedLength);
     buffer.set(message);
     buffer[message.length] = 0x80;

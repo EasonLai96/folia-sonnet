@@ -13,6 +13,7 @@ import {
     type DualTheme,
     type Theme,
 } from '../types';
+import { normalizeRandomVisualizerModes } from './randomVisualizerModes';
 import { normalizeLumiereTuning } from './lumiereTuning';
 
 // src/utils/appearanceCodec.ts
@@ -523,6 +524,7 @@ export const compressConfig = (config: any): string => {
     }
     if (config.visualizerMode) minified.vm = config.visualizerMode;
     if (config.randomVisualizerModePerSong !== undefined) minified.rvms = config.randomVisualizerModePerSong;
+    if (config.randomVisualizerModes !== undefined) minified.rvm = normalizeRandomVisualizerModes(config.randomVisualizerModes);
     if (config.visualizerBackgroundMode) minified.vbm = config.visualizerBackgroundMode;
     if (config.backgroundOpacity !== undefined) minified.bo = config.backgroundOpacity;
     if (config.useCoverColorBg !== undefined) minified.ccb = config.useCoverColorBg;
@@ -586,6 +588,7 @@ export const compressConfig = (config: any): string => {
     if (config.libraryWallSeamStyle !== undefined) minified.lwss = config.libraryWallSeamStyle;
     if (config.libraryWallBackdropLyrics !== undefined) minified.lwbl = config.libraryWallBackdropLyrics;
     if (config.libraryWallBackdropBlur !== undefined) minified.lwbb = config.libraryWallBackdropBlur;
+    if (config.libraryWallSeamDirection !== undefined) minified.lwsd = config.libraryWallSeamDirection;
 
     const jsonStr = JSON.stringify(minified);
     const bytes = new TextEncoder().encode(jsonStr);
@@ -619,6 +622,7 @@ export const decompressConfig = (str: string): any => {
         || parsed.t !== undefined
         || parsed.vm !== undefined
         || parsed.rvms !== undefined
+        || parsed.rvm !== undefined
         || parsed.ccb !== undefined
         || parsed.dvgb !== undefined
         || parsed.dvv !== undefined
@@ -653,7 +657,8 @@ export const decompressConfig = (str: string): any => {
         || parsed.lwsc !== undefined
         || parsed.lwss !== undefined
         || parsed.lwbl !== undefined
-        || parsed.lwbb !== undefined;
+        || parsed.lwbb !== undefined
+        || parsed.lwsd !== undefined;
     if (isMinified) {
         const decompressed: any = {};
         if (parsed.t) {
@@ -664,6 +669,7 @@ export const decompressConfig = (str: string): any => {
         }
         if (parsed.vm) decompressed.visualizerMode = parsed.vm;
         if (parsed.rvms !== undefined) decompressed.randomVisualizerModePerSong = parsed.rvms;
+        if (parsed.rvm !== undefined) decompressed.randomVisualizerModes = normalizeRandomVisualizerModes(parsed.rvm);
         if (parsed.vbm) decompressed.visualizerBackgroundMode = parsed.vbm;
         if (parsed.bo !== undefined) decompressed.backgroundOpacity = parsed.bo;
         if (parsed.ccb !== undefined) decompressed.useCoverColorBg = parsed.ccb;
@@ -726,13 +732,14 @@ export const decompressConfig = (str: string): any => {
         if (parsed.lwss !== undefined) decompressed.libraryWallSeamStyle = parsed.lwss;
         if (parsed.lwbl !== undefined) decompressed.libraryWallBackdropLyrics = parsed.lwbl;
         if (parsed.lwbb !== undefined) decompressed.libraryWallBackdropBlur = parsed.lwbb;
+        if (parsed.lwsd !== undefined) decompressed.libraryWallSeamDirection = parsed.lwsd;
 
         return decompressed;
     } else {
         // Frozen: the 13 lyric-style tunings in this list predate the visualizerTunings bundle, which carries any
         // new style. Do not add a lyric style here.
         const validKeys = [
-            'theme', 'visualizerMode', 'randomVisualizerModePerSong', 'visualizerBackgroundMode', 'backgroundOpacity',
+            'theme', 'visualizerMode', 'randomVisualizerModePerSong', 'randomVisualizerModes', 'visualizerBackgroundMode', 'backgroundOpacity',
             'useCoverColorBg', 'disableVisualizerGeometricBackground', 'disableVisualizerVignette', 'staticMode',
             'visualizerOpacity', 'hidePlayerTranslationSubtitle', 'showSubtitleTranslation', 'subtitleContentMode',
             'subtitleOverlayBackground', 'subtitleUpcomingLyricsBlur', 'subtitleOverlayOpacity',
@@ -748,10 +755,14 @@ export const decompressConfig = (str: string): any => {
             'stageTrackPillMode', 'stageTrackPillTimeoutSec', 'stageTrackPillOnHome',
             'libraryWallStackEdges',
             'libraryWallSeamClear', 'libraryWallSeamStyle', 'libraryWallBackdropLyrics', 'libraryWallBackdropBlur',
+            'libraryWallSeamDirection',
         ];
         const hasValidKey = validKeys.some(k => parsed[k] !== undefined);
         if (!hasValidKey) {
             throw new Error('Invalid visual settings configuration');
+        }
+        if (parsed.randomVisualizerModes !== undefined) {
+            parsed.randomVisualizerModes = normalizeRandomVisualizerModes(parsed.randomVisualizerModes);
         }
         return parsed;
     }

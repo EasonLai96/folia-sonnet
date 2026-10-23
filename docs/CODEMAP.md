@@ -18,13 +18,13 @@
 | library | 256+ |
 | services | 256+ |
 | backend/electron | 128+ |
+| src (其他) | 128+ |
 | utils | 128+ |
 | hooks | 64+ |
-| src (其他) | 64+ |
 | 其他 | 64+ |
 | stores | 32+ |
 | types | 16+ |
-| i18n | 4+ |
+| i18n | 8+ |
 | workers | 4+ |
 
 ## 枢纽模块
@@ -39,6 +39,7 @@
 | 128+ | `src/utils/appPlaybackGuards.ts` |
 | 64+ | `src/components/command-palette/types.ts` |
 | 64+ | `src/components/modal/settings/kit/index.ts` |
+| 64+ | `src/i18n/config.ts` |
 | 64+ | `src/library/core/suite/suite.contract.ts` |
 | 64+ | `src/mods/folium/contract.ts` |
 | 64+ | `src/services/db.ts` |
@@ -49,20 +50,21 @@
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
-| 32+ | `src/components/visualizer/registry.tsx` |
+| 32+ | `src/components/wall/layout.ts` |
 | 32+ | `src/components/wall/wallSlots.ts` |
-| 32+ | `src/i18n/config.ts` |
 | 32+ | `src/library/core/account/account.contract.ts` |
 | 32+ | `src/library/core/collection/collection.contract.ts` |
 | 32+ | `src/library/core/directory/directory.contract.ts` |
 | 32+ | `src/library/core/home/homeModel.contract.ts` |
 | 32+ | `src/library/suites/bravais/bravaisLayer.ts` |
+| 32+ | `src/mods/types.ts` |
 | 32+ | `src/platform/runtime.ts` |
 | 32+ | `src/services/baseThemes.ts` |
 | 32+ | `src/services/onlineMusic/providerRegistry.ts` |
 | 32+ | `src/services/onlineMusic/songMetadata.ts` |
 | 32+ | `src/stores/motionSignals.ts` |
 | 32+ | `src/stores/useAudioSettingsStore.ts` |
+| 32+ | `src/stores/useCollectionNavigationStore.ts` |
 | 32+ | `src/stores/useOnlineProviderAccountStore.ts` |
 | 32+ | `src/stores/usePlayerChromeSettingsStore.ts` |
 | 32+ | `src/stores/useThemeSettingsStore.ts` |
@@ -71,6 +73,7 @@
 | 32+ | `src/types/navidrome.ts` |
 | 32+ | `src/utils/coverUrl.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
+| 32+ | `src/utils/keyboardTargets.ts` |
 | 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
 | 32+ | `src/utils/lyrics/renderHints.ts` |

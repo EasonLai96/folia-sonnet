@@ -9,7 +9,7 @@ import { getOnlineMusicProvider, listOnlineMusicProviders } from '@/services/onl
 
 const AUTH_MEMBERS: Record<string, string[]> = {
     netease: [
-        'canRunLoginSelfCheck', 'checkLogin', 'createQr', 'describeLoginFailure', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'localService',
+        'canRunLoginSelfCheck', 'checkLogin', 'createQr', 'describeLoginFailure', 'forgetOldKeptAccount', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'localService',
         'logout', 'oldKeptAccount', 'runLoginSelfCheck', 'showsKeptAccountAtStart', 'signInRanOut', 'startLogin',
     ],
     qq: [
@@ -35,8 +35,10 @@ const AUTH_MEMBERS: Record<string, string[]> = {
         'openLoginPage', 'opensLoginPageItself', 'signInRanOut', 'startLogin',
     ],
     // 汽水（扫码）与飞牛（用户名密码 + 自建服务地址）是我们自己接的两个平台。
+    // resolveLoginMethods：桥支持两套协议时由 provider 声明「车机 / 手机」两种扫码方式。
     qishui: [
-        'cancelLogin', 'checkLogin', 'createQr', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout', 'startLogin',
+        'cancelLogin', 'checkLogin', 'createQr', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout',
+        'resolveLoginMethods', 'startLogin',
     ],
     // 两种登录方式（FN ID 云连接 / 局域网地址）由 provider 声明：要不要先停在「选择方式」那一屏，由 controller 按它决定。
     feiniu: [

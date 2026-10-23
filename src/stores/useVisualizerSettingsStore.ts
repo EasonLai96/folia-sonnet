@@ -22,6 +22,9 @@ import i18n from '../i18n/config';
 import { setStatusMessage } from './useStatusMessageStore';
 import { VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY, WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY, readStoredBackgroundOpacity, readStoredTuning, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperFloatingAvoidOffsetX, readStoredWallpaperFloatingAvoidWidth, readStoredWallpaperFloatingFillSafeArea, readStoredWallpaperFloatingFontSize, readStoredWallpaperFloatingFontSizeMode, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperFloatingWidth, readStoredWallpaperLyricsFontMode, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, writeStoredTuning } from './visualizerSettingsPersistence';
 import { getStoredBoolean, getStoredString, setStoredBoolean, setStoredString } from './storagePrimitives';
+// 上游 v0.7.22 的随机池：参与随机的样式集合。和 fork 保留的「每首换一种」是同一件事的两半。
+import { RANDOM_VISUALIZER_MODES_STORAGE_KEY, readStoredRandomVisualizerModes } from './visualizerSettingsPersistence';
+import { normalizeRandomVisualizerModes, type RandomVisualizerMode } from '../utils/randomVisualizerModes';
 
 /** 是否把播放中的歌词喂给系统动态壁纸。关掉后壁纸保留最后一帧，不再更新。 */
 export const LYRICS_WALLPAPER_FEED_STORAGE_KEY = 'folia.lyricsWallpaperFeed';
@@ -55,6 +58,8 @@ const clampWallpaperBlur = (value: number): number => {
     return Math.min(1, Math.max(0, value));
 };
 
+export type SetVisualizerModeOptions = { notify?: boolean; preserveRandom?: boolean };
+
 type OwnSettingsState = {
     disableVisualizerVignette: boolean;
     disableVisualizerGeometricBackground: boolean;
@@ -71,6 +76,7 @@ type OwnSettingsState = {
     renderPixelRatio: RenderPixelRatio | null;
     visualizerMode: VisualizerMode;
     randomVisualizerModePerSong: boolean;
+    randomVisualizerModes: RandomVisualizerMode[];
     /** Snap animated glow blur radii to a bounded set. See components/visualizer/wordGlow.ts. */
     glowBlurQuantize: boolean;
     /** 把播放中的歌词推给原生歌词动态壁纸。Android 专有，其它平台恒为 false 也不影响。 */
@@ -190,8 +196,9 @@ type OwnSettingsState = {
     handleResetVisualizerBackgroundMode: () => void;
     handleSetVisualizerFrameRate: (frameRate: VisualizerFrameRate) => void;
     handleSetRenderPixelRatio: (limit: RenderPixelRatio | null) => void;
-    handleSetVisualizerMode: (mode: VisualizerMode, options?: { notify?: boolean }) => void;
-    handleToggleRandomVisualizerModePerSong: (enable: boolean) => void;
+    handleSetVisualizerMode: (mode: VisualizerMode, options?: SetVisualizerModeOptions) => void;
+    handleToggleRandomVisualizerModePerSong: (enable: boolean, options?: { notify?: boolean }) => void;
+    handleSetRandomVisualizerModes: (modes: readonly VisualizerMode[]) => void;
     handleToggleGlowBlurQuantize: (enable: boolean) => void;
     handleToggleLyricsWallpaperFeed: (enable: boolean) => void;
     handleSetLyricsWallpaperBackground: (mode: 'cover' | 'color' | 'image' | 'video') => void;
@@ -298,6 +305,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     renderPixelRatio: readStoredRenderPixelRatio(),
     visualizerMode: readStoredVisualizerMode(),
     randomVisualizerModePerSong: getStoredBoolean('random_visualizer_mode_per_song', false),
+    randomVisualizerModes: readStoredRandomVisualizerModes(),
     glowBlurQuantize: readStoredGlowBlurQuantize(),
     lyricsWallpaperFeed: getStoredBoolean(LYRICS_WALLPAPER_FEED_STORAGE_KEY, true),
     lyricsWallpaperBackground: resolveWallpaperBackground(
@@ -395,7 +403,12 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         if (typeof window !== 'undefined') {
             localStorage.setItem('visualizer_mode', mode);
         }
-        set({ visualizerMode: mode });
+        if (!options?.preserveRandom && get().randomVisualizerModePerSong) {
+            setStoredBoolean('random_visualizer_mode_per_song', false);
+            set({ visualizerMode: mode, randomVisualizerModePerSong: false });
+        } else {
+            set({ visualizerMode: mode });
+        }
         if (options?.notify !== false) {
             setStatusMessage({
                 type: 'info',
@@ -405,13 +418,20 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
             });
         }
     },
-    handleToggleRandomVisualizerModePerSong: (enable) => {
+    handleToggleRandomVisualizerModePerSong: (enable, options) => {
         setStoredBoolean('random_visualizer_mode_per_song', enable);
         set({ randomVisualizerModePerSong: enable });
-        setStatusMessage({
-            type: 'info',
-            text: i18n.t(`status.randomVisualizerModePerSong${enable ? 'On' : 'Off'}`),
-        });
+        if (options?.notify !== false) {
+            setStatusMessage({
+                type: 'info',
+                text: i18n.t(`status.randomVisualizerModePerSong${enable ? 'On' : 'Off'}`),
+            });
+        }
+    },
+    handleSetRandomVisualizerModes: (modes) => {
+        const next = normalizeRandomVisualizerModes(modes);
+        setStoredString(RANDOM_VISUALIZER_MODES_STORAGE_KEY, JSON.stringify(next));
+        set({ randomVisualizerModes: next });
     },
     handleToggleGlowBlurQuantize: (enable) => {
         if (typeof window !== 'undefined') {
@@ -585,6 +605,8 @@ export const selectVisualizerSettingsSnapshot = (state: VisualizerSettingsState)
     handleToggleDisableVisualizerVignette: state.handleToggleDisableVisualizerVignette,
     handleToggleRandomVisualizerModePerSong: state.handleToggleRandomVisualizerModePerSong,
     randomVisualizerModePerSong: state.randomVisualizerModePerSong,
+    randomVisualizerModes: state.randomVisualizerModes,
+    handleSetRandomVisualizerModes: state.handleSetRandomVisualizerModes,
     visualizerBackgroundMode: state.visualizerBackgroundMode,
     visualizerFrameRate: state.visualizerFrameRate,
     visualizerMode: state.visualizerMode,
@@ -592,6 +614,6 @@ export const selectVisualizerSettingsSnapshot = (state: VisualizerSettingsState)
 });
 
 // Module-level handle for the assembly layer; an action needs no subscription.
-export const handleSetVisualizerMode = (mode: VisualizerMode, options?: { notify?: boolean }) => (
+export const handleSetVisualizerMode = (mode: VisualizerMode, options?: SetVisualizerModeOptions) => (
     useVisualizerSettingsStore.getState().handleSetVisualizerMode(mode, options)
 );

@@ -3,17 +3,20 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import ConfirmDialog from '../../../shared/ConfirmDialog';
 import { MOTION_SURFACE_IDS, useMotionSettingsStore, type MotionSurfaceId } from '../../../../stores/useMotionSettingsStore';
+import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
 import { useThemeSettingsStore } from '../../../../stores/useThemeSettingsStore';
 import { useVisualizerSettingsStore } from '../../../../stores/useVisualizerSettingsStore';
 import { VISUALIZER_FRAME_RATE_OPTIONS } from '../../../../utils/frameRateLimiter';
 import { DEFAULT_RENDER_PIXEL_RATIO, RENDER_PIXEL_RATIO_OPTIONS } from '../../../../utils/renderPixelRatio';
 import { Group, Link, Reveal, Row, Segmented, Toggle, option, useSettingsKitTheme, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
+import { GpuPreferenceRow } from './graphics/GpuPreferenceRow';
+import { useSettingsPage } from './settingsPageContext';
 
 // src/components/modal/settings/pages/GraphicsPage.tsx
 // The 性能与动效 page: what trades picture for smoothness or works around a renderer problem
-// (static mode, the home background, native blur, the frame-rate cap, the Linux glow fix), and
-// which parts of the interface play reduced motion.
+// (static mode, the home background, native blur, the frame-rate cap, background throttling, the
+// Linux glow fix, the Windows render GPU), and which parts of the interface play reduced motion.
 
 /** Docs page behind the "Fix lyric animation freeze on Linux" switch. */
 const CHROMIUM_FD_EXHAUSTION_DOCS_URL = 'https://folia-site.cielaniska.top/guide/chromium-fd-exhaustion';
@@ -24,6 +27,9 @@ const FRAME_RATE_WHEN_SWITCHED_ON = 120;
 /** Native blur is not offered on Linux. */
 const IS_LINUX = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('linux');
 
+/** The render GPU choice only does something in the Windows desktop app (electron/gpuPreference.cjs). */
+const IS_WINDOWS_DESKTOP = typeof window !== 'undefined' && window.electron?.platform === 'win32';
+
 const PERFORMANCE: SettingsGroupDef = { id: 'graphicsPerformance', titleKey: 'options.labPerformanceSection' };
 const MOTION: SettingsGroupDef = { id: 'graphicsMotion', titleKey: 'options.reduceMotionSection' };
 
@@ -33,10 +39,12 @@ const O = {
     nativeBlur: option(PERFORMANCE, 'enablePlayerPageNativeBlur', 'options.enablePlayerPageNativeBlur'),
     frameRate: option(PERFORMANCE, 'visualizerFrameRate', 'options.visualizerFrameRate'),
     frameRateValue: option(PERFORMANCE, 'visualizerFrameRateValue', 'options.visualizerFrameRateValue'),
+    backgroundThrottling: option(PERFORMANCE, 'backgroundThrottling', 'options.backgroundThrottling', { electronOnly: true }),
     glowFix: option(PERFORMANCE, 'glowBlurQuantize', 'options.glowBlurQuantize'),
     // 这两行是 fork 自己加的，说明收进「i」（`noteKey`）而不是印在标签下面 —— 见 kit/Row.tsx 的说明。
     renderPixelRatio: option(PERFORMANCE, 'renderPixelRatio', 'options.renderPixelRatio', { noteKey: 'options.renderPixelRatioDesc' }),
     renderPixelRatioValue: option(PERFORMANCE, 'renderPixelRatioValue', 'options.renderPixelRatioValue'),
+    gpuPreference: option(PERFORMANCE, 'gpuPreference', 'options.gpuPreference', { electronOnly: true, available: () => IS_WINDOWS_DESKTOP }),
     followSystem: option(MOTION, 'reduceMotionFollowSystem', 'options.reduceMotionFollowSystem'),
 };
 
@@ -62,6 +70,7 @@ const RENDER_PIXEL_RATIO_CHOICES = RENDER_PIXEL_RATIO_OPTIONS.map(ratio => ({ va
 const GraphicsPage: React.FC = () => {
     const { t } = useTranslation();
     const { isDaylight } = useSettingsKitTheme();
+    const { isElectron } = useSettingsPage();
     const theme = useThemeSettingsStore(useShallow(state => ({
         staticMode: state.staticMode,
         homeBackgroundOff: state.disableHomeDynamicBackground,
@@ -70,6 +79,8 @@ const GraphicsPage: React.FC = () => {
     })));
     const nativeBlur = usePlayerChromeSettingsStore(state => state.enablePlayerPageNativeBlur);
     const setNativeBlur = usePlayerChromeSettingsStore(state => state.handleTogglePlayerPageNativeBlur);
+    const backgroundThrottling = useDesktopSettingsStore(state => state.backgroundThrottling);
+    const setBackgroundThrottling = useDesktopSettingsStore(state => state.handleToggleBackgroundThrottling);
     const visualizer = useVisualizerSettingsStore(useShallow(state => ({
         frameRate: state.visualizerFrameRate,
         glowFix: state.glowBlurQuantize,
@@ -143,6 +154,11 @@ const GraphicsPage: React.FC = () => {
                         />
                     </Row>
                 </Reveal>
+                {isElectron && (
+                    <Row option={O.backgroundThrottling} hint={t('options.backgroundThrottlingHint')} note={t('options.backgroundThrottlingDesc')}>
+                        <Toggle checked={backgroundThrottling} onChange={setBackgroundThrottling} />
+                    </Row>
+                )}
                 <Row
                     option={O.glowFix}
                     hint={(
@@ -154,6 +170,7 @@ const GraphicsPage: React.FC = () => {
                 >
                     <Toggle checked={visualizer.glowFix} onChange={visualizer.setGlowFix} />
                 </Row>
+                {IS_WINDOWS_DESKTOP && <GpuPreferenceRow option={O.gpuPreference} />}
             </Group>
 
             <Group def={MOTION} foot={t('options.reduceMotionSectionDesc')}>

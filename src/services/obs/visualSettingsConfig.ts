@@ -31,6 +31,7 @@ export function buildVisualSettingsConfig(): Record<string, unknown> {
     followSystemTheme: storeThemeSettings.followSystemTheme,
     visualizerMode: storeVisualizer.visualizerMode,
     randomVisualizerModePerSong: storeVisualizer.randomVisualizerModePerSong,
+    randomVisualizerModes: storeVisualizer.randomVisualizerModes,
     visualizerBackgroundMode: storeVisualizer.visualizerBackgroundMode,
     backgroundOpacity: storeVisualizer.backgroundOpacity,
     // The other three legs of background.common, alongside the opacity above. The local OBS browser
@@ -108,6 +109,9 @@ export function buildVisualSettingsConfig(): Record<string, unknown> {
     libraryWallSeamStyle: useLibraryWallLookStore.getState().seamStyle,
     libraryWallBackdropLyrics: useLibraryWallLookStore.getState().backdropLyrics,
     libraryWallBackdropBlur: useLibraryWallLookStore.getState().backdropBlur,
+    // Which way the info strip opens (a column split, a row split across the wall, or by the screen's
+    // shape): part of the wall's look, no user exception.
+    libraryWallSeamDirection: useLibraryWallLookStore.getState().seamDirection,
   };
 }
 
