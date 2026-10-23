@@ -356,10 +356,19 @@ public final class FoliaMainLooperWatchdog {
         return from > 0 && to > from ? text.substring(from, to) : "?";
     }
 
-    /** 只留最后一段（`android.view.ViewRootImpl$TraversalRunnable` → `ViewRootImpl$TraversalRunnable`）。 */
+    /**
+     * 只留最后一段（`android.view.ViewRootImpl$TraversalRunnable` → `ViewRootImpl$TraversalRunnable`）。
+     *
+     * ⚠️ 先砍掉 `@1a2b3c` 那个哈希：Looper 打的是 `msg.callback + ""`，而默认 `toString()`
+     * 带 `类名@身份哈希` —— 不砍的话同一个类每出现一个新对象就是一条新 key，
+     * 直方图会被同一件事拆成十几行（第一版就踩了：`FrameDisplayEventReceiver@fd4d318`
+     * 占了 417ms，旁边可能还躺着 `@42e66b0` 的十几毫秒）。
+     */
     private static String simpleName(String name) {
-        int dot = name.lastIndexOf('.');
-        return dot >= 0 ? name.substring(dot + 1) : name;
+        int at = name.indexOf('@');
+        String trimmed = at > 0 ? name.substring(0, at) : name;
+        int dot = trimmed.lastIndexOf('.');
+        return dot >= 0 ? trimmed.substring(dot + 1) : trimmed;
     }
 
     // ---------------------------------------------------------------- 记与取
