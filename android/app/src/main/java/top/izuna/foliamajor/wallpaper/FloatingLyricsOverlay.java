@@ -410,6 +410,17 @@ public final class FloatingLyricsOverlay {
          */
         if (preview) return true;
 
+        /*
+         * 「在所有应用上叠加」：关掉时只在能**确认**「用户在桌面」的时候挂。
+         *
+         * 这一层原先压根不读这个开关 —— 精简样式于是在任何应用上都压着，
+         * 用户报的「关掉不生效」有一半是它。判据与 WebView 叠层共用一份
+         * （WallpaperOverlay.desktopConfirmed：只有我们自己的壁纸正在画才叫"确认"），
+         * 免得两层各判一套、一个关得掉一个关不掉。
+         */
+        if (!tuningFlag("wp.overlayAllApps", false)
+                && !WallpaperOverlay.shared(context).desktopConfirmed()) return false;
+
         // 这两条跟随叠层那两个开关：用户在设置里关了「暂停时隐藏 / 唱完隐藏」，
         // 那小窗就该跟着留着 —— 它是同一套桌面歌词，不该自己另立一套规则。
         if (!snapshot.playing && tuningFlag("wp.hideWhenPaused", true)) return false;
