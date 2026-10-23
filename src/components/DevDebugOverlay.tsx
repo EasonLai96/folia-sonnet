@@ -10,7 +10,6 @@ import { readFrameTimingSnapshot, runCpuProbe } from '../utils/frameTimingDiagno
 import { readAiThemeAttempts } from '../utils/aiThemeDiagnostics';
 import { readMediaDiagnostics } from '../utils/mediaDiagnostics';
 import { usePerfDiagnosticsStore } from '../stores/usePerfDiagnosticsStore';
-import { drainMainLooperLog } from '../platform/foliaNative';
 
 export interface DevDebugLineSnapshot {
     text: string | null;
@@ -190,22 +189,6 @@ const DebugRow: React.FC<{ label: string; value: string; }> = ({ label, value })
             <dd className="text-[11px] font-medium text-right break-words">{value}</dd>
         </>
     );
-};
-
-/**
- * 最近几次掉帧（**临时诊断**，定位完连 `usePlaybackVisualizerBridge` 里那段一起删）。
- *
- * 每行：`间隔ms@堆MB`，按最近三次倒着排。判据是堆：掉帧那一刻堆**回落**就是 GC；
- * 没有回落却卡了，就是主线程在等别的东西（同步 IPC / 合成 / 布局）。
- */
-const formatHitchLog = (): string => {
-    const log = (window as Window & {
-        __foliaHitchLog?: { gapMs: number; heapMB: number | null }[];
-    }).__foliaHitchLog;
-    if (!log || log.length === 0) return 'none';
-    return log.slice(-3).reverse()
-        .map(entry => `${entry.gapMs}ms@${entry.heapMB ?? '?'}MB`)
-        .join(' · ');
 };
 
 const renderCellValue = (value: string, isDaylight: boolean) => {
@@ -621,33 +604,11 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
     const [tick, setTick] = useState(0);
     const [cpu, setCpu] = useState<ReturnType<typeof runCpuProbe> | null>(null);
     const [probing, setProbing] = useState(false);
-    /*
-     * 原生那侧的主线程卡顿日志（**临时诊断**，定位完删）。
-     *
-     * 它是原生 `Log.w`，只在 adb logcat 里；真机常常不在 adb 上，所以由这里每秒去
-     * 原生取一次（取走即清空），用户截图就能给我 —— 这是「主线程有没有被单条消息
-     * 卡住、被谁卡住」的唯一可见渠道。
-     */
-    const [looperLog, setLooperLog] = useState('');
 
     useEffect(() => {
         const handle = window.setInterval(() => setTick(value => value + 1), 1000);
         return () => window.clearInterval(handle);
     }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-        void drainMainLooperLog().then(text => {
-            if (cancelled || !text) return;
-            setLooperLog(previous => {
-                const merged = previous ? `${previous} ¶ ${text}` : text;
-                return merged.split(' ¶ ').slice(-6).join(' ¶ ');
-            });
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [tick]);
 
     const perfEnabled = usePerfDiagnosticsStore(state => state.perfDiagnosticsEnabled);
     const frames = useMemo(() => readFrameTimingSnapshot(), [tick]);
@@ -698,17 +659,6 @@ const PerfPanel: React.FC<{ isDaylight: boolean; panelClass: string; }> = ({ isD
                         <DebugRow label="cores" value={frames.cores === null ? 'n/a' : String(frames.cores)} />
                         <DebugRow label="memory" value={frames.memoryGb === null ? 'n/a' : `${frames.memoryGb}GB`} />
                         <DebugRow label="visible/hidden" value={`${(frames.visibleMs / 1000).toFixed(0)}s / ${(frames.hiddenMs / 1000).toFixed(0)}s`} />
-                        {/*
-                         * 掉帧打点（**临时诊断**，定位完连 usePlaybackVisualizerBridge 里
-                         * 那一段一起删）。行里带堆内存：掉帧那一刻堆要是回落了就是 GC。
-                         */}
-                        <DebugRow label="hitches" value={formatHitchLog()} />
-                        {/*
-                         * 原生主线程卡顿日志（**临时诊断**，定位完连 FoliaMainLooperWatchdog
-                         * 一起删）。`msg` = 单条主线程消息跑了多久（后面是 handler 与 callback，
-                         * 直接点名是谁）；`frame` = 主线程上两帧之间隔了多久。
-                         */}
-                        <DebugRow label="looper" value={looperLog || 'none'} />
                     </dl>
                     <div className="mt-3 flex items-center gap-3">
                         <button

@@ -14,7 +14,6 @@ import {
     lyricCurrentTime,
 } from '../../../../stores/motionSignals';
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
-import { drainMainLooperLog } from '../../../../platform/foliaNative';
 import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 import { readIncomingLyricClock } from './incomingLyricClock';
 
@@ -76,49 +75,8 @@ type UsePlaybackVisualizerBridgeParams = {
  * 但把这笔开销砍掉了一半以上。中间那些帧不写信号，可视化自然沿用上一帧的读数。
  */
 const SPECTRUM_READ_INTERVAL_MS = 33;
-/** 掉帧打点：两帧间隔超过这么久才记一条（临时诊断用，定位完删）。 */
-const HITCH_LOG_THRESHOLD_MS = 80;
-/** 定时器探针的节拍（临时诊断，见文件末尾那个 effect）。 */
-const TICK_PROBE_INTERVAL_MS = 16;
-/** 取原生卡顿日志的节拍（临时诊断，同上）。 */
-const LOOPER_DRAIN_INTERVAL_MS = 1000;
 /** 空频谱：反复 `new Uint8Array(0)` 只会给堆添垃圾，也白唤醒一遍订阅者。 */
 const EMPTY_SPECTRUM = new Uint8Array(0);
-/** store 变更打点的最短间隔（临时诊断）：同一个键连着抖的时候别刷屏，数在 `dropped` 里。 */
-const STORE_PROBE_MIN_INTERVAL_MS = 120;
-/**
- * 开页后的「热身期」（临时诊断）：这段时间里一个探针都不许出声。
- *
- * ⚠️ 这一条是被人肉日志教育出来的：前两版里**每次贴回来的都是启动那一秒** ——
- * `bootstrap-*.js` 133ms、`FileReader.onload`、`import.then` 拉 lazy chunk、
- * `IDBRequest.onsuccess`（zustand persist 回填），一秒钟砸出十几条 LoAF，
- * 而真正要找的「稳态隔几秒顿一下」被这些淹在里面根本看不见。
- *
- * 启动贵是一次性的，跟稳态的周期性停顿**不是同一个问题**，混在一起只会看错。
- * 所以前 WARMUP_MS 一律闭嘴，之后才开始记 —— 那时界面已经画完、歌也正常在放。
- */
-const PROBE_WARMUP_MS = 8000;
-/** 汇总窗口（临时诊断）：稳态每 5 秒一行，先看形状再翻明细。 */
-const SUMMARY_INTERVAL_MS = 5000;
-/** 这个模块被求值的那一刻 ≈ 页面开始跑的时刻，热身期从这里算。 */
-const PROBE_EPOCH_MS = performance.now();
-
-/**
- * 一个汇总窗口里攒下的数（临时诊断，见 `[FoliaSum]`）。
- *
- * 逐条日志适合看「那一下到底发生了什么」，但手机上控制台窄，翻十几条就晕。
- * 先看每 5 秒这一行：掉了几帧、最长多少、LoAF 里有谁、store 里哪个键在动。
- */
-const probeWindow = {
-    gaps: [] as number[],
-    loafCount: 0,
-    maxLoafMs: 0,
-    maxBlockMs: 0,
-    scripts: new Map<string, number>(),
-    storeKeys: new Map<string, number>(),
-    storeDropped: 0,
-    storeEvents: 0,
-};
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -151,25 +109,6 @@ export function usePlaybackVisualizerBridge({
     const incomingLyrics = usePlaybackStore(state => state.lyrics);
 
     const currentLineIndexRef = useRef(-1);
-    /**
-     * 掉帧打点（**临时诊断用**，定位到原因后连这一段一起删）。
-     *
-     * 这一条 rAF 是所有可视化共用的时钟，卡的那一下必然体现为这里两帧之间的间隔
-     * 突然变长。判据在堆内存上：卡顿时 `usedJSHeapSize` 要是**回落**了，就是 GC；
-     * 没回落却卡了，那就是主线程在等别的东西（同步 IPC / 合成 / 布局）。
-     *
-     * 打进 console.warn，用 logcat 过滤 `FoliaHitch` 就能看到；同时也留在
-     * `window.__foliaHitchLog` 里，方便在调试叠层里读。
-     */
-    const lastFrameAtMsRef = useRef(0);
-    /**
-     * 上一帧这一整个回调自己跑了多久（临时诊断，定位完删）。
-     *
-     * 掉帧那一笔的 `gapMs` 是「两帧之间隔了多久」，里面既包含 JS 自己干的活，
-     * 也包含在等别人（合成 / IPC / 别的任务）。两个数一起看才能分得开：
-     * `gapMs` 大而 `workMs` 小 = 时间在 JS 之外花掉了，改 JS 没用。
-     */
-    const lastWorkMsRef = useRef(0);
     // 上一帧真的去问频谱是什么时候。只为那个 ~30Hz 的降频服务（见 SPECTRUM_READ_INTERVAL_MS）。
     const spectrumReadAtMsRef = useRef(0);
     // 智能动感模式: loads the track's beats while it is on; the clock is stepped below. A ref, so
@@ -259,43 +198,6 @@ export function usePlaybackVisualizerBridge({
         const analyser = analyserRef.current;
         // 只有第二条才需要这个间隔。
         const nowMsValue = performance.now();
-        /*
-         * 掉帧打点（临时诊断，见上面 lastFrameAtMsRef 的说明）。
-         *
-         * 阈值取 80ms：正常一帧 16ms，掉三帧以上才记 —— 只留明显看得出来的那些。
-         */
-        if (lastFrameAtMsRef.current !== 0) {
-            const frameGapMs = nowMsValue - lastFrameAtMsRef.current;
-            if (frameGapMs >= HITCH_LOG_THRESHOLD_MS && probeWarm()) {
-                probeWindow.gaps.push(Math.round(frameGapMs));
-                const memory = (performance as Performance & {
-                    memory?: { usedJSHeapSize: number };
-                }).memory;
-                const entry = {
-                    gapMs: Math.round(frameGapMs),
-                    // 上一帧 JS 自己花了多久（见 lastWorkMsRef）。
-                    workMs: Math.round(lastWorkMsRef.current),
-                    // 距上一次原生位置事件过去多久。一直贴着某个值就说明掉帧跟着过桥事件走。
-                    posAgeMs: nativePlaybackEngine.lastEventAtMs > 0
-                        ? Math.round(nowMsValue - nativePlaybackEngine.lastEventAtMs)
-                        : null,
-                    atMs: Math.round(nowMsValue),
-                    // 墙钟后六位：与原生 `FoliaMainLooperWatchdog` 那几行对时间用的
-                    // （`atMs` 是页面自己的时间原点，跟原生那边任何一个钟都对不齐）。
-                    wallMs: Date.now() % 1000000,
-                    native: nativePlaybackEngine.ownsPlayback(),
-                    heapMB: memory ? Math.round(memory.usedJSHeapSize / 1048576) : null,
-                };
-                const log: typeof entry[] = (window as Window & {
-                    __foliaHitchLog?: typeof entry[];
-                }).__foliaHitchLog ?? [];
-                log.push(entry);
-                if (log.length > 40) log.shift();
-                (window as Window & { __foliaHitchLog?: typeof entry[] }).__foliaHitchLog = log;
-                console.warn('[FoliaHitch]', JSON.stringify(entry));
-            }
-        }
-        lastFrameAtMsRef.current = nowMsValue;
         const spectrumDue = nowMsValue - spectrumReadAtMsRef.current >= SPECTRUM_READ_INTERVAL_MS;
         const process = (value: number, boost = 2) => {
             const normalized = value / 255;
@@ -473,7 +375,6 @@ export function usePlaybackVisualizerBridge({
             }
         }
 
-        lastWorkMsRef.current = performance.now() - nowMsValue;
         animationFrameRef.current = requestAnimationFrame(updateLoop);
     }, [
         activePlaybackContext,
@@ -513,258 +414,4 @@ export function usePlaybackVisualizerBridge({
             }
         };
     }, [animationFrameRef, updateLoop]);
-
-    /*
-     * 掉帧打点的另一半：**定时器探针**（临时诊断，定位完删）。
-     *
-     * 现在已知的事实是 `workMs` 恒为 0 —— rAF 回调自己一毫秒都没花，也就是说
-     * 「等下一帧」的那段时间**不含任何 JS**。这把范围砍成两种，而这两种的修法
-     * 完全不一样：
-     *
-     *   · **渲染进程忙**（样式 / 布局 / 光栅 / 渲染进程自己的 GC 占着它的主线程）
-     *     —— 定时器是宏任务，排在同一条线程上，它跟着一起被推迟 → `[FoliaTick]` 也脏；
-     *   · **渲染进程闲着，只是在等合成器给 BeginFrame**（App 主线程被占、或 GPU 被占）
-     *     —— 定时器照点到达 → `[FoliaTick]` 干净，只有 `[FoliaHitch]` 脏。
-     *
-     * 所以两条一起看：hitch 脏 + tick 干净 = 别再改 JS 与样式，去看 App 主线程 / GPU。
-     */
-    useEffect(() => {
-        let lastTickAtMs = 0;
-        const timer = window.setInterval(() => {
-            const nowMs = performance.now();
-            if (lastTickAtMs !== 0) {
-                const tickGapMs = nowMs - lastTickAtMs;
-                if (tickGapMs >= HITCH_LOG_THRESHOLD_MS && probeWarm()) {
-                    console.warn('[FoliaTick]', JSON.stringify({
-                        gapMs: Math.round(tickGapMs),
-                        atMs: Math.round(nowMs),
-                        wallMs: Date.now() % 1000000,
-                    }));
-                }
-            }
-            lastTickAtMs = nowMs;
-        }, TICK_PROBE_INTERVAL_MS);
-        /*
-         * 顺带每秒把原生那侧攒的卡顿日志取回来。
-         *
-         * ⚠️ **取数必须挂在这里，不能只挂在开发者表上**：开发者表只有 `Alt+Shift+D`
-         * 弹得出来，手机上没有物理键盘根本打不开 —— 挂在它上面等于永远没人去取，
-         * 控制台里于是一条 `[FoliaLooper]` 都不会有（这版就白跑了一次）。
-         * 取回来的那几行由 `drainMainLooperLog()` 自己打进控制台，跟 `[FoliaTick]`
-         * 排在一起，两边都带墙钟后六位，可直接对时间。
-         */
-        const drain = window.setInterval(() => void drainMainLooperLog(), LOOPER_DRAIN_INTERVAL_MS);
-        /*
-         * 第三个探针：**长动画帧（LoAF）**。
-         *
-         * 到这里为止，「卡的那 200ms 里渲染进程在干什么」一直是空的：
-         *   · `workMs = 0` 只说明**我们自己的 rAF 回调**没花时间，管不到别人；
-         *   · `[FoliaTick]` 脏只说明那条线程确实被占住了，说不出被**什么**占的；
-         *   · 主线程那边的 Printer 称的是 App 进程，管不到渲染进程。
-         *
-         * `long-animation-frame` 正好补这一段：浏览器在**一帧超过 50ms** 时把这一帧
-         * 拆开报给你 —— 从 `startTime` 到 `renderStart` 之间是**脚本**，`renderStart`
-         * 到 `styleAndLayoutStart` 之间是**样式/布局**，剩下的算绘制提交；每一段还带
-         * `blockingDuration` 和逐条 `scripts[]`（含 `invoker`、`sourceURL`、函数名）。
-         *
-         * 判据因此变成三条互斥的：
-         *   · `scripts` 里有名字 → 就是那段脚本，改它；
-         *   · `blocking` 几乎全落在 `styleAndLayout` 一段 → 是样式/布局（动画大量读写
-         *     布局属性、或一帧里改了太多元素），跟 JS 逻辑无关；
-         *   · `renderStart` 等于 `startTime`（脚本段为 0）、而 `duration` 很大 → 这一帧
-         *     **根本没开始渲染**，卡在等 BeginFrame / 合成器，去查 App 主线程与 GPU。
-         *
-         * ⚠️ 只有 Chromium 123+ 才有（WebView 随系统/商店更新，一般都在）。不支持时
-         * 打一条 `unsupported` 就收手 —— 否则「这一类条目一条都没有」会被误读成
-         * 「这段时间一帧都没掉」。
-         */
-        const loaf = observeLongAnimationFrames();
-        /*
-         * 第四个探针：**store 变更**（临时诊断）。
-         *
-         * LoAF 已经定出「那 40~175ms 是 React Scheduler 的工作循环（`re`）」—— 也就是
-         * **一次 React 渲染**。可 React 不会自己跑，一定有人 `setState`。而
-         * `usePlaybackStore` 是一次普通 zustand `set`：**每个 `usePlaybackStore(...)`
-         * 都会收到通知**，谁的选择器返回值变了谁就重渲染。
-         *
-         * 所以只要把「哪个键在什么时候变了」记下来，就能跟 `[FoliaLoaf]` 的 `wallMs`
-         * 直接对上：变的是不是 `currentLineIndex`（歌词推进／节拍），还是一堆别的。
-         * 秒几次也一并看得出来 —— 一秒十几次的键，就是那 40~175ms 的元凶。
-         */
-        const offStore = attachStoreProbe();
-        /*
-         * 每 5 秒一行汇总（临时诊断）。
-         *
-         * 逐条日志回答「那一下发生了什么」，这一行回答「稳态到底什么形状」：
-         * 掉了几帧、最长多少、LoAF 里出现最多的是哪个脚本、store 里哪个键在动。
-         * 手机上控制台只有几行宽，先看这个再翻明细。
-         */
-        const summary = window.setInterval(() => {
-            if (!probeWarm()) return;
-            console.warn('[FoliaSum]', JSON.stringify(takeProbeSummary()));
-        }, SUMMARY_INTERVAL_MS);
-        return () => {
-            window.clearInterval(timer);
-            window.clearInterval(drain);
-            window.clearInterval(summary);
-            loaf?.disconnect();
-            offStore();
-        };
-    }, []);
-}
-
-/** 热身期过了没有（临时诊断，见 PROBE_WARMUP_MS）。 */
-const probeWarm = () => performance.now() - PROBE_EPOCH_MS >= PROBE_WARMUP_MS;
-
-/** 把一张计数表压成 `名字×次数`，取前几名；空的给空串。 */
-function topCounts(counts: Map<string, number>, limit: number): string[] {
-    return [...counts.entries()]
-        .sort((left, right) => right[1] - left[1])
-        .slice(0, limit)
-        .map(entry => `${entry[0]}×${entry[1]}`);
-}
-
-/** 取走这个窗口攒下的数并清空（临时诊断，见 `[FoliaSum]`）。 */
-function takeProbeSummary() {
-    const summary = {
-        frames: probeWindow.gaps.length,
-        maxGap: probeWindow.gaps.length ? Math.max(...probeWindow.gaps) : 0,
-        loaf: probeWindow.loafCount,
-        maxLoaf: Math.round(probeWindow.maxLoafMs),
-        maxBlock: Math.round(probeWindow.maxBlockMs),
-        scripts: topCounts(probeWindow.scripts, 4).join(','),
-        store: topCounts(probeWindow.storeKeys, 6).join(','),
-        storeEvents: probeWindow.storeEvents,
-        storeDropped: probeWindow.storeDropped,
-        native: nativePlaybackEngine.ownsPlayback(),
-        wallMs: Date.now() % 1000000,
-    };
-    probeWindow.gaps = [];
-    probeWindow.loafCount = 0;
-    probeWindow.maxLoafMs = 0;
-    probeWindow.maxBlockMs = 0;
-    probeWindow.scripts.clear();
-    probeWindow.storeKeys.clear();
-    probeWindow.storeEvents = 0;
-    probeWindow.storeDropped = 0;
-    return summary;
-}
-
-/**
- * 把 `usePlaybackStore` 的每次变更打成一行（临时诊断，见调用处那段说明）。
- *
- * 只记**引用变了**的键 —— zustand 的 `set` 会合并不变的字段，所以这一份就是
- * 「谁真的动了」。`dropped` 是被节流的条数：同一个键在 120ms 里抖十次，说明
- * 它在被高频写，那比「变了几次」更值得看。
- */
-function attachStoreProbe(): () => void {
-    let lastLoggedAtMs = 0;
-    let dropped = 0;
-    return usePlaybackStore.subscribe((state, previous) => {
-        const current = state as unknown as Record<string, unknown>;
-        const before = previous as unknown as Record<string, unknown>;
-        const changed: string[] = [];
-        for (const key of Object.keys(current)) {
-            if (current[key] !== before[key]) changed.push(key);
-        }
-        if (changed.length === 0) return;
-        // 热身期里一率不记：启动那几秒的 persist 回填会把统计冲成噪音。
-        if (!probeWarm()) return;
-        probeWindow.storeEvents += 1;
-        for (const key of changed) {
-            probeWindow.storeKeys.set(key, (probeWindow.storeKeys.get(key) ?? 0) + 1);
-        }
-        const nowMs = performance.now();
-        if (nowMs - lastLoggedAtMs < STORE_PROBE_MIN_INTERVAL_MS) {
-            dropped += 1;
-            probeWindow.storeDropped += 1;
-            return;
-        }
-        lastLoggedAtMs = nowMs;
-        console.warn('[FoliaStore]', JSON.stringify({
-            keys: changed.join(','),
-            dropped,
-            wallMs: Date.now() % 1000000,
-        }));
-        dropped = 0;
-    });
-}
-
-/**
- * 挂 `long-animation-frame` 观察者（临时诊断，见调用处那段说明）。
- *
- * 返回 `null` 表示这台机器/这个 WebView 给不了。
- */
-function observeLongAnimationFrames(): PerformanceObserver | null {
-    if (typeof PerformanceObserver !== 'function') {
-        console.warn('[FoliaLoaf] unsupported: no PerformanceObserver');
-        return null;
-    }
-    // `supportedEntryTypes` 是 Chrome 自己的静态属性，lib.dom 里没有，要绕开类型。
-    const supported = (PerformanceObserver as unknown as { supportedEntryTypes?: readonly string[] })
-        .supportedEntryTypes;
-    if (supported && !supported.includes('long-animation-frame')) {
-        console.warn('[FoliaLoaf] unsupported: entryType missing');
-        return null;
-    }
-    try {
-        const observer = new PerformanceObserver(list => {
-            for (const entry of list.getEntries()) {
-                if (!probeWarm()) continue;
-                const described = describeLongFrame(entry);
-                probeWindow.loafCount += 1;
-                probeWindow.maxLoafMs = Math.max(probeWindow.maxLoafMs, described.dur);
-                probeWindow.maxBlockMs = Math.max(probeWindow.maxBlockMs, described.block ?? 0);
-                for (const script of described.scripts) {
-                    probeWindow.scripts.set(script.name, (probeWindow.scripts.get(script.name) ?? 0) + 1);
-                }
-                console.warn('[FoliaLoaf]', JSON.stringify(described));
-            }
-        });
-        // 这个 type 比 lib.dom 新，但 `PerformanceObserverInit.type` 是 string，不用强转。
-        observer.observe({ type: 'long-animation-frame', buffered: false });
-        return observer;
-    } catch (error) {
-        console.warn('[FoliaLoaf] unsupported:', String(error));
-        return null;
-    }
-}
-
-/** 把一条 LoAF 记录压成一行能读的字，字段名尽量短（控制台一行塞得下）。 */
-function describeLongFrame(entry: PerformanceEntry) {
-    const frame = entry as PerformanceEntry & {
-        renderStart?: number;
-        styleAndLayoutStart?: number;
-        blockingDuration?: number;
-        firstUIEventTimestamp?: number;
-        scripts?: Array<{
-            startTime?: number;
-            invoker?: string;
-            sourceURL?: string;
-            sourceFunctionName?: string;
-            duration?: number;
-            forcedStyleAndLayoutDuration?: number;
-        }>;
-    };
-    const start = entry.startTime;
-    const at = (value?: number) => (typeof value === 'number' ? Math.round(value - start) : null);
-    return {
-        dur: Math.round(entry.duration),
-        // 脚本段 / 样式布局段各自的起点（相对这一帧），null = 没走到那一步。
-        render: at(frame.renderStart),
-        layout: at(frame.styleAndLayoutStart),
-        block: typeof frame.blockingDuration === 'number' ? Math.round(frame.blockingDuration) : null,
-        wallMs: Date.now() % 1000000,
-        native: nativePlaybackEngine.ownsPlayback(),
-        // 前三条脚本就够认出是谁了；名字取不到时退回 invoker / 文件名末段。
-        scripts: (frame.scripts ?? []).slice(0, 3).map(script => ({
-            name: script.sourceFunctionName || script.invoker || '?',
-            at: at(script.startTime),
-            dur: typeof script.duration === 'number' ? Math.round(script.duration) : null,
-            forced: typeof script.forcedStyleAndLayoutDuration === 'number'
-                ? Math.round(script.forcedStyleAndLayoutDuration)
-                : null,
-            url: (script.sourceURL ?? '').split('/').pop(),
-        })),
-    };
 }

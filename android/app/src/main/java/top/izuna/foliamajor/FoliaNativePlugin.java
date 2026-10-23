@@ -136,21 +136,6 @@ public class FoliaNativePlugin extends Plugin {
         .writeTimeout(45, TimeUnit.SECONDS)
         .build();
 
-    /**
-     * 取走主线程卡顿探针攒下的那几行（**临时诊断**，定位完连探针一起删）。
-     *
-     * 真机常常不在 adb 上，而探针记的是原生 `Log.w` —— 只写进 logcat 的话，
-     * 屏幕上根本看不到。开发者表每秒来取一次，用户直接截图就能给我。
-     *
-     * 取走即清空：攒着不取会一直堆在探针里，界面上也会翻出几分钟前的旧账。
-     */
-    @PluginMethod
-    public void drainMainLooperLog(PluginCall call) {
-        JSObject result = new JSObject();
-        result.put("text", FoliaMainLooperWatchdog.drain());
-        call.resolve(result);
-    }
-
     /*
      * AI 云缓存的原生侧副本。
      *

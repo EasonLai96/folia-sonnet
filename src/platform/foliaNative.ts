@@ -150,14 +150,6 @@ interface FoliaNativePlugin {
     getVideoLayerFile(): Promise<{ has?: boolean; name?: string; url?: string }>;
     /** 删掉原生那一份视频副本（设置里的「清除本地视频」）。 */
     clearVideoLayerFile(): Promise<void>;
-    /**
-     * ⚠️ **临时诊断**（定位完连原生那个 `FoliaMainLooperWatchdog` 一起删）。
-     *
-     * 取走原生那侧「主线程卡顿探针」攒下的几行。真机常常不在 adb 上，而探针记的是
-     * 原生 `Log.w` —— 只写进 logcat 的话在屏幕上根本看不到，所以由开发者表每秒来
-     * 取一次，用户截图就能给我。**取走即清空。**
-     */
-    drainMainLooperLog(): Promise<{ text?: string }>;
     addListener(
         eventName: 'updateDownloadProgress',
         listener: (progress: UpdateDownloadProgress) => void,
@@ -372,33 +364,6 @@ export const clearNativeVideoLayerFile = async (): Promise<void> => {
         await FoliaNative.clearVideoLayerFile();
     } catch (error) {
         console.warn('[FoliaNative] clearVideoLayerFile failed', error);
-    }
-};
-
-/**
- * ⚠️ **临时诊断**（定位完连原生那个 `FoliaMainLooperWatchdog` 一起删）。
- *
- * 取走原生「主线程卡顿探针」攒下的几行，取走即清空。
- *
- * 探针记的是原生 `Log.w`，只写进 logcat；真机常常不在 adb 上，那个渠道等于没有。
- * 所以由开发者表每秒来取一次，用户截图就能给我 —— 这是「主线程有没有被单条消息
- * 卡住、被谁卡住」唯一能看见的路。
- */
-export const drainMainLooperLog = async (): Promise<string> => {
-    if (!isCapacitorAndroid()) return '';
-    try {
-        const result = await FoliaNative.drainMainLooperLog();
-        const text = (result.text ?? '').trim();
-        /*
-         * 同时打进控制台：开发者表要 `Alt+Shift+D` 才弹得出来，手机上没有物理键盘
-         * 根本按不了，而用户看的就是控制台。打在这里还能和 `[FoliaTick]` /
-         * `[FoliaHitch]` 的墙钟（`wallMs`，同为后六位）直接对时间。
-         */
-        if (text) console.warn('[FoliaLooper]', text);
-        return text;
-    } catch {
-        // 探针不在这版包里 / 桥上出意外都不该把开发者表拖崩。
-        return '';
     }
 };
 
