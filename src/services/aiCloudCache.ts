@@ -183,10 +183,9 @@ export type AiCloudCachePull =
         status: 'hit';
         payload: unknown;
         /**
-         * exact = 精确键命中；
-         * words = 键没对上，靠歌名捞到一条**内容合规**的（证据词都在你手上这段歌词里）；
-         * forced = 一条合规的都没有，从兜底里挑的（证据只到一半，见
-         * pickBestEffortCandidates）—— **未经证实**，所以它不参与回填。
+         * exact = 精确键命中（只有「没歌词可判」那一档才走这条路，见函数头）；
+         * words = 靠高亮词认出来的：候选标的证据词在这段歌词里 **100%** 全在场；
+         * forced = 没歌词可判，取服务端排序最靠前的一条 —— **未经证实**，不参与回填。
          */
         matched: 'exact' | 'words' | 'forced';
         /** words 命中时，答案原本存在哪个键上 —— 回填到自己这个键要用它。 */
@@ -285,51 +284,35 @@ export const countHighlightWordHits = (words: readonly string[], lyricText: stri
     evidenceHits(words, lyricText).hits
 );
 
-/**
- * 高亮词的**覆盖率**：命中数 / 证据词数（0~1）。
- *
- * 一条证据都没有时是 0 —— 那不是「全都命中了」（0/0），是「没有凭据」。
- * 「一条都不合规时挑最像的那条」那一档用它 —— 那里已经没有是非，只有谁更像；
- * 判**合不合规**要看个数，不看比例（见 highlightWordsPresent）。
+/* 原来这里还有个「覆盖率」—— 命中数 / 证据词数 —— 用来在兜底里挑「最像的那条」。
+ * 兜底删了它也跟着没用了：判合规只看**个数**（差一个就不算），比的时候比**命中数**
+ * （都是 100% 时词多的那条更可信），没有哪个地方还需要一个 0~1 的比例。
  */
-export const highlightWordsCoverage = (words: readonly string[], lyricText: string): number => {
-    const { total, hits } = evidenceHits(words, lyricText);
-    return total === 0 ? 0 : hits / total;
-};
 
 /**
- * 最多允许缺几个词：不管挑了多少个词，缺超过这个数就当「这条答案不是照着这首歌做的」。
+ * 候选合不合规：**证据词必须在你手上这段歌词里 100% 全在场**，少一个都不行。
  *
- * 以前是「覆盖率 ≥ 80%」，那是**按比例**放宽 —— 词越多能缺得越多（10 个词缺 2 个、
- * 20 个词缺 4 个都过）。同一首歌的翻唱 / 现场 / 各平台 LRC 本来就共享大半的高亮词，
- * 于是拿一首近亲的歌词去撞另一首的答案也能撞上八成：用户报的正是「明明是另一首歌，
- * 居然匹配上了」。改成**按个数**之后，差多少就是差多少，词多不再等于可以差更多。
+ * 这条路收紧过三轮，一轮比一轮严，每一轮都是被真实例子推着走的：
+ *  1. 最早是「覆盖率 ≥ 80%」—— 按比例放宽，词越多能缺越多（10 个词缺 2 个、
+ *     20 个词缺 4 个都过），近亲之间互相撞上八成；
+ *  2. 改成「按个数，最多缺一个」—— 还是出事：用户报的那例（风清云净）根本没走到
+ *     这一步（覆盖率 3/5），是从兜底被捡走的；
+ *  3. 现在 **100%**：差一个词就当「这条答案不是照着这份歌词做的」，重新生成。
  *
- * 仍留着这一个的宽容：同一首歌的两份 LRC 差一个词（一句口白、翻译行不同、多一个空格
- * 之外的差别）就整条判死，用户看到的是「歌词明明一样，云缓存就是拉不到」。
+ * 代价是同一首歌的两份 LRC 差一个词（一句口白、翻译行不同）也可能判不上 ——
+ * 用户拍板要的是准，不是全：宁可自己重生成一次，也不要拿一条照着别首歌做的高亮词。
+ *
+ * 空词表 / 全是虚词（total === 0）同样不合规：那不是「全都命中了」（0/0），
+ * 是**没有凭据**。
+ *
+ * ⚠️ **别把「词少的答案」一刀切否掉**：模型常常只挑一两个词，只要它们都在歌词里，
+ * 那样一条照样合规（试过反过来 —— 少于两个词一律判不合规 —— 上机是所有歌的高亮词
+ * 显示都错）。
  */
-const HIGHLIGHT_WORD_MAX_MISSING = 1;
-/**
- * 词到了这个数才给「缺一个」这个宽容：不足五个词时必须**全中**。
- *
- * 两个词里缺一个就是只中一半 —— 那不是「差一点」，是「这条答案跟这首的关系只有一半」，
- * 按比例放宽的年代正是这种短词表被放过去的。
- *
- * ⚠️ **别把「词少的答案」一刀切否掉**（试过：少于两个词一律不合规）—— 模型常常就只挑
- * 一两个词，那样一否，十几条近亲**全部**不合规，只好走「强制拿一条」那条路，拿回来的
- * 是高亮词完全不对的一份，上机的结果是**所有歌**的高亮词显示都错。词少照样放行（全中
- * 即可），只是不给「缺一个」这个宽容。
- */
-const HIGHLIGHT_WORD_RELAX_MIN_WORDS = 5;
-
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
     const { total, hits } = evidenceHits(words, lyricText);
-    /* 一个证据词都没有：没有凭据说明它属于这首歌。 */
-    if (total === 0) return false;
-    if (hits >= total) return true;
-    if (hits <= 0) return false;
-    return total >= HIGHLIGHT_WORD_RELAX_MIN_WORDS
-        && total - hits <= HIGHLIGHT_WORD_MAX_MISSING;
+    /* 没有证据词 ≠ 全都命中：那是没有凭据。 */
+    return total > 0 && hits >= total;
 };
 
 /**
@@ -385,62 +368,19 @@ const fetchResolveCandidates = async (
     }
 };
 
-/**
- * 强制匹配那一批：从**随机**一处开始取前几条。
+/*
+ * 这里原来有个「一条都不合规时挑最像的那条」的兜底，已经被删掉了。
  *
- * 随机是用户要的（「匹配不上就随机选一个作为候选」）—— 一圈近亲里谁都不比谁更「是」这首
- * 歌，挑第一条反而会让每次都拿到同一条最旧的。多取几条是为了某一条已经被删了时不至于
- * 空手而归；它们只是候选，取到第一条有内容的就收。
+ * 它错在把**没有是非**当成了**谁更像**：一条候选的证据词在这首的歌词里只到一半，它不是
+ * 「有点像这首的答案」，它就是**另一首歌的答案** —— 挑它当最像的，只会把别首歌的高亮
+ * 词当成这首的，还会回填到精确键上，错一次就一直错下去（用户报的风清云净那例就是这样
+ * 进来的：证据词 5 个只中 3 个，而且中的那 3 个是「我 / 什么 / 你」这种任何一首歌都有
+ * 的词）。
+ *
+ * 现在的规矩是**只认 100%**：达标的一条都没有就回 miss，让本机照这首重新生成。
+ * 「没歌词可判」那一档（纯音乐、按歌名+歌手存的主题）仍然取服务端排序最靠前的几条 ——
+ * 那个不是「判出来不像」，是**没得判**。
  */
-/**
- * 兜底下限：有歌词可判时，一条候选至少要有**一半**的证据词在场，才配得上「强制匹配」。
- *
- * 一条都不合规时挑**最像**的那几条：按高亮词的覆盖率从高到低取前 N 条。
- *
- * 以前这里是**随机**挑一条。随机等于承认「眼前的十几条近亲跟这首的关系都一样」——
- * 但它们并不一样：覆盖率 0.7 那条明显比 0.1 那条更像这首的答案，随机挑则两条机会
- * 均等，挑到最不像的那条时拉回来的就是一份照着别一首歌挑的高亮词，歌词上该亮的一
- * 个都亮不起来（用户报「歌曲墙上一个 AI 高亮都没有」，而这份数据还将回填到本次的
- * 精确键上，之后每次都是精确命中 —— 错一次就一直错下去）。
- *
- * ⚠️ **光挑「最像的」还不够 —— 全都一点不像时，最像的那条照样是错的**。
- * 用户接着报的就是这个：高亮词 `留住 / 我 / 什么 / 把 / 你` 里，「留住」和「把」在这首的
- * 歌词里根本不存在，覆盖率是「我 / 什么 / 你」这三个任何一首歌都有的词撑到 3/5 的 ——
- * 它连旧的 80% 门槛都进不去（所以不走合规判定），却在兜底里以「最像的那条」被挑走，
- * 然后回填到精确键上，错一次就一直错下去。所以给兜底设一条下限：**一条证据词都对不
- * 上的候选不参与兜底**，宁可回一句「云端没有」，让本机照这首歌重新生成。
- *
- * 下限取 0.5 而不是更高：同一首歌的两份 LRC 差一个词（模型只挑了两个证据词、其中一个
- * 换了写法）时是 1/2，那正是兜底这条路的来由，不该被门槛挡在外面。
- *
- * 「一个词都没标」的老条目（服务端没给 words）无从判，仍然照旧参与兜底 —— 它们不是
- * 「判出来不像」，是「没得判」，和没有歌词那一档同理。
- *
- * 覆盖率一样时留着服务端给的顺序（歌名全等优先、更新时间倒序），所以排序是稳定的。
- * 手上没有歌词时无从判，退化成「取最靠前那几条」，不会因此变成 miss。
- */
-const FORCED_EVIDENCE_COVERAGE_MIN = 0.5;
-
-const pickBestEffortCandidates = (
-    candidates: readonly ResolveCandidate[],
-    lyricText: string,
-): ResolveCandidate[] => {
-    if (candidates.length === 0) return [];
-    if (!lyricText) {
-        return candidates.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
-    }
-    const ranked = candidates
-        .map((candidate, index) => ({
-            candidate,
-            index,
-            // 没标词的条目无从判：留着，别让它因为「算出来 0」被门槛扫掉。
-            judgeable: candidate.words.length > 0,
-            coverage: highlightWordsCoverage(candidate.words, lyricText),
-        }))
-        .filter(entry => !entry.judgeable || entry.coverage >= FORCED_EVIDENCE_COVERAGE_MIN)
-        .sort((a, b) => b.coverage - a.coverage || a.index - b.index);
-    return ranked.slice(0, MAX_CONCURRENT_ENTRY_FETCHES).map(entry => entry.candidate);
-};
 
 export interface AiCloudCachePushMeta {
     songTitle?: string;
@@ -478,13 +418,19 @@ const withTimeout = (): AbortSignal => {
 };
 
 /**
- * 拉一次：先按精确键问，没中再按**歌名**捞一条内容合规的。
+ * 拉一次。
  *
- * 键是「歌词 + policy」的 MD5，于是同一首歌换个版本的歌词就是另一个键 —— 翻唱、现场、
- * 平台之间同一首歌的 LRC 本来就不一样。只赌精确键的话，「库里明明躺着答案却取不到」
- * 是常态。所以第二次机会不看哈希，改看内容：候选条目标的高亮词都在你手上这段歌词里，
- * 那条答案就是照着这首歌做的。**一条都对不上也不再报没命中** —— 改为强制挑一条
- * （见下面那段注释）：宁可拿一条近亲的答案，也不要说「云端没有」。
+ * **有歌词可判时（舞台那条链路）不读精确键**：把服务端按歌名送回来的候选**一次全判**，
+ * 只留证据词 100% 在场的那几条，第一个到手的就是答案。
+ *
+ * 为什么不认精确键：键是「歌词 + policy」的 MD5，看着天衣无缝，可它里面躺着的那一份
+ * 未必是照着这份歌词做的 —— 早年的「强制匹配 + 回填」把别的歌的答案写过来了（键是这首
+ * 的，内容是别首的），之后每次都是精确命中，错一次就一直错下去。用户拍板：**高亮词
+ * 才是准的，多个结果一起看，100% 才认**；精确键只留给「没得判」的那一档（见下）。
+ *
+ * **没歌词可判时**（主题按「歌名 + 歌手」存的那一路、纯音乐）无从判 —— 老路照旧：
+ * 先按精确键问，没中就按歌名捞一条最靠前的（服务端已按「歌名全等优先、更新时间
+ * 倒序」排过）。这一档不记 miss，否则用户看到的就是「云端明明有，就是匹配不上」。
  *
  * 出错一律当「没命中」，调用方照常生成。
  */
@@ -496,6 +442,11 @@ export const pullAiCloudCache = async (
     if (!isFoliaCloudCacheEnabled()) return { status: 'unavailable' };
     if (!/^[a-f0-9]{32}$/.test(key)) return { status: 'unavailable' };
     if (wasRecentMiss(kind, key)) return { status: 'miss' };
+
+    const songTitle = String(meta.songTitle ?? '').trim();
+    const lyricText = String(meta.lyricText ?? '');
+    /* 有歌名又有歌词才判得动：两样缺一样就只剩「信键」或「信歌名」这两条老路。 */
+    const judgeByWords = Boolean(songTitle && lyricText);
 
     const url = resolveAiCloudCacheUrl(kind, key);
     let data: { hit?: unknown; entry?: unknown } | null = null;
@@ -511,11 +462,17 @@ export const pullAiCloudCache = async (
      * 整段包住，不只是 reject：取那个导出本身也可能抛（模块没加载出来时是同步的），
      * 而缓存的纪律是**永不阻塞功能** —— 这里出任何岔子都只是「这次没命中」。
      */
+    /*
+     * 精确键那一份**只在没得判的时候才读** —— 见函数头的说明：有歌词可判时它可能是
+     * 被早年「强制匹配 + 回填」写进来的，键对了内容却不是这首的。
+     */
     let native: { ok: boolean; body: string } | null = null;
-    try {
-        native = await fetchAiCacheViaNative(key, url);
-    } catch {
-        native = null;
+    if (!judgeByWords) {
+        try {
+            native = await fetchAiCacheViaNative(key, url);
+        } catch {
+            native = null;
+        }
     }
     if (native) {
         /* 原生真发了请求、服务端说没有：那就是没命中，不必再用网页那条再问一遍。 */
@@ -528,7 +485,7 @@ export const pullAiCloudCache = async (
         }
     }
 
-    if (!data) {
+    if (!judgeByWords && !data) {
         try {
             const response = await createAiFetch()(url, {
                 method: 'GET',
@@ -550,13 +507,11 @@ export const pullAiCloudCache = async (
     }
 
     /*
-     * 第二次机会：**不看哈希，看内容**。
+     * 不看哈希，看内容。
      *
      * 服务端按歌名把同类条目的高亮词送回来（小得多的响应），本机拿自己这段歌词逐条判
-     * —— 那条答案标的词全都在这儿，它就是照着这首歌做的，哪怕两份 LRC 差几个字。
-     * 判定留在本机，歌词正文一次都不用上传。
+     * —— 判定留在本机，歌词正文一次都不用上传。
      */
-    const songTitle = String(meta.songTitle ?? '').trim();
     if (!songTitle) {
         rememberMiss(kind, key);
         return { status: 'miss' };
@@ -569,65 +524,53 @@ export const pullAiCloudCache = async (
     }
 
     /*
-     * 有歌词才判合规。
-     *
-     * 没有歌词（主题只按歌名存的那一路、纯音乐）无从判 —— 那就直接走下面那条强制的路，
-     * 而不是像以前那样当场记一次「没命中」：那样这一首本次会话再也不会问第二次，用户
-     * 看到的就是「云端明明有，就是匹配不上」。
-     */
-    const lyricText = String(meta.lyricText ?? '');
-
-    /*
-     * 合规判定**一次做齐**，再去发请求。
+     * 判定**一次做齐**，再去发请求。
      *
      * 歌名一样、歌词不一样的歌本来就是一堆近亲（翻唱、现场、各平台的 LRC 差几个字
      * 就是一个新键），候选一次能来十来个。原来是「判一个高亮词 → 拉一次」挨着串行，
      * 前面只要有一个慢、或者卡到 12 秒超时，后面明明合规的那条就一直排不上 —— 用户
      * 等的就是这一段。判定是本机字符串比较，零成本，先全筛完再一起问。
+     *
+     * 合规 = 证据词 **100%** 在场（highlightWordsPresent）。
+     *
+     * 有歌词却一条都不达标 → **miss**，让本机照这首重新生成：拿一条照着别首歌做的高亮
+     * 词当这首的主题，比承认「云端没有」糟得多。
      */
-    const eligible = lyricText
-        ? candidates.filter((candidate) => highlightWordsPresent(candidate.words, lyricText))
-        : [];
-
-    /*
-     * 一条都不合规 → **强制匹配**：挑最像的那一条用。
-     *
-     * 以前这一步是「判不过就当没命中」，于是用户撞上的是那句最让人恼火的话：这一屏明明是
-     * 从云端那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变。原因只是各平台
-     * 的 LRC 差几个字 —— 高亮词差一两个，整条候选就被判成「另一首歌」。
-     *
-     * 用户要的就是「反正没有出现的词也无所谓」：词少几个不影响这是不是同一首歌的配色。
-     * 所以这里不再返回 miss，改从候选里挑**高亮词覆盖率最高**的那条（见
-     * pickBestEffortCandidates）。
-     *
-     * ⚠️ 但兜底不是「无论如何都要拿一条」：一条证据词都对不上的候选不参与兜底
-     * （下限见 pickBestEffortCandidates），那样会是 miss —— 拿一条照着别的歌做的高亮词
-     * 当这首的主题，比承认「云端没有」糟得多。
-     *
-     * ⚠️ 兜底挑来的那条**不回填**（matched 记成 'forced'，调用方只回填 'words'）。
-     * 它本来就是「没验证上」才走的兜底，回填到精确键上就变成永久事实 ——
-     * 一次猜错，这首歌以后每次都是那一份错的高亮词。宁可下次再走一遍「搜歌名 + 逐条判」，
-     * 也不把猜测写成结论。
-     */
-    const forced = eligible.length === 0;
-    const batch = forced
-        ? pickBestEffortCandidates(candidates, lyricText)
-        : eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
+    const batch = lyricText
+        ? candidates
+            .map((candidate, index) => ({ candidate, index }))
+            /* 不达标的连排序都不参加 —— 「最像的那条」照样是另一首歌的答案。 */
+            .filter(({ candidate }) => highlightWordsPresent(candidate.words, lyricText))
+            /*
+             * 达标的那几条**一起比，取证据词最多的**。
+             *
+             * 全都 100% 在场时，词越多越不可能是巧合：只挑了「小黄花」一条，同名曲的
+             * 翻唱也能撞上；挑了六条还一条不落，那基本就是照着同一份歌词做的。
+             * 词数一样时留服务端给的顺序（歌名全等优先、更新时间倒序），排序是稳定的。
+             */
+            .sort((a, b) => (
+                countHighlightWordHits(b.candidate.words, lyricText)
+                - countHighlightWordHits(a.candidate.words, lyricText)
+                || a.index - b.index
+            ))
+            .slice(0, MAX_CONCURRENT_ENTRY_FETCHES)
+            .map(({ candidate }) => candidate)
+        /* 没歌词可判：信服务端给的排序，取最靠前那几条（见函数头那一档）。 */
+        : candidates.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
 
     const payloads = await Promise.all(
         batch.map((candidate) => fetchEntry(kind, candidate.key)),
     );
-    /*
-     * 取**顺序最靠前**的那个成功的：合规那一批服务端已经按「歌名完全相等优先、更新时间
-     * 倒序」排过了，所以这里不必再挑，第一个到手的就是最该用的那条。
-     */
     const index = payloads.findIndex((payload) => payload !== null);
     if (index >= 0) {
         return {
             status: 'hit',
             payload: payloads[index],
-            /* 兜底挑来的不算「内容合规」：调用方据此决定要不要回填（见下）。 */
-            matched: forced ? 'forced' : 'words',
+            /*
+             * 'words' = 证据词 100% 验证过的（调用方据此回填）；
+             * 'forced' = 没歌词可判、拿最靠前那条（不回填 —— 它没被验证过）。
+             */
+            matched: lyricText ? 'words' : 'forced',
             sourceKey: batch[index].key,
         };
     }
@@ -697,7 +640,12 @@ export const withAiCloudCache = async <T>(options: {
     platform?: string;
     /** 歌词正文的 MD5。算得出来就带上，服务端好拿平台上的歌词对一遍。 */
     lyricHash?: string;
-    /** 歌词正文。只用在「精确键没中」那一次兜底判定上，**不会上传**。 */
+    /**
+     * 歌词正文。**不会上传** —— 只在本机跟候选的高亮词对。
+     *
+     * 有它的时候拉缓存**不看精确键**（见 `pullAiCloudCache` 的函数头）：判得动就该以
+     * 高亮词为准。没有它（主题那一路、纯音乐）才退回信键。
+     */
     lyricText?: string;
     isPureMusic?: boolean;
     /**

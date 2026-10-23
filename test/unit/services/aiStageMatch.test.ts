@@ -61,6 +61,15 @@ const baseRequest = (lines: { fullText: string }[]) => ({
 
 const pullKeyOf = (url: string): string => (url.includes('/ai-cache/stage/') ? (url.split('/').pop() ?? '') : '');
 
+/*
+ * 云端那条答案存在哪个键上。
+ *
+ * 有歌词可判时拉缓存**不读精确键**（精确键里可能躺着别首歌的答案），只能走「按歌名捞候选
+ * → 本机拿高亮词判 → 按候选的键取回」，所以每个用例都得先给出一条**词全在歌词里**的候选。
+ */
+const REMOTE_KEY = 'a'.repeat(32);
+const candidatesFor = (words: string[]) => json({ ok: true, candidates: [{ key: REMOTE_KEY, words }] });
+
 beforeEach(() => {
   handlers.fetch = null;
   handlers.cloudEnabled = true;
@@ -68,11 +77,13 @@ beforeEach(() => {
 
 describe('matchStage', () => {
   it('命中就把主题交回来，并且一次都不去生成', async () => {
-    handlers.fetch = async (url) => (
-      url.includes('/ai-cache/stage/')
-        ? json({ hit: true, entry: { payload: { theme: dualTheme, decision: { mode: 'flow', reason: 'r', params: {} } } } })
-        : json({ hit: false }, false)
-    );
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) return candidatesFor(['小黄花']);
+      if (url.includes(REMOTE_KEY)) {
+        return json({ hit: true, entry: { payload: { theme: dualTheme, decision: { mode: 'flow', reason: 'r', params: {} } } } });
+      }
+      return json({ hit: false }, false);
+    };
 
     const result = await matchStage({
       ...baseRequest(lyricsOf.hit),
@@ -103,11 +114,13 @@ describe('matchStage', () => {
    * 条目不能算命中（否则界面上什么都没变，却弹了「已从云端拿到」）。
    */
   it('缺了要用的那一半不算命中', async () => {
-    handlers.fetch = async (url) => (
-      url.includes('/ai-cache/stage/')
-        ? json({ hit: true, entry: { payload: { decision: { mode: 'flow', reason: 'r', params: {} } } } })
-        : json({ hit: false }, false)
-    );
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) return candidatesFor(['动画决策']);
+      if (url.includes(REMOTE_KEY)) {
+        return json({ hit: true, entry: { payload: { decision: { mode: 'flow', reason: 'r', params: {} } } } });
+      }
+      return json({ hit: false }, false);
+    };
 
     expect(await matchStage(baseRequest(lyricsOf.half))).toBeNull();
   });
@@ -143,12 +156,18 @@ describe('matchStage', () => {
     });
     expect(generatedFingerprint).not.toBe('');
 
+    /*
+     * 键从**回填那一次 PUT** 上读：有歌词时 pull 根本不碰精确键（见 REMOTE_KEY 那条注释），
+     * 而回填写的正是 `ctx.fingerprint` —— 同一个值，一样对得上。
+     */
     let matchedKey = '';
-    handlers.fetch = async (url) => {
-      if (url.includes('/ai-cache/stage/')) {
+    handlers.fetch = async (url, init) => {
+      if (init?.method === 'PUT') {
         matchedKey = pullKeyOf(url);
-        return json({ hit: true, entry: { payload: { theme: dualTheme } } });
+        return json({ ok: true, stored: true });
       }
+      if (url.includes('/ai-cache/resolve')) return candidatesFor(['刮风', '握着']);
+      if (url.includes(REMOTE_KEY)) return json({ hit: true, entry: { payload: { theme: dualTheme } } });
       return json({ hit: false }, false);
     };
     await matchStage(baseRequest(lyricsOf.sameKey));

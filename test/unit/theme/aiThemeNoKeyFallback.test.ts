@@ -40,6 +40,25 @@ vi.mock('@/services/aiNativeFetch', () => ({
             state.pushed.push(body.payload);
             return { ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response;
         }
+        /*
+         * POST = 按歌名捞候选（只回高亮词，判定在本机做）。
+         *
+         * 有歌词可判时拉缓存**不读精确键** —— 键对了不代表内容对。所以这个 mock 必须
+         * 真答得出一条候选，否则用例会因为「接口没给候选」而红，验不到想验的东西。
+         */
+        if (method === 'POST') {
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    ok: true,
+                    candidates: state.payload === null
+                        ? []
+                        /* 这个词在 beforeEach 那两句假歌词里，判定过得去。 */
+                        : [{ key: 'a'.repeat(32), words: ['歌词'] }],
+                }),
+            } as unknown as Response;
+        }
         /* GET = 拉缓存 */
         return {
             ok: true,

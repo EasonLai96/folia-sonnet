@@ -11,9 +11,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 第二次机会**不看哈希，看内容**：候选条目标的高亮词都在你手上这段歌词里，那条答案
 // 就是照着这首歌做的。判定留在本机（服务端只回高亮词），歌词正文因此不用上传。
 //
-// 但高亮词只是**挑**的依据，不是门槛：一条都对不上时改为**强制拿一条**（挑最像的那个候选），
-// 不再报「没有」—— 各平台的 LRC 差几个字就该判成另一首歌，这是用户最恼火的那一句
-// 「云端明明有，就是匹配不上」。
+// ⭐ 高亮词是**门槛**，不是「挑的依据」：必须 100% 全在场，少一个就当这条答案是照着
+// 别首歌做的。以前按比例放过（≥80%）、再后来「最多缺一个」、再后来「兜底挑最像的那条」，
+// 一轮比一轮宽松的后果是近亲之间互相顶替 —— 用户报「明明是另一首歌，居然匹配上了」，
+// 而那份错答案还会回填到精确键上，错一次就一直错下去。
+//
+// 于是有歌词可判时**连精确键都不读**：键对了不代表内容对（早年的强制匹配把别首的答案
+// 写过来了），高亮词才是准的。精确键只留给「没得判」那一档（主题按歌名+歌手存的那一路、
+// 纯音乐）。
 
 const { handlers } = vi.hoisted(() => ({
   handlers: {
@@ -57,6 +62,9 @@ const KEY_PUSHED = 'a2b3c4d5'.repeat(4);
 const KEY_J = 'a7b8c9d0'.repeat(4);
 const KEY_K = 'b1c2d3e4'.repeat(4);
 const KEY_L = 'c5d6e7f8'.repeat(4);
+const KEY_J2 = '0f1e2d3c'.repeat(4);
+const KEY_M = '1a2b3c4d'.repeat(4);
+const KEY_N = '2b3c4d5e'.repeat(4);
 
 const payload = {
   theme: {
@@ -102,11 +110,19 @@ describe('highlightWordsPresent', () => {
     expect(highlightWordsPresent(['故事'], '故事的小黄花')).toBe(true);
   });
 
-  /* 不到五个词：差一个就不行（4 个差 1 = 75%）。到了五个才给「缺一个」这个宽容。 */
-  it('lets a word go missing once there are five of them', () => {
+  /*
+   * 差一个就不行，**不管一共挑了几个**。
+   *
+   * 中间那版是「到了五个词才给缺一个的宽容」，照样出事：用户报的那例证据词只有 5 个、
+   * 命中 3 个，看着离「缺一个」不远，其实另外两个（留住 / 把）根本不在这首的歌词里 ——
+   * 它就是另一首歌的答案。现在一律 100%。
+   */
+  it('lets no word go missing, however many there are', () => {
     expect(highlightWordsPresent(['故事', '小黄花', '童年', '不在'], lyric)).toBe(false);
-    expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千', '不在歌词里'], lyric)).toBe(true);
+    expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千', '不在歌词里'], lyric)).toBe(false);
     expect(highlightWordsPresent(['故事', '小黄花', '童年', '不在', '也不在'], lyric)).toBe(false);
+    /* 全在的那一份照旧合规。 */
+    expect(highlightWordsPresent(['故事', '小黄花', '童年', '荡秋千'], lyric)).toBe(true);
   });
 
   it('is not satisfied when a word is missing', () => {
@@ -116,20 +132,21 @@ describe('highlightWordsPresent', () => {
   /*
    * 词多**不再**等于可以多缺几个。
    *
-   * 以前按覆盖率放行（≥80%）：10 个词缺 2 个、20 个词缺 4 个照样过。而同一首歌的翻唱 /
+   * 最早按覆盖率放行（≥80%）：10 个词缺 2 个、20 个词缺 4 个照样过。而同一首歌的翻唱 /
    * 现场 / 各平台 LRC 本来就共享大半的高亮词，于是拿一首近亲的歌词去撞另一首的答案也
-   * 能撞上八成 —— 用户报的正是「明明是另一首歌，居然匹配上了」。现在按**个数**判，
-   * 不管挑了多少个词，最多只缺一个。
+   * 能撞上八成 —— 用户报的正是「明明是另一首歌，居然匹配上了」。
+   *
+   * 代价是同一首歌的两份 LRC 差一个词（一句口白、翻译行不同）也判不上 —— 用户拍板要的
+   * 是准，不是全：宁可自己重生成一次。
    */
-  it('counts the missing words instead of taking a percentage', () => {
+  it('counts the words instead of taking a percentage', () => {
     const many = '甲乙丙丁戊己庚辛壬癸';
     /* 用双字：单字在任何歌里都能撞上，不当证据（见下面那条用例）。 */
     const words = ['甲乙', '丙丁', '戊己', '庚辛', '壬癸'];
 
     expect(highlightWordsPresent(words, many)).toBe(true);
-    /* 缺 1 个：同一首歌的两份 LRC 差一个词（口白 / 翻译行）不该整条判死。 */
-    expect(highlightWordsPresent([...words.slice(0, 4), '不在'], many)).toBe(true);
-    /* 缺 2 个：覆盖率正好 60%，旧规则按比例（80%）也不放行，现在更不行。 */
+    /* 缺 1 个：以前「到了五个词可以缺一个」放它过，现在不行。 */
+    expect(highlightWordsPresent([...words.slice(0, 4), '不在'], many)).toBe(false);
     expect(highlightWordsPresent([...words.slice(0, 3), '不在', '也不在'], many)).toBe(false);
   });
 
@@ -198,19 +215,15 @@ describe('pullAiCloudCache 的第二次机会', () => {
       expect(result.sourceKey).toBe(KEY_A);
       expect(result.payload).toEqual(payload);
     }
-    /* 顺带钉住顺序：先精确，再 resolve，最后按候选的键取回。 */
-    expect(seen[0]).toContain(KEY_B);
-    expect(seen[1]).toContain('/ai-cache/resolve');
-    expect(seen[2]).toContain(KEY_A);
+    /*
+     * 顺带钉住顺序：**根本不问精确键**，一上来就是 resolve，然后按候选的键取回。
+     * 有歌词可判时精确键里躺着什么不作数 —— 它可能就是别首歌的答案（见文件头）。
+     */
+    expect(seen[0]).toContain('/ai-cache/resolve');
+    expect(seen[1]).toContain(KEY_A);
+    expect(seen.some((url) => url.includes(KEY_B))).toBe(false);
   });
 
-  /*
-   * 高亮词只是**挑**的依据，不是门槛：一条都对得上时按它排，一条都对不上时**强制拿一条**。
-   *
-   * 以前这一步是「判不过就当没命中」，用户撞上的是那句最恼火的话 —— 这一屏明明是从云端
-   * 那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变；原因只是各平台的 LRC
-   * 差几个字。词少几个不影响这是不是同一首歌的配色（用户原话「反正没有出现的词也无所谓」）。
-   */
   /*
    * 一条证据都对不上时**不再**强制匹配：那是「判出来不像」，不是「没得判」。
    *
@@ -258,25 +271,30 @@ describe('pullAiCloudCache 的第二次机会', () => {
   });
 
   /*
-   * 都判不过时挑**最像**的那条（高亮词覆盖率最高），不再随便挑一条。
+   * 一条都不达标时**放弃**，不再「挑最像的那条」。
    *
-   * 随机等于承认「眼前的十几条近亲跟这首的关系都一样」—— 它们并不一样：覆盖率 0.67 那条
-   * 明显比 0 那条更像这首的答案。而挑到的那条会回填到本次的精确键上，错一次就一直错下去。
+   * 中间那版先随机挑、后来改成挑覆盖率最高的 —— 两版都错在把「没有是非」当成了「谁更像」：
+   * 覆盖率 2/3 那条不是「有点像这首的答案」，它就是**另一首歌的答案**。挑它，歌词上该亮的
+   * 一个都亮不起来，而它还会被回填到这首的精确键上，错一次就一直错下去。
    */
-  it('falls back to the closest candidate, not an arbitrary one', async () => {
+  it('gives up when no candidate is a full match', async () => {
+    /* 三条候选**都给得出内容** —— 这一条要验的是判定，不是「接口没给」。 */
+    const seen: string[] = [];
     handlers.fetch = async (url) => {
+      seen.push(url);
       if (url.includes('/ai-cache/resolve')) {
         return json({
           ok: true,
           candidates: [
             { key: KEY_A, words: ['完全不在', '也不在'] },                  // 0/2
             { key: KEY_H, words: ['小黄花', '不在歌词里'] },                 // 1/2
-            { key: KEY_B, words: ['小黄花', '荡秋千', '不在这段里'] },       // 2/3 —— 最高的那条
+            { key: KEY_B, words: ['小黄花', '荡秋千', '不在这段里'] },       // 2/3 —— 最像的那条
           ],
         });
       }
-      if (url.includes(KEY_B)) return json({ hit: true, entry: { payload } });
-      if (url.includes(KEY_A) || url.includes(KEY_H)) return json({ hit: true, entry: { payload: secondPayload } });
+      if (url.includes(KEY_A) || url.includes(KEY_H) || url.includes(KEY_B)) {
+        return json({ hit: true, entry: { payload } });
+      }
       return json({ hit: false }, false);
     };
 
@@ -285,24 +303,61 @@ describe('pullAiCloudCache 的第二次机会', () => {
       lyricText: '故事的小黄花\n童年的荡秋千',
     });
 
+    expect(result.status).toBe('miss');
+    /* 连一条内容都不该去取 —— 判不过就是判不过。 */
+    expect(seen.some((url) => url.includes(KEY_A) || url.includes(KEY_H) || url.includes(KEY_B))).toBe(false);
+  });
+
+  /*
+   * 达标的那几条**一起比，取证据词最多的**。
+   *
+   * 全都 100% 在场时，词越多越不可能是巧合：只挑了「小黄花」一条，同名曲的翻唱也能撞上；
+   * 挑了四条还一条不落，那基本就是照着同一份歌词做的。所以最靠前那条（服务端按更新时间
+   * 排的）要让位给词最多的那条。
+   */
+  it('takes the candidate with the most evidence, not the first one', async () => {
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({
+          ok: true,
+          candidates: [
+            { key: KEY_A, words: ['小黄花'] },                                  // 1 条证据
+            { key: KEY_H, words: ['故事', '小黄花', '童年', '荡秋千'] },        // 4 条 —— 最可信那条
+            { key: KEY_B, words: ['故事', '童年'] },                            // 2 条
+          ],
+        });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      if (url.includes(KEY_H)) return json({ hit: true, entry: { payload: secondPayload } });
+      if (url.includes(KEY_B)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_J2, {
+      songTitle: '晴天',
+      lyricText: '故事的小黄花\n童年的荡秋千',
+    });
+
     expect(result.status).toBe('hit');
     if (result.status === 'hit') {
-      /* 走的是兜底：记成 'forced'，调用方据此不把它回填到精确键上。 */
-      expect(result.matched).toBe('forced');
-      expect(result.sourceKey).toBe(KEY_B);
-      expect(result.payload).toEqual(payload);
+      expect(result.matched).toBe('words');
+      expect(result.sourceKey).toBe(KEY_H);
+      expect(result.payload).toEqual(secondPayload);
     }
   });
 
   /*
-   * 兜底挑来的不回填：它本来就没验证上，写成精确键等于把一次猜测钉成永久事实 ——
-   * 下次、下下次，这首永远拿这份可能是别首歌的答案。
+   * 没验证过的不回填：写成精确键等于把一次猜测钉成永久事实 —— 下次、下下次，这首永远
+   * 拿这份可能是别首歌的答案。
+   *
+   * 这一档现在只剩「没歌词可判」（主题按歌名+歌手存的那一路）：有歌词时判不过就是
+   * miss，根本走不到这里。
    */
-  it('does not write a forced pick back under the exact key', async () => {
+  it('does not write an unverified pick back under the exact key', async () => {
     const puts: string[] = [];
     handlers.fetch = async (url, init) => {
       if (url.includes('/ai-cache/resolve')) {
-        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花', '不在歌词里'] }] });
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
       }
       if (init?.method === 'PUT') {
         puts.push(String(init.body ?? ''));
@@ -313,35 +368,36 @@ describe('pullAiCloudCache 的第二次机会', () => {
     };
 
     const result = await withAiCloudCache({
-      kind: 'stage',
+      kind: 'theme',
       fingerprint: KEY_L,
-      /* 兜底命中就不该轮到模型，也不该有 PUT。 */
+      /* 命中就不该轮到模型，也不该有 PUT。 */
       generate: async () => { throw new Error('不该轮到模型'); },
       validate: (value) => (value && typeof value === 'object' ? value as Record<string, unknown> : null),
       songTitle: '晴天',
-      lyricText: '故事的小黄花',
     });
 
     expect(result.source).toBe('cloud');
     expect(puts).toHaveLength(0);
   });
 
-  /* 一条高亮词都没标的候选：也走强制匹配那条路，不再整条出局。 */
-  it('forces a match even when no candidate marked any word', async () => {
+  /*
+   * 一条高亮词都没标的候选：**无从判**，那不是「全都命中」（0/0）。
+   *
+   * 以前它走强制匹配 —— 于是服务端早年的老条目（那时还不存 words）能把任何一首歌的答案
+   * 顶给任何人。现在老实回 miss。
+   */
+  it('gives up when a candidate marked no word at all', async () => {
     handlers.fetch = async (url) => {
       if (url.includes('/ai-cache/resolve')) {
         return json({ ok: true, candidates: [{ key: KEY_A, words: [] }] });
       }
-      /* 内容照样给：只有「真取不到内容」才该轮到 miss。 */
+      /* 内容照样给：只有「真取不到内容」才该轮到 miss，这一条验的是「没凭据」。 */
       if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
       return json({ hit: false }, false);
     };
 
     const result = await pullAiCloudCache('stage', KEY_D, { songTitle: '晴天', lyricText: '故事的小黄花' });
-    expect(result.status).toBe('hit');
-    if (result.status === 'hit') {
-      expect(result.sourceKey).toBe(KEY_A);
-    }
+    expect(result.status).toBe('miss');
   });
 
   /* 没歌名就无从下手，老老实实按没命中走。 */
@@ -352,12 +408,13 @@ describe('pullAiCloudCache 的第二次机会', () => {
   });
 
   /*
-   * 没有歌词可判（主题只按「歌名 + 歌手」存的那一路、纯音乐）也**照样**走强制匹配。
+   * 没有歌词可判（主题只按「歌名 + 歌手」存的那一路、纯音乐）**没得判**，那就照旧：
+   * 先问精确键，没中就按歌名取最靠前那条（'forced' —— 不回填）。
    *
    * 以前这一支在「没有歌词」时就当场记一次 miss 返回 —— 于是那一路本次会话再也不会问
    * 第二次，从「AI 主题」那一屏点播放看到的正是「云端明明有，就是匹配不上」。
    */
-  it('forces a match when there is no lyric to judge against', async () => {
+  it('takes the closest title match when there is no lyric to judge against', async () => {
     handlers.fetch = async (url) => {
       if (url.includes('/ai-cache/resolve')) {
         return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
@@ -369,6 +426,7 @@ describe('pullAiCloudCache 的第二次机会', () => {
     const result = await pullAiCloudCache('theme', KEY_J, { songTitle: '晴天' });
     expect(result.status).toBe('hit');
     if (result.status === 'hit') {
+      expect(result.matched).toBe('forced');
       expect(result.sourceKey).toBe(KEY_A);
       expect(result.payload).toEqual(payload);
     }
@@ -406,7 +464,7 @@ describe('pullAiCloudCache 的第二次机会', () => {
     expect(result.status).toBe('hit');
     if (result.status === 'hit') {
       expect(result.matched).toBe('words');
-      /* 服务端已经按「歌名全等优先、更新时间倒序」排过 —— 取最靠前那条。 */
+      /* 两条都是 2 条证据（一样多）→ 留服务端给的顺序（歌名全等优先、更新时间倒序）。 */
       expect(result.sourceKey).toBe(KEY_A);
       expect(result.payload).toEqual(payload);
     }
@@ -415,15 +473,48 @@ describe('pullAiCloudCache 的第二次机会', () => {
     expect(seen.some((url) => url.includes(KEY_H))).toBe(true);
   });
 
-  it('answers from the exact key without ever asking for candidates', async () => {
+  /*
+   * ⭐ **有歌词可判时不认精确键**，哪怕服务端照这个键答得出来。
+   *
+   * 键是「歌词 + policy」的 MD5，看着天衣无缝，可里面躺着的那一份未必是照着这份歌词做的
+   * —— 早年的「强制匹配 + 回填」把别首歌的答案写到这个键上了。读它，等于每次都拿回那份
+   * 错答案，而且永远没机会纠正。所以这里一定要按高亮词重新认一次。
+   */
+  it('never trusts the exact key once there is a lyric to judge by', async () => {
+    const seen: string[] = [];
+    handlers.fetch = async (url) => {
+      seen.push(url);
+      /* 精确键这一问**答得出来**：专门造这个场景，才能验出「答得出来也不读」。 */
+      if (url.includes(KEY_F)) return json({ hit: true, entry: { payload } });
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花'] }] });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload: secondPayload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_F, { songTitle: '晴天', lyricText: '故事的小黄花' });
+
+    expect(result.status).toBe('hit');
+    if (result.status === 'hit') {
+      expect(result.matched).toBe('words');
+      /* 拿回来的是**验证过**的那条，不是精确键里躺着的 payload。 */
+      expect(result.payload).toEqual(secondPayload);
+    }
+    expect(seen.some((url) => url.includes(KEY_F))).toBe(false);
+  });
+
+  /* 没歌词可判那一档（主题 / 纯音乐）反过来：无从判，只能信键。 */
+  it('does take the exact key when there is nothing to judge by', async () => {
     const seen: string[] = [];
     handlers.fetch = async (url) => {
       seen.push(url);
       return json({ hit: true, entry: { payload } });
     };
 
-    const result = await pullAiCloudCache('stage', KEY_F, { songTitle: '晴天', lyricText: '故事的小黄花' });
+    const result = await pullAiCloudCache('theme', KEY_N, { songTitle: '晴天' });
 
+    expect(result.status).toBe('hit');
     if (result.status === 'hit') expect(result.matched).toBe('exact');
     expect(seen.some((url) => url.includes('/ai-cache/resolve'))).toBe(false);
   });
@@ -446,7 +537,10 @@ describe('推上去之后自己要还能拉到', () => {
         stored = true;
         return json({ ok: true, stored: true });
       }
-      if (url.includes('/ai-cache/resolve')) return json({ ok: true, candidates: [] });
+      /* 推上去之后，这首歌在云端就是一条**有高亮词**的候选了 —— 有歌词时只能这样被认出来。 */
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: stored ? [{ key: KEY_PUSHED, words: ['小黄花'] }] : [] });
+      }
       if (url.includes(KEY_PUSHED) && stored) return json({ hit: true, entry: { payload } });
       return json({ hit: false }, false);
     };
@@ -498,7 +592,7 @@ describe('withAiCloudCache 把按内容捞到的那条回填', () => {
 
     const result = await withAiCloudCache({
       kind: 'stage',
-      fingerprint: KEY_G,
+      fingerprint: KEY_M,
       generate: async () => { throw new Error('不该轮到模型'); },
       validate: (value) => (value && typeof value === 'object' ? value as Record<string, unknown> : null),
       songTitle: '晴天',
