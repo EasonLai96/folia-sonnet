@@ -82,6 +82,8 @@ const HITCH_LOG_THRESHOLD_MS = 80;
 const TICK_PROBE_INTERVAL_MS = 16;
 /** 取原生卡顿日志的节拍（临时诊断，同上）。 */
 const LOOPER_DRAIN_INTERVAL_MS = 1000;
+/** 空频谱：反复 `new Uint8Array(0)` 只会给堆添垃圾，也白唤醒一遍订阅者。 */
+const EMPTY_SPECTRUM = new Uint8Array(0);
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -275,7 +277,8 @@ export function usePlaybackVisualizerBridge({
             audioBands.mid.set(breath);
             audioBands.vocal.set(breath);
             audioBands.treble.set(breath);
-            audioBands.spectrum?.set(new Uint8Array(0));
+            // 同一份空数组反复 set 没有意义，也会白唤醒订阅者。
+            audioBands.spectrum?.set(EMPTY_SPECTRUM);
         } else if (tapped) {
             audioBands.spectrum?.set(tapped.spectrum);
             audioPower.set(process((tapped.bass + tapped.lowMid) / 2, 3));
