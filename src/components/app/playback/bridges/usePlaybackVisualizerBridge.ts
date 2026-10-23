@@ -518,9 +518,106 @@ export function usePlaybackVisualizerBridge({
          * 排在一起，两边都带墙钟后六位，可直接对时间。
          */
         const drain = window.setInterval(() => void drainMainLooperLog(), LOOPER_DRAIN_INTERVAL_MS);
+        /*
+         * 第三个探针：**长动画帧（LoAF）**。
+         *
+         * 到这里为止，「卡的那 200ms 里渲染进程在干什么」一直是空的：
+         *   · `workMs = 0` 只说明**我们自己的 rAF 回调**没花时间，管不到别人；
+         *   · `[FoliaTick]` 脏只说明那条线程确实被占住了，说不出被**什么**占的；
+         *   · 主线程那边的 Printer 称的是 App 进程，管不到渲染进程。
+         *
+         * `long-animation-frame` 正好补这一段：浏览器在**一帧超过 50ms** 时把这一帧
+         * 拆开报给你 —— 从 `startTime` 到 `renderStart` 之间是**脚本**，`renderStart`
+         * 到 `styleAndLayoutStart` 之间是**样式/布局**，剩下的算绘制提交；每一段还带
+         * `blockingDuration` 和逐条 `scripts[]`（含 `invoker`、`sourceURL`、函数名）。
+         *
+         * 判据因此变成三条互斥的：
+         *   · `scripts` 里有名字 → 就是那段脚本，改它；
+         *   · `blocking` 几乎全落在 `styleAndLayout` 一段 → 是样式/布局（动画大量读写
+         *     布局属性、或一帧里改了太多元素），跟 JS 逻辑无关；
+         *   · `renderStart` 等于 `startTime`（脚本段为 0）、而 `duration` 很大 → 这一帧
+         *     **根本没开始渲染**，卡在等 BeginFrame / 合成器，去查 App 主线程与 GPU。
+         *
+         * ⚠️ 只有 Chromium 123+ 才有（WebView 随系统/商店更新，一般都在）。不支持时
+         * 打一条 `unsupported` 就收手 —— 否则「这一类条目一条都没有」会被误读成
+         * 「这段时间一帧都没掉」。
+         */
+        const loaf = observeLongAnimationFrames();
         return () => {
             window.clearInterval(timer);
             window.clearInterval(drain);
+            loaf?.disconnect();
         };
     }, []);
+}
+
+/**
+ * 挂 `long-animation-frame` 观察者（临时诊断，见调用处那段说明）。
+ *
+ * 返回 `null` 表示这台机器/这个 WebView 给不了。
+ */
+function observeLongAnimationFrames(): PerformanceObserver | null {
+    if (typeof PerformanceObserver !== 'function') {
+        console.warn('[FoliaLoaf] unsupported: no PerformanceObserver');
+        return null;
+    }
+    // `supportedEntryTypes` 是 Chrome 自己的静态属性，lib.dom 里没有，要绕开类型。
+    const supported = (PerformanceObserver as unknown as { supportedEntryTypes?: readonly string[] })
+        .supportedEntryTypes;
+    if (supported && !supported.includes('long-animation-frame')) {
+        console.warn('[FoliaLoaf] unsupported: entryType missing');
+        return null;
+    }
+    try {
+        const observer = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) {
+                console.warn('[FoliaLoaf]', JSON.stringify(describeLongFrame(entry)));
+            }
+        });
+        // 这个 type 比 lib.dom 新，但 `PerformanceObserverInit.type` 是 string，不用强转。
+        observer.observe({ type: 'long-animation-frame', buffered: false });
+        return observer;
+    } catch (error) {
+        console.warn('[FoliaLoaf] unsupported:', String(error));
+        return null;
+    }
+}
+
+/** 把一条 LoAF 记录压成一行能读的字，字段名尽量短（控制台一行塞得下）。 */
+function describeLongFrame(entry: PerformanceEntry) {
+    const frame = entry as PerformanceEntry & {
+        renderStart?: number;
+        styleAndLayoutStart?: number;
+        blockingDuration?: number;
+        firstUIEventTimestamp?: number;
+        scripts?: Array<{
+            startTime?: number;
+            invoker?: string;
+            sourceURL?: string;
+            sourceFunctionName?: string;
+            duration?: number;
+            forcedStyleAndLayoutDuration?: number;
+        }>;
+    };
+    const start = entry.startTime;
+    const at = (value?: number) => (typeof value === 'number' ? Math.round(value - start) : null);
+    return {
+        dur: Math.round(entry.duration),
+        // 脚本段 / 样式布局段各自的起点（相对这一帧），null = 没走到那一步。
+        render: at(frame.renderStart),
+        layout: at(frame.styleAndLayoutStart),
+        block: typeof frame.blockingDuration === 'number' ? Math.round(frame.blockingDuration) : null,
+        wallMs: Date.now() % 1000000,
+        native: nativePlaybackEngine.ownsPlayback(),
+        // 前三条脚本就够认出是谁了；名字取不到时退回 invoker / 文件名末段。
+        scripts: (frame.scripts ?? []).slice(0, 3).map(script => ({
+            name: script.sourceFunctionName || script.invoker || '?',
+            at: at(script.startTime),
+            dur: typeof script.duration === 'number' ? Math.round(script.duration) : null,
+            forced: typeof script.forcedStyleAndLayoutDuration === 'number'
+                ? Math.round(script.forcedStyleAndLayoutDuration)
+                : null,
+            url: (script.sourceURL ?? '').split('/').pop(),
+        })),
+    };
 }
