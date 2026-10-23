@@ -86,6 +86,39 @@ const LOOPER_DRAIN_INTERVAL_MS = 1000;
 const EMPTY_SPECTRUM = new Uint8Array(0);
 /** store 变更打点的最短间隔（临时诊断）：同一个键连着抖的时候别刷屏，数在 `dropped` 里。 */
 const STORE_PROBE_MIN_INTERVAL_MS = 120;
+/**
+ * 开页后的「热身期」（临时诊断）：这段时间里一个探针都不许出声。
+ *
+ * ⚠️ 这一条是被人肉日志教育出来的：前两版里**每次贴回来的都是启动那一秒** ——
+ * `bootstrap-*.js` 133ms、`FileReader.onload`、`import.then` 拉 lazy chunk、
+ * `IDBRequest.onsuccess`（zustand persist 回填），一秒钟砸出十几条 LoAF，
+ * 而真正要找的「稳态隔几秒顿一下」被这些淹在里面根本看不见。
+ *
+ * 启动贵是一次性的，跟稳态的周期性停顿**不是同一个问题**，混在一起只会看错。
+ * 所以前 WARMUP_MS 一律闭嘴，之后才开始记 —— 那时界面已经画完、歌也正常在放。
+ */
+const PROBE_WARMUP_MS = 8000;
+/** 汇总窗口（临时诊断）：稳态每 5 秒一行，先看形状再翻明细。 */
+const SUMMARY_INTERVAL_MS = 5000;
+/** 这个模块被求值的那一刻 ≈ 页面开始跑的时刻，热身期从这里算。 */
+const PROBE_EPOCH_MS = performance.now();
+
+/**
+ * 一个汇总窗口里攒下的数（临时诊断，见 `[FoliaSum]`）。
+ *
+ * 逐条日志适合看「那一下到底发生了什么」，但手机上控制台窄，翻十几条就晕。
+ * 先看每 5 秒这一行：掉了几帧、最长多少、LoAF 里有谁、store 里哪个键在动。
+ */
+const probeWindow = {
+    gaps: [] as number[],
+    loafCount: 0,
+    maxLoafMs: 0,
+    maxBlockMs: 0,
+    scripts: new Map<string, number>(),
+    storeKeys: new Map<string, number>(),
+    storeDropped: 0,
+    storeEvents: 0,
+};
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -233,7 +266,8 @@ export function usePlaybackVisualizerBridge({
          */
         if (lastFrameAtMsRef.current !== 0) {
             const frameGapMs = nowMsValue - lastFrameAtMsRef.current;
-            if (frameGapMs >= HITCH_LOG_THRESHOLD_MS) {
+            if (frameGapMs >= HITCH_LOG_THRESHOLD_MS && probeWarm()) {
+                probeWindow.gaps.push(Math.round(frameGapMs));
                 const memory = (performance as Performance & {
                     memory?: { usedJSHeapSize: number };
                 }).memory;
@@ -500,7 +534,7 @@ export function usePlaybackVisualizerBridge({
             const nowMs = performance.now();
             if (lastTickAtMs !== 0) {
                 const tickGapMs = nowMs - lastTickAtMs;
-                if (tickGapMs >= HITCH_LOG_THRESHOLD_MS) {
+                if (tickGapMs >= HITCH_LOG_THRESHOLD_MS && probeWarm()) {
                     console.warn('[FoliaTick]', JSON.stringify({
                         gapMs: Math.round(tickGapMs),
                         atMs: Math.round(nowMs),
@@ -558,13 +592,62 @@ export function usePlaybackVisualizerBridge({
          * 秒几次也一并看得出来 —— 一秒十几次的键，就是那 40~175ms 的元凶。
          */
         const offStore = attachStoreProbe();
+        /*
+         * 每 5 秒一行汇总（临时诊断）。
+         *
+         * 逐条日志回答「那一下发生了什么」，这一行回答「稳态到底什么形状」：
+         * 掉了几帧、最长多少、LoAF 里出现最多的是哪个脚本、store 里哪个键在动。
+         * 手机上控制台只有几行宽，先看这个再翻明细。
+         */
+        const summary = window.setInterval(() => {
+            if (!probeWarm()) return;
+            console.warn('[FoliaSum]', JSON.stringify(takeProbeSummary()));
+        }, SUMMARY_INTERVAL_MS);
         return () => {
             window.clearInterval(timer);
             window.clearInterval(drain);
+            window.clearInterval(summary);
             loaf?.disconnect();
             offStore();
         };
     }, []);
+}
+
+/** 热身期过了没有（临时诊断，见 PROBE_WARMUP_MS）。 */
+const probeWarm = () => performance.now() - PROBE_EPOCH_MS >= PROBE_WARMUP_MS;
+
+/** 把一张计数表压成 `名字×次数`，取前几名；空的给空串。 */
+function topCounts(counts: Map<string, number>, limit: number): string[] {
+    return [...counts.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, limit)
+        .map(entry => `${entry[0]}×${entry[1]}`);
+}
+
+/** 取走这个窗口攒下的数并清空（临时诊断，见 `[FoliaSum]`）。 */
+function takeProbeSummary() {
+    const summary = {
+        frames: probeWindow.gaps.length,
+        maxGap: probeWindow.gaps.length ? Math.max(...probeWindow.gaps) : 0,
+        loaf: probeWindow.loafCount,
+        maxLoaf: Math.round(probeWindow.maxLoafMs),
+        maxBlock: Math.round(probeWindow.maxBlockMs),
+        scripts: topCounts(probeWindow.scripts, 4).join(','),
+        store: topCounts(probeWindow.storeKeys, 6).join(','),
+        storeEvents: probeWindow.storeEvents,
+        storeDropped: probeWindow.storeDropped,
+        native: nativePlaybackEngine.ownsPlayback(),
+        wallMs: Date.now() % 1000000,
+    };
+    probeWindow.gaps = [];
+    probeWindow.loafCount = 0;
+    probeWindow.maxLoafMs = 0;
+    probeWindow.maxBlockMs = 0;
+    probeWindow.scripts.clear();
+    probeWindow.storeKeys.clear();
+    probeWindow.storeEvents = 0;
+    probeWindow.storeDropped = 0;
+    return summary;
 }
 
 /**
@@ -585,9 +668,16 @@ function attachStoreProbe(): () => void {
             if (current[key] !== before[key]) changed.push(key);
         }
         if (changed.length === 0) return;
+        // 热身期里一率不记：启动那几秒的 persist 回填会把统计冲成噪音。
+        if (!probeWarm()) return;
+        probeWindow.storeEvents += 1;
+        for (const key of changed) {
+            probeWindow.storeKeys.set(key, (probeWindow.storeKeys.get(key) ?? 0) + 1);
+        }
         const nowMs = performance.now();
         if (nowMs - lastLoggedAtMs < STORE_PROBE_MIN_INTERVAL_MS) {
             dropped += 1;
+            probeWindow.storeDropped += 1;
             return;
         }
         lastLoggedAtMs = nowMs;
@@ -620,7 +710,15 @@ function observeLongAnimationFrames(): PerformanceObserver | null {
     try {
         const observer = new PerformanceObserver(list => {
             for (const entry of list.getEntries()) {
-                console.warn('[FoliaLoaf]', JSON.stringify(describeLongFrame(entry)));
+                if (!probeWarm()) continue;
+                const described = describeLongFrame(entry);
+                probeWindow.loafCount += 1;
+                probeWindow.maxLoafMs = Math.max(probeWindow.maxLoafMs, described.dur);
+                probeWindow.maxBlockMs = Math.max(probeWindow.maxBlockMs, described.block ?? 0);
+                for (const script of described.scripts) {
+                    probeWindow.scripts.set(script.name, (probeWindow.scripts.get(script.name) ?? 0) + 1);
+                }
+                console.warn('[FoliaLoaf]', JSON.stringify(described));
             }
         });
         // 这个 type 比 lib.dom 新，但 `PerformanceObserverInit.type` 是 string，不用强转。
