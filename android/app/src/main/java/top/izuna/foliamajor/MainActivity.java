@@ -18,11 +18,14 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.PluginHandle;
 
 // Capacitor 官方插件。
 //
@@ -32,6 +35,7 @@ import com.getcapacitor.BridgeActivity;
 // `"StatusBar" plugin is not implemented on android` —— 那条未处理的 Promise 拒绝就是这么来的，
 // 状态栏图标的明暗也跟着一直是默认的。
 import com.capacitorjs.plugins.browser.BrowserPlugin;
+import com.capacitorjs.plugins.filesystem.FilesystemPlugin;
 import com.capacitorjs.plugins.splashscreen.SplashScreenPlugin;
 import com.capacitorjs.plugins.statusbar.StatusBarPlugin;
 
@@ -52,6 +56,10 @@ import java.util.Locale;
 public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "FoliaMainActivity";
+
+    // YouTube Music 登录屏用 androidx 的 Activity Result API 回传：注册要在 STARTED 之前，
+    // 结果按 resultCode+data 交给插件自己派话（见 FoliaYtmPlugin / YtmSignInActivity）。
+    private ActivityResultLauncher<Intent> ytmSignInLauncher;
 
     /**
      * 播放控制意图由清单注册的 FoliaCommandReceiver 统一接收，不再挂在 Activity 上。
@@ -196,6 +204,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(StatusBarPlugin.class);
         registerPlugin(SplashScreenPlugin.class);
         registerPlugin(BrowserPlugin.class);
+        // YouTube Music 的音频下载缓存走它（ytm/android/ytmAndroidBridge.ts 的 Filesystem）。
+        registerPlugin(FilesystemPlugin.class);
         // 汽水音乐：签名宿主（隐藏 WebView + bdms.js）的原生桥。
         registerPlugin(FoliaQishuiPlugin.class);
         // YouTube Music：只管「登录一次、把 YouTube 的 cookie 交出来」，取数不经过原生
@@ -209,6 +219,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(top.izuna.foliamajor.player.FoliaNativePlayerPlugin.class);
 
         super.onCreate(savedInstanceState);
+
+        attachYtmSignInLauncher();
 
         checkWebViewSupport();
         applyImmersiveMode();
@@ -594,5 +606,22 @@ public class MainActivity extends BridgeActivity {
         // 亮色主题下图标用深色，反之为浅色。
         controller.setAppearanceLightStatusBars(isDaylight);
         controller.setAppearanceLightNavigationBars(isDaylight);
+    }
+
+    /** 给 YouTube Music 登录屏（FoliaYtm 插件）注册一个 Activity Result 通道，把结果递给插件。 */
+    private void attachYtmSignInLauncher() {
+        ytmSignInLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                PluginHandle handle = getBridge().getPlugin("FoliaYtm");
+                if (handle != null && handle.getInstance() instanceof FoliaYtmPlugin) {
+                    ((FoliaYtmPlugin) handle.getInstance())
+                        .onSignInActivityResult(result.getResultCode(), result.getData());
+                }
+            });
+        PluginHandle ytm = getBridge().getPlugin("FoliaYtm");
+        if (ytm != null && ytm.getInstance() instanceof FoliaYtmPlugin) {
+            ((FoliaYtmPlugin) ytm.getInstance()).attachSignInLauncher(ytmSignInLauncher);
+        }
     }
 }

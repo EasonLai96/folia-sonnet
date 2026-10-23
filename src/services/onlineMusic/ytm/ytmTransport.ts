@@ -1,20 +1,16 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
-import type { ProviderAvailability, ProviderErrorCode } from '../../../types/onlineMusic';
-import { isYtmInPageAvailable, runYtmInPage } from './ytmInPageRuntime';
+import type { ProviderErrorCode } from '../../../types/onlineMusic';
+import { isCapacitorAndroid } from '../../../platform/runtime';
 
 // src/services/onlineMusic/ytm/ytmTransport.ts
 // The IPC boundary to electron/ytm/ytmApiBridge.cjs. Google credentials stay in the main process;
 // only the shapes below cross over.
-//
-// 安卓上没有 Electron，协议层换成 ytmusic 那套跑在**主 WebView 里**（见 ytmInPageRuntime）：
-// youtubei.js 本来就是浏览器库，不必像汽水那样塞进一个隐藏 WebView。原生只留一座登录
-// Activity 负责把 YouTube 的 cookie 交出来（见 platform/foliaNative 的 FoliaYtm）。
 
 export type YtmOperation =
     | 'login_status' | 'logout'
     | 'web_login_start' | 'web_login_check' | 'web_login_cancel' | 'web_login_open'
     | 'search_songs' | 'song_detail' | 'song_detail_en' | 'song_detail_zh' | 'lyrics' | 'album' | 'artist' | 'playlist' | 'public_playlist' | 'user_playlists' | 'user_albums' | 'audio'
-    | 'explore' | 'mix' | 'playlist_edit' | 'list_save' | 'list_saved' | 'song_like';
+    | 'explore' | 'mix' | 'playlist_edit' | 'list_save' | 'list_saved' | 'song_like' | 'account_history';
 export type YtmParams = Record<string, string | undefined>;
 // `reason`: the desktop side's own word for why a sign-in failed, where it has one.
 export type YtmBridgeResult =
@@ -73,28 +69,29 @@ export type YtmWireWebLoginState =
     | { state: 'confirmed'; account: unknown }
     | { state: 'error'; message: string; code?: ProviderErrorCode; reason?: string };
 
-/**
- * 桌面端靠 Electron 那座桥；安卓上协议层跑在主 WebView 里，登录由原生的 Activity 负责。
- * 两条路给的是同一套信封（operation + params → data），所以渲染层只有这一处判断。
- */
-export const getYtmTransportAvailability = (): ProviderAvailability => {
-    if (typeof window !== 'undefined' && typeof window.electron?.ytmRequest === 'function') {
-        return { configured: true };
-    }
-    // 安卓 WebView：youtubei.js 跑在页内，不靠原生就能取数（见 ytmInPageRuntime）。
-    if (isYtmInPageAvailable()) return { configured: true };
-    return { configured: false, reason: 'runtime-unavailable' };
+const hasDesktopBridge = () => typeof window !== 'undefined' && typeof window.electron?.ytmRequest === 'function';
+
+// The Android App has no desktop side: there the operations run in the page itself, through the
+// native sign-in gate (android/ytmAndroidBridge.ts), loaded on first use.
+const sendRequest = async (operation: YtmOperation, params: YtmParams): Promise<YtmBridgeResult> => {
+    if (hasDesktopBridge()) return window.electron!.ytmRequest(operation, params);
+    const { requestYtmOnAndroid } = await import('./android/ytmAndroidBridge');
+    return requestYtmOnAndroid(operation, params);
 };
 
+export const getYtmTransportAvailability = () => (
+    hasDesktopBridge() || isCapacitorAndroid()
+        ? { configured: true } as const
+        : { configured: false, reason: 'runtime-unavailable' } as const
+);
+
 export async function requestYtm<T = unknown>(operation: YtmOperation, params: YtmParams = {}): Promise<T> {
-    // 安卓：协议层就在本页里，直接调。
-    if (isYtmInPageAvailable()) return (await runYtmInPage(operation, params)) as T;
     if (!getYtmTransportAvailability().configured) {
         throw new OnlineProviderError('unavailable', 'YouTube Music requires the desktop app', 'ytm');
     }
     const startedAt = Date.now();
     let result: YtmBridgeResult;
-    try { result = await window.electron!.ytmRequest(operation, params); }
+    try { result = await sendRequest(operation, params); }
     catch {
         console.warn(`[Ytm] ${operation} did not reach the desktop app`);
         throw new OnlineProviderError('network', 'YouTube Music desktop request failed', 'ytm');

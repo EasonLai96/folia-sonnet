@@ -6,7 +6,6 @@ import { parseLyricsByFormat } from '../../../utils/lyrics/parserCore';
 import { noteYtmAccount, ytmHasPremium } from './ytmAccount';
 import { getYtmTransportAvailability, requestYtm } from './ytmTransport';
 import type { YtmWirePage, YtmWireSong, YtmWireWebLoginState } from './ytmTransport';
-import { getYtmLoginDiagnostics } from './ytmInPageRuntime';
 import { createYtmPager, normalizeYtmCollection, normalizeYtmSong, normalizeYtmUser, requireYtmSong } from './ytmNormalize';
 import { clearYtmCatalogCache, ytmCatalog } from './ytmCatalog';
 import { clearYtmLibraryCache, ytmLibrary } from './ytmLibrary';
@@ -16,6 +15,7 @@ import { resetYtmRecommendations, ytmRecommendations } from './ytmRecommendation
 import { describeYtmLoginFailure, ytmLoginFailure } from './ytmLoginFailure';
 import { describeYtmFailure } from './ytmFailure';
 import i18n from '../../../i18n/config';
+import { isCapacitorAndroid } from '../../../platform/runtime';
 
 // src/services/onlineMusic/ytm/ytmProvider.ts
 // YouTube Music adapter. Sign-in is made in the person's own browser: the desktop side opens a
@@ -61,7 +61,14 @@ export const ytmProvider: OnlineMusicProvider = {
     // `recommendations` is the radio tab (ytmRecommendations.ts): a personal FM made of song
     // radios, and the playlists of the account's music page. It has no daily songs, which YouTube
     // Music has no counterpart of. Its recommendation page is the explore tab.
-    capabilities: {
+    // The Android App signs in through its own native screen (android/ytmAndroidBridge.ts): what needs the
+    // account beyond that — the library, the explore tab, mutations of it — has no port there yet.
+    capabilities: isCapacitorAndroid() ? {
+        search: true, playback: true, lyrics: true, wordByWordLyrics: false, auth: true,
+        userLibrary: false, playlists: true, albums: true, artists: true, userAlbums: false,
+        recommendations: false, explore: false, mutations: false, playlistTrackMutations: false, likes: false,
+        playlistSubscription: false,
+    } : {
         search: true, playback: true, lyrics: true, wordByWordLyrics: false, auth: true,
         userLibrary: true, playlists: true, albums: true, artists: true, userAlbums: true,
         recommendations: true, explore: true, mutations: true, playlistTrackMutations: true, likes: true,
@@ -143,9 +150,13 @@ export const ytmProvider: OnlineMusicProvider = {
     },
     auth: {
         // On macOS a browser goes on running after its last window is closed: the note says to quit it.
+        // On Android the sign-in opens on a screen of the app itself, and Google may refuse an embedded
+        // browser there: that is what this note says, instead of the browser-window one.
         getLoginTexts: () => ({
             title: 'home.loginTitleYtm',
-            note: isMacPlatform ? 'home.loginNoteYtmBrowserMac' : 'home.loginNoteYtmBrowser',
+            ...(isCapacitorAndroid()
+                ? { note: 'home.loginNoteYtmAndroid' }
+                : { note: isMacPlatform ? 'home.loginNoteYtmBrowserMac' : 'home.loginNoteYtmBrowser' }),
             // The desktop side found none of the browsers it opens: the window then says which ones the sign-in needs.
             caseNotes: { 'browser-unfinished': 'home.loginCaseYtmUnfinished', 'no-browser': 'home.loginNoBrowserYtm' },
         }),
@@ -179,8 +190,6 @@ export const ytmProvider: OnlineMusicProvider = {
             return key;
         },
         describeLoginFailure: describeYtmLoginFailure,
-        // 登录确认之后账号没读出来（account-refresh-failed）时，报告里这一段靠它说出卡在哪。
-        getLoginDiagnostics: async () => getYtmLoginDiagnostics(),
         async openLoginPage() { await requestYtm('web_login_open'); },
         // The window of the sign-in is opened by its start, and closing it ends the sign-in.
         opensLoginPageItself: () => true,
