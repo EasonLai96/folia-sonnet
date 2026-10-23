@@ -349,6 +349,7 @@ http://127.0.0.1:13000
 - `src/md5.ts`：MD5 实现（WebCrypto 不提供 MD5，而缓存键就是它）。
 - `src/stageGallery.ts` / `src/stageGalleryView.ts`：对外那一面（访客检索页与详情页）的路由与渲染。
 - `install.sh` / `install.ps1`：Node、Docker、Cloudflare 三种部署菜单。
+- `scripts/scan-dirty-cache.mts`：扫云缓存里「内容与键对不上」的脏条目（只读，见下）。
 
 当前协议约束：schema version 为 `2`（v2 新增 `font_market` / `font_files` / `font_previews` / `ai_cache` / `admin_sessions` 五张表），主题 manifest 固定为 `256` 个 bucket；主题批量写入上限为 `500`，bucket 请求最多 `32` 个，完整主题 list 最多 `1000` 条；字体文件单份上限 `40MB`、预览图 `2MB`；AI 缓存单条 payload 上限 `64KB`，`kind` 需匹配 `^[a-z0-9_-]{1,32}$`、`key` 需匹配 `^[a-f0-9]{32}$`。修改这些限制或路由时必须同步客户端 `src/services/sync/*`、`src/services/fontMarket.ts`、`src/services/aiCloudCache.ts` 和本 README。
 
@@ -435,6 +436,45 @@ http://127.0.0.1:13000
 - **拉取那条链路完全不看它们**，键仍然是那个 MD5 —— 早先推上去、没有这些字段的条目照样拉得到。
 - `lyricHash` 之所以要单独带一份：缓存键是「歌词 + policy」的 MD5，而 policy 里的屏蔽样式与自定义提示词只有本机能算，服务端复现不出来，所以另给一份纯歌词的哈希去比对。
 - 没写平台名（本地歌曲、旧客户端）时，服务端按 **netease → qq → kugou** 顺序逐个平台试，先搜到谁算谁。
+
+---
+
+## 🧹 扫云缓存里的脏条目
+
+判定收紧之前，拉缓存是「精确键没中 → 按歌名挑一条 → **回填到自己的键上**」。回填之后每次都是精确命中，于是**错一次就一直错下去**：键是这首的，内容是别首的。新条目不会再脏，可早先写进去的那些还躺着。
+
+`scripts/scan-dirty-cache.mts` 就是去把它们点出来：
+
+```bash
+cd sync-server
+npx tsx scripts/scan-dirty-cache.mts                 # 全量只读扫一遍
+npx tsx scripts/scan-dirty-cache.mts --only 晴天      # 只看某个歌名
+npx tsx scripts/scan-dirty-cache.mts --limit 40 --out /tmp/dirty.json
+```
+
+判据跟客户端拉缓存那一侧是**同一条规矩**：AI 标的高亮词里能当证据的那几个（去掉单字与虚词），在这首歌的歌词里必须 **100%** 全在。歌词由服务端那套歌词源去平台上搜，最多取 3 个版本 —— 同一首歌换个版本的 LRC 照样算数。
+
+| 结论 | 含义 | 怎么办 |
+| --- | --- | --- |
+| `dirty` | 高亮词在这首歌的歌词里凑不齐 —— 键与内容对不上 | 删掉，或让客户端重新生成覆盖 |
+| `clean` | 证据词全在 | 留着 |
+| `no_evidence` | 这条没标任何能当证据的词（老条目） | **不算脏**，无从判，留着 |
+| `no_lyric` | 平台上搜不到这首歌 | **不算脏**，无从判，留着 |
+| 死歌名 | 歌名在库里，可按歌名一条也捞不回来 | 没人拉得到，可清 |
+
+后三档刻意不当脏处理：**宁可漏，不可错杀** —— 删掉一条别人做好的主题，比留着一条可能错的糟得多。
+
+确认过报告之后才谈删除：
+
+```bash
+npx tsx scripts/scan-dirty-cache.mts --delete --admin-user <账号> --admin-pass <密码> --yes
+```
+
+删除走管理接口（`/admin/login` 拿 cookie + `DELETE /admin/api/ai-cache/stage/:key`），被覆盖前的旧版还在 `ai_cache_backups` 里，管理员面板能捞回来。**不给 `--delete` 就一个字节都不改**。
+
+扫的那两个接口（`/api/ai-cache/songs` 与 `/api/ai-cache/resolve`）本来就是公开的，所以不需要 wrangler、不需要登录 Cloudflare；一个歌名最多看到 12 条候选（服务端 `MAX_RESOLVE_CANDIDATES`），版本特别多的歌名可以用 `--only` 分片。
+
+---
 
 ## 🔍 访客检索页
 

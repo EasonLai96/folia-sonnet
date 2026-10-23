@@ -44,6 +44,7 @@ import {
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { resolveSongPlatform } from '../utils/songPlatform';
 import { setStatusMessage as setStatusMsg } from '../stores/useStatusMessageStore';
+import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { useStableCallbacks } from './useStableCallbacks';
 
 type StatusSetter = Dispatch<SetStateAction<StatusMessage | null>>;
@@ -70,6 +71,22 @@ const saveSyncedThemeWithoutBlocking = (...args: Parameters<typeof saveSyncedThe
 const CUSTOM_THEME_PREFERRED_KEY = 'custom_theme_preferred';
 
 /** 云端 / 本地那两层只认「歌名 + 歌手」，把 SongResult 折成它要的形状。 */
+/**
+ * 当前这首歌的歌词正文 —— 只在**歌词确实是这首的**时候才给。
+ *
+ * 切歌那一刻歌词常常还没换过来：拿上一首的词去判这一首，会把明明合规的条目判成不合规
+ * （凭空多一次生成）。宁可这一回不判（照旧信键），也不要拿错的歌词当凭据。
+ */
+const readLyricTextFor = (song: SongResult | null): string => {
+    if (!song) return '';
+    const lyrics = usePlaybackStore.getState().lyrics;
+    if (!lyrics?.lines?.length) return '';
+    const lyricTitle = String(lyrics.title ?? '').trim();
+    const songTitle = String(song.name ?? '').trim();
+    if (lyricTitle && songTitle && lyricTitle !== songTitle) return '';
+    return lyrics.lines.map(line => line.fullText).join('\n').trim();
+};
+
 const songRefOf = (song: SongResult): AiThemeSongRef => ({
     title: song?.name,
     artist: song?.artists?.map(artist => artist.name).filter(Boolean).join('、'),
@@ -598,7 +615,11 @@ export function useThemeController({
              */
             const cloudKey = localSong.aiCloudThemeKey;
             if (cloudKey) {
-                const cached = await pullCachedThemeByKey(cloudKey);
+                /*
+                 * 带上歌词：这一路以前是**按已知键直取**，一道判定都不走 —— 舞台那条链路
+                 * 判住的脏条目，从「AI 主题」这一屏点播放照样能进来。
+                 */
+                const cached = await pullCachedThemeByKey(cloudKey, readLyricTextFor(localSong));
                 if (cached) {
                     applyDualTheme(cached, { respectCustomPreference: false });
                     return 'cloud-theme' as const;
@@ -613,7 +634,7 @@ export function useThemeController({
                  * 这一路现在是**强制匹配**（services/aiCloudCache）：歌名对得上就用，不再因为
                  * 高亮词差几个字判成没有。所以它是这一屏点播放最后那道兜底：取不到才轮到生成。
                  */
-                const byTitle = await pullAiThemeFromCloud(songRefOf(localSong));
+                const byTitle = await pullAiThemeFromCloud(songRefOf(localSong), readLyricTextFor(localSong));
                 if (byTitle) {
                     applyDualTheme(byTitle, { respectCustomPreference: false });
                     return 'cloud-theme' as const;

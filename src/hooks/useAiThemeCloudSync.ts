@@ -107,7 +107,8 @@ export const useAiThemeCloudSync = (options: {
              * 老数据的兜底：早先同步上去的主题存在 kind='theme'（按歌名 + 歌手算键）里，
              * 舞台那条链路上没有。两条都问过才算真的没有。
              */
-            const legacy = await pullAiThemeFromCloud(songRef);
+            /* 带歌词：主题那条路也要过高亮词，不然舞台那道判住的东西从这儿照旧进来。 */
+            const legacy = await pullAiThemeFromCloud(songRef, allText);
             if (legacy && applyAiThemeFromOutside(legacy)) {
                 setStatusMessage({ type: 'success', text: t('ui.aiThemeCloudPulled') });
                 return;

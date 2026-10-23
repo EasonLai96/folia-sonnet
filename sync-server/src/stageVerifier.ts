@@ -94,21 +94,99 @@ const flattenForMatch = (value: string): string => (
 );
 
 /**
- * 「合规」：AI 标记的高亮词在这首歌的歌词里**全都找得到**。
+ * 一个词要能当证据，至少得这么长。
+ *
+ * **单字不算证据**：「留」在几乎每一首中文歌里都能撞上，它说明不了这条答案是照着哪首
+ * 歌词做的；「留住」才算一句有点内容的凭据。英文同理（单字母、单字都不算）。
+ */
+const MIN_EVIDENCE_WORD_LENGTH = 2;
+
+/**
+ * 不构成证据的词：代词、助词、连词、介词、疑问词、程度副词 —— **任何一首歌里都有**的那些。
+ *
+ * 它们出现在歌词里说明不了任何事情。用户报的例子最典型：一条候选的高亮词是
+ * `留住 / 我 / 什么 / 把 / 你`，而手上这首的歌词里「留住」和「把」根本不存在，光靠
+ * 「我」「什么」「你」这三个就把另一首近亲的答案顶成了这首的主题。
+ *
+ * 只收到「显然没有区分度」这一层为止 —— 开始 / 结束 / 快乐 这类实词**不**进这张表：
+ * 它到底是内容还是套话机器分不清，宁可放过也不误伤。表里全是压平后（去空白、转小写）
+ * 的形式。
+ *
+ * ⚠️ **这张表与客户端 `src/services/aiCloudCache.ts` 里的 `NON_EVIDENCE_WORDS` 是同一
+ * 张表**（两份代码，一个规矩）：改一边必须改另一边，否则客户端判得过的条目在服务端
+ * 被拒（或反过来），`test/unit/sync-server/highlightEvidenceParity.test.ts` 钉着这一点。
+ */
+const NON_EVIDENCE_WORDS = new Set([
+  // 代词与指称
+  '我', '我们', '咱', '咱们', '你', '你们', '他', '他们', '她', '她们', '它', '它们',
+  '自己', '大家', '这', '这个', '这些', '那', '那个', '那些', '谁', '什么', '怎么',
+  '怎样', '怎么样', '这么', '那么', '多少', '哪里', '哪儿', '这里', '那里',
+  // 助词 / 语气
+  '的', '地', '得', '了', '着', '过', '吗', '呢', '吧', '啊', '呀', '哦', '啦',
+  // 系词 / 助动词 / 否定
+  '是', '在', '有', '没', '没有', '不', '别', '无', '要', '会', '能', '可以', '应该',
+  '需要', '就是', '还是', '也是', '都是',
+  // 连词 / 介词
+  '和', '与', '跟', '或', '而', '且', '但', '但是', '却', '因为', '所以', '然后',
+  '而且', '如果', '虽然', '于是', '把', '被', '给', '让', '使', '对', '从', '向',
+  '往', '到', '于', '为', '用',
+  // 程度 / 频率 / 范围
+  '也', '都', '就', '又', '再', '还', '很', '太', '更', '最', '才', '只', '一直',
+  '总是', '一个', '一样', '一些', '所有', '一切', '时候', '现在', '已经', '知道',
+  '觉得', '感觉', '一起',
+  // 英文里同样没有区分度的那些
+  'the', 'and', 'of', 'to', 'in', 'on', 'at', 'as', 'an', 'be', 'by', 'if', 'or',
+  'is', 'it', 'we', 'me', 'my', 'up', 'so', 'no', 'do', 'am', 'are', 'was', 'you',
+  'your', 'this', 'that', 'what', 'when', 'not',
+]);
+
+/** 能当证据用的那部分高亮词：去掉单字，再去掉上面那张表里的虚词。 */
+export const highlightEvidenceWords = (words: readonly string[]): string[] => (
+  words
+    .map((word) => flattenForMatch(word))
+    .filter((word) => word.length >= MIN_EVIDENCE_WORD_LENGTH && !NON_EVIDENCE_WORDS.has(word))
+);
+
+/**
+ * 「合规」：**证据词**在这首歌的歌词里**全部找得到**，少一个都不行。
  *
  * 高亮词是模型照着歌词挑出来的 —— 一条照着别的歌做的答案，不可能把这首的词挑出来。
  * 所以这比哈希宽松（容忍同一首歌的不同版本），又比「一律放行」严格得多。
  *
- * 一个高亮词都没有时不算合规：哈希已经对不上了，再没有任何证据说明它属于这首歌。
+ * 判定只看**证据词**（去掉单字与虚词）：「我 / 什么 / 你」这种任何一首歌里都有的词出现
+ * 在歌词里说明不了任何事情，拿它们凑出来的「命中」会把另一首近亲的答案顶成这首的
+ * —— 用户报的就是这个。规矩与客户端拉缓存那一侧**完全一致**：100%，差一个就不算。
+ *
+ * 一个证据词都没有时不算合规：那不是「全都命中了」（0/0），是**没有凭据**。
  */
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
-  if (words.length === 0) return false;
+  const evidence = highlightEvidenceWords(words);
+  if (evidence.length === 0) return false;
   const haystack = flattenForMatch(lyricText);
   if (!haystack) return false;
-  return words.every((word) => {
-    const needle = flattenForMatch(word);
-    return needle.length > 0 && haystack.includes(needle);
-  });
+  return evidence.every((needle) => haystack.includes(needle));
+};
+
+/**
+ * 证据词的**总数、命中数与缺的那几个**。
+ *
+ * 判定本身用 `highlightWordsPresent`；扫描脚本要拿 `missing` 说清「这一条差在哪」，
+ * 不然管理员看着一条「脏」不知道它脏在哪、是不是误判。
+ */
+export const countEvidenceHits = (
+  words: readonly string[],
+  lyricText: string,
+): { total: number; hits: number; missing: string[] } => {
+  const evidence = highlightEvidenceWords(words);
+  const haystack = flattenForMatch(lyricText);
+  if (evidence.length === 0 || !haystack) {
+    return { total: evidence.length, hits: 0, missing: [...evidence] };
+  }
+  const missing: string[] = [];
+  for (const needle of evidence) {
+    if (!haystack.includes(needle)) missing.push(needle);
+  }
+  return { total: evidence.length, hits: evidence.length - missing.length, missing };
 };
 
 export const verifyStageUpload = async (input: {
