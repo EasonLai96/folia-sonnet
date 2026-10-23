@@ -55,6 +55,8 @@ const KEY_H = 'd4e5f6a7'.repeat(4);
 const KEY_I = 'e6f7a8b9'.repeat(4);
 const KEY_PUSHED = 'a2b3c4d5'.repeat(4);
 const KEY_J = 'a7b8c9d0'.repeat(4);
+const KEY_K = 'b1c2d3e4'.repeat(4);
+const KEY_L = 'c5d6e7f8'.repeat(4);
 
 const payload = {
   theme: {
@@ -121,13 +123,46 @@ describe('highlightWordsPresent', () => {
    */
   it('counts the missing words instead of taking a percentage', () => {
     const many = '甲乙丙丁戊己庚辛壬癸';
-    const words = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+    /* 用双字：单字在任何歌里都能撞上，不当证据（见下面那条用例）。 */
+    const words = ['甲乙', '丙丁', '戊己', '庚辛', '壬癸'];
 
     expect(highlightWordsPresent(words, many)).toBe(true);
     /* 缺 1 个：同一首歌的两份 LRC 差一个词（口白 / 翻译行）不该整条判死。 */
-    expect(highlightWordsPresent([...words.slice(0, 9), '不在'], many)).toBe(true);
-    /* 缺 2 个：覆盖率正好 80%，旧规则放行，现在不行。 */
-    expect(highlightWordsPresent([...words.slice(0, 8), '不在', '也不在'], many)).toBe(false);
+    expect(highlightWordsPresent([...words.slice(0, 4), '不在'], many)).toBe(true);
+    /* 缺 2 个：覆盖率正好 60%，旧规则按比例（80%）也不放行，现在更不行。 */
+    expect(highlightWordsPresent([...words.slice(0, 3), '不在', '也不在'], many)).toBe(false);
+  });
+
+  /*
+   * 单字不算证据：「我 / 你 / 把」在几乎每一首中文歌里都有，它们出现在歌词里说明不了
+   * 这条答案是照着哪首歌词做的。
+   */
+  it('does not count single characters as evidence', () => {
+    const lyric2 = '我你他把什么都在这里面';
+    expect(highlightWordsPresent(['我', '你', '把'], lyric2)).toBe(false);
+    /* 换成从歌词里挑出来的实词，同样三个词就合规了。 */
+    expect(highlightWordsPresent(['绚烂', '闪躲', '告别'], '世界变得更绚烂\n所有告别\n无论我怎么闪躲')).toBe(true);
+  });
+
+  /*
+   * 用户报的那个真例子：候选的高亮词是 留住 / 我 / 什么 / 把 / 你，
+   * 而这首的歌词里「留住」和「把」根本不存在 —— 覆盖率 3/5 全靠三个虚词撑着。
+   * 去掉虚词与单字之后证据只剩「留住」，一个都没命中，不该算匹配。
+   */
+  it('does not take an answer whose only evidence is missing from the lyric', () => {
+    const lyric2 = [
+      '可那些与我无关',
+      '麻烦总缠着我',
+      '什么也不想说',
+      '让我重新认识一个更好的你',
+      '因为你陪着我',
+    ].join('\n');
+
+    expect(highlightWordsPresent(['留住', '我', '什么', '把', '你'], lyric2)).toBe(false);
+    /* 光是「我 / 什么 / 你」这三个虚词命中，一点都不算证据。 */
+    expect(highlightWordsPresent(['我', '什么', '你'], lyric2)).toBe(false);
+    /* 同一段歌词，换成真的从里面挑出来的词就合规。 */
+    expect(highlightWordsPresent(['麻烦', '重新认识', '好天气'], lyric2 + '\n就像大雨过后的好天气')).toBe(true);
   });
 
   /*
@@ -176,9 +211,16 @@ describe('pullAiCloudCache 的第二次机会', () => {
    * 那批歌名里点进来的、云端确实躺着这一首的答案，播下去却一点没变；原因只是各平台的 LRC
    * 差几个字。词少几个不影响这是不是同一首歌的配色（用户原话「反正没有出现的词也无所谓」）。
    */
-  it('forces a title match when no candidate fits the lyric', async () => {
+  /*
+   * 一条证据都对不上时**不再**强制匹配：那是「判出来不像」，不是「没得判」。
+   *
+   * 以前是「反正挑最像的那条」,于是另一首近亲的答案会被顶上来，还回填到这首的精确键上
+   * —— 用户报的就是这个（高亮词 留住/我/什么/把/你 里前两个根本不在歌词里）。
+   * 现在该老实说「云端没有」，让本机照这首重新生成。
+   */
+  it('gives up instead of forcing a match when no candidate has any evidence', async () => {
     /*
-     * 候选那一键**是给了内容的** —— 这两条要验的是判定本身，不是「接口没给」。
+     * 候选那一键**是给了内容的** —— 这一条要验的是判定本身，不是「接口没给」。
      * 少了 `url.includes(KEY_A)` 这一支，测试会因为别的原因通过，把实现改坏也不红。
      */
     handlers.fetch = async (url) => {
@@ -194,12 +236,25 @@ describe('pullAiCloudCache 的第二次机会', () => {
       lyricText: '完全不同的一首歌',
     });
 
-    expect(result.status).toBe('hit');
-    if (result.status === 'hit') {
-      expect(result.matched).toBe('words');
-      expect(result.sourceKey).toBe(KEY_A);
-      expect(result.payload).toEqual(payload);
-    }
+    expect(result.status).toBe('miss');
+  });
+
+  /* 虚词凑出来的「命中」同样不算证据：整个候选里没有一个实词对得上。 */
+  it('gives up when the only words that match are filler', async () => {
+    handlers.fetch = async (url) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['留住', '我', '什么', '把', '你'] }] });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await pullAiCloudCache('stage', KEY_K, {
+      songTitle: '风清云净',
+      lyricText: '可那些与我无关\n麻烦总缠着我\n什么也不想说\n让我重新认识一个更好的你',
+    });
+
+    expect(result.status).toBe('miss');
   });
 
   /*
@@ -232,10 +287,43 @@ describe('pullAiCloudCache 的第二次机会', () => {
 
     expect(result.status).toBe('hit');
     if (result.status === 'hit') {
-      expect(result.matched).toBe('words');
+      /* 走的是兜底：记成 'forced'，调用方据此不把它回填到精确键上。 */
+      expect(result.matched).toBe('forced');
       expect(result.sourceKey).toBe(KEY_B);
       expect(result.payload).toEqual(payload);
     }
+  });
+
+  /*
+   * 兜底挑来的不回填：它本来就没验证上，写成精确键等于把一次猜测钉成永久事实 ——
+   * 下次、下下次，这首永远拿这份可能是别首歌的答案。
+   */
+  it('does not write a forced pick back under the exact key', async () => {
+    const puts: string[] = [];
+    handlers.fetch = async (url, init) => {
+      if (url.includes('/ai-cache/resolve')) {
+        return json({ ok: true, candidates: [{ key: KEY_A, words: ['小黄花', '不在歌词里'] }] });
+      }
+      if (init?.method === 'PUT') {
+        puts.push(String(init.body ?? ''));
+        return json({ ok: true, stored: true });
+      }
+      if (url.includes(KEY_A)) return json({ hit: true, entry: { payload } });
+      return json({ hit: false }, false);
+    };
+
+    const result = await withAiCloudCache({
+      kind: 'stage',
+      fingerprint: KEY_L,
+      /* 兜底命中就不该轮到模型，也不该有 PUT。 */
+      generate: async () => { throw new Error('不该轮到模型'); },
+      validate: (value) => (value && typeof value === 'object' ? value as Record<string, unknown> : null),
+      songTitle: '晴天',
+      lyricText: '故事的小黄花',
+    });
+
+    expect(result.source).toBe('cloud');
+    expect(puts).toHaveLength(0);
   });
 
   /* 一条高亮词都没标的候选：也走强制匹配那条路，不再整条出局。 */

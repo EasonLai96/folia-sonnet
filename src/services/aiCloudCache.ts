@@ -183,10 +183,12 @@ export type AiCloudCachePull =
         status: 'hit';
         payload: unknown;
         /**
-         * exact = 精确键命中；words = 键没对上，靠歌名捞到一条**内容合规**的
-         * （那条答案里 AI 标的高亮词都在你手上这段歌词里）。
+         * exact = 精确键命中；
+         * words = 键没对上，靠歌名捞到一条**内容合规**的（证据词都在你手上这段歌词里）；
+         * forced = 一条合规的都没有，从兜底里挑的（证据只到一半，见
+         * pickBestEffortCandidates）—— **未经证实**，所以它不参与回填。
          */
-        matched: 'exact' | 'words';
+        matched: 'exact' | 'words' | 'forced';
         /** words 命中时，答案原本存在哪个键上 —— 回填到自己这个键要用它。 */
         sourceKey?: string;
     }
@@ -212,27 +214,87 @@ const flattenForMatch = (value: string): string => (
     String(value ?? '').replace(/\s+/g, '').toLowerCase()
 );
 
-/** AI 标的那几个词，你手上这段歌词里**命中了几个**（0 ~ words.length）。 */
-export const countHighlightWordHits = (words: readonly string[], lyricText: string): number => {
-    const haystack = flattenForMatch(lyricText);
-    if (!haystack) return 0;
-    let present = 0;
-    words.forEach((word) => {
-        const needle = flattenForMatch(word);
-        if (needle.length > 0 && haystack.includes(needle)) present += 1;
-    });
-    return present;
-};
+/**
+ * 一个词要能当证据，至少得这么长。
+ *
+ * **单字不算证据**：「留」在几乎每一首中文歌里都能撞上，它说明不了这条答案是照着哪首
+ * 歌词做的；「留住」才算一句有点内容的凭据。英文同理（单字母、单字都不算）。
+ */
+const MIN_EVIDENCE_WORD_LENGTH = 2;
 
 /**
- * 高亮词的**覆盖率**：命中数 / 词数（0~1）。
+ * 不构成证据的词：代词、助词、连词、介词、疑问词、程度副词 —— **任何一首歌里都有**的那些。
  *
+ * 它们出现在歌词里说明不了任何事情。用户报的例子最典型：一个候选的高亮词是
+ * `留住 / 我 / 什么 / 把 / 你`，而手上这首的歌词里「留住」和「把」根本不存在，
+ * 光靠「我」「什么」「你」这三个就把另一首近亲的答案顶成了这首的主题
+ * （覆盖率算出来 3/5，看着还挺像那么回事）。
+ *
+ * 只收到「显然没有区分度」这一层为止 —— 开始 / 结束 / 快乐 这类实词**不**进这张表：
+ * 它到底是内容还是套话机器分不清，宁可放过也不误伤。表里全是压平后（去空白、转小写）
+ * 的形式。
+ */
+const NON_EVIDENCE_WORDS = new Set([
+    // 代词与指称
+    '我', '我们', '咱', '咱们', '你', '你们', '他', '他们', '她', '她们', '它', '它们',
+    '自己', '大家', '这', '这个', '这些', '那', '那个', '那些', '谁', '什么', '怎么',
+    '怎样', '怎么样', '这么', '那么', '多少', '哪里', '哪儿', '这里', '那里',
+    // 助词 / 语气
+    '的', '地', '得', '了', '着', '过', '吗', '呢', '吧', '啊', '呀', '哦', '啦',
+    // 系词 / 助动词 / 否定
+    '是', '在', '有', '没', '没有', '不', '别', '无', '要', '会', '能', '可以', '应该',
+    '需要', '就是', '还是', '也是', '都是',
+    // 连词 / 介词
+    '和', '与', '跟', '或', '而', '且', '但', '但是', '却', '因为', '所以', '然后',
+    '而且', '如果', '虽然', '于是', '把', '被', '给', '让', '使', '对', '从', '向',
+    '往', '到', '于', '为', '用',
+    // 程度 / 频率 / 范围
+    '也', '都', '就', '又', '再', '还', '很', '太', '更', '最', '才', '只', '一直',
+    '总是', '一个', '一样', '一些', '所有', '一切', '时候', '现在', '已经', '知道',
+    '觉得', '感觉', '一起',
+    // 英文里同样没有区分度的那些
+    'the', 'and', 'of', 'to', 'in', 'on', 'at', 'as', 'an', 'be', 'by', 'if', 'or',
+    'is', 'it', 'we', 'me', 'my', 'up', 'so', 'no', 'do', 'am', 'are', 'was', 'you',
+    'your', 'this', 'that', 'what', 'when', 'not',
+]);
+
+/** 能当证据用的那部分高亮词：去掉单字，再去掉上面那张表里的虚词。 */
+export const highlightEvidenceWords = (words: readonly string[]): string[] => (
+    words
+        .map(word => flattenForMatch(word))
+        .filter(word => word.length >= MIN_EVIDENCE_WORD_LENGTH
+            && !NON_EVIDENCE_WORDS.has(word))
+);
+
+/** 证据词的**总数与命中数**。判定与排序都只看这两个数，不再看整份词表。 */
+const evidenceHits = (words: readonly string[], lyricText: string): { total: number; hits: number } => {
+    const evidence = highlightEvidenceWords(words);
+    const haystack = flattenForMatch(lyricText);
+    if (evidence.length === 0 || !haystack) {
+        return { total: evidence.length, hits: 0 };
+    }
+    let hits = 0;
+    evidence.forEach((needle) => {
+        if (haystack.includes(needle)) hits += 1;
+    });
+    return { total: evidence.length, hits };
+};
+
+/** 你手上这段歌词里**命中了几个**证据词。 */
+export const countHighlightWordHits = (words: readonly string[], lyricText: string): number => (
+    evidenceHits(words, lyricText).hits
+);
+
+/**
+ * 高亮词的**覆盖率**：命中数 / 证据词数（0~1）。
+ *
+ * 一条证据都没有时是 0 —— 那不是「全都命中了」（0/0），是「没有凭据」。
  * 「一条都不合规时挑最像的那条」那一档用它 —— 那里已经没有是非，只有谁更像；
  * 判**合不合规**要看个数，不看比例（见 highlightWordsPresent）。
  */
 export const highlightWordsCoverage = (words: readonly string[], lyricText: string): number => {
-    if (words.length === 0) return 0;
-    return countHighlightWordHits(words, lyricText) / words.length;
+    const { total, hits } = evidenceHits(words, lyricText);
+    return total === 0 ? 0 : hits / total;
 };
 
 /**
@@ -261,13 +323,13 @@ const HIGHLIGHT_WORD_MAX_MISSING = 1;
 const HIGHLIGHT_WORD_RELAX_MIN_WORDS = 5;
 
 export const highlightWordsPresent = (words: readonly string[], lyricText: string): boolean => {
-    const total = words.length;
+    const { total, hits } = evidenceHits(words, lyricText);
+    /* 一个证据词都没有：没有凭据说明它属于这首歌。 */
     if (total === 0) return false;
-    const present = countHighlightWordHits(words, lyricText);
-    if (present >= total) return true;
-    if (present <= 0) return false;   // 一个都没有：没有任何证据说明它属于这首歌。
+    if (hits >= total) return true;
+    if (hits <= 0) return false;
     return total >= HIGHLIGHT_WORD_RELAX_MIN_WORDS
-        && total - present <= HIGHLIGHT_WORD_MAX_MISSING;
+        && total - hits <= HIGHLIGHT_WORD_MAX_MISSING;
 };
 
 /**
@@ -331,6 +393,8 @@ const fetchResolveCandidates = async (
  * 空手而归；它们只是候选，取到第一条有内容的就收。
  */
 /**
+ * 兜底下限：有歌词可判时，一条候选至少要有**一半**的证据词在场，才配得上「强制匹配」。
+ *
  * 一条都不合规时挑**最像**的那几条：按高亮词的覆盖率从高到低取前 N 条。
  *
  * 以前这里是**随机**挑一条。随机等于承认「眼前的十几条近亲跟这首的关系都一样」——
@@ -339,16 +403,41 @@ const fetchResolveCandidates = async (
  * 个都亮不起来（用户报「歌曲墙上一个 AI 高亮都没有」，而这份数据还将回填到本次的
  * 精确键上，之后每次都是精确命中 —— 错一次就一直错下去）。
  *
+ * ⚠️ **光挑「最像的」还不够 —— 全都一点不像时，最像的那条照样是错的**。
+ * 用户接着报的就是这个：高亮词 `留住 / 我 / 什么 / 把 / 你` 里，「留住」和「把」在这首的
+ * 歌词里根本不存在，覆盖率是「我 / 什么 / 你」这三个任何一首歌都有的词撑到 3/5 的 ——
+ * 它连旧的 80% 门槛都进不去（所以不走合规判定），却在兜底里以「最像的那条」被挑走，
+ * 然后回填到精确键上，错一次就一直错下去。所以给兜底设一条下限：**一条证据词都对不
+ * 上的候选不参与兜底**，宁可回一句「云端没有」，让本机照这首歌重新生成。
+ *
+ * 下限取 0.5 而不是更高：同一首歌的两份 LRC 差一个词（模型只挑了两个证据词、其中一个
+ * 换了写法）时是 1/2，那正是兜底这条路的来由，不该被门槛挡在外面。
+ *
+ * 「一个词都没标」的老条目（服务端没给 words）无从判，仍然照旧参与兜底 —— 它们不是
+ * 「判出来不像」，是「没得判」，和没有歌词那一档同理。
+ *
  * 覆盖率一样时留着服务端给的顺序（歌名全等优先、更新时间倒序），所以排序是稳定的。
- * 全是 0（比如手上没有歌词）时它退化成「取最靠前那几条」，不会因此变成 miss。
+ * 手上没有歌词时无从判，退化成「取最靠前那几条」，不会因此变成 miss。
  */
+const FORCED_EVIDENCE_COVERAGE_MIN = 0.5;
+
 const pickBestEffortCandidates = (
     candidates: readonly ResolveCandidate[],
     lyricText: string,
 ): ResolveCandidate[] => {
     if (candidates.length === 0) return [];
+    if (!lyricText) {
+        return candidates.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
+    }
     const ranked = candidates
-        .map((candidate, index) => ({ candidate, index, coverage: highlightWordsCoverage(candidate.words, lyricText) }))
+        .map((candidate, index) => ({
+            candidate,
+            index,
+            // 没标词的条目无从判：留着，别让它因为「算出来 0」被门槛扫掉。
+            judgeable: candidate.words.length > 0,
+            coverage: highlightWordsCoverage(candidate.words, lyricText),
+        }))
+        .filter(entry => !entry.judgeable || entry.coverage >= FORCED_EVIDENCE_COVERAGE_MIN)
         .sort((a, b) => b.coverage - a.coverage || a.index - b.index);
     return ranked.slice(0, MAX_CONCURRENT_ENTRY_FETCHES).map(entry => entry.candidate);
 };
@@ -509,12 +598,21 @@ export const pullAiCloudCache = async (
      *
      * 用户要的就是「反正没有出现的词也无所谓」：词少几个不影响这是不是同一首歌的配色。
      * 所以这里不再返回 miss，改从候选里挑**高亮词覆盖率最高**的那条（见
-     * pickBestEffortCandidates）。挑到的那一条照样会**回填**到本次这个精确键上
-     * （matched 仍是 'words'），下次就是精确命中，不会每次都换一个答案。
+     * pickBestEffortCandidates）。
+     *
+     * ⚠️ 但兜底不是「无论如何都要拿一条」：一条证据词都对不上的候选不参与兜底
+     * （下限见 pickBestEffortCandidates），那样会是 miss —— 拿一条照着别的歌做的高亮词
+     * 当这首的主题，比承认「云端没有」糟得多。
+     *
+     * ⚠️ 兜底挑来的那条**不回填**（matched 记成 'forced'，调用方只回填 'words'）。
+     * 它本来就是「没验证上」才走的兜底，回填到精确键上就变成永久事实 ——
+     * 一次猜错，这首歌以后每次都是那一份错的高亮词。宁可下次再走一遍「搜歌名 + 逐条判」，
+     * 也不把猜测写成结论。
      */
-    const batch = eligible.length > 0
-        ? eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES)
-        : pickBestEffortCandidates(candidates, lyricText);
+    const forced = eligible.length === 0;
+    const batch = forced
+        ? pickBestEffortCandidates(candidates, lyricText)
+        : eligible.slice(0, MAX_CONCURRENT_ENTRY_FETCHES);
 
     const payloads = await Promise.all(
         batch.map((candidate) => fetchEntry(kind, candidate.key)),
@@ -528,7 +626,8 @@ export const pullAiCloudCache = async (
         return {
             status: 'hit',
             payload: payloads[index],
-            matched: 'words',
+            /* 兜底挑来的不算「内容合规」：调用方据此决定要不要回填（见下）。 */
+            matched: forced ? 'forced' : 'words',
             sourceKey: batch[index].key,
         };
     }
