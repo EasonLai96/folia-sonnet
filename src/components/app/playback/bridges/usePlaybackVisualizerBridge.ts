@@ -14,6 +14,7 @@ import {
     lyricCurrentTime,
 } from '../../../../stores/motionSignals';
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
+import { drainMainLooperLog } from '../../../../platform/foliaNative';
 import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 import { readIncomingLyricClock } from './incomingLyricClock';
 
@@ -79,6 +80,8 @@ const SPECTRUM_READ_INTERVAL_MS = 33;
 const HITCH_LOG_THRESHOLD_MS = 80;
 /** 定时器探针的节拍（临时诊断，见文件末尾那个 effect）。 */
 const TICK_PROBE_INTERVAL_MS = 16;
+/** 取原生卡顿日志的节拍（临时诊断，同上）。 */
+const LOOPER_DRAIN_INTERVAL_MS = 1000;
 
 // Runs the requestAnimationFrame loop for audio-reactive visuals and lyric timing.
 export function usePlaybackVisualizerBridge({
@@ -502,6 +505,19 @@ export function usePlaybackVisualizerBridge({
             }
             lastTickAtMs = nowMs;
         }, TICK_PROBE_INTERVAL_MS);
-        return () => window.clearInterval(timer);
+        /*
+         * 顺带每秒把原生那侧攒的卡顿日志取回来。
+         *
+         * ⚠️ **取数必须挂在这里，不能只挂在开发者表上**：开发者表只有 `Alt+Shift+D`
+         * 弹得出来，手机上没有物理键盘根本打不开 —— 挂在它上面等于永远没人去取，
+         * 控制台里于是一条 `[FoliaLooper]` 都不会有（这版就白跑了一次）。
+         * 取回来的那几行由 `drainMainLooperLog()` 自己打进控制台，跟 `[FoliaTick]`
+         * 排在一起，两边都带墙钟后六位，可直接对时间。
+         */
+        const drain = window.setInterval(() => void drainMainLooperLog(), LOOPER_DRAIN_INTERVAL_MS);
+        return () => {
+            window.clearInterval(timer);
+            window.clearInterval(drain);
+        };
     }, []);
 }
