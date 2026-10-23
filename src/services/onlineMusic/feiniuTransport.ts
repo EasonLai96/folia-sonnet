@@ -64,48 +64,64 @@ export const normalizeFeiniuServerUrl = (value: string): string => (
 );
 
 /**
- * FN ID 那台 NAS 的域名后缀（FN Connect 的网关域名）。
+ * FN ID 那台 NAS 的域名后缀（FN Connect 的中继网关）。
  *
- * 飞牛的远程访问服务是 FN Connect：每台 NAS 领一个 FN ID，网关地址是 `https://<FN ID>.5ddd.com`
- * —— 域名是飞牛自己的，不是用户搭的反代，所以在这里补后缀就够了，也不需要那个 5666 / 5667
- * 的局域网端口（网关走 https 443）。例：填 `pcyear` → `https://pcyear.5ddd.com`。
+ * 飞牛的远程访问是 FN Connect：每台 NAS 领一个 FN ID，中继地址是 `https://<FN ID>.fnos.net`
+ * —— 域名是飞牛自己的，不是用户搭的反代，在这里补后缀就够了，也不需要那个 5666 的局域网
+ * 端口（网关走 https 443）。例：填 `baixiao` → `https://baixiao.fnos.net`。
  *
- * ⚠️ 后缀只有这一家：写别的（`fnid.cc` 之类）DNS 直接解析不了，报出来的是「连不上」，
- * 看着像 NAS 没开机，其实是地址拼错了 —— 这个后缀是本仓库实测过的（多个公共 DNS 一致）。
- *
- * ⚠️ 网关不等于直连：它是 FN Connect 的一层鉴权，没有网关会话时任何接口都回它自己的登录页
- * （HTML），连密码登录那一步也过不去。所以这一栏只解决「地址是什么」，不解决「怎么过网关」。
+ * ⚠️ 后缀只有这一家（实测，`baixiao.fnos.net` 在多个公共 DNS 上都解析得到）。`5ddd.com` 是
+ * **旧**的中继域名：早先的通道，如今不再下发 —— 用户在旧版本里连过的地址可能还是它，所以
+ * 判定「走不走中继」时两个都认，但**拼地址只用 fnos.net**。
  */
-const FNID_HOST_SUFFIX = '5ddd.com';
+const FNID_HOST_SUFFIX = 'fnos.net';
+/** 上一代中继通道的域名：只用来认「这条地址是中继」，不再用来拼新地址。 */
+const LEGACY_RELAY_SUFFIX = '5ddd.com';
+
+/** 这一条地址是不是走飞牛的中继（而不是局域网直连）：是的话请求都要带 `mode=relay`。 */
+export const isFeiniuRelayAddress = (value: string): boolean => {
+    const host = normalizeFeiniuServerUrl(value).replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].toLowerCase();
+    return host.endsWith(`.${FNID_HOST_SUFFIX}`) || host.endsWith(`.${LEGACY_RELAY_SUFFIX}`);
+};
 
 /**
  * 这一页是不是 FN Connect 网关自己的登录页。
  *
- * 网关没有会话时，任何请求（连密码登录那一步也在内）都只回这一页 —— 请求其实到了那台机器，
- * 所以这里的失败原因不是「地址上没有服务」，而是「这一层要先用网页登录」。
+ * 网关没放行时，任何请求（连密码登录那一步也在内）都只回一页 HTML —— 请求其实到了那台机器，
+ * 所以这里的失败原因不是「地址上没有服务」，而是「这一层不放行」。
  * 判据取网关页自己的特征（标题与它引用的静态资源都带 FN Connect / fnnas.com/connect）。
  */
 export const isFnConnectLoginPage = (text: string): boolean => (
     /fn\s*connect|fnnas\.com\/connect/i.test(text.slice(0, 4096))
 );
 
-/** 用户在「FN ID」那一栏填的东西（可能带了 https、端口、或者干脆就是整条域名）变成服务器地址。 */
+/**
+ * 用户在「FN ID」那一栏填的东西（可能带了 https、端口、或者干脆就是整条域名）变成服务器地址。
+ *
+ * 只有「不带点、不带端口」的一串才是 FN ID，才去补中继后缀；写了域名或 IP 的是另一回事，
+ * 那种照他写的来 —— 连自己域名的人知道自己在连哪里，不该被我们改成 https。
+ */
 export const feiniuServerUrlFromFnId = (value: string): string => {
-    const cleaned = normalizeFeiniuServerUrl(value).replace(/^https?:\/\//i, '').toLowerCase();
-    const head = cleaned.split('/')[0] ?? '';
+    const cleaned = normalizeFeiniuServerUrl(value);
+    const bare = cleaned.replace(/^https?:\/\//i, '');
+    const head = bare.split('/')[0] ?? '';
     if (!head) return '';
     const [name, maybePort] = head.split(':');
+    // 一串没有点的东西才可能是 FN ID（域名一定有点，IP 也有点）。
+    if (!name.includes('.')) return `https://${name.toLowerCase()}.${FNID_HOST_SUFFIX}${/^\d+$/.test(maybePort ?? '') ? `:${maybePort}` : ''}`;
     const port = /^\d+$/.test(maybePort ?? '') ? `:${maybePort}` : '';
-    const domain = name.includes('.') ? name : `${name}.${FNID_HOST_SUFFIX}`;
-    return `https://${domain}${port}`;
+    const scheme = /^https:\/\//i.test(cleaned) ? 'https' : /^http:\/\//i.test(cleaned) ? 'http' : 'https';
+    return `${scheme}://${name.toLowerCase()}${port}`;
 };
 
 /** 反方向：上次的地址是一条 FN ID 的远程地址时给出它的 ID（用来预填那一栏）；不是就给空串。 */
 export const feiniuFnIdFromServerUrl = (value: string): string => {
     const head = normalizeFeiniuServerUrl(value).replace(/^https?:\/\//i, '').split('/')[0] ?? '';
     const host = head.split(':')[0].toLowerCase();
-    if (!host.endsWith(`.${FNID_HOST_SUFFIX}`)) return '';
-    return host.slice(0, -(FNID_HOST_SUFFIX.length + 1));
+    for (const suffix of [FNID_HOST_SUFFIX, LEGACY_RELAY_SUFFIX]) {
+        if (host.endsWith(`.${suffix}`)) return host.slice(0, -(suffix.length + 1));
+    }
+    return '';
 };
 
 /**
@@ -295,8 +311,15 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
     // 取键名是大小写敏感的（浏览器的 Headers 才不敏感）。
     const headers: Record<string, string> = { accept: 'application/json' };
     if (options.anonymous) {
-        // 登录这一发只能靠地址本身，但中继模式仍要声明。
-        if (isFeiniuRelayMode()) headers.cookie = 'mode=relay';
+        // ⭐登录这一发**恒带** `mode=relay`。
+        //
+        // 中继网关（fnos.net）放不放行，看的就只有这一个值 —— 实测：
+        //   带 `Cookie: mode=relay`  → 200 + JSON（放行，接口照常回 code）
+        //   不带                     → 302 + nginx 的 HTML（拦下）
+        // 而「走不走中继」这个标志恰恰要**登录成功之后**才知道（首次登录时它还不存在）：
+        // 按标志决定带不带，等于首次登录永远带不上，FN ID 这条路就永远登不进来。
+        // 局域网直连的那台收下一个不认识的 cookie 并不影响什么（顺手带上，省一条分支）。
+        headers.cookie = 'mode=relay';
     } else {
         headers.cookie = feiniuAuthCookie();
     }
@@ -334,6 +357,19 @@ export const feiniuRequest = async <T = unknown>(path: string, options: FeiniuRe
         throw new OnlineProviderError(
             'auth-required',
             `FeiNiu rejected the session (HTTP ${status})`,
+            'feiniu',
+            undefined,
+            status,
+        );
+    }
+
+    // 中继网关拦下请求的方式是一次 302，正文是 nginx 那一页「302 Found」——
+    // 它**不带** FN Connect 的字样，所以只能按状态码认（下面那个认登录页的判据认不出它）。
+    // 这就是「没带 mode=relay」/「这台 NAS 没开 FN Connect」的那一面，别按「地址上没有服务」说。
+    if (status >= 300 && status < 400 && /^\s*(<!doctype|<html|<head)/i.test(text)) {
+        throw new OnlineProviderError(
+            'web-login-required',
+            `FeiNiu gateway redirected the request instead of answering it for ${path} (HTTP ${status}, ${describeFeiniuTarget(url)}) — 中继网关把请求拨走了：FN ID 这条路要求请求带 mode=relay，并确认这台 NAS 开了 FN Connect 远程访问`,
             'feiniu',
             undefined,
             status,
@@ -479,6 +515,9 @@ export const feiniuPasswordLogin = async (username: string, password: string, se
         throw new OnlineProviderError('invalid-response', 'FeiNiu login returned no token', 'feiniu', data);
     }
     writeProviderSessionValue('feiniu', 'token', data.userToken);
+    // 连的是中继网关还是自家局域网，只有登录成功（地址已经落盘）之后才说得准：
+    // 这里补上标志，之后 API 与封面 / 音频流才会带上 `mode=relay`（见 feiniuAuthCookie）。
+    setFeiniuRelayMode(isFeiniuRelayAddress(getFeiniuServerUrl()));
     syncFeiniuCookieJar();
     return data;
 };

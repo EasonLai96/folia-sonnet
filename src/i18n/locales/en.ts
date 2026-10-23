@@ -1574,7 +1574,7 @@ export default {
     "loginPasswordInvalidCredentials": "Wrong username or password. Please try again.",
     "loginPasswordNetwork": "Cannot reach this address. Check the address, make sure the NAS is on, and that both devices share a network.",
     "loginPasswordUnavailable": "No usable FeiNiu music service at this address.",
-    "loginPasswordWebLoginRequired": "This NAS sits behind the FN Connect gateway, which lets nothing through until you sign in once in a browser (the account itself is fine). Open https://<FN ID>.5ddd.com in a browser and sign in, or use an address you can reach directly.",
+    "loginPasswordWebLoginRequired": "This NAS sits behind FeiNiu's relay gateway (fnos.net), which turned this request away — the account itself is fine. Check that FN Connect remote access is on for this NAS and that the FN ID is right, or use an address you can reach directly (LAN IP / your own domain).",
     "loginPasswordRefreshFailed": "Signed in, but reading your library failed. Refresh from the home page later.",
     "loginPasswordFailed": "Sign-in failed. Please try again.",
     "qqLoginMethodTitle": "Choose sign-in method",

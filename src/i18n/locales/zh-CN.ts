@@ -1575,7 +1575,7 @@ export default {
     "loginPasswordInvalidCredentials": "用户名或密码不对，请重填。",
     "loginPasswordNetwork": "连不上这个地址。请检查地址是否正确、NAS 是否开机、手机与 NAS 是否在同一个网络。",
     "loginPasswordUnavailable": "这个地址上没有可用的飞牛音乐服务。",
-    "loginPasswordWebLoginRequired": "这台 NAS 前面是 FN Connect 网关，它要先在网页里登录一次才放行（账号密码本身没错，是这一层不认）。先用浏览器打开 https://<FN ID>.5ddd.com 登录一次，或者改用能直接访问的地址。",
+    "loginPasswordWebLoginRequired": "这台 NAS 前面是飞牛的中继网关（fnos.net），它把这次请求拨走了 —— 账号密码本身没错。检查这台 NAS 有没有开 FN Connect 远程访问、FN ID 填得对不对；或者换成能直接访问的地址（局域网 IP / 自己的域名）。",
     "loginPasswordRefreshFailed": "登录成功了，但读取歌单失败。请稍后在首页刷新一次。",
     "loginPasswordFailed": "登录失败，请重试。",
     "qqLoginMethodTitle": "选择登录方式",
