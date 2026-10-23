@@ -66,6 +66,44 @@ type Tap = {
     dispose: () => void;
 };
 
+/**
+ * FFT 的默认节拍（每多少帧做一次 2048 点 FFT）。
+ *
+ * `hop = 1024` 在 48kHz 下约合 47 次/秒 —— 正好够播放页按帧读，观感不丢。
+ */
+const SPECTRUM_DEFAULT_HOP = 1024;
+/**
+ * 缓冲偏大时改用这个节拍：把「一次输出回调里的 FFT 次数」砍半。
+ *
+ * 代价是频谱更新掉到约 23 次/秒，只在缓冲真的很大时才付。
+ */
+const SPECTRUM_RELAXED_HOP = 2048;
+/** `outputLatency` 超过这个值就算「缓冲偏大」（`balanced` 够不到，0.1/0.2 那两档一定超）。 */
+const SPECTRUM_LARGE_BUFFER_LATENCY_SEC = 0.04;
+
+/**
+ * 频谱 FFT 的节拍按**输出缓冲**自适应 —— 「大缓冲就掉帧」那条链的解药。
+ *
+ * 机制（`AudioWorkletProcessor.process()` 永远按 128 帧调一次）：
+ * 底层一次输出回调里要连着跑 `framesPerBuffer / 128` 次 `process()`，缓冲越大，
+ * 那几十次就越是**一整块**落在实时优先级线程上；而我们每 `hop` 帧做一次 2048 点
+ * FFT，于是「一次回调里的 FFT 次数」= `framesPerBuffer / hop`：
+ *
+ *   · `balanced`（几十毫秒级）→ 每次回调 1~2 次，随便跑；
+ *   · `latencyHint: 0.2`（9600 帧）→ 每次回调 9 次，一整块 4~5ms 的实时线程突发，
+ *     正好顶掉 120Hz 下主线程那 8.3ms 的帧预算 → 播放页掉帧（实测过的现象）。
+ *
+ * ⚠️ 这是**保险**，不是当前问题的解药：现在取的是 `balanced`，`outputLatency` 够不到
+ * 阈值，hop 一步都不会变。它的意义是「以后谁想把缓冲拉大，不会再把掉帧带回来」。
+ *
+ * ⚠️ `outputLatency` 只有在 ctx 真的跑起来之后才有意义，所以这个值必须等
+ * `state === 'running'` 之后再算（`createSpectrumTap` 本来就只在那一刻被调用）。
+ */
+const tapHopFor = (context: AudioContext): number => {
+    const latency = typeof context.outputLatency === 'number' ? context.outputLatency : 0;
+    return latency >= SPECTRUM_LARGE_BUFFER_LATENCY_SEC ? SPECTRUM_RELAXED_HOP : SPECTRUM_DEFAULT_HOP;
+};
+
 let active: Tap | null = null;
 
 /** 最新一份频谱，没接上或还没到手就是 null。调用方拿不到就退回 AnalyserNode。 */
@@ -108,6 +146,11 @@ export const createSpectrumTap = async (
         url = URL.createObjectURL(new Blob([SPECTRUM_WORKLET_SOURCE], { type: 'application/javascript' }));
         await addModuleWithTimeout(context, url);
 
+        // 缓冲多大决定 hop（见 tapHopFor）；顺手把它记下来 —— 这条日志一出，
+        // 「现在跑在哪一档、一次回调里攒几次 FFT」就不用猜了。
+        const hop = options?.hop ?? tapHopFor(context);
+        const outputLatencySec = typeof context.outputLatency === 'number' ? context.outputLatency : 0;
+
         node = new AudioWorkletNode(context, SPECTRUM_WORKLET_NAME, {
             numberOfInputs: 1,
             numberOfOutputs: 1,
@@ -115,7 +158,7 @@ export const createSpectrumTap = async (
             processorOptions: {
                 fftSize: options?.fftSize ?? 2048,
                 smoothingTimeConstant: options?.smoothingTimeConstant ?? 0.6,
-                hop: options?.hop ?? 1024,
+                hop,
             },
         });
         // processor 本来就不写输出（静音），再串一个零增益是双保险：这一路只抽频谱。
@@ -161,7 +204,11 @@ export const createSpectrumTap = async (
          * 于是翻日志的人分不清「接上了」和「addModule 的 Promise 卡在 suspended 的
          * context 上、既没成也没败」。后者正是播放页掉帧的样子。
          */
-        console.info('[SpectrumTap] 频谱由音频线程抽，主线程不再等音频线程');
+        console.info(
+            '[SpectrumTap] 频谱由音频线程抽，主线程不再等音频线程',
+            `(hop ${hop} ≈ ${Math.round((context.sampleRate / hop) * 10) / 10} 次/秒,`,
+            `outputLatency ${Math.round(outputLatencySec * 1000)}ms)`,
+        );
         return true;
     } catch (error) {
         // 记进诊断再 warn：这一条决定了播放页是不是会掉帧，光靠日志看不出来。
