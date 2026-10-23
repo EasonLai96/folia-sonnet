@@ -49,7 +49,6 @@
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
-| 32+ | `src/components/visualizer/registry.tsx` |
 | 32+ | `src/components/wall/wallSlots.ts` |
 | 32+ | `src/i18n/config.ts` |
 | 32+ | `src/library/core/account/account.contract.ts` |
@@ -71,6 +70,7 @@
 | 32+ | `src/types/navidrome.ts` |
 | 32+ | `src/utils/coverUrl.ts` |
 | 32+ | `src/utils/fontStacks.ts` |
+| 32+ | `src/utils/keyboardTargets.ts` |
 | 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
 | 32+ | `src/utils/lyrics/renderHints.ts` |
