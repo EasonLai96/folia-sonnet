@@ -59,6 +59,12 @@ interface FoliaPlaybackPlugin {
   }): Promise<void>;
   /** 停止播放时收掉前台服务与通知。 */
   stop(): Promise<void>;
+  /**
+   * 队列镜像快照：WebView 冻结后通知栏切歌的原生兜底数据源。
+   * JS 活着时每次队列/当前歌变化都推一份（当前 ±10 首、带已解析地址的窗口），
+   * index 是当前歌在窗口里的下标。原生只转存，冻结时才用它。
+   */
+  setQueueMirror(options: { queueJson: string; index: number }): Promise<void>;
   /** 原生在用户点击通知栏/锁屏/耳机按键时派发的事件。 */
   addListener(
     eventName: 'foliaPlaybackCommand',
@@ -145,6 +151,12 @@ type UseCapacitorPlaybackBridgeOptions = {
   canLike?: boolean;
   /** 通知栏 / 锁屏 / 耳机那颗心被按下。与面板里的喜爱按钮同一个动作。 */
   onToggleLike?: () => void;
+  /** 队列快照：镜像兜底的数据源。缺省时不推镜像。 */
+  queue?: SongResult[];
+  /** 当前这首歌已解析的播放地址（audioSrc）：镜像里当前条目就用它。 */
+  currentAudioUrl?: string | null;
+  /** 队列里其它条目的已解析地址（预取命中的才有）：没有的条目带空 url，原生会跳过。 */
+  resolvedUrlOf?: (song: SongResult) => string | null;
 };
 
 /**
@@ -166,6 +178,9 @@ export const useCapacitorPlaybackBridge = ({
   isLiked = false,
   canLike = false,
   onToggleLike,
+  queue,
+  currentAudioUrl,
+  resolvedUrlOf,
 }: UseCapacitorPlaybackBridgeOptions): void => {
   const enabled = isCapacitorAndroid();
 
@@ -256,6 +271,35 @@ export const useCapacitorPlaybackBridge = ({
       cancelled = true;
     };
   }, [enabled, currentSong, cachedCoverUrl, isLiked, canLike]);
+
+  // 队列镜像：WebView 冻结后通知栏切歌的唯一依据。JS 活着时每次队列/当前歌变化
+  // 都把「当前 ±10 首、带已解析地址」的窗口推给原生；冻结时 onSkipToNext/Previous
+  // 的确认计时器发现 JS 没回话，就从这份镜像里取相邻一首直接交给原生播放器。
+  // resolvedUrlOf 是内联函数（每次渲染换身份），走 ref 不进依赖。
+  const mirrorSourceRef = React.useRef({ queue, currentAudioUrl, resolvedUrlOf });
+  mirrorSourceRef.current = { queue, currentAudioUrl, resolvedUrlOf };
+  React.useEffect(() => {
+    if (!enabled || !currentSong) return;
+    const { queue: list, currentAudioUrl: activeUrl, resolvedUrlOf: urlOf } = mirrorSourceRef.current;
+    if (!list || list.length === 0) return;
+    const activeKey = getPlaybackSongKey(currentSong);
+    const index = list.findIndex((song) => getPlaybackSongKey(song) === activeKey);
+    if (index < 0) return;
+    const windowStart = Math.max(0, index - 10);
+    const windowList = list.slice(windowStart, Math.min(list.length, index + 11));
+    const entries = windowList.map((song) => {
+      const isCurrent = getPlaybackSongKey(song) === activeKey;
+      return {
+        songKey: getPlaybackSongKey(song),
+        title: song.name || '',
+        artist: getSongArtistLabel(song) || '',
+        album: getSongAlbumLabel(song) || '',
+        artworkUrl: getSongCoverUrl(song) || '',
+        url: (isCurrent ? activeUrl : urlOf?.(song)) ?? '',
+      };
+    });
+    void FoliaPlayback.setQueueMirror({ queueJson: JSON.stringify(entries), index: index - windowStart });
+  }, [enabled, currentSong, queue, currentAudioUrl]);
 
   // 播放状态：playing 时服务进入前台，这是后台网络不被节流的关键。
   //

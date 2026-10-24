@@ -97,6 +97,16 @@ public class FoliaPlaybackService extends android.app.Service {
     private boolean cachedCanLike = false;
     /** 封面角标（通知 small icon）的资源 id；0 = 还没收到过，用缺省。 */
     private int cachedBadgeRes = 0;
+
+    // ===== 通知栏镜像队列 =====
+    // JS 活着时把「当前 ±10 首、带已解析地址」的队列窗口推过来；WebView 冻结后
+    // 通知栏的下一首/上一首就靠这份快照在原生直接换源（见 scheduleSkipFallback）。
+    private static volatile String mirroredQueueJson = null;
+    private static volatile int mirroredIndex = -1;
+    /** 最近一次收到元数据的时刻：skip 的确认计时器据此判断 JS 有没有回话。 */
+    private volatile long lastMetadataAtMs = 0L;
+    /** JS 没回话等多久就自己动手。预取命中的下一首 2.5s 内足够换好源。 */
+    private static final long SKIP_FALLBACK_MS = 2_500L;
     /**
      * 已经调用过 startForeground 了；见 promoteToForeground()。
      *
@@ -259,11 +269,13 @@ public class FoliaPlaybackService extends android.app.Service {
             @Override
             public void onSkipToNext() {
                 sendCommand("next");
+                scheduleSkipFallback(+1);
             }
 
             @Override
             public void onSkipToPrevious() {
                 sendCommand("previous");
+                scheduleSkipFallback(-1);
             }
 
             /**
@@ -385,6 +397,10 @@ public class FoliaPlaybackService extends android.app.Service {
                 case ACTION_UPDATE_STATE:
                     updatePlaybackState(intent);
                     break;
+                case ACTION_UPDATE_QUEUE_MIRROR:
+                    mirroredQueueJson = intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON);
+                    mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1);
+                    break;
                 case ACTION_REFRESH_METADATA:
                     // ColorOS 原生歌词到的比播放晚（Web 层先拿到词）时用这条：
                     // 只按缓存重建 metadata 与 PlaybackState，不动前台化状态。
@@ -456,6 +472,79 @@ public class FoliaPlaybackService extends android.app.Service {
         intent.putExtra(EXTRA_COMMAND, command);
         intent.putExtra(EXTRA_COMMAND_POSITION, positionMs);
         sendBroadcast(intent);
+    }
+
+    /**
+     * 「下一首/上一首」的确认计时器：命令照旧广播给 JS，同时等它回话。
+     *
+     * WebView 冻结时 JS 一条命令都不会执行 —— {@link #lastMetadataAtMs} 不动，
+     * 超时就用镜像队列在原生直接换源（{@link #skipViaMirror}）。JS 活着时它会在
+     * 窗口内推来新歌的元数据，计时器看到时间戳变了就收手，两路不打架。
+     */
+    private void scheduleSkipFallback(int direction) {
+        final long before = lastMetadataAtMs;
+        mainHandler.postDelayed(() -> {
+            if (lastMetadataAtMs != before) return;
+            // 原生手上没歌（原生播放没开）：镜像也没处换源，只能等 JS。
+            if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) return;
+            skipViaMirror(direction);
+        }, SKIP_FALLBACK_MS);
+    }
+
+    /** 从镜像队列取相邻一首，原生直接换源并自更新通知元数据。 */
+    private void skipViaMirror(int direction) {
+        String json = mirroredQueueJson;
+        int index = mirroredIndex;
+        if (json == null || index < 0) return;
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(json);
+            int target = index + direction;
+            if (target < 0 || target >= array.length()) return;
+            org.json.JSONObject entry = array.getJSONObject(target);
+            String url = entry.optString("url", "");
+            // 地址没解析出来（预取没命中）：镜像帮不上，等 JS 醒来再切。
+            if (url.isEmpty()) return;
+            mirroredIndex = target;
+            nativePlayMirrorEntry(entry, url);
+        } catch (org.json.JSONException ignored) {
+        }
+    }
+
+    /** 用镜像条目直接接管播放：换源、起播、通知与壁纸锚点全部就地更新。 */
+    private void nativePlayMirrorEntry(org.json.JSONObject entry, String url) {
+        top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url);
+        top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem();
+        String songKey = entry.optString("songKey", "");
+        boolean songChanged = !songKey.isEmpty() && !songKey.equals(cachedSongKey);
+        if (songChanged) {
+            cachedSongKey = songKey;
+            cachedArtwork = null;
+            cachedDurationMs = 0L;
+            pendingArtworkUrl = null;
+            cachedLiked = false;
+            cachedCanLike = false;
+        }
+        String title = entry.optString("title", "");
+        if (!title.isEmpty()) cachedTitle = title;
+        String artist = entry.optString("artist", "");
+        if (!artist.isEmpty()) cachedArtist = artist;
+        String album = entry.optString("album", "");
+        if (!album.isEmpty()) cachedAlbum = album;
+        cachedState = PlaybackStateCompat.STATE_PLAYING;
+        cachedPlaying = true;
+        cachedPositionMs = 0L;
+        cachedSpeed = 1.0f;
+        // 自己就是「回话」：否则下一个计时器会再跳一首。
+        lastMetadataAtMs = android.os.SystemClock.elapsedRealtime();
+        applyMetadata();
+        applyPlaybackState();
+        promoteToForeground();
+        syncWallpaperAnchor(true);
+        String artworkUrl = entry.optString("artworkUrl", "");
+        if (!artworkUrl.isEmpty() && !artworkUrl.equals(pendingArtworkUrl)) {
+            pendingArtworkUrl = artworkUrl;
+            fetchArtwork(artworkUrl);
+        }
     }
 
     /**
@@ -561,6 +650,8 @@ public class FoliaPlaybackService extends android.app.Service {
     }
 
     private void updateMetadata(Intent intent) {
+        // JS 回话了：skip 的确认计时器看到这个时间戳变化就会收手，不再用镜像兜底。
+        lastMetadataAtMs = android.os.SystemClock.elapsedRealtime();
         String title = intent.getStringExtra(EXTRA_TITLE);
         String artist = intent.getStringExtra(EXTRA_ARTIST);
         String album = intent.getStringExtra(EXTRA_ALBAND);
@@ -1066,6 +1157,10 @@ public class FoliaPlaybackService extends android.app.Service {
     // ---- Web 层（useCapacitorPlaybackBridge）通过这些常量与服务交互 ----
 
     static final String ACTION_UPDATE_METADATA = "top.izuna.foliamajor.action.UPDATE_METADATA";
+    /** JS 活着时把队列快照推过来（WebView 冻结时原生切歌的唯一依据），见镜像区。 */
+    static final String ACTION_UPDATE_QUEUE_MIRROR = "top.izuna.foliamajor.action.UPDATE_QUEUE_MIRROR";
+    static final String EXTRA_QUEUE_MIRROR_JSON = "queueMirrorJson";
+    static final String EXTRA_QUEUE_MIRROR_INDEX = "queueMirrorIndex";
     static final String ACTION_UPDATE_STATE = "top.izuna.foliamajor.action.UPDATE_STATE";
     /**
      * 按缓存重建一次 metadata + PlaybackState，不改动任何缓存字段。

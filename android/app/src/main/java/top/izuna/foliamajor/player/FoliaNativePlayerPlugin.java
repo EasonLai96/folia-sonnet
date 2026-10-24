@@ -195,6 +195,18 @@ public class FoliaNativePlayerPlugin extends Plugin {
         current.player.play();
     }
 
+    /**
+     * 通知栏镜像切歌用：跳过 JS，直接给播放器换源。
+     *
+     * 「下一首/上一首」的确认计时器超时（WebView 冻结，JS 没回话）时，服务从镜像
+     * 队列取出相邻条目走这里。播放器内部自己处理线程（与 resumeFromSystem 同纪律）。
+     */
+    public static void prepareFromSystem(String url) {
+        FoliaNativePlayerPlugin current = instance;
+        if (current == null || current.player == null || url == null || url.isEmpty()) return;
+        current.player.prepare(url, -1L);
+    }
+
     /** 同上，方向相反。 */
     public static void pauseFromSystem() {
         FoliaNativePlayerPlugin current = instance;

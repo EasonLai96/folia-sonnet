@@ -99,6 +99,30 @@ public class FoliaPlaybackPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * 队列镜像快照：WebView 冻结后通知栏切歌的原生兜底数据源。
+     *
+     * JS 活着时每次队列/当前歌变化都推一份（当前 ±10 首、带已解析地址的窗口）。
+     * 服务把它存成静态字段；{@code onSkipToNext/Previous} 的确认计时器发现 JS
+     * 没回话时，就按这份快照在原生直接换源。只转存、不解析 —— 镜像的语义归服务。
+     */
+    @PluginMethod
+    public void setQueueMirror(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.resolve();
+            return;
+        }
+        Intent intent = new Intent(activity, FoliaPlaybackService.class);
+        intent.setAction(FoliaPlaybackService.ACTION_UPDATE_QUEUE_MIRROR);
+        String queueJson = call.getString("queueJson");
+        if (queueJson != null) intent.putExtra(FoliaPlaybackService.EXTRA_QUEUE_MIRROR_JSON, queueJson);
+        Integer index = call.getInt("index");
+        if (index != null) intent.putExtra(FoliaPlaybackService.EXTRA_QUEUE_MIRROR_INDEX, index);
+        startServiceCompat(activity, intent);
+        call.resolve();
+    }
+
     @PluginMethod
     public void setState(PluginCall call) {
         Activity activity = getActivity();
