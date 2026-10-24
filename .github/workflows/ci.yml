@@ -153,3 +153,25 @@ jobs:
       # 不需要 npm ci：只读仓库里的 package.json、.nvmrc、workflow 文件。
       - name: Check version policy
         run: npm run check:versions
+
+  ui-gates:
+    name: UI gates
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # 不需要 npm ci：只读 src/ 里的源码。
+      - name: Control library policy
+        run: npm run check:ui
+
+      - name: File size policy
+        run: npm run check:size

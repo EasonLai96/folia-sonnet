@@ -46,7 +46,8 @@
 
 ### 界面
 
-- 用项目自己的控件：设置页用 `src/components/modal/settings/kit/`（`Select`、`Slider`、`Toggle` 等），别处的下拉框用 `src/components/shared/CustomSelect.tsx`，不用系统自带的 `<select>`。图标只用 `lucide-react`。弹窗、文字测量等现成工具见 `reuse-project-utilities`。
+- 用项目自己的控件：设置页用 `src/components/modal/settings/kit/`（`Select`、`Slider`、`Toggle` 等），其余一律用 `src/components/ui`（`Button`、`TextField`、`TextArea`、`Checkbox`、`Select`）。**任何地方都不许手写 `<button>`、`<input>`、`<select>`、`<textarea>`**，唯一的实现处是 `src/components/ui/`（和设置页 kit）。`npm run check:ui` 会拦，基线只许变小。图标只用 `lucide-react`。弹窗、文字测量等现成工具见 `reuse-project-utilities`。
+- 单个文件不超过 800 行（含注释）。超了就按功能拆，`npm run check:size` 会拦；基线里的 11 个文件只许变短。
 - 样式用 Tailwind；只属于一个功能的 CSS 文件放在那个功能的目录里（如 `src/components/app/lattice/Lattice.css`）。
 - 界面上的文字都走 i18n（`t()`），三份语言文件 `src/i18n/locales/en.ts`、`zh-CN.ts`、`in.ts` 一起加。繁体中文不用写：构建时由 `dev/i18n/traditionalLocalePlugin.mjs` 从 zh-CN 转出来。主进程（`electron/*.cjs`）自己的文案表也有 zh-TW，要手写成 zh-CN 的转换结果，`test/unit/i18n/traditionalMainProcessText.test.ts` 会核对。
 - 新设置：外观类的进配置导入导出（`src/components/modal/settings/pages/storage/visualConfigTransfer.ts`、`src/utils/appearanceCodec.ts`）；功能类的设置和可执行动作进命令面板。细则见 `settings-feature-integration`。
