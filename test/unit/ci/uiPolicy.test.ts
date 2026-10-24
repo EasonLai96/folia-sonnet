@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { MAX_LINES, countControlsIn, scanControls, scanSizes } from '../../../ci/uiPolicy.ts';
+import { MAX_LINES, countControlsIn, countLines, scanControls, scanSizes } from '../../../ci/uiPolicy.ts';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -22,6 +22,12 @@ describe('手写控件计数', () => {
 describe('门禁阈值', () => {
     it('行数上限是 800', () => {
         expect(MAX_LINES).toBe(800);
+    });
+
+    it('行数不把文件末尾的换行算成一行', () => {
+        expect(countLines('a\nb\n')).toBe(2);
+        expect(countLines('a\nb')).toBe(2);
+        expect(countLines('')).toBe(0);
     });
 });
 
