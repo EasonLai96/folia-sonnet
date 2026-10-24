@@ -44,9 +44,9 @@ const FormInput: React.FC<{
         <form className="bravais-form-input" onSubmit={submit}>
             <TextField ref={inputRef} name={name} defaultValue={initial} placeholder={placeholder} autoComplete="off" spellCheck={false} onKeyDown={onKeyDown} />
             <span className="bravais-form-buttons">
-                <button type="submit" className="bravais-chrome-button is-primary" data-bravais-form-action="submit" disabled={pending}>
+                <Button type="submit" className="bravais-chrome-button is-primary" data-bravais-form-action="submit" disabled={pending}>
                     {pending && <Loader2 aria-hidden className="animate-spin" />}{submitLabel}
-                </button>
+                </Button>
                 <Button className="bravais-chrome-button" data-bravais-form-action="cancel" onClick={onCancel}>{cancelLabel}</Button>
             </span>
         </form>

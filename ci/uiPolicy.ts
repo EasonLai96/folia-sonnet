@@ -19,6 +19,12 @@ export const MAX_LINES = 800;
 const CONTROL_BASELINE = 'ci/uiControlBaseline.json';
 const SIZE_BASELINE = 'ci/fileSizeBaseline.json';
 
+// 行数按「内容行」算：文件末尾的换行不算一行（否则每个文件都会多算 1，800 行的文件会被判成 801）。
+export function countLines(source: string): number {
+    if (source.length === 0) return 0;
+    return source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
+}
+
 export function countControlsIn(source: string): Record<string, number> {
     const counts: Record<string, number> = {};
     for (const tag of CONTROL_TAGS) {
@@ -67,7 +73,7 @@ export function scanSizes(root: string = repoRoot): Violation[] {
     const baseline = readBaseline(root, SIZE_BASELINE);
     const violations: Violation[] = [];
     for (const file of listSources(root)) {
-        const lines = fs.readFileSync(path.join(root, file), 'utf8').split('\n').length;
+        const lines = countLines(fs.readFileSync(path.join(root, file), 'utf8'));
         const allowed = baseline[file] ?? MAX_LINES;
         if (lines > allowed) violations.push({ file, found: lines, allowed, unit: 'lines' });
     }
@@ -83,7 +89,7 @@ export function writeBaselines(root: string = repoRoot): void {
             const total = Object.values(countControlsIn(source)).reduce((sum, n) => sum + n, 0);
             if (total > 0) controls[file] = total;
         }
-        const lines = source.split('\n').length;
+        const lines = countLines(source);
         if (lines > MAX_LINES) sizes[file] = lines;
     }
     const sort = (object: Record<string, number>) => Object.fromEntries(Object.entries(object).sort(([a], [b]) => a.localeCompare(b)));
