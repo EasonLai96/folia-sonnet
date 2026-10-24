@@ -14,6 +14,7 @@ import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
 import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
 import type { FontBlobStore } from './fontBlobs.js';
+import { compareAndSetSettings, readSettingsRow, settingsConfirmation, settingsRevision } from './settingsConfirmation.js';
 
 export type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement;
@@ -494,10 +495,29 @@ api.get('/settings', async (c) => {
 
 api.get('/themes/manifest', async (c) => c.json(await getThemeManifest(c.env.FOLIA_SYNC_DB)));
 
+api.get('/settings/confirmation', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.json(await settingsConfirmation(await readSettingsRow(c.env.FOLIA_SYNC_DB)));
+});
+
 api.put('/settings', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
-  if (!body || body.schemaVersion !== SCHEMA_VERSION || typeof body.updatedAt !== 'string' || !isRecord(body.data)) {
+  // Settings exports shipped as v1 even after the server's wire metadata moved to v2.
+  if (!body || (body.schemaVersion !== 1 && body.schemaVersion !== SCHEMA_VERSION) || typeof body.updatedAt !== 'string' || !isRecord(body.data)) {
     return c.json({ ok: false, error: 'invalid_settings' }, 400);
+  }
+  if ('expectedRevision' in body) {
+    c.header('Cache-Control', 'no-store');
+    if (body.expectedRevision !== null && (typeof body.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedRevision))) {
+      return c.json({ ok: false, error: 'invalid_revision' }, 400);
+    }
+    const observed = await readSettingsRow(c.env.FOLIA_SYNC_DB);
+    if (await settingsRevision(observed) !== body.expectedRevision) {
+      return c.json({ ok: false, error: 'settings_conflict' }, 409);
+    }
+    const written = await compareAndSetSettings(c.env.FOLIA_SYNC_DB, observed, body);
+    if (!written) return c.json({ ok: false, error: 'settings_conflict' }, 409);
+    return c.json({ ok: true, accepted: true, ...await settingsConfirmation(written) });
   }
   await c.env.FOLIA_SYNC_DB
     .prepare(`
