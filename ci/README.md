@@ -16,6 +16,28 @@ GitHub 只运行 `.github/workflows/*.yml`，子目录不读。所以那里只�
 
 其余 workflow（`electron-release`、`canary-pre-release`、`nightly-pre-release`、`release-candidate`、`docker-*`、`triage-*`、`codemap-sync`、`linux-arm64-package-check`、`sync-server-docker-publish`）是沿用上游的旧流程，之后逐个替换或删除；换掉时直接删文件，不要往这里搬。
 
+## 提 PR：不熟 GitHub 就照着抄
+
+```text
+git switch -c fix/登录超时 origin/dev                  # 1. 从 dev 切一个分支，别再往 main/dev 上写
+# ...改代码...
+git add -A && git commit -m "fix: 登录超时后不再卡住"    # 2. 提交
+npm run pr -- "fix: 登录超时后不再卡住"                  # 3. 本地门禁 → 推分支 → 建 PR（一条命令）
+gh pr checks <PR号> --watch                             # 4. 盯 CI，绿了再去要 review
+```
+
+`npm run pr` 会做这些事，做不了就当场说清楚原因：
+
+- 拒绝在 `main` / `dev` 上直接提 PR；
+- 拒绝还有没提交的改动；
+- 先跑 `npm run ci:local`（加 `--skip-ci` 可跳过，但 CI 照样拦你）；
+- `git push -u origin` 当前分支，再 `gh pr create --base dev`；
+- 最后打印「盯 CI」和「要 review」的命令。
+
+没装 `gh`（GitHub 命令行）时：`winget install GitHub.cli`（macOS `brew install gh`），然后 `gh auth login` 按提示走一遍。
+
+**合并前必须有 review**（至少一次 AI review，必须发在 GitHub 的 PR 上）：`gh pr review <PR号> --comment --body-file review.md`。只在聊天里说「看过了」不算。
+
 ## 加一个检查
 
 1. 本目录写脚本。Node 24 能直接跑 TypeScript（`node ci/xxx.ts`），不装依赖，所以能在没有 `npm ci` 的 job 里跑。
