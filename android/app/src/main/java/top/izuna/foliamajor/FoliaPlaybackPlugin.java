@@ -149,6 +149,24 @@ public class FoliaPlaybackPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * JS「问原生要当前的状态」。
+     *
+     * 原生是播放的真源：WebView 冻结期间通知栏的镜像换源、原生补写红心都发生在
+     * 原生侧，JS 醒来后第一件事是拉这份快照对齐（队列跳到原生的歌、位置对齐、
+     * 红心认领），而不是推它自己那份旧状态。服务没在跑时 hasSong=false。
+     */
+    @PluginMethod
+    public void getPlaybackSnapshot(PluginCall call) {
+        try {
+            call.resolve(JSObject.fromJSONObject(FoliaPlaybackService.snapshotJson()));
+        } catch (Throwable error) {
+            JSObject empty = new JSObject();
+            empty.put("hasSong", false);
+            call.resolve(empty);
+        }
+    }
+
     @PluginMethod
     public void setQueueMirror(PluginCall call) {
         Activity activity = getActivity();

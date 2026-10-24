@@ -4,11 +4,14 @@ import { isCapacitorAndroid } from '../platform/runtime';
 import type { SongResult } from '../types';
 import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../services/onlineMusic/songMetadata';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
-import { fetchCoverBytes } from '../services/coverBytes';
 import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
 import { applyNativeLikeOverrides, type NativeLikeOverrideInput } from '../services/onlineMusic/omni';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
+//
+// 分工（原生为真源）：通知栏那张封面由原生按 artworkUrl 自己下载（没有 CORS 限制，
+// 也不吃 WebView 冻结）；JS 不再抓 base64 —— 拉取的活全归原生，JS 只在醒来时
+// 「问原生要当前的状态」（getPlaybackSnapshot）把自己对齐过去。
 
 /**
  * 与 FoliaPlaybackService / MainActivity 里的常量一一对应，改一处必须两处都改。
@@ -22,12 +25,11 @@ const EXTRA_COMMAND = 'command';
 type PlaybackSnapshot = 'playing' | 'paused' | 'stopped';
 
 interface FoliaPlaybackPlugin {
-  /** 启动前台服务并更新媒体元数据。artworkBase64 传 null 表示这次没有新封面。 */
+  /** 启动前台服务并更新媒体元数据。封面由原生按 artworkUrl 自己下载，不经 JS。 */
   update(options: {
     title?: string;
     artist?: string;
     album?: string;
-    artworkBase64?: string | null;
     /** 封面地址。原生会自己下载，用来绕开 WebView 的 CORS 限制。 */
     artworkUrl?: string | null;
     durationMs?: number;
@@ -73,6 +75,28 @@ interface FoliaPlaybackPlugin {
    */
   setQueueMirror(options: { queueJson: string; index: number }): Promise<void>;
   /**
+   * 问原生要当前的状态（原生是播放的真源）。
+   * WebView 冻结期间通知栏的镜像换源、原生补写红心都发生在原生侧，JS 醒来后
+   * 第一件事是拉这份快照对齐自己的队列 / 位置 / 红心，而不是推旧状态过去。
+   */
+  getPlaybackSnapshot(): Promise<{
+    snapshot: {
+      hasSong: boolean;
+      songKey: string;
+      title: string;
+      artist: string;
+      album: string;
+      durationMs: number;
+      positionMs: number;
+      playing: boolean;
+      liked: boolean;
+      canLike: boolean;
+      providerId: string;
+      serverSongId: string;
+      artworkUrl: string;
+    };
+  }>;
+  /**
    * 原生补写过的红心（WebView 冻结期间通知栏那颗心在服务器上写成功的）。
    * App 启动时取走一次，对齐进账号缓存，App 里的心才不会与通知栏打架。
    */
@@ -85,57 +109,6 @@ interface FoliaPlaybackPlugin {
 }
 
 const FoliaPlayback = registerPlugin<FoliaPlaybackPlugin>('FoliaPlayback');
-
-// 通知栏封面：Base64 体积大，同一首歌只取一次。
-const artworkCache = new Map<string, string>();
-const ARTWORK_MAX_EDGE = 512;
-
-/**
- * 把封面图片抓成 base64。
- *
- * 通知栏需要 Bitmap 而非 URL：通知由系统进程渲染，它无法访问 WebView 的
- * 缓存文件或带鉴权的资源。用 canvas 缩到 512px 再编码，避免大图撑爆 Binder 事务
- * （跨进程传输有 1MB 上限，传原始大图会 TransactionTooLargeException）。
- */
-const loadArtworkAsBase64 = async (url: string): Promise<string | null> => {
-  const cached = artworkCache.get(url);
-  if (cached) return cached;
-  if (typeof document === 'undefined') return null;
-
-  try {
-    // 取字节这件事只有 services/coverBytes 那一处知道该怎么取：
-    // 带凭据的那一跳会让「回通配符」的图床直接被浏览器判死，通知栏于是常年没有封面。
-    const blob = await fetchCoverBytes(url);
-    if (!blob) return null;
-    if (typeof createImageBitmap !== 'function') return null;
-
-    const bitmap = await createImageBitmap(blob);
-    const scale = Math.min(1, ARTWORK_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) return null;
-    context.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    // data URL 本身带前缀，原生侧会剥掉，这里原样传。
-    artworkCache.set(url, dataUrl);
-    // 只缓存最近的几张，避免长时间播放把内存吃满。
-    if (artworkCache.size > 8) {
-      const oldest = artworkCache.keys().next().value;
-      if (oldest !== undefined) artworkCache.delete(oldest);
-    }
-    return dataUrl;
-  } catch {
-    // 封面拿不到不影响播放与通知，原生侧会退回默认图标。
-    return null;
-  }
-};
 
 /**
  * 通知栏进度条的位置刷新间隔。
@@ -164,10 +137,12 @@ type UseCapacitorPlaybackBridgeOptions = {
   /** 通知栏 / 锁屏 / 耳机那颗心被按下。与面板里的喜爱按钮同一个动作。 */
   onToggleLike?: () => void;
   /**
-   * 原生兜底切歌后 JS 醒来的认领：把队列跳到原生正在放的那首（按 songKey 找）。
+   * 原生兜底切歌后 JS 的认领：把队列跳到原生正在放的那首（按 songKey 找），
+   * 找到并接管了回 true（positionMs 是原生此刻的位置，接管后对齐过去）；
+   * 队列还没恢复 / 找不到这首歌回 false，调用方会重试。
    * 不认领的话，App 打开时队列还停在旧歌上，与通知栏各说各话。
    */
-  onSyncToSong?: (songKey: string) => void;
+  onSyncToSong?: (songKey: string, positionMs?: number) => boolean | void;
   /** 队列快照：镜像兜底的数据源。缺省时不推镜像。 */
   queue?: SongResult[];
   /** 当前这首歌已解析的播放地址（audioSrc）：镜像里当前条目就用它。 */
@@ -225,6 +200,35 @@ export const useCapacitorPlaybackBridge = ({
     };
   }, [enabled]);
 
+  // 问原生要当前的状态：原生是播放的真源。WebView 冻结期间镜像换过源、原生一直在
+  // 放，JS 醒来后不是推它自己那份旧状态，而是先拉这份快照把自己的队列与位置对齐
+  // 过去。队列的恢复（localStorage hydration）可能比这个 effect 晚：找不到歌就每
+  // 500ms 重试一次，最多 6 秒，之后放弃（没有可对齐的就算了）。
+  React.useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const attempt = async (): Promise<boolean> => {
+      const { snapshot } = await FoliaPlayback.getPlaybackSnapshot();
+      if (cancelled || !snapshot || !snapshot.hasSong || !snapshot.songKey) return true;
+      return Boolean(callbacksRef.current.onSyncToSong?.(snapshot.songKey, snapshot.positionMs));
+    };
+    const run = async () => {
+      for (let attemptIndex = 0; attemptIndex < 12 && !cancelled; attemptIndex += 1) {
+        try {
+          if (await attempt()) return;
+        } catch {
+          // 老版本原生没有这个方法：没有可对齐的，静默放弃。
+          return;
+        }
+        await new Promise((resolveTimer) => setTimeout(resolveTimer, 500));
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+
   // 通知栏/锁屏/耳机的控制键走这里回到 Web 层。
   React.useEffect(() => {
     if (!enabled) return;
@@ -274,6 +278,10 @@ export const useCapacitorPlaybackBridge = ({
   }, [enabled, mediaSessionPlayRef, mediaSessionPauseRef, mediaSessionPrevRef, mediaSessionNextRef]);
 
   // 元数据：切歌时更新一次。
+  //
+  // 封面只给地址，抓取完全归原生（fetchArtwork 按 URL 下载，没有 CORS 限制，
+  // 也不吃 WebView 冻结）。JS 抓 base64 那条路整个删了 —— 它每首歌多一趟
+  // canvas 编码、多占一份桥的吞吐，而原生下载本来就更快更稳。
   React.useEffect(() => {
     if (!enabled) return;
     if (!currentSong) {
@@ -283,12 +291,10 @@ export const useCapacitorPlaybackBridge = ({
     const coverUrl = cachedCoverUrl || getSongCoverUrl(currentSong) || '';
     const songKey = getPlaybackSongKey(currentSong);
     const likeIdentity = resolveLikeIdentity(currentSong);
-    const metadata = {
+    void FoliaPlayback.update({
       title: currentSong.name || '',
       artist: getSongArtistLabel(currentSong) || '',
       album: getSongAlbumLabel(currentSong) || '',
-      // 封面地址一并给过去：WebView 里 fetch 远端封面常被 CORS 挡掉，
-      // 原生下载没有这个限制，通知栏因此总能拿到对应的封面。
       artworkUrl: coverUrl || null,
       durationMs: getDurationMs(currentSong),
       providerBadge: resolveProviderBadge(currentSong),
@@ -297,24 +303,7 @@ export const useCapacitorPlaybackBridge = ({
       canLike,
       providerId: likeIdentity.providerId || null,
       serverSongId: likeIdentity.serverSongId || null,
-    };
-
-    // 分两次发：先不带封面发一次，让原生立刻换标题并把上一首的封面丢掉，再等封面抓到补一次。
-    //
-    // 合成一次（等 base64 拿到再发）的话，封面抓取的这一段时间里原生手上的还是上一首的图，
-    // 通知栏就先画出上一首的封面，等下载线程跑完才换成当前歌 —— 看着就是封面慢了一拍。
-    let cancelled = false;
-    void (async () => {
-      await FoliaPlayback.update({ ...metadata, artworkBase64: null });
-      if (!coverUrl) return;
-      const artworkBase64 = await loadArtworkAsBase64(coverUrl);
-      // 抓封面期间可能已经切歌了，晚到的这张不能贴到新歌上。
-      if (cancelled || !artworkBase64) return;
-      await FoliaPlayback.update({ ...metadata, artworkBase64 });
-    })();
-    return () => {
-      cancelled = true;
-    };
+    });
   }, [enabled, currentSong, cachedCoverUrl, isLiked, canLike]);
 
   // 队列镜像：WebView 冻结后通知栏切歌的唯一依据。JS 活着时每次队列/当前歌变化

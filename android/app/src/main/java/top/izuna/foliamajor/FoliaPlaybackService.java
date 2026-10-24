@@ -54,6 +54,9 @@ public class FoliaPlaybackService extends android.app.Service {
      */
     private static volatile boolean running = false;
 
+    /** 活着的服务实例：getPlaybackSnapshot（JS 问原生要状态）从这里读。 */
+    private static volatile FoliaPlaybackService snapshotSource = null;
+
     /** 服务是否还活着。public：coloros 包要判断「有没有必要发刷新 intent」。 */
     public static boolean isRunning() {
         return running;
@@ -66,6 +69,44 @@ public class FoliaPlaybackService extends android.app.Service {
      */
     public static boolean isForegrounded() {
         return foregrounded;
+    }
+
+    /**
+     * 当前播放状态的快照（给 {@code getPlaybackSnapshot}，JS「问原生要状态」）。
+     *
+     * 原生是播放的真源：WebView 冻结期间镜像换过源、原生一直在放，JS 醒来后第一件事
+     * 就是拉这份快照对齐自己的队列与位置，而不是推它自己那份旧状态。服务没在跑
+     * （进程刚起、还没放过歌）时 hasSong=false，JS 按自己恢复的状态走。
+     */
+    static org.json.JSONObject snapshotJson() {
+        FoliaPlaybackService service = snapshotSource;
+        org.json.JSONObject out = new org.json.JSONObject();
+        if (service == null) {
+            try {
+                out.put("hasSong", false);
+            } catch (org.json.JSONException ignored) {
+            }
+            return out;
+        }
+        synchronized (service) {
+            try {
+                out.put("hasSong", service.cachedSongKey != null && !service.cachedSongKey.isEmpty());
+                out.put("songKey", service.cachedSongKey == null ? "" : service.cachedSongKey);
+                out.put("title", service.cachedTitle == null ? "" : service.cachedTitle);
+                out.put("artist", service.cachedArtist == null ? "" : service.cachedArtist);
+                out.put("album", service.cachedAlbum == null ? "" : service.cachedAlbum);
+                out.put("durationMs", service.cachedDurationMs);
+                out.put("positionMs", service.resolvePlaybackPositionMs());
+                out.put("playing", service.cachedState == PlaybackStateCompat.STATE_PLAYING);
+                out.put("liked", service.cachedLiked);
+                out.put("canLike", service.cachedCanLike);
+                out.put("providerId", service.cachedProviderId == null ? "" : service.cachedProviderId);
+                out.put("serverSongId", service.cachedServerSongId == null ? "" : service.cachedServerSongId);
+                out.put("artworkUrl", service.pendingArtworkUrl == null ? "" : service.pendingArtworkUrl);
+            } catch (org.json.JSONException ignored) {
+            }
+        }
+        return out;
     }
 
     // 通知内容缓存：metadata 与 playbackState 是两次独立更新，
@@ -189,6 +230,7 @@ public class FoliaPlaybackService extends android.app.Service {
     public void onCreate() {
         super.onCreate();
         running = true;
+        snapshotSource = this;
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         // 新实例起来了：前台状态必须从零算。它是静态的，进程活着时插件读它
         // （isForegrounded）决定走 startService 还是 startForegroundService；留着上一个
@@ -463,6 +505,9 @@ public class FoliaPlaybackService extends android.app.Service {
     @Override
     public void onDestroy() {
         running = false;
+        if (snapshotSource == this) {
+            snapshotSource = null;
+        }
         // 实例要没了：那次等确认的检查也跟着撤掉（它持着 this）。
         playConfirmPending = false;
         mainHandler.removeCallbacks(playConfirmCheck);

@@ -1614,11 +1614,17 @@ export default function App() {
         },
         // 与面板里的喜爱按钮同一个动作：能不能用、状态怎么存都归它，原生不自己记账。
         onToggleLike: handleLike,
-        // 原生兜底切歌后 JS 醒来的认领：把队列跳到原生正在放的那首。
-        // 队列里找不到（队列早换过了）就不动，等下一次正常的切歌对齐。
-        onSyncToSong: (songKey) => {
+        // 原生兜底切歌后 JS 的认领（App 启动拉快照 + syncTo 命令共用这一个入口）：
+        // 把队列跳到原生正在放的那首，并把它已经放到的位置对齐过去。
+        // 队列里找不到（还没恢复 / 队列早换过了）回 false，调用方会重试。
+        onSyncToSong: (songKey, positionMs) => {
+            if (currentSong && getPlaybackSongKey(currentSong) === songKey) return true;
             const song = playQueue.find((item) => getPlaybackSongKey(item) === songKey);
-            if (song) void playSong(song, playQueue);
+            if (!song) return false;
+            void playSong(song, playQueue).then(() => {
+                if (positionMs && positionMs > 0) seekMainAudioRef.current(positionMs / 1000);
+            });
+            return true;
         },
     });
 
