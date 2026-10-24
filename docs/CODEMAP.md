@@ -18,13 +18,13 @@
 | library | 256+ |
 | services | 256+ |
 | backend/electron | 128+ |
-| src (其他) | 128+ |
 | utils | 128+ |
 | hooks | 64+ |
+| src (其他) | 64+ |
 | 其他 | 64+ |
 | stores | 32+ |
 | types | 16+ |
-| i18n | 8+ |
+| i18n | 4+ |
 | workers | 4+ |
 
 ## 枢纽模块
@@ -35,6 +35,7 @@
 | --- | --- |
 | 1024+ | `src/types.ts` |
 | 256+ | `src/types/onlineMusic.ts` |
+| 128+ | `src/stores/usePlaybackStore.ts` |
 | 128+ | `src/types/ponder.ts` |
 | 128+ | `src/utils/appPlaybackGuards.ts` |
 | 64+ | `src/components/command-palette/types.ts` |
@@ -45,12 +46,13 @@
 | 64+ | `src/services/db.ts` |
 | 64+ | `src/services/onlineMusic/omni.ts` |
 | 64+ | `src/stores/useAppViewStore.ts` |
-| 64+ | `src/stores/usePlaybackStore.ts` |
 | 64+ | `src/stores/useStatusMessageStore.ts` |
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
+| 32+ | `src/components/visualizer/hanabi/types.ts` |
 | 32+ | `src/components/visualizer/registry.tsx` |
+| 32+ | `src/components/wall/layout.ts` |
 | 32+ | `src/components/wall/wallSlots.ts` |
 | 32+ | `src/library/core/account/account.contract.ts` |
 | 32+ | `src/library/core/collection/collection.contract.ts` |
@@ -251,6 +253,7 @@
 - `src/components/visualizer/classic/entry.tsx`
 - `src/components/visualizer/diorama/entry.tsx`
 - `src/components/visualizer/fume/entry.tsx`
+- `src/components/visualizer/hanabi/entry.tsx`
 - `src/components/visualizer/lumiere/entry.tsx`
 - `src/components/visualizer/monet/entry.tsx`
 - `src/components/visualizer/partita/entry.tsx`
@@ -274,6 +277,7 @@
 - `src/components/visualizer/classic/tuning.ts`
 - `src/components/visualizer/diorama/tuning.ts`
 - `src/components/visualizer/fume/tuning.ts`
+- `src/components/visualizer/hanabi/tuning.ts`
 - `src/components/visualizer/lumiere/tuning.ts`
 - `src/components/visualizer/monet/tuning.ts`
 - `src/components/visualizer/partita/tuning.ts`
@@ -296,6 +300,7 @@
 - `src/components/visualizer/classic/tuning.ts`
 - `src/components/visualizer/diorama/tuning.ts`
 - `src/components/visualizer/fume/tuning.ts`
+- `src/components/visualizer/hanabi/tuning.ts`
 - `src/components/visualizer/lumiere/tuning.ts`
 - `src/components/visualizer/monet/tuning.ts`
 - `src/components/visualizer/partita/tuning.ts`
