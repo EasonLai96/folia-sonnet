@@ -12,6 +12,7 @@ import { Tooltip } from '../../modal/settings/kit';
 import { AccountPicture, PlatformMark, platformMarkOf } from '../PlatformMark';
 import { rowStatus, type RowStatus } from '../platformRows';
 import { filterRows } from './loginView';
+import { TextField } from '../../ui';
 
 // src/components/login/window/PlatformColumn.tsx
 // 登录窗口里平台的那一列：每个平台一行（记号、名字和它下面的登录状态、已登录的头像），各行平分列的高，
@@ -206,7 +207,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
             {rows.length >= SEARCH_FROM && (
                 <label className="st-t-fast mb-1.5 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-[var(--st-fill)] px-2.5 text-[color:var(--st-t3)] transition-shadow focus-within:shadow-[inset_0_0_0_1.5px_var(--st-line2)]">
                     <Search size={14} className="shrink-0" />
-                    <input
+                    <TextField
                         value={query}
                         onChange={event => { setQuery(event.target.value); setPointed(null); }}
                         onKeyDown={handleKeyDown}
