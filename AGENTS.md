@@ -80,6 +80,8 @@
 
 - **开 PR 之前**跑 `npm run ci:local`（typecheck + 单测 + `vite build` + 版本约束，与 `.github/workflows/ci.yml` 同一套），红了不许开 PR。
 - **开 PR 之后**跑 `gh pr checks <编号> --watch`，全绿才合并；红了当场修，不要交给别人。
+- **合并前必须 review，至少一次 AI review**，而且报告要发在 GitHub 上：`gh pr review <编号> --comment --body-file review.md`。只在聊天里说「看过了」不算，`gh pr view <编号> --json reviews` 里能查到才算。有未处理的 CHANGES_REQUESTED 不许合。
+- GitHub 的原生 approval 只能由别人给，AI review 是评论、不会变成 approval：要硬拦就由 owner 在分支保护里开 Require a pull request before merging；要把 AI review 也变成硬门禁，需要给审查账号单独一个 GitHub 身份，或加一个「review 是否存在」的 required check（还没做）。
 - 检查逻辑都放 `ci/`，`.github/workflows/` 只留入口；沿用的旧 workflow 之后逐个替换，新流程不要再直接往 `.github/workflows/` 里加。
 - `.github/workflows/ci.yml`：PR 到 `dev` / `main`，以及这两个分支的 push 都会跑。出包不在这里。
 - 版本约束实现在 `ci/checkVersionPolicy.ts`，单独跑 `npm run check:versions`：平台依赖钉死且根目录与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 Node 版本一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本与 `package.json` 同步。
