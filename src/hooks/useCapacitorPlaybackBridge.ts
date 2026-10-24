@@ -50,6 +50,12 @@ interface FoliaPlaybackPlugin {
      * 画出来点了没反应比不画更让人困惑。不传 = 这次不改。
      */
     canLike?: boolean | null;
+    /**
+     * 红心的原生兜底：当前歌来自哪个平台、平台侧的歌曲 id。
+     * WebView 冻结时通知栏那颗心按它直接对各平台补写收藏（kugou 等没有原生通道会跳过）。
+     */
+    providerId?: string | null;
+    serverSongId?: string | null;
   }): Promise<void>;
   /** 更新播放状态。playing=true 时服务会真正进入前台。 */
   setState(options: {
@@ -240,6 +246,7 @@ export const useCapacitorPlaybackBridge = ({
     }
     const coverUrl = cachedCoverUrl || getSongCoverUrl(currentSong) || '';
     const songKey = getPlaybackSongKey(currentSong);
+    const likeIdentity = resolveLikeIdentity(currentSong);
     const metadata = {
       title: currentSong.name || '',
       artist: getSongArtistLabel(currentSong) || '',
@@ -252,6 +259,8 @@ export const useCapacitorPlaybackBridge = ({
       songKey,
       liked: isLiked,
       canLike,
+      providerId: likeIdentity.providerId || null,
+      serverSongId: likeIdentity.serverSongId || null,
     };
 
     // 分两次发：先不带封面发一次，让原生立刻换标题并把上一首的封面丢掉，再等封面抓到补一次。
@@ -289,6 +298,7 @@ export const useCapacitorPlaybackBridge = ({
     const windowList = list.slice(windowStart, Math.min(list.length, index + 11));
     const entries = windowList.map((song) => {
       const isCurrent = getPlaybackSongKey(song) === activeKey;
+      const identity = resolveLikeIdentity(song);
       return {
         songKey: getPlaybackSongKey(song),
         title: song.name || '',
@@ -296,10 +306,18 @@ export const useCapacitorPlaybackBridge = ({
         album: getSongAlbumLabel(song) || '',
         artworkUrl: getSongCoverUrl(song) || '',
         url: (isCurrent ? activeUrl : urlOf?.(song)) ?? '',
+        // 原生兜底切歌后，服务用这两样维持红心兜底的能力（网易 / QQ 才有）。
+        providerId: identity.providerId,
+        serverSongId: identity.serverSongId,
+        // 红心状态只有「推镜像时正播着的那首」是确定的：镜像推完用户可能切走，
+        // 其它歌在「我喜欢」里的状态这里拿不到，就不带，原生按未知处理（心先藏起来）。
+        ...(isCurrent ? { liked: isLiked, canLike } : {}),
       };
     });
     void FoliaPlayback.setQueueMirror({ queueJson: JSON.stringify(entries), index: index - windowStart });
-  }, [enabled, currentSong, queue, currentAudioUrl]);
+    // isLiked/canLike 进依赖：当前条目带的红心状态要跟着收藏变化重推，否则原生兜底
+    // 切歌后拿到的 liked 是推送那一刻的旧值。
+  }, [enabled, currentSong, queue, currentAudioUrl, isLiked, canLike]);
 
   // 播放状态：playing 时服务进入前台，这是后台网络不被节流的关键。
   //
@@ -397,6 +415,34 @@ const getDurationMs = (song: SongResult): number => {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return 0;
   // 有些音源给的是秒。
   return ms > 0 && ms < 1000 ? Math.round(ms * 1000) : Math.round(ms);
+};
+
+/**
+ * 红心的原生兜底需要的歌曲身份：平台与平台侧歌曲 id。
+ *
+ * 网易的收藏写入只认数字曲库 id（mediaId 就是它）；QQ 的写入要数字 songId
+ * （正规化时存在 providerData.songId，mediaId 多数时候是 songmid，不能拿去猜）。
+ * 本地 / Navidrome / 舞台这些自家人没有平台身份，原生兜底对它们跳过。
+ */
+const resolveLikeIdentity = (song: SongResult | null | undefined): {
+  providerId: string;
+  serverSongId: string;
+} => {
+  const sourceRef = song?.sourceRef?.kind === 'online' ? song.sourceRef : undefined;
+  if (!sourceRef) return { providerId: '', serverSongId: '' };
+  if (sourceRef.providerId === 'netease') {
+    return { providerId: 'netease', serverSongId: String(sourceRef.mediaId ?? '') };
+  }
+  if (sourceRef.providerId === 'qq') {
+    const data = (sourceRef.providerData ?? {}) as Record<string, unknown>;
+    const id = typeof data.songId === 'string' && /^\d{1,15}$/.test(data.songId.trim())
+      ? data.songId.trim()
+      : (typeof sourceRef.mediaId === 'string' && /^\d{1,15}$/.test(sourceRef.mediaId.trim())
+        ? sourceRef.mediaId.trim()
+        : '');
+    return { providerId: 'qq', serverSongId: id };
+  }
+  return { providerId: String(sourceRef.providerId), serverSongId: '' };
 };
 
 /**

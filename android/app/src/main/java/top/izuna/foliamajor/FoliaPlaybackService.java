@@ -97,6 +97,15 @@ public class FoliaPlaybackService extends android.app.Service {
     private boolean cachedCanLike = false;
     /** 封面角标（通知 small icon）的资源 id；0 = 还没收到过，用缺省。 */
     private int cachedBadgeRes = 0;
+    // ===== 红心的原生兜底 =====
+    // 当前歌的服务器侧身份：哪个平台、平台认的歌曲 id。Web 层随 metadata / 队列镜像推来，
+    // WebView 冻结时通知栏那颗心按它直接对各平台补写收藏（见 scheduleLikeFallback）。
+    private String cachedProviderId = "";
+    private String cachedServerSongId = "";
+    /** 原生红心兜底在途标记：同一时刻只允许一发，连点两下不会发出两个相反的写入。 */
+    private volatile boolean likeFallbackInFlight = false;
+    /** JS 没回话等多久就原生补写红心。要长于 JS 正常处理一次收藏的耗时（写 + 复查），免得慢一点就双写。 */
+    private static final long LIKE_FALLBACK_MS = 5_000L;
 
     // ===== 通知栏镜像队列 =====
     // JS 活着时把「当前 ±10 首、带已解析地址」的队列窗口推过来；WebView 冻结后
@@ -300,7 +309,9 @@ public class FoliaPlaybackService extends android.app.Service {
                  * 等 Web 层终于推来一次锚点才弹回去 —— 就是那个「闪一下」。
                  */
                 boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
-                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(pos, playing);
+                // setSeekAnchor：写锚点的同时打开回弹守卫窗 —— JS 那边音频还没 seek 完时
+                // 推来的旧位置（守卫窗内的位置回退）会被状态层丢掉，见 WallpaperLyricsState。
+                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setSeekAnchor(pos, playing);
                 top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
                         .shared(FoliaPlaybackService.this).invalidateOverlay();
             }
@@ -330,6 +341,9 @@ public class FoliaPlaybackService extends android.app.Service {
             public void onCustomAction(String action, android.os.Bundle extras) {
                 if (ACTION_TOGGLE_LIKE.equals(action)) {
                     sendCommand("like");
+                    // 命令照旧给 JS（它才是账号态的唯一写手），同时挂一个原生兜底：
+                    // WebView 冻结时 JS 永远不会回话，超时后由这里直接对各平台补写。
+                    scheduleLikeFallback();
                 }
             }
         });
@@ -400,6 +414,11 @@ public class FoliaPlaybackService extends android.app.Service {
                 case ACTION_UPDATE_QUEUE_MIRROR:
                     mirroredQueueJson = intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON);
                     mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1);
+                    break;
+                case ACTION_SCHEDULE_LIKE_FALLBACK:
+                    // 通知栏 / 锁屏那颗心走 FoliaCommandReceiver，不经 MediaSession 回调，
+                    // 由接收器转成这条 action 把兜底计时器挂上。
+                    scheduleLikeFallback();
                     break;
                 case ACTION_REFRESH_METADATA:
                     // ColorOS 原生歌词到的比播放晚（Web 层先拿到词）时用这条：
@@ -491,6 +510,49 @@ public class FoliaPlaybackService extends android.app.Service {
         }, SKIP_FALLBACK_MS);
     }
 
+    /**
+     * 红心的原生兜底计时器：命令照旧广播给 JS，同时等它回话。
+     *
+     * JS 的「回话」在这里的定义与切歌兜底一致：**它有没有推出新的 metadata**。
+     * 收藏成功（或失败）都会让 Web 层推一次元数据（liked 字段变了），于是
+     * {@link #lastMetadataAtMs} 前进，计时器看到就收手。WebView 冻结时它永远不前进，
+     * 超时后按当前歌的平台身份直接对各平台服务器补写（{@link #toggleLikeNatively}）。
+     */
+    private void scheduleLikeFallback() {
+        final long before = lastMetadataAtMs;
+        mainHandler.postDelayed(() -> {
+            if (lastMetadataAtMs != before) return;
+            toggleLikeNatively();
+        }, LIKE_FALLBACK_MS);
+    }
+
+    /** 原生补写红心：成功后就地换心（通知、MediaSession、锁屏快照一起刷）。 */
+    private void toggleLikeNatively() {
+        if (likeFallbackInFlight) return;
+        if (!cachedCanLike) return;
+        final String providerId = cachedProviderId;
+        final String songId = cachedServerSongId;
+        final boolean wanted = !cachedLiked;
+        if (providerId.isEmpty() || songId.isEmpty()) return;
+        likeFallbackInFlight = true;
+        // 网络与 CookieManager 都不能上主线程：桥的线程规则（memory 15）在这里同样适用。
+        new Thread(() -> {
+            boolean ok = false;
+            try {
+                ok = top.izuna.foliamajor.online.LikeFallback.setLiked(providerId, songId, wanted);
+            } finally {
+                likeFallbackInFlight = false;
+            }
+            if (!ok) return;
+            // JS 醒来后推来的 liked 仍以它为准（它才是账号态的唯一写手）；
+            // 这里先让通知栏别停在旧状态上。
+            cachedLiked = wanted;
+            publishSnapshot();
+            applyPlaybackState();
+            publishNotification();
+        }, "folia-like-fallback").start();
+    }
+
     /** 从镜像队列取相邻一首，原生直接换源并自更新通知元数据。 */
     private void skipViaMirror(int direction) {
         String json = mirroredQueueJson;
@@ -523,6 +585,8 @@ public class FoliaPlaybackService extends android.app.Service {
             pendingArtworkUrl = null;
             cachedLiked = false;
             cachedCanLike = false;
+            cachedProviderId = "";
+            cachedServerSongId = "";
         }
         String title = entry.optString("title", "");
         if (!title.isEmpty()) cachedTitle = title;
@@ -530,6 +594,14 @@ public class FoliaPlaybackService extends android.app.Service {
         if (!artist.isEmpty()) cachedArtist = artist;
         String album = entry.optString("album", "");
         if (!album.isEmpty()) cachedAlbum = album;
+        // 镜像条目带上服务器侧身份与红心状态（Web 层只为「推镜像时正播着的那首」带
+        // liked/canLike）：原生兜底切歌之后，那颗心与红心兜底才不会一齐消失。
+        String entryProvider = entry.optString("providerId", "");
+        if (!entryProvider.isEmpty()) cachedProviderId = entryProvider;
+        String entrySongId = entry.optString("serverSongId", "");
+        if (!entrySongId.isEmpty()) cachedServerSongId = entrySongId;
+        if (entry.has("liked")) cachedLiked = entry.optBoolean("liked", false);
+        if (entry.has("canLike")) cachedCanLike = entry.optBoolean("canLike", false);
         cachedState = PlaybackStateCompat.STATE_PLAYING;
         cachedPlaying = true;
         cachedPositionMs = 0L;
@@ -683,6 +755,10 @@ public class FoliaPlaybackService extends android.app.Service {
             // 里带的就是新歌的值，所以先清、紧接着下面再按 extras 覆盖。
             cachedLiked = false;
             cachedCanLike = false;
+            // 红心兜底用的服务器侧身份同理：宁可空着等这一次 update 带来，
+            // 也不能拿着上一首的 id 去给新歌写收藏。
+            cachedProviderId = "";
+            cachedServerSongId = "";
         }
 
         // 「喜欢」与否跟着 metadata 一起到：它是当前歌曲的属性，不是播放状态。
@@ -694,6 +770,12 @@ public class FoliaPlaybackService extends android.app.Service {
         if (intent.hasExtra(EXTRA_CAN_LIKE)) {
             cachedCanLike = intent.getBooleanExtra(EXTRA_CAN_LIKE, false);
         }
+        // 红心兜底用的服务器侧身份：与 songKey 一起到。没带就保留旧值
+        //（老版本 Web 层不推这两个字段，那时原生兜底按「没身份」跳过）。
+        String providerId = intent.getStringExtra(EXTRA_PROVIDER_ID);
+        if (providerId != null) cachedProviderId = providerId;
+        String serverSongId = intent.getStringExtra(EXTRA_SERVER_SONG_ID);
+        if (serverSongId != null) cachedServerSongId = serverSongId;
 
         // 先更新缓存，再重建通知：metadata 与 state 是两次独立调用，
         // 任何一次都要能拿到完整的通知内容。
@@ -1187,6 +1269,12 @@ public class FoliaPlaybackService extends android.app.Service {
     static final String EXTRA_LIKED = "liked";
     /** 「喜欢」这个动作当前能不能用；false 时通知栏不画那颗心。 */
     static final String EXTRA_CAN_LIKE = "canLike";
+    /** 红心兜底：当前歌来自哪个平台（netease/qq/…），决定原生补写收藏走哪条路。 */
+    static final String EXTRA_PROVIDER_ID = "providerId";
+    /** 红心兜底：当前歌在平台侧的歌曲 id（网易 = 数字曲库 id，QQ = 数字 songId）。 */
+    static final String EXTRA_SERVER_SONG_ID = "serverSongId";
+    /** 通知栏/锁屏那颗心经 FoliaCommandReceiver 转进来的兜底挂载动作。 */
+    static final String ACTION_SCHEDULE_LIKE_FALLBACK = "top.izuna.foliamajor.action.SCHEDULE_LIKE_FALLBACK";
     /**
      * MediaSession 的自定义动作名：「喜欢 / 取消喜欢」。
      *

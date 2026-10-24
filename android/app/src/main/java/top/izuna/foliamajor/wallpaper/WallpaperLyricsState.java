@@ -284,6 +284,45 @@ public final class WallpaperLyricsState {
 
     private static volatile Snapshot current = EMPTY;
 
+    // ===== seek 回弹守卫 =====
+    // 通知栏进度条拖动时，服务（onSeekTo）先把锚点对齐到目标位置；随后 JS 那边才收到
+    // seek 命令、音频还没真 seek 过去，timeupdate 报的还是旧位置。这一份「位置回退」的
+    // 推送如果在窗口期内被收下，叠层就是用户看到的「先弹到新位置、又弹回旧位置、
+    // 再跳回新位置」。所以原生 seek 之后的短时间内，明显往回跳的推送一律丢掉位置。
+    private static volatile long nativeSeekAtMs = 0L;
+    private static volatile long nativeSeekPositionMs = 0L;
+    private static final long SEEK_GUARD_WINDOW_MS = 600L;
+    private static final long SEEK_GUARD_TOLERANCE_MS = 400L;
+
+    /**
+     * 原生侧的一次「真 seek」：写锚点的同时打开回弹守卫窗。
+     * 只有通知栏 / 锁屏拖进度条这条路走这里；播放 / 暂停的对齐（syncWallpaperAnchor）
+     * 位置取自快照自己，不存在回退，照旧走 {@link #setAnchor}。
+     */
+    public static void setSeekAnchor(long positionMs, boolean playing) {
+        nativeSeekAtMs = SystemClock.elapsedRealtime();
+        nativeSeekPositionMs = positionMs;
+        setAnchor(positionMs, playing);
+    }
+
+    /** 这一推是不是 seek 守卫窗内的位置回退。 */
+    private static boolean isSeekRegression(long positionMs) {
+        long since = SystemClock.elapsedRealtime() - nativeSeekAtMs;
+        if (since < 0L || since > SEEK_GUARD_WINDOW_MS) {
+            return false;
+        }
+        return positionMs < nativeSeekPositionMs - SEEK_GUARD_TOLERANCE_MS;
+    }
+
+    // ===== 主题推送按内容去重 =====
+    // 切歌那一推本来就被「等主题落定」的闸按住，但闸放开之后仍可能连着来两份：
+    // 一份主题在途、一份主题落定（或封面补到）。叠层每收一次整包就重画一次，
+    // 于是换一首歌闪两下。既然两份的内容一样，第二份就根本不该重贴 ——
+    // 判据不是「publish 来了几次」，而是「渲染出来的东西变没变」。
+    private static String lastPalettePrimary = null;
+    private static String lastPaletteSecondary = null;
+    private static String lastPaletteThemeJson = null;
+
     /** 最近一次写进磁盘的自选图，用来跳过重复写入。 */
     private static String lastStoredImage = null;
     private static String lastStoredKey = null;
@@ -316,6 +355,11 @@ public final class WallpaperLyricsState {
     /** 播放位置推进：只更新锚点，不动时间轴，也不落盘。 */
     public static void setAnchor(long positionMs, boolean playing) {
         Snapshot previous = current;
+        if (isSeekRegression(positionMs)) {
+            // seek 守卫窗内的旧位置回推：位置丢弃，playing 照收 —— 那是独立的事实。
+            // 锚点沿用快照里已有的（原生 seek 刚写进去的那个）。
+            positionMs = previous.anchorPositionMs;
+        }
         current = new Snapshot(previous.title, previous.artist, previous.cover, previous.accent,
                 previous.baseColor, previous.motion, previous.backgroundMode, previous.image,
                 previous.font, previous.visualizerMode, previous.blur, previous.showProgress,
@@ -380,6 +424,14 @@ public final class WallpaperLyricsState {
                                long positionMs, boolean playing) {
         Snapshot previous = current;
         tuning = resolveTuning(tuningPatch);
+        // seek 守卫窗内的位置回退：整包推送也照丢。锚点沿用快照里已有的（原生 seek
+        // 刚写进去的那个），其余字段照常更新。
+        long anchorElapsedMs = SystemClock.elapsedRealtime();
+        long anchorPositionMs = positionMs;
+        if (isSeekRegression(positionMs)) {
+            anchorElapsedMs = previous.anchorElapsedMs;
+            anchorPositionMs = previous.anchorPositionMs;
+        }
         Snapshot next = new Snapshot(
                 title != null ? title : previous.title,
                 artist != null ? artist : previous.artist,
@@ -397,13 +449,87 @@ public final class WallpaperLyricsState {
                 durationMs >= 0L ? durationMs : previous.durationMs,
                 lines != null ? lines : previous.lines,
                 playing,
-                SystemClock.elapsedRealtime(),
-                positionMs,
+                anchorElapsedMs,
+                anchorPositionMs,
                 System.currentTimeMillis());
+        // 同内容不重贴：叠层看到「签名变了」才会重画整包，而签名里带着 stamp。
+        // 渲染内容与上一份完全相同（主题在途/落定的两连推就是这种）时沿用旧 stamp，
+        // 叠层那次推送整个跳过。主题要单独看：它存在 WallpaperThemePalette 的小表里、
+        // 不进 Snapshot，主题真的换了时 stamp 必须前进，否则叠层永远拿不到新主题。
+        if (renderedContentEquals(previous, next) && !paletteChanged(context)) {
+            next = new Snapshot(next.title, next.artist, next.cover, next.accent, next.baseColor,
+                    next.motion, next.backgroundMode, next.image, next.font,
+                    next.visualizerMode, next.blur, next.showProgress, next.showTranslation,
+                    next.durationMs, next.lines, next.playing, next.anchorElapsedMs,
+                    next.anchorPositionMs, previous.stamp);
+        }
         current = next;
         if (context != null && (lines != null || tuningPatch != null)) {
             persist(context, next);
         }
+    }
+
+    /**
+     * 叠层会渲染的字段是否与上一份完全相同。
+     * 位置 / 播放态不参与 —— 那两个走锚点，签名里本来就有，不靠 stamp。
+     */
+    private static boolean renderedContentEquals(Snapshot a, Snapshot b) {
+        return a.title.equals(b.title)
+                && a.artist.equals(b.artist)
+                && (a.cover == null ? b.cover == null : a.cover.equals(b.cover))
+                && a.accent == b.accent
+                && a.baseColor == b.baseColor
+                && a.motion == b.motion
+                && a.backgroundMode.equals(b.backgroundMode)
+                && (a.image == null ? b.image == null : a.image.equals(b.image))
+                && a.visualizerMode.equals(b.visualizerMode)
+                && a.blur == b.blur
+                && a.showProgress == b.showProgress
+                && a.showTranslation == b.showTranslation
+                && a.durationMs == b.durationMs
+                && linesEqual(a.lines, b.lines);
+    }
+
+    private static boolean linesEqual(TimedLine[] a, TimedLine[] b) {
+        if (a == b) return true;
+        if (a == null || b == null || a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) {
+            TimedLine left = a[i];
+            TimedLine right = b[i];
+            if (left == right) continue;
+            if (left == null || right == null) return false;
+            if (left.startMs != right.startMs || left.endMs != right.endMs) return false;
+            if (!left.text.equals(right.text)) return false;
+            if (left.translation == null ? right.translation != null
+                    : !left.translation.equals(right.translation)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 主题三元组（主色 / 次色 / 整份主题 JSON）相对上一次 publish 有没有变。
+     * FoliaWallpaperPlugin 在调 publish 之前已经把新的三元组写进偏好表了，
+     * 这里读出来跟缓存比对并刷新缓存。首次（缓存还是 null）不算变：
+     * 那时快照也刚从 EMPTY 出发，签名本来就会变。
+     */
+    private static boolean paletteChanged(Context context) {
+        if (context == null) return false;
+        String[] palette = WallpaperThemePalette.read(context);
+        String themeJson = WallpaperThemePalette.readThemeJson(context);
+        boolean changed = lastPalettePrimary != null && (
+                !nullSafeEquals(lastPalettePrimary, palette[0])
+                || !nullSafeEquals(lastPaletteSecondary, palette[1])
+                || !nullSafeEquals(lastPaletteThemeJson, themeJson));
+        lastPalettePrimary = palette[0];
+        lastPaletteSecondary = palette[1];
+        lastPaletteThemeJson = themeJson;
+        return changed;
+    }
+
+    private static boolean nullSafeEquals(String a, String b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     /** 只改外观（背景模式 / 自选图 / 可视化风格），不动时间轴，也避免整条时间轴重新落盘。 */

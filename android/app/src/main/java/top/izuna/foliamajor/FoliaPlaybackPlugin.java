@@ -94,6 +94,11 @@ public class FoliaPlaybackPlugin extends Plugin {
         if (liked != null) intent.putExtra(FoliaPlaybackService.EXTRA_LIKED, liked.booleanValue());
         Boolean canLike = call.getBoolean("canLike");
         if (canLike != null) intent.putExtra(FoliaPlaybackService.EXTRA_CAN_LIKE, canLike.booleanValue());
+        // 红心兜底用的服务器侧身份：WebView 冻结时通知栏那颗心按它直接对各平台补写收藏。
+        String providerId = call.getString("providerId");
+        if (providerId != null) intent.putExtra(FoliaPlaybackService.EXTRA_PROVIDER_ID, providerId);
+        String serverSongId = call.getString("serverSongId");
+        if (serverSongId != null) intent.putExtra(FoliaPlaybackService.EXTRA_SERVER_SONG_ID, serverSongId);
 
         startServiceCompat(activity, intent);
         call.resolve();
