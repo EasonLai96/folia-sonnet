@@ -7,7 +7,8 @@ import type { LucideIcon } from 'lucide-react';
 //
 // bare 是迁移期的默认档：只保留结构类，尺寸/字号/过渡/颜色一律交给调用方。基础类里任何一条
 // 高度、字号、transition 都可能压过调用方的 className（Tailwind 的层叠不按书写顺序，而是按
-// 生成的顺序），迁移既有按钮时那就是外观回退。ref 透传：菜单/弹层的定位锚点要用它。
+// 生成的顺序），迁移既有按钮时那就是外观回退。
+// ref 透传：菜单/弹层的定位锚点要用。type 默认 button，表单里的提交键可以传 submit。
 
 export type ButtonVariant = 'bare' | 'fill' | 'primary' | 'quiet';
 export type ButtonSize = 'sm' | 'md';
@@ -25,7 +26,7 @@ const SIZE: Record<ButtonSize, string> = {
     md: 'h-8 text-[13px]',
 };
 
-export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> {
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: ButtonVariant;
     size?: ButtonSize;
     icon?: LucideIcon;
@@ -34,7 +35,7 @@ export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonE
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-    { variant = 'bare', size = 'md', icon: Icon, tip, className, children, ...rest },
+    { variant = 'bare', size = 'md', icon: Icon, tip, className, children, type = 'button', ...rest },
     ref,
 ) {
     const iconOnly = !children;
@@ -43,7 +44,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     return (
         <button
             ref={ref}
-            type="button"
+            type={type}
             {...rest}
             aria-label={iconOnly ? (rest['aria-label'] ?? tip) : rest['aria-label']}
             title={tip ?? rest.title}
