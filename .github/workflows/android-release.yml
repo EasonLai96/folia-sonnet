@@ -2,9 +2,10 @@ name: Android Release
 
 # Android 出包：Web 产物 → Capacitor 同步 → 签名 → APK / AAB。
 #
-# 触发方式两种：
-#   1. 打 v* 标签（正式发布，默认发 GitHub Release）
-#   2. 手动 workflow_dispatch：可以顺手涨版本号 + 打标签（见 bump 输入），
+# 触发方式三种：
+#   1. 推 release/x.y.z 分支（正式发版，分支名必须等于 package.json 的版本）
+#   2. 打 v* 标签（兼容旧流程，标签必须等于 package.json 的版本）
+#   3. 手动 workflow_dispatch：可以顺手涨版本号 + 打标签（见 bump 输入），
 #      等于「一键发版」—— 涨版本、CI 校验、出包、建 Release 全在这一个 job 里跑完。
 #
 # 为什么手动这条不靠「推标签去触发另一个 workflow」：用 GITHUB_TOKEN 推的提交/标签
@@ -19,6 +20,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - 'release/**'
   workflow_dispatch:
     inputs:
       bump:
@@ -103,18 +106,23 @@ jobs:
           VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
           echo "本次出包版本：v${VERSION}（versionCode 由它推出，见 android/app/build.gradle）"
 
-      - name: Verify tag matches package.json
-        # 标签触发时 versionName / versionCode 全从 package.json 读：两者对不上，发出去的包
-        # 版本就是错的。直接 fail，别让它安静地打完。
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Verify release ref matches package.json
+        # 标签或 release/ 分支都代表一次发版；versionName / versionCode 全从 package.json 读，
+        # 两边对不上，发出去的包版本就是错的。直接 fail，别让它安静地打完。
+        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
         run: |
           set -euo pipefail
           VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
-          if [[ "v${VERSION}" != "${GITHUB_REF_NAME}" ]]; then
-            echo "::error::标签 ${GITHUB_REF_NAME} 与 package.json 的 v${VERSION} 不一致"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            EXPECTED="v${VERSION}"
+          else
+            EXPECTED="release/${VERSION}"
+          fi
+          if [[ "${GITHUB_REF_NAME}" != "${EXPECTED}" ]]; then
+            echo "::error::${GITHUB_REF_NAME} 与 package.json 的版本对不上，应为 ${EXPECTED}"
             exit 1
           fi
-          echo "标签与 package.json 一致：v${VERSION}"
+          echo "发版 ref 与 package.json 一致：${GITHUB_REF_NAME}"
 
       - name: Check version policy
         # 平台依赖钉死、Docker 部署同版本、Node 版本一致、锁文件与 package.json 同步。
