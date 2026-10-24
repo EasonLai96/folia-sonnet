@@ -235,7 +235,7 @@ SYNC_TOKEN="你的_SYNC_TOKEN"
 # 选填：网页看板访问 Token (至少 16 位)
 DASHBOARD_TOKEN="你的_DASHBOARD_TOKEN"
 
-# 选填：可视化面板 /admin 的登录凭据（不填就用出厂那一组，两个都要给才生效）
+# 选填：显式启用 /admin；两项必填，密码去掉两端空白后至少 16 字符，否则面板关闭
 ADMIN_USERNAME="你的账号"
 ADMIN_PASSWORD="你的密码"
 ```
@@ -275,7 +275,7 @@ PORT=3000
 # 选填：SQLite 数据库保存路径（默认在当前目录生成 folia-sync.db）
 DB_PATH="./folia-sync.db"
 
-# 选填：可视化面板 /admin 的登录凭据（不填就用出厂那一组，两个都要给才生效）
+# 选填：显式启用 /admin；两项必填，密码去掉两端空白后至少 16 字符，否则面板关闭
 ADMIN_USERNAME="你的账号"
 ADMIN_PASSWORD="你的密码"
 ```
@@ -371,27 +371,19 @@ http://127.0.0.1:13000
 
 **访问地址**：`http://你的服务域名/admin`
 
-**出厂账号密码**：
+**默认关闭，没有内置账号或密码。** Node 环境变量或 Workers secrets 必须同时配置 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`；用户名不能为空，密码去掉两端空白后至少 16 字符（实际验证密码仍保留空白）。缺失、空值或不足门槛时，所有 `/admin` 页面/API 返回 `503 admin_not_configured`，同步与公开缓存/字体接口不受此门槛影响。示例密码只是占位，部署时请使用随机长密码。
 
-| 项目 | 默认值 |
-| --- | --- |
-| 账号 | `maimai993` |
-| 密码 | `IgFXYJPHtEB9eog6TqYRhjk6` |
+```env
+ADMIN_USERNAME="你的账号"
+ADMIN_PASSWORD="请换成至少16字符的随机长密码"
+```
+
+升级时自动给 `admin_sessions` 增加可空 `credential_tag` 列，不删除现有数据，也不改变对外 schema version 2。旧版没有标签的 session 无法继续登录，用户需要重新登录。轮换用户名或密码也会使旧 session 失效。先备份数据库再升级，Node 与 Workers 都要更新实际生效的环境配置；多副本需要同步轮换配置并滚动更新，尚未更新的旧进程仍按旧配置运行。
+
+浏览器只持有 HttpOnly、SameSite=Lax cookie，HTTPS 时带 Secure；有效期 12 小时，剩余不足 10 小时且访问面板时续期；退出删除 session。所有管理响应 `Cache-Control: no-store`，不提供跨源 CORS，写操作拒绝不同 Origin 或 cross-site Fetch Metadata。无 Origin 的非浏览器管理脚本仍需正常登录 cookie。
 
 > [!WARNING]
-> 这是**写在源码里的出厂凭据**，仓库公开 = 谁都看得到。它只保证「服务起得来就能登进去」，
-> **部署到公网前必须换成自己的**：
->
-> ```env
-> ADMIN_USERNAME="你的账号"
-> ADMIN_PASSWORD="你的密码"
-> ```
->
-> 环境变量一旦只配了一个（比如只配了账号），另一项仍会回落到出厂值，等于没换 ——
-> 两个都要给。还在用出厂值时，启动日志会打一条黄色警告，登录后的面板顶部也会挂一条提醒。
->
-> 登录态存在服务端的 `admin_sessions` 表里，浏览器只持有一个 httpOnly cookie，有效期 12 小时，
-> 剩余不足 10 小时且仍在活跃使用时自动续期；退出登录即从库中删除该条 session。
+> 公网部署必须使用 HTTPS，并在反向代理/WAF 配置登录限流与访问控制。16 字符门槛不是密码强度检测，本服务没有分布式抗暴力破解保证。HTTPS 反向代理转发到 HTTP Node 时，显式配置 `ADMIN_PUBLIC_ORIGIN="https://你的公开服务域名"`（只允许 HTTP(S) origin，无路径/账号/查询参数），使同源校验与 Secure cookie 使用公开地址。未配置则使用收到请求的 origin；格式错误会关闭管理入口。服务不信任客户端提供的 X-Forwarded-* 头来决定授权 origin。Workers 可在 vars 中配置同名值。
 
 面板有两个页签：
 
