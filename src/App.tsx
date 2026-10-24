@@ -616,8 +616,8 @@ export default function App() {
      *  · `nativeActive`          —— 总闸 ∧ 开关 ∧ 原生插件真的在（不能靠 `typeof
      *                               plugin.method === 'function'` 判，registerPlugin 给的是代理）；
      *  · `nativeTakes`           —— 这一首真的交给原生：地址还得是原生吃得下的
-     *                               （blob 是 WebView 自己的对象 URL，媒体缓存副本就是这种，
-     *                                 那首整首回落 `<audio>`）。
+     *                               （blob 是 WebView 自己的对象 URL，本地导入的歌就是这种，
+     *                                 那首整首回落 `<audio>`；媒体缓存走本机回环地址，原生能读）。
      *
      * `nativeTakesRef` 给那些「用户按下时才跑」的回调（音量、seek、transport）用：
      * 它们不该因为换了一首歌就换身份。

@@ -50,7 +50,7 @@ export const useNativePlaybackRuntime = ({
 
     const takes = enabled && nativePlaybackEngine.supports(audioSrc);
 
-    // 地址 → 播放器。blob 地址（媒体缓存副本 / 本地歌）原生吃不下，那种歌整首回落到 <audio>。
+    // 地址 → 播放器。blob 地址（本地歌）原生吃不下，那种歌整首回落到 <audio>。
     useEffect(() => {
         if (!enabled || !audioSrc) return;
         if (!nativePlaybackEngine.supports(audioSrc)) {
@@ -94,15 +94,14 @@ export const useNativePlaybackRuntime = ({
             /*
              * 位置也在这里落一次 —— **只在页面不可见时**。
              *
-             * 前台时 rAF 每帧都在写（插值过的、更平滑），这里再写一次只是把 250ms 前的
-             * 采样值覆盖回去：每秒四次、每次往回退最多 250ms，歌词就会看得见的抖。
-             * 切到后台以后 rAF 直接被 Chromium 停掉，那时候只剩这一条 —— 通知栏那条
-             * 进度条才走得动（原来的写法只靠 rAF，后台永远停在最后一次前台读数上）。
+             * 前台时 rAF 每帧都在写（插值过的、更平滑）。原生现在只在状态边界发事件
+             * （没有 250ms 的位置推送），所以后台这一条只在暂停 / 缓冲 / seek / 单曲循环
+             * 这类边界上校准；通知栏与锁屏另有自己的取数路径（直接问播放器）。
              */
             const pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
             if (pageHidden && typeof event.positionMs === 'number' && event.type !== 'ready') {
-                // 走引擎而不是直接写采样值：它那里有「只进不退」的夹子，
-                // 直接写采样会把 250ms 前的旧值塞回去，回来前台时正好抽一下。
+                // 走引擎而不是直接写事件里的采样值：它那里有「只进不退」的夹子，
+                // 直接写会让界面上已经画出去的那一帧往回抽一下。
                 currentTime.set(nativePlaybackEngine.getPositionSec());
             }
             switch (event.type) {
