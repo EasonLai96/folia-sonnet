@@ -6,6 +6,7 @@
 
 - `checkVersionPolicy.ts`：版本约束检查，`npm run check:versions`。CI 的 `version-policy` job 和 `test/unit/versionPolicy.test.ts` 跑的是同一份实现。
   查的是：平台依赖钉死且与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 `node-version` 一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本和 `package.json` 同步。
+- `uiPolicy.ts`：两条重构门禁。`npm run check:ui` 禁止在 `src/components/ui/` 与设置页 kit 之外手写 `<button>/<input>/<select>/<textarea>`；`npm run check:size` 禁止文件超过 800 行。基线 `uiControlBaseline.json`、`fileSizeBaseline.json` 只许变小，收紧时跑 `node ci/uiPolicy.ts all --update`。
 
 ## 为什么入口还在 .github/workflows
 

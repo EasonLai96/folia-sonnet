@@ -1,0 +1,13 @@
+{
+  "src/App.tsx": 3363,
+  "src/components/DevDebugOverlay.tsx": 1201,
+  "src/components/modal/settings/LyricsWallpaperSettingsSection.tsx": 1009,
+  "src/components/modal/SettingsModal.tsx": 1480,
+  "src/components/visualizer/settingsPanels.tsx": 829,
+  "src/entries/wallpaperSurface.tsx": 1301,
+  "src/library/app/GridViewOverlayHost.tsx": 806,
+  "src/library/suites/grid/artist/ArtistGridView.tsx": 1565,
+  "src/library/suites/grid/collection/GridView.tsx": 2338,
+  "src/library/suites/grid/directory/GridMap.tsx": 1222,
+  "src/library/suites/grid/home/Grid3DSlider.tsx": 960
+}
