@@ -114,3 +114,36 @@ android/.gradle-home*/
 .workbuddy/
 # 仓库内的一次性校验脚本（悬空 import 检查等），只在本机跑，不必进仓库。
 .tools/
+
+# ---- 本机开发产物 ----
+# 单测覆盖率与 Playwright 的默认输出目录。
+coverage/
+playwright-report/
+blob-report/
+# tsc 增量编译缓存。
+*.tsbuildinfo
+# Vite 的依赖预构建缓存（不总是落在 node_modules 下）。
+.vite/
+
+# ---- Android / Gradle 本地产物 ----
+# Gradle 用户目录与根工程的构建输出；android/app/.gitignore 只管 app 模块。
+android/.gradle/
+android/build/
+android/local.properties
+android/captures/
+android/.cxx/
+# Capacitor sync 每次重写的 Web 资源与插件清单。
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# ---- 本地配置与环境变量 ----
+# 只提交示例文件，其余 .env* 都是本机配置（含密钥）。
+.env
+.env.*
+!.env.example
+# git-filter-branch 的工作目录，历史重写留下的临时状态。
+.git-rewrite/
+# AI 工具的本地规则与状态：规则只有 AGENTS.md 一份，工具各自的配置不再进仓库。
+.gemini/
+.claude/settings.local.json

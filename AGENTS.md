@@ -103,7 +103,9 @@
 - 各平台依赖的上游、版本钉在哪、上游变了怎么跟：`src/services/onlineMusic/UPSTREAMS.md`。
 - 加一个歌词动画样式：`src/components/visualizer/README.md` 的“加一个歌词动画样式”。
 
-## 全局沟通规则
+## 沟通与评审
 
+- 回复、评审意见、PR 摘要一律用简体中文；代码、变量名、注释、日志里的英文术语保持原样，解释用中文。
 - 回答用户问题时，直接给出结论，不添加无关的辅助性评价措辞。
 - 如果用户指出的是潜在 bug 或不合理设计，需要直接指出问题并给出建议，不回避。
+- 评审意见简洁、具体、可操作：优先 correctness、security、performance、maintainability，不为风格偏好提低价值评论；只是建议而非必须修改的，标注“建议”。
