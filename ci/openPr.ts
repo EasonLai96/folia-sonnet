@@ -7,7 +7,7 @@
 //   - 没装 / 没登录 / 用 SSH 认证：照常 push（SSH 走你自己的 key），然后打印一个 compare 链接，
 //     浏览器里点 Create pull request 即可；CI 在 PR 的 Checks 页看，review 在 Files changed 里写。
 //
-// 写给不熟 GitHub 的同学：除了改代码和写提交信息，其余步骤都由这里代劳。
+// 所有 CLI 解析都在 main() 里：这个文件会被单测 import，模块顶层不能碰 process.exit。
 
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -27,27 +27,11 @@ const USAGE = `用法：npm run pr -- "标题" [选项]
 没装 gh、或用 SSH 认证：同样跑这一条，最后会用浏览器链接代替 gh 建 PR。
 `;
 
-const argv = process.argv.slice(2);
-const flags = new Set(argv.filter(arg => arg.startsWith('--')));
-const optionValue = (name: string, fallback: string): string => {
-    const index = argv.indexOf(name);
-    return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
-};
-const title = argv.find((arg, index) => !arg.startsWith('--') && argv[index - 1] !== '--base');
-
-if (flags.has('--help') || flags.has('-h') || argv.length === 0) {
-    console.log(USAGE);
-    process.exit(argv.length === 0 ? 1 : 0);
+/** 从 origin 的 URL 里取出 GitHub 的 owner/repo；HTTPS、ssh://、git@ 三种写法都认。 */
+export function githubRepoFromRemote(url: string): { owner: string; repo: string } | null {
+    const matched = /github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?$/i.exec(url.trim());
+    return matched ? { owner: matched[1], repo: matched[2] } : null;
 }
-if (!title) {
-    console.error('缺少标题。\n\n' + USAGE);
-    process.exit(1);
-}
-const prTitle: string = title;
-const base = optionValue('--base', 'dev');
-const watch = flags.has('--watch');
-const skipCi = flags.has('--skip-ci');
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function run(command: string, args: string[], capture = false): string {
     const result = spawnSync(command, args, {
@@ -66,13 +50,29 @@ function tryRun(command: string, args: string[]): boolean {
     return !result.error && result.status === 0;
 }
 
-/** 从 origin 的 URL 里取出 GitHub 的 owner/repo；HTTPS、ssh://、git@ 三种写法都认。 */
-export function githubRepoFromRemote(url: string): { owner: string; repo: string } | null {
-    const matched = /github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?$/i.exec(url.trim());
-    return matched ? { owner: matched[1], repo: matched[2] } : null;
-}
-
 function main(): void {
+    const argv = process.argv.slice(2);
+    const flags = new Set(argv.filter(arg => arg.startsWith('--')));
+    const optionValue = (name: string, fallback: string): string => {
+        const index = argv.indexOf(name);
+        return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
+    };
+    const title = argv.find((arg, index) => !arg.startsWith('--') && argv[index - 1] !== '--base');
+
+    if (flags.has('--help') || flags.has('-h') || argv.length === 0) {
+        console.log(USAGE);
+        process.exit(argv.length === 0 ? 1 : 0);
+    }
+    if (!title) {
+        console.error('缺少标题。\n\n' + USAGE);
+        process.exit(1);
+    }
+    const prTitle: string = title;
+    const base = optionValue('--base', 'dev');
+    const watch = flags.has('--watch');
+    const skipCi = flags.has('--skip-ci');
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
     const ghAvailable = tryRun('gh', ['--version']);
     const ghAuthed = ghAvailable && tryRun('gh', ['auth', 'status']);
 
