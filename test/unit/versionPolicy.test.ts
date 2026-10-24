@@ -9,7 +9,7 @@ import {
     parseVersion,
     versionCodeOf,
     versionNumberIssues,
-} from '../../dev/ci/checkVersionPolicy.ts';
+} from '../../ci/checkVersionPolicy.ts';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
