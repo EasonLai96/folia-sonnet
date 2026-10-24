@@ -73,9 +73,9 @@ jobs:
         with:
           node-version: 24
 
-      # 与 pr-unit-tests 用同一把 key：这棵树 1.4GB（onnxruntime-node 原生库 285MB +
+      # 与 ci.yml 用同一把 key：这棵树 1.4GB（onnxruntime-node 原生库 285MB +
       # electron 43 的 dist 313MB），冷启动 npm ci 要五分钟，命中缓存直接省掉。
-      # 见 pr-unit-tests.yml 里关于缓存作用域的说明。
+      # 见 ci.yml 里关于缓存作用域的说明。
       - name: Restore node_modules
         id: node-modules
         uses: actions/cache@v4
@@ -103,11 +103,32 @@ jobs:
           VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
           echo "本次出包版本：v${VERSION}（versionCode 由它推出，见 android/app/build.gradle）"
 
+      - name: Verify tag matches package.json
+        # 标签触发时 versionName / versionCode 全从 package.json 读：两者对不上，发出去的包
+        # 版本就是错的。直接 fail，别让它安静地打完。
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          VERSION="$(node -e "process.stdout.write(require('./package.json').version)")"
+          if [[ "v${VERSION}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 与 package.json 的 v${VERSION} 不一致"
+            exit 1
+          fi
+          echo "标签与 package.json 一致：v${VERSION}"
+
+      - name: Check version policy
+        # 平台依赖钉死、Docker 部署同版本、Node 版本一致、锁文件与 package.json 同步。
+        run: npm run check:versions
+
       - name: Run typecheck
         # 出包前先过一遍类型检查：标签可以随手推，PR 的门禁不一定覆盖得到，
         # 而 vite build 与 gradle 都不做类型检查 —— 那类错误要一路走到运行时才炸。
         # 跑 1 分多钟，换掉一次「装机才发现」是值的。
         run: npm run typecheck
+
+      - name: Run unit tests
+        # 同上：出包前的最后一道门禁，坏逻辑不打包。
+        run: npm run test:unit
 
       # Capacitor 7 的 android 库以 source/target 21 编译，JDK 17 会直接报
       # 「无效的源发行版：21」。必须是 21 或更高。
