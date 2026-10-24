@@ -49,8 +49,10 @@ const rejected = (param: string) => ({
     payload: { error: { message: `Unsupported parameter: '${param}' is not supported with this model.` } },
 });
 
+// Keep the diagnostic fixture distinct from English words; one-character exact-key masking is
+// covered separately by desktopAiRedaction, including its collision with parameter names.
 const run = (fetchImpl: unknown, url = 'http://endpoint.test/v1') => client.runAiJsonCompletion({
-    store: { get: (k: string) => ({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_API_URL: url }[k]) },
+    store: { get: (k: string) => ({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'synthetic-reasoning-credential', OPENAI_API_URL: url }[k]) },
     systemPrompt: 'sys',
     sourcePrompt: 'src',
     customFetch: fetchImpl,
@@ -139,7 +141,7 @@ describe('reasoning suppression ladder', () => {
     it('sends nothing extra for the theme to an unknown endpoint, which does not ask to disable reasoning', async () => {
         const { attempts, fetchImpl } = makeFetch(() => answered('{}'));
         await client.runAiJsonCompletion({
-            store: { get: (k: string) => ({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_API_URL: 'https://theme.example.test/v1' }[k]) },
+            store: { get: (k: string) => ({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'synthetic-reasoning-credential', OPENAI_API_URL: 'https://theme.example.test/v1' }[k]) },
             task: 'theme', systemPrompt: 'sys', sourcePrompt: 'src', customFetch: fetchImpl, answerTokens: 4096,
         });
 

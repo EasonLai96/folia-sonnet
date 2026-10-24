@@ -271,7 +271,7 @@ const realignSegmentsToText = (boundaries, text) => {
  * What still throws is anything structural — not JSON, no `lines` array, the wrong number of rows —
  * because then the mapping from row to lyric line is unknown and nothing can be trusted.
  */
-const parseSegmentationResponse = (raw, lines) => {
+const parseSegmentationResponse = (raw, lines, sanitizeDiagnostic = (text) => text) => {
   const text = stripCodeFence(raw);
   if (!text) {
     throw new Error('Empty segmentation response');
@@ -281,7 +281,7 @@ const parseSegmentationResponse = (raw, lines) => {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`Segmentation response was not valid JSON: ${clip(text)}`);
+    throw new Error(`Segmentation response was not valid JSON: ${clip(sanitizeDiagnostic(text))}`);
   }
 
   const rows = Array.isArray(parsed) ? parsed : parsed && parsed.lines;
@@ -313,7 +313,7 @@ const parseSegmentationResponse = (raw, lines) => {
     boundaries.push(null);
     rejections.push(
       `line ${index + 1} does not reproduce the original text (first difference at character ${at + 1});`
-      + ` expected ${JSON.stringify(clip(lines[index]))} got ${JSON.stringify(clip(got))}`,
+      + ` expected ${JSON.stringify(clip(sanitizeDiagnostic(lines[index])))} got ${JSON.stringify(clip(sanitizeDiagnostic(got)))}`,
     );
   });
 

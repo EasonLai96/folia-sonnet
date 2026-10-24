@@ -113,6 +113,7 @@ const {
   runGeminiThemeCompletion,
 } = require('./aiTextClient.cjs');
 const { registerAiModelDiscovery } = require('./ai/modelDiscoveryIpc.cjs');
+const { redactSecrets, sanitizeAiError, snapshotAiSettings } = require('./ai/requestText.cjs');
 const { createAiCredentialStore, isAiCredentialKey, isReservedAiCredentialKey } = require('./aiCredentialStore.cjs');
 const {
   SEGMENTATION_GEMINI_SCHEMA,
@@ -7599,9 +7600,10 @@ ipcMain.handle('lyric-proxy-fetch', async (event, url, init) => {
 
 // Integrate AI logic locally into Electron
 ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
+  const requestSettings = snapshotAiSettings(aiCredentials.settingsView);
   try {
     const { isPureMusic = false, songTitle } = options;
-    const provider = store.get('AI_PROVIDER') || 'gemini';
+    const provider = requestSettings.get('AI_PROVIDER') || 'gemini';
     const useSystemProxy = store.get('USE_SYSTEM_PROXY_FOR_AI') || false;
     const customFetch = (url, options) => fetchWithOptionalSystemProxy(url, options, useSystemProxy);
     const snippet = lyricsText.slice(0, 2000);
@@ -7612,7 +7614,7 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
       const systemPrompt = buildThemeSystemPrompt(true);
       const sourcePrompt = buildThemeSourcePrompt(snippet, isPureMusic, songTitle);
       const content = await runAiJsonCompletion({
-        store: aiCredentials.settingsView,
+        store: requestSettings,
         task: 'theme',
         systemPrompt,
         sourcePrompt,
@@ -7628,7 +7630,7 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
       }
       dualTheme = sanitizeGeneratedDualTheme(JSON.parse(jsonStr));
 
-      const providerLabel = await aiProviderLabel(aiCredentials.settingsView);
+      const providerLabel = await aiProviderLabel(requestSettings);
       dualTheme.light.provider = providerLabel;
       dualTheme.dark.provider = providerLabel;
 
@@ -7638,7 +7640,7 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
       // The key is read through the credential store's view (decrypted in the main process only);
       // runGeminiThemeCompletion throws when it is not configured.
       dualTheme = sanitizeGeneratedDualTheme(await runGeminiThemeCompletion({
-        store: aiCredentials.settingsView,
+        store: requestSettings,
         systemPrompt,
         sourcePrompt,
         responseSchema: getGeminiResponseSchema(),
@@ -7656,8 +7658,9 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
     dualTheme.dark.animationIntensity = 'normal';
     return dualTheme;
   } catch (e) {
-    console.error(e);
-    throw new Error(e instanceof Error ? e.message : String(e));
+    const safeError = sanitizeAiError(e, requestSettings.apiKey);
+    console.error('[ai-theme] failed:', safeError);
+    throw safeError;
   }
 });
 
@@ -7687,7 +7690,8 @@ ipcMain.handle('ai-test-connection', async (event, payload) => {
     }
     return await runAiConnectionTest(testPayload, { customFetch });
   } catch (e) {
-    console.error('[ai-test] failed:', e instanceof Error ? e.message : String(e));
+    // A failure outside the client may contain the unsaved form key; do not record it raw.
+    console.error('[ai-test] failed:', new Error('Connection test failed unexpectedly.'));
     return { ok: false, durationMs: 0, errorKind: 'network', error: 'Connection test failed unexpectedly.' };
   }
 });
@@ -7698,6 +7702,8 @@ ipcMain.handle('ai-test-connection', async (event, payload) => {
 ipcMain.handle('segment-lyrics', async (event, lines) => {
   // Held outside the try so the failure path can print what the model actually said. Without it a
   // rejected response gives the user a stack trace and nothing to act on.
+  // The request snapshot scrubs that diagnostic before clipping/logging it.
+  const requestSettings = snapshotAiSettings(aiCredentials.settingsView);
   let rawResponse = null;
   try {
     const sourceLines = Array.isArray(lines) ? lines.map((line) => String(line == null ? '' : line)) : [];
@@ -7708,10 +7714,10 @@ ipcMain.handle('segment-lyrics', async (event, lines) => {
     const useSystemProxy = store.get('USE_SYSTEM_PROXY_FOR_AI') || false;
     const customFetch = (url, options) => fetchWithOptionalSystemProxy(url, options, useSystemProxy);
     console.log(`[segment-lyrics] segmenting ${sourceLines.length} lines`
-      + ` via ${store.get('AI_PROVIDER') || 'gemini'}${useSystemProxy ? ' (system proxy)' : ''}`);
+      + ` via ${requestSettings.get('AI_PROVIDER') || 'gemini'}${useSystemProxy ? ' (system proxy)' : ''}`);
 
     rawResponse = await runAiJsonCompletion({
-      store: aiCredentials.settingsView,
+      store: requestSettings,
       // Splitting text at word boundaries has nothing to reason about, and a reasoning model left
       // to its own devices spends the whole budget thinking and returns nothing. The segmentation
       // task is what tells each provider's adapter to switch reasoning off (on Gemini, the zero
@@ -7728,7 +7734,7 @@ ipcMain.handle('segment-lyrics', async (event, lines) => {
       answerTokens: SEGMENTATION_MAX_OUTPUT_TOKENS,
     });
 
-    const { boundaries, rejections } = parseSegmentationResponse(rawResponse, sourceLines);
+    const { boundaries, rejections } = parseSegmentationResponse(rawResponse, sourceLines, (text) => redactSecrets(text, requestSettings.apiKey));
     if (rejections.length > 0) {
       // Not fatal: those lines keep the default split. Logged because a model that mangles many
       // lines is worth noticing, and the renderer only sees a count.
@@ -7737,11 +7743,11 @@ ipcMain.handle('segment-lyrics', async (event, lines) => {
     }
     return boundaries;
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error('[segment-lyrics] failed:', message);
+    const safeError = sanitizeAiError(e, requestSettings.apiKey);
+    console.error('[segment-lyrics] failed:', safeError);
     if (rawResponse) {
-      console.error('[segment-lyrics] raw model response:', String(rawResponse).slice(0, 4000));
+      console.error('[segment-lyrics] raw model response:', redactSecrets(rawResponse, requestSettings.apiKey).slice(0, 4000));
     }
-    throw new Error(message);
+    throw safeError;
   }
 });

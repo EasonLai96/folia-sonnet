@@ -4,6 +4,7 @@
 // Request bodies come from shared/ai/anthropic.mjs; this file only sends them, reads the reply and
 // classifies failures, so a change to what Claude is asked lives in the adapter.
 const { MAX_ERROR_BODY_CHARS, describeFetchFailure, redactSecrets, redactUrl } = require('./requestText.cjs');
+const logAi = (apiKey, line) => console.log(redactSecrets(line, apiKey));
 
 const normalizeAnthropicMessagesUrl = (rawUrl) => {
     const url = new URL(rawUrl || 'https://api.anthropic.com/v1');
@@ -146,10 +147,10 @@ async function runAnthropicCompletion({
         url,
         model,
         attempts: adapter.attempts(task, model),
-        log: (line) => console.log(line),
+        log: (line) => logAi(apiKey, line),
         describeEmpty: (result) => describeEmptyAnswer(result, model),
         send: async (attempt) => {
-            console.log(`[ai] POST ${redactUrl(url)} model=${model} provider=${adapter.id} reasoning=${attempt.label}`);
+            logAi(apiKey, `[ai] POST ${redactUrl(url)} model=${model} provider=${adapter.id} reasoning=${attempt.label}`);
             const startedAt = Date.now();
             const result = await sendAnthropic({
                 apiUrl,
@@ -162,7 +163,7 @@ async function runAnthropicCompletion({
                 timeoutMs,
             });
             if (result.ok) {
-                console.log(`[ai] ${redactUrl(url)} answered in ${Date.now() - startedAt}ms stop_reason=${result.stopReason}`);
+                logAi(apiKey, `[ai] ${redactUrl(url)} answered in ${Date.now() - startedAt}ms stop_reason=${result.stopReason}`);
             }
             return result;
         },
@@ -186,7 +187,7 @@ async function runAnthropicConnectionTest({ adapter, apiUrl, apiKey, model, prom
             model,
             attempts: adapter.attempts('test', model),
             cache: null,
-            log: (line) => console.log(line.replace(/^\[ai\]/, '[ai-test]')),
+            log: (line) => logAi(apiKey, line.replace(/^\[ai\]/, '[ai-test]')),
             send: (attempt) => sendAnthropic({
                 apiUrl,
                 apiKey,

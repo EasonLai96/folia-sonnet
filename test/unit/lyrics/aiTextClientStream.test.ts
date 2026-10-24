@@ -152,10 +152,11 @@ describe('streamed requests', () => {
         return new Response(body, { status, headers: { 'Content-Type': 'text/event-stream' } });
     };
 
+    // Diagnostic wording is tested with a distinct credential; exact short-key masking has its own regression.
     const run = (fetchImpl: unknown, url: string, stream: boolean | undefined) => client.runAiJsonCompletion({
         store: {
             get: (k: string) => ({
-                AI_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_API_URL: url, OPENAI_API_STREAM: stream,
+                AI_PROVIDER: 'openai', OPENAI_API_KEY: 'synthetic-stream-credential', OPENAI_API_URL: url, OPENAI_API_STREAM: stream,
             } as Record<string, unknown>)[k],
         },
         systemPrompt: 'sys',

@@ -1,17 +1,57 @@
 'use strict';
 
-// electron/ai/requestText.cjs
-// What the main process's AI requests may show of themselves in messages and log lines: addresses
-// and provider error text with credentials taken out, a bounded raw error body, and a failure to
-// send or read described by what timed out. Shared by electron/aiTextClient.cjs (OpenAI-compatible,
-// Gemini, the connection test) and electron/ai/anthropicClient.cjs, so every protocol redacts alike.
-
-// The raw error body kept for deciding whether a parameter was rejected. Bounded, because a
-// misconfigured URL can answer with a whole HTML page. The same as shared/ai/compatibleBody.mjs's,
-// which the web routes use; that one is ESM, loaded only on first use here.
+// Display/log/IPC boundaries for desktop AI requests. Never retain a transport's raw error fields.
 const MAX_ERROR_BODY_CHARS = 16 * 1024;
+const REDACTED = '[redacted]';
+const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Address with credentials and query dropped, safe to put in a message even if the user pasted a key into it. */
+// Accept literal, JSON-string escaped, mixed percent (case-insensitive hex), and form copies of the exact key.
+const credentialPattern = (credential) => Array.from(credential).map((character) => {
+    try {
+        let encoded = encodeURIComponent(character);
+        if (encoded === character) encoded = `%${character.charCodeAt(0).toString(16).padStart(2, '0')}`;
+        const percent = encoded.replace(/[a-f]/gi, (letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`);
+        const jsonEscaped = escapePattern(JSON.stringify(character).slice(1, -1));
+        return `(?:${jsonEscaped}|${escapePattern(character)}|${percent}${character === ' ' ? '|\\+' : ''})`;
+    } catch {
+        return escapePattern(character);
+    }
+}).join('');
+
+const redactSecrets = (value, apiKey) => {
+    const text = String(value ?? '');
+    const spans = [];
+    const collect = (pattern, labeled = false) => {
+        for (const match of text.matchAll(pattern)) {
+            const quoted = labeled && /^["']/.test(match[2]);
+            const start = match.index + (labeled ? match[1].length + (quoted ? 1 : 0) : 0);
+            const end = match.index + match[0].length - (quoted ? 1 : 0);
+            // Idempotence matters for short keys which also occur inside the replacement marker.
+            const marker = text.lastIndexOf(REDACTED, start);
+            if (marker >= 0 && start >= marker && end <= marker + REDACTED.length) continue;
+            spans.push({ start, end });
+        }
+    };
+    if (apiKey) collect(new RegExp(credentialPattern(String(apiKey)), 'g'));
+    collect(/(\b(?:bearer|basic)(?:\s+|%20|\+))([^\s"'`,;}&]+)/gi, true);
+    collect(/((?:[?&]|%3f|%26)(?:key|api[_-]?key|(?:access|refresh|id)[_-]?token|token|auth(?:orization)?|password|secret)(?:=|%3d))((?:(?!%26|%23)[^&#\s"'`])+)/gi, true);
+    collect(/(["']?\b(?:x[_-](?:goog[_-])?api[_-]key|api[_-]?key|(?:proxy[_-])?authorization|auth|(?:access|refresh|id)[_-]?token|token|password|secret|cookie|set[_-]cookie)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:(?:bearer|basic)\s+)?[^\s"',;}&]+)/gi, true);
+    const merged = [];
+    for (const span of spans.sort((a, b) => a.start - b.start || b.end - a.end)) {
+        const previous = merged[merged.length - 1];
+        if (previous && span.start <= previous.end) previous.end = Math.max(previous.end, span.end);
+        else merged.push({ ...span });
+    }
+    let offset = 0;
+    const parts = [];
+    for (const span of merged) {
+        parts.push(text.slice(offset, span.start), REDACTED);
+        offset = span.end;
+    }
+    parts.push(text.slice(offset));
+    return parts.join('');
+};
+
 const redactUrl = (rawUrl) => {
     try {
         const parsed = new URL(rawUrl);
@@ -21,34 +61,43 @@ const redactUrl = (rawUrl) => {
     }
 };
 
-/**
- * `text` with the key and anything that looks like an echoed credential replaced by `***`.
- * Servers sometimes echo the request back: the Authorization header, Anthropic's and Gemini's key
- * headers, a key in the query.
- */
-const redactSecrets = (text, apiKey) => {
-    let redacted = String(text);
-    if (apiKey) {
-        redacted = redacted.split(apiKey).join('***');
-    }
-    return redacted
-        .replace(/(bearer\s+)[^\s"',;]+/gi, '$1***')
-        .replace(/((?:x-api-key|x-goog-api-key)["']?\s*[:=]\s*["']?)[^\s"',;]+/gi, '$1***')
-        .replace(/([?&](?:key|api[_-]?key|token|access_token)=)[^&\s"']+/gi, '$1***');
+// SyntaxError messages can expose only a prefix of a secret; exact-key replacement cannot fix that.
+const sanitizeAiError = (error, apiKey) => {
+    const name = error && error.name;
+    const message = redactSecrets(name === 'SyntaxError' ? 'AI provider returned invalid JSON'
+        : error && typeof error.message === 'string' ? error.message : String(error ?? ''), apiKey);
+    const safe = new Error(message);
+    safe.name = name === 'AbortError' || name === 'TimeoutError' ? name : 'Error';
+    // Even newly captured stacks can contain a credential in a configured path or function name.
+    safe.stack = redactSecrets(safe.stack, apiKey);
+    return safe;
 };
 
-/**
- * Turns an abort into an error that names the deadline (`<label> timed out after Ns`, named
- * TimeoutError) rather than a bare "aborted"; any other failure is handed on as an Error.
- */
 const describeFetchFailure = (error, timeoutMs, label) => {
-    const name = error && error.name;
-    if (name === 'TimeoutError' || name === 'AbortError') {
+    if (error && error.name === 'TimeoutError') {
         const timedOut = new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`);
         timedOut.name = 'TimeoutError';
         return timedOut;
     }
-    return error instanceof Error ? error : new Error(String(error));
+    // Cancellation remains distinguishable from a timeout; the public boundary rebuilds the error.
+    return error instanceof Error || error?.name === 'AbortError' ? error : new Error(String(error));
 };
 
-module.exports = { MAX_ERROR_BODY_CHARS, describeFetchFailure, redactSecrets, redactUrl };
+// Capture before the first await. Only the selected provider's credential is read/decrypted, once.
+const snapshotAiSettings = (store, requestedProvider) => {
+    try {
+        const provider = requestedProvider || store.get('AI_PROVIDER') || 'gemini';
+        const values = { AI_PROVIDER: provider };
+        for (const key of ['AI_PROVIDER_PRESET', 'OPENAI_API_URL', 'OPENAI_API_MODEL', 'OPENAI_API_TEMPERATURE',
+            'OPENAI_API_STREAM', 'GEMINI_API_URL', 'GEMINI_API_MODEL']) values[key] = store.get(key);
+        const credentialKey = provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
+        const apiKey = store.get(credentialKey);
+        values[credentialKey] = apiKey;
+        return { get: (key) => values[key], apiKey };
+    } catch {
+        // Credential providers may throw before a key has been captured; no safe exact-key context exists yet.
+        throw new Error('AI settings could not be read');
+    }
+};
+
+module.exports = { MAX_ERROR_BODY_CHARS, describeFetchFailure, redactSecrets, redactUrl, sanitizeAiError, snapshotAiSettings };

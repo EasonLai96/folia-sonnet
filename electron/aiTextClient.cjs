@@ -23,7 +23,8 @@ const DEFAULT_OPENAI_TEMPERATURE = 0.7;
 // 拼地址的规则与渲染进程共用一份，见 shared/geminiEndpoint.cjs。
 const { resolveGeminiGenerateContentUrl, sanitizeApiUrlInput, GEMINI_DEFAULT_MODEL } = require('../shared/geminiEndpoint.cjs');
 const { runAnthropicCompletion, runAnthropicConnectionTest } = require('./ai/anthropicClient.cjs');
-const { MAX_ERROR_BODY_CHARS, describeFetchFailure, redactSecrets, redactUrl } = require('./ai/requestText.cjs');
+const { MAX_ERROR_BODY_CHARS, describeFetchFailure, redactSecrets, redactUrl, sanitizeAiError, snapshotAiSettings } = require('./ai/requestText.cjs');
+const logAi = (apiKey, line) => console.log(redactSecrets(line, apiKey));
 
 /** A Gemini model from settings: `models/` dropped, `defaultModel` when blank, anything else refused. */
 const resolveGeminiModel = (raw, defaultModel) => {
@@ -418,7 +419,9 @@ async function sendOpenAICompatible({ apiUrl, apiKey, adapter, body, customFetch
     return {
       ok: false,
       status: response.status,
-      errorText: formatOpenAICompatibleErrorText(response, rawText),
+      errorText: redactSecrets(formatOpenAICompatibleErrorText(response, rawText), apiKey),
+      // Private ladder evidence must retain parameter names even when a short key overlaps them.
+      // Never log/expose this field publicly; only sanitized errorText crosses that boundary.
       errorBody: rawText.slice(0, MAX_ERROR_BODY_CHARS),
     };
   }
@@ -468,7 +471,7 @@ async function runOpenAICompatibleCompletion({ ai, adapter, connection, apiKey, 
     url: apiUrl,
     model,
     attempts: adapter.attempts(task, model),
-    log: (line) => console.log(line),
+    log: (line) => logAi(apiKey, line),
     describeEmpty: (result) => describeEmptyCompletion(result.choice, result.usage, model, result.exhausted),
     send: async (attempt) => {
       const body = ai.buildCompatibleBody(adapter, {
@@ -476,16 +479,16 @@ async function runOpenAICompatibleCompletion({ ai, adapter, connection, apiKey, 
         budget: ai.budgetFor(task, answerTokens, attempt), temperature, stream,
       });
       if (body.temperature !== undefined && body.temperature !== temperature) {
-        console.log(`[ai] temperature ${temperature} is outside ${adapter.id}'s range, sending ${body.temperature}`);
+        logAi(apiKey, `[ai] temperature ${temperature} is outside ${adapter.id}'s range, sending ${body.temperature}`);
       }
 
-      console.log(`[ai] POST ${redactUrl(apiUrl)} model=${model} provider=${adapter.id} reasoning=${attempt.label}${stream ? ' stream=on' : ''}`);
+      logAi(apiKey, `[ai] POST ${redactUrl(apiUrl)} model=${model} provider=${adapter.id} reasoning=${attempt.label}${stream ? ' stream=on' : ''}`);
       const startedAt = Date.now();
       const result = await sendOpenAICompatible({ apiUrl, apiKey, adapter, body, customFetch, timeoutMs });
       if (!result.ok) {
         return ai.withErrorHint(adapter, result);
       }
-      console.log(`[ai] ${redactUrl(apiUrl)} answered in ${Date.now() - startedAt}ms`);
+      logAi(apiKey, `[ai] ${redactUrl(apiUrl)} answered in ${Date.now() - startedAt}ms`);
       return { ...result, exhausted: ai.exhaustedByReasoning(result.choice, result.usage, adapter) };
     },
   });
@@ -512,7 +515,7 @@ async function sendGemini({ apiKey, url, model, body, customFetch, timeoutMs, lo
   const timed = typeof timeoutMs === 'number';
   const failure = (error, label) => (timed ? describeFetchFailure(error, timeoutMs, label) : error);
   if (log) {
-    console.log('[ai] POST ' + model);
+    logAi(apiKey, '[ai] POST ' + model);
   }
   const startedAt = Date.now();
 
@@ -532,7 +535,7 @@ async function sendGemini({ apiKey, url, model, body, customFetch, timeoutMs, lo
     throw failure(error, 'Request to Gemini');
   }
   if (log) {
-    console.log(`[ai] gemini headers ${response.status} in ${Date.now() - startedAt}ms, reading body…`);
+    logAi(apiKey, `[ai] gemini headers ${response.status} in ${Date.now() - startedAt}ms, reading body…`);
   }
 
   if (!response.ok) {
@@ -540,7 +543,8 @@ async function sendGemini({ apiKey, url, model, body, customFetch, timeoutMs, lo
     return {
       ok: false,
       status: response.status,
-      errorText: `Gemini API error: ${response.status} ${response.statusText}${errText ? ` - ${errText}` : ''}`,
+      errorText: redactSecrets(`Gemini API error: ${response.status} ${response.statusText}${errText ? ` - ${errText}` : ''}`, apiKey),
+      // Private detection evidence, not a display/log field (a key may overlap "thinking").
       errorBody: errText.slice(0, MAX_ERROR_BODY_CHARS),
     };
   }
@@ -552,7 +556,7 @@ async function sendGemini({ apiKey, url, model, body, customFetch, timeoutMs, lo
     throw failure(error, 'Reading the response from Gemini');
   }
   if (log) {
-    console.log(`[ai] gemini body complete in ${Date.now() - startedAt}ms total`);
+    logAi(apiKey, `[ai] gemini body complete in ${Date.now() - startedAt}ms total`);
   }
 
   const candidate = data && data.candidates && data.candidates[0];
@@ -636,7 +640,7 @@ async function runGeminiCompletion({ ai, store, task, systemPrompt, sourcePrompt
     url,
     model,
     attempts: adapter.attempts(task, model),
-    ...(log ? { log: (line) => console.log(line) } : {}),
+    ...(log ? { log: (line) => logAi(apiKey, line) } : {}),
     describeEmpty: (result) => describeEmptyGeminiAnswer(result, model, emptyMessage),
     send: (attempt) => sendGemini({
       apiKey,
@@ -659,7 +663,7 @@ async function runGeminiCompletion({ ai, store, task, systemPrompt, sourcePrompt
  * it now sends the adapter's theme thinking level, caps the output at `answerTokens` plus room for
  * thinking, and runs under the same deadline as the other asks; it had none.
  */
-async function runGeminiThemeCompletion({ store, systemPrompt, sourcePrompt, responseSchema, answerTokens, customFetch, timeoutMs = DEFAULT_AI_TIMEOUT_MS }) {
+async function runGeminiThemeCompletionInternal({ store, systemPrompt, sourcePrompt, responseSchema, answerTokens, customFetch, timeoutMs = DEFAULT_AI_TIMEOUT_MS }) {
   const ai = await loadAiModules();
   return JSON.parse(await runGeminiCompletion({
     ai,
@@ -685,7 +689,7 @@ const JSON_TASKS = new Set(['segmentation', 'theme']);
  * answer itself needs, and attempts that cannot switch reasoning off get room for it on top
  * (shared/ai/aiTasks.mjs). `schema` is JSON Schema, `geminiSchema` the same in Gemini's dialect.
  */
-async function runAiJsonCompletion({ store, task, systemPrompt, sourcePrompt, schema, schemaName, geminiSchema, answerTokens, customFetch, timeoutMs = DEFAULT_AI_TIMEOUT_MS }) {
+async function runAiJsonCompletionInternal({ store, task, systemPrompt, sourcePrompt, schema, schemaName, geminiSchema, answerTokens, customFetch, timeoutMs = DEFAULT_AI_TIMEOUT_MS }) {
   if (!JSON_TASKS.has(task)) {
     throw new Error(`Unknown AI task: ${task}`);
   }
@@ -848,13 +852,15 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
   }
   const { provider, apiKey, apiUrl: rawApiUrl, model: rawModel, stream } = validated.config;
   const startedAt = now();
-  const finish = (result) => ({ durationMs: now() - startedAt, ...result });
+  const finish = (result) => ({ durationMs: now() - startedAt, ...Object.fromEntries(
+    Object.entries(result).map(([key, value]) => [key, typeof value === 'string' ? redactSecrets(value, apiKey) : value]),
+  ) });
   // Servers sometimes echo the request back: Authorization header, key headers, ?key=.
   const redact = (message) => redactSecrets(message, apiKey);
   const scrub = (message) => truncateText(redact(message), AI_TEST_MAX_ERROR_CHARS);
   const failure = (error, extra = {}) => finish({
     ok: false,
-    error: scrub(error instanceof Error ? error.message : error),
+    error: scrub(sanitizeAiError(error, apiKey).message),
     ...extra,
   });
   const reply = (text) => truncateText(redact(text), AI_TEST_MAX_REPLY_CHARS);
@@ -890,7 +896,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
     const model = resolveGeminiModel(rawModel, adapter.defaultModel);
     // 连接测试用的是用户这一刻填的地址，同样过一遍反代解析。
     const url = resolveGeminiGenerateContentUrl(rawApiUrl, model);
-    console.log('[ai-test] POST ' + model);
+    logAi(apiKey, '[ai-test] POST ' + model);
     let outcome;
     try {
       outcome = await ai.walkAttempts({
@@ -900,7 +906,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
         model,
         attempts: adapter.attempts('test', model),
         cache: null,
-        log: (line) => console.log(line.replace(/^\[ai\]/, '[ai-test]')),
+        log: (line) => logAi(apiKey, line.replace(/^\[ai\]/, '[ai-test]')),
         send: (attempt) => sendGemini({
           apiKey,
           url,
@@ -934,7 +940,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
 
   const apiUrl = normalizeOpenAIChatCompletionsUrl(rawApiUrl);
   const { model } = connection;
-  console.log(`[ai-test] POST ${redactUrl(apiUrl)} model=${model} provider=${adapter.id}${stream ? ' stream=on' : ''}`);
+  logAi(apiKey, `[ai-test] POST ${redactUrl(apiUrl)} model=${model} provider=${adapter.id}${stream ? ' stream=on' : ''}`);
 
   // Each attempt is one "hello" with the adapter's test switches; a model that rejects them by name
   // moves to the next attempt, and a successful response with no answer is still reported below
@@ -948,7 +954,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
       model,
       attempts: adapter.attempts('test', model),
       cache: null,
-      log: (line) => console.log(line.replace(/^\[ai\]/, '[ai-test]')),
+      log: (line) => logAi(apiKey, line.replace(/^\[ai\]/, '[ai-test]')),
       send: async (attempt) => {
         const result = await sendOpenAICompatible({
           apiUrl,
@@ -965,7 +971,7 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
       },
     });
   } catch (error) {
-    const message = (error instanceof Error ? error.message : String(error)).split(apiUrl).join(redactUrl(apiUrl));
+    const message = sanitizeAiError(error, apiKey).message.split(apiUrl).join(redactUrl(apiUrl));
     return failure(message, { errorKind: /timed out/.test(message) ? 'timeout' : 'network' });
   }
   const { result } = outcome;
@@ -986,6 +992,18 @@ async function runAiConnectionTest(rawInput, { customFetch, timeoutMs = AI_TEST_
   }
   return finish({ ok: true, status: result.status, model: shownModel, text: reply(text) });
 }
+
+// Public boundaries keep the request credential even if settings change while IO is pending.
+async function withAiRequestSnapshot(options, run, requestedProvider) {
+  const store = snapshotAiSettings(options.store, requestedProvider);
+  try {
+    return await run({ ...options, store });
+  } catch (error) {
+    throw sanitizeAiError(error, store.apiKey);
+  }
+}
+const runAiJsonCompletion = (options) => withAiRequestSnapshot(options, runAiJsonCompletionInternal);
+const runGeminiThemeCompletion = (options) => withAiRequestSnapshot(options, runGeminiThemeCompletionInternal, 'gemini');
 
 module.exports = {
   DEFAULT_AI_TIMEOUT_MS,

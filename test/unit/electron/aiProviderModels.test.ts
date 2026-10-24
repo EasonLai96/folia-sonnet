@@ -278,7 +278,8 @@ describe('selected model completion', () => {
         const denied = vi.fn().mockImplementation(async () => json({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key test-secret' } }, 401));
         const failure = await client.runAiJsonCompletion({ store, task: 'theme', systemPrompt: 'theme', sourcePrompt: 'source', customFetch: denied, answerTokens: 8192 })
             .catch((error: Error) => error.message);
-        expect(failure).toBe('Anthropic API error (401): authentication_error: invalid x-api-key ***');
+        expect(failure).toBe('Anthropic API error (401): authentication_error: invalid x-api-key [redacted]');
+        expect(failure).not.toContain('test-secret');
         expect(denied).toHaveBeenCalledTimes(1);
     });
     it('uses the selected Gemini model for both real theme and segmentation requests', async () => {
@@ -328,7 +329,8 @@ describe('selected model completion', () => {
         expect(calls[0].url).toContain('/gemini-selected:generateContent');
         expect(calls[0].body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'minimal' });
         expect(calls[1].url).toBe('https://api.anthropic.com/v1/messages');
-        expect(result).toMatchObject({ ok: true, model: 'claude-selected', text: 'Hi ***' });
+        expect(result).toMatchObject({ ok: true, model: 'claude-selected', text: 'Hi [redacted]' });
+        expect(JSON.stringify(result)).not.toContain('test-secret');
     });
     it('follows the address\'s host, not the form\'s preset, as the saved settings do', async () => {
         const urls: string[] = [];

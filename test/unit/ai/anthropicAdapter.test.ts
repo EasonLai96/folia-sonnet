@@ -370,7 +370,7 @@ describe('the desktop sender', () => {
     it('shows the provider\'s error type and message, with the key redacted', async () => {
         const echoed = reply({ type: 'error', error: { type: 'invalid_request_error', message: `max_tokens: too large (x-api-key: ${KEY})` } }, 400);
         await expect(ask('claude-haiku-5-5', record(echoed).customFetch))
-            .rejects.toThrow('Anthropic API error (400): invalid_request_error: max_tokens: too large (x-api-key: ***');
+            .rejects.toThrow('Anthropic API error (400): invalid_request_error: max_tokens: too large (x-api-key: [redacted]');
     });
 
     it('tests with the segmentation switch and passes an empty reply with a reason', async () => {
@@ -397,7 +397,8 @@ describe('the desktop sender', () => {
 
         const denied = record(reply({ type: 'error', error: { type: 'authentication_error', message: `invalid key ${KEY}` } }, 401));
         const failed = await test('claude-opus-5-5', denied.customFetch);
-        expect(failed).toMatchObject({ ok: false, status: 401, errorKind: 'http', error: 'Anthropic API error (401): authentication_error: invalid key ***' });
+        expect(failed).toMatchObject({ ok: false, status: 401, errorKind: 'http', error: 'Anthropic API error (401): authentication_error: invalid key [redacted]' });
+        expect(JSON.stringify(failed)).not.toContain(KEY);
 
         const stalled = (_url: string, init: any) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
         expect(await test('claude-opus-5-5', stalled, 5)).toMatchObject({ ok: false, errorKind: 'timeout', error: 'Request to https://api.anthropic.com/v1/messages timed out after 0s' });
