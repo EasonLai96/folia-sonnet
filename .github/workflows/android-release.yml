@@ -231,9 +231,11 @@ jobs:
           APK="android/app/build/outputs/apk/release/app-release.apk"
           APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -1)"
           [[ -n "${APKSIGNER}" ]] || { echo "::error::找不到 apksigner（ANDROID_HOME 未设置？）"; exit 1; }
-          ACTUAL="$("${APKSIGNER}" verify --print-certs "$APK" | grep -i 'certificate SHA-256 digest' | head -1 | sed -E 's/.*digest: *//' | tr '[:lower:]' '[:upper:]')"
+          # apksigner 输出的是不带冒号的 BC100C…，keytool 输出的是带冒号的 BC:10:…：两边都去掉冒号再比。
+          ACTUAL="$("${APKSIGNER}" verify --print-certs "$APK" | grep -i 'certificate SHA-256 digest' | head -1 | sed -E 's/.*digest: *//' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED="${EXPECTED_CERT_SHA256//:/}"
           echo "APK 签名证书 SHA-256：${ACTUAL}"
-          [[ "${ACTUAL}" == "${EXPECTED_CERT_SHA256}" ]] \
+          [[ "${ACTUAL}" == "${EXPECTED}" ]] \
             || { echo "::error::APK 的签名证书与预期不一致（keystore 换过？secrets 配错？）"; exit 1; }
 
       - name: Remove signing material from the workspace
