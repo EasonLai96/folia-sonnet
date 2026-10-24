@@ -138,7 +138,7 @@ describe('AI cache atomic archive/prune/replacement/restore', () => {
         });
         const waiting = restore(id);
         try {
-            await paused;
+            expect(await Promise.race([paused.then(() => true), waiting.then(() => false)])).toBe(true);
             expect((await restore(id)).status).toBe(200);
             const before = await snapshot();
             release();
@@ -167,7 +167,7 @@ describe('AI cache atomic archive/prune/replacement/restore', () => {
         });
         const waiting = restore(id);
         try {
-            await paused;
+            expect(await Promise.race([paused.then(() => true), waiting.then(() => false)])).toBe(true);
             await db.prepare('DELETE FROM ai_cache_backups WHERE id = ?').bind(id).run();
             const before = await snapshot();
             release();
