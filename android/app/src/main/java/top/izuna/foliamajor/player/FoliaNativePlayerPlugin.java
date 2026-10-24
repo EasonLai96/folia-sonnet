@@ -8,7 +8,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 
 import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
 
@@ -18,8 +17,13 @@ import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
  * Web 侧只在 `settings.nativePlayback` 打开、且这个插件真的在（Capacitor.isPluginAvailable）
  * 时才走原生；否则一切都还是 WebView 的 `<audio>`。也就是说这一层默认完全不参与播放。
  *
- * 位置是**推**的，不是**拉**的：播放器每 250ms 主动发一次 `foliaNativePlayer` 事件，
- * Web 侧按本地墙钟插值。别改成 Web 侧定时调 getSnapshot —— Capacitor 的桥只有一条，
+ * 位置**只在状态边界过桥**（ready / playing / paused / buffering / seeked / ended）：
+ * 播放器内部每 250ms 采一次位置，但那一拍只喂原生锚点（壁纸 / 悬浮窗 / 通知栏），
+ * 不再注入主 WebView。Web 侧按本地墙钟从最后一次状态位置往前推
+ * （见 `nativePlaybackEngine.getPositionSec`）—— 每 500ms 灌一次 JS 正是
+ * 「App 内歌词可视化隔几秒顿一下」的来源，见 `onEvent` 里那段说明。
+ *
+ * 别改成 Web 侧定时调 getSnapshot：Capacitor 的桥只有一条，
  * 轮询会跟批量拉取那些操作抢同一条通道。
  *
  * 事件名与 `src/services/playbackEngine/nativePlayerPlugin.ts` 一一对应，改一处两处都要改。
@@ -39,17 +43,6 @@ public class FoliaNativePlayerPlugin extends Plugin {
      * 改播放器那个 `POSITION_TICK_MS` 时这里要跟着改。
      */
     private static final long POSITION_TICK_MS = 250L;
-
-    /**
-     * 位置过桥的最小间隔：播放器 250ms 报一次，攒两次才往 WebView 发。
-     *
-     * 见下面「位置这一档过桥要降频」那段。改这个值必须同步放宽
-     * `nativePlaybackEngine` 的 `MAX_LEAD_MS`，否则插值会被夹住。
-     */
-    private static final long WEB_NOTIFY_INTERVAL_MS = 500L;
-
-    /** 上一次真的把位置过桥的时刻。只有播放器线程会碰它（onEvent 在那上面跑）。 */
-    private long lastWebNotifyAtMs = 0L;
 
     /** 采样值与「墙钟外推出来的位置」差不到一个采样周期：这一拍没有新信息。 */
     private static boolean anchorStillTrue(long sampledMs) {
@@ -77,13 +70,6 @@ public class FoliaNativePlayerPlugin extends Plugin {
                  * ⚠️ 这一下是**播放器线程**上跑的（播放循环在那条专用线程上，见
                  * FoliaNativePlayer 文件头的「线程」那一节），不在主线程。
                  */
-                JSObject payload = new JSObject();
-                payload.put("type", type);
-                payload.put("positionMs", (double) positionMs);
-                payload.put("durationMs", (double) durationMs);
-                if (message != null) {
-                    payload.put("message", message);
-                }
                 /*
                  * 桌面歌词（壁纸 / 悬浮小窗 / 锁屏）的时间轴锚点：由播放器自己给，
                  * **就在这里写**，不再绕一次主线程 —— 锚点记的是「收到这个位置的那一刻」，
@@ -91,8 +77,14 @@ public class FoliaNativePlayerPlugin extends Plugin {
                  * `WallpaperLyricsState` 那几个字段是 volatile 的，跨线程写没问题。
                  */
                 if ("position".equals(type) || "playing".equals(type)
-                    || "paused".equals(type) || "ready".equals(type)) {
-                    boolean playing = !"paused".equals(type);
+                    || "paused".equals(type) || "ready".equals(type) || "seeked".equals(type)) {
+                    /*
+                     * seeked 既可能是播放中的单曲循环，也可能是暂停时拖进度条：
+                     * 不能用「不是 paused 就算在播」推，问播放器自己。
+                     */
+                    boolean playing = "seeked".equals(type)
+                        ? (player != null && player.isPlaying())
+                        : !"paused".equals(type);
                     /*
                      * ⭐ **"position" 这一档不是每次都写锚点。**
                      *
@@ -135,28 +127,38 @@ public class FoliaNativePlayerPlugin extends Plugin {
                     }
                 }
                 /*
-                 * ⭐ **位置这一档过桥要降频**，锚点不降。
+                 * ⭐ **位置的每一拍不再过桥。**
                  *
-                 * App 内（主 WebView）每 250ms 就会被 `evaluateJavascript` 灌一次 JS，
-                 * 而叠层那个 WebView 近乎不收推送（它只在签名变了才收，见
-                 * WallpaperOverlay）—— 这就是「原生播放一开，App 内的可视化每几秒顿
-                 * 一下，而 App 外的悬浮小窗 / 叠层一点不卡」的唯一差别。关掉原生播放
-                 * 这条链整个消失，卡顿也就跟着消失。
+                 * App 内（主 WebView）原来每 250ms（后来降到 500ms）就会被
+                 * `evaluateJavascript` 灌一次 JS。掉帧打点对上的正是这个节拍：
+                 * 主线程上每隔 500ms 多出一帧 `syncAndDrawFrame` 的等待，掉帧成簇出现，
+                 * 而 App 外的悬浮小窗 / 叠层几乎不卡 —— 它们不收这条事件。
                  *
                  * 这笔开销不在数据量上，在「往 WebView 里塞一次 JS」这件事本身：
-                 * 它要切进 JS 上下文、排到渲染流水线前面，还给 GC 添一份垃圾。
-                 * 攒够两次再发，频率直接减半，别的什么都不动。
+                 * 要切进 JS 上下文、排到渲染流水线前面，还给 GC 添一份垃圾。
+                 * 降频只是把「每 250ms 一次」变成「每 500ms 一次」，节拍还在；
+                 * 所以现在干脆不发 —— 只把**状态边界**（ready / playing / paused /
+                 * buffering / ended / error / idle）过桥，位置由 Web 侧自己的墙钟
+                 * 从最后一次锚点往前推（见 nativePlaybackEngine.getPositionSec）。
                  *
-                 * ⚠️ 锚点**照旧每 250ms 算一次**（就在上面），壁纸 / 悬浮窗 / 叠层的
+                 * 锚点**照旧每 250ms 算一次**（就在上面），壁纸 / 悬浮窗 / 叠层的
                  * 时间轴精度一点没降 —— 那一侧读的是锚点，不是这条事件。
-                 * ⚠️ Web 侧自己会插值，但插值有上限（nativePlaybackEngine 的
-                 * MAX_LEAD_MS），**改这个值必须同步放宽那个上限**，否则位置会被夹住、
-                 * 进度条走走停停。
+                 * 通知栏 / 锁屏的进度条也直接问播放器（FoliaPlaybackService），
+                 * 不经过 WebView。
                  */
                 if ("position".equals(type)) {
-                    long now = SystemClock.elapsedRealtime();
-                    if (now - lastWebNotifyAtMs < WEB_NOTIFY_INTERVAL_MS) return;
-                    lastWebNotifyAtMs = now;
+                    return;
+                }
+                /*
+                 * 只有状态边界才需要构造 payload / 过桥。位置那一拍在上面已经 return，
+                 * 不在这里给播放器线程添垃圾。
+                 */
+                JSObject payload = new JSObject();
+                payload.put("type", type);
+                payload.put("positionMs", (double) positionMs);
+                payload.put("durationMs", (double) durationMs);
+                if (message != null) {
+                    payload.put("message", message);
                 }
                 /*
                  * 过桥那一下回主线程：`notifyListeners` 里的监听器表不是为并发写的
