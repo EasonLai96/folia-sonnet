@@ -429,6 +429,8 @@ http://127.0.0.1:13000
 
 每次覆盖之前，旧的那版整条存进 `ai_cache_backups`，**每个键最多 10 份**（超了删最旧的）。管理员在 `/admin/api/ai-cache-backups/:kind/:key` 能翻旧版，挑一版 `POST /:id/restore` 捞回来 —— 捞的时候当前那条也会先存进备份，捞错还能再捞。
 
+归档、裁剪旧备份、替换当前值在同一个 D1/SQLite batch 中执行；恢复时读取并删除所选备份也在同一批次中，裁剪不会提前删除所选版本。备份若已被另一次恢复消费或删除，返回 `404 not_found`，不再写入当前值或备份。任一步失败都会回滚整批，不会吞掉备份错误后继续覆盖。单条 payload 的 `64KB` 上限按 JSON 序列化后的 UTF-8 字节数（`65536` bytes）计算，`payloadBytes` 返回同一字节数，不按 JavaScript 字符串长度计数。
+
 **关于平台名字段**
 
 上传现在多带三个字段：`platform`（netease / qq / kugou，本地歌曲留空）、`lyricHash`（歌词正文的 MD5）、`isPureMusic`。
