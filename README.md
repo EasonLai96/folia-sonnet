@@ -47,7 +47,7 @@ Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器�
 
 ## 参考项目
 
-本仓库站在这些项目之上，按来源分别对应上游主线、Web 版本、原生歌词协议与移动端适配参考：
+本仓库站在这些项目之上，按来源分别对应上游主线、Web 版本、原生歌词协议、移动端适配参考，以及 Android 上 YouTube Music 登录那一套的移植出处：
 
 | 项目                                                                                                | 关系                                                                              |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -56,6 +56,17 @@ Folia 是一个以全屏沉浸式歌词播放为核心的在线音乐播放器�
 | [2706521883-lgtm/folia-qishui](https://github.com/2706521883-lgtm/folia-qishui)                   | 在 Folia 主线基础上新增「汽水音乐」在线音源。本仓库的汽水音乐协议层、Electron 签名宿主与音频解密均来自该项目。 |
 | [Andrea-lyz/ColorOS-Live-Lyrics-Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge) | ColorOS 原生锁屏歌词（「媒体与播放」歌词页）的桥接协议参考。原生锁屏歌词那部分按它的协议写 `MediaMetadata["lyricInfo"]`。 |
 | [RemnantCloudGodofWar/folia-android](https://github.com/RemnantCloudGodofWar/folia-android)       | 同为 Folia 的 Android 化尝试，手机适配（紧凑布局、竖屏 / 横屏）与 AI 主题等做法参考了它。                        |
+| [EasonLai96/folia-major](https://github.com/EasonLai96/folia-major)                               | Android 上 YouTube Music 的真账号登录整套来自它的 [`android-v23`](https://github.com/EasonLai96/folia-major/releases/tag/android-v23) 版本：原生登录 Activity、Android Keystore 加密的会话持久化、secure-only Cookie 的签名与 canonical Origin 修复，以及 BotGuard poToken 加整首下载的音频路线。 |
+
+## Android 上的 YouTube Music
+
+桌面端那几家的登录在本机能做的事，手机上不一定成立；YouTube Music 这一家现在是手机上的独一份：
+
+- 登录只能走 Google 的 cookie（YouTube 没给 YouTube Music 的 OAuth），所以由原生的一座登录 Activity（`android/app` 的 `YtmSignInActivity.java`）装自己的 WebView，登录完把 cookie 交回来。
+- **必须登录才可用**：我们不提供访客模式。会话验证过真账号才落盘，落盘由原生侧用 Android Keystore 的 AES-GCM 密钥加密（`YtmSessionStore.java`）；冷启动先读回来、问过 YouTube 确认还有效才放行。
+- 手机上行得通的：搜索、歌词、专辑、歌手、公开歌单与电台（`mix`）、播放（BotGuard 来源证明令牌 + 整首下载进缓存目录）。
+- 手机上**不支持**的：个人曲库、推荐 / 用户专辑、收藏与歌单增删、歌曲的红心。这些在界面上会直接说不支持，不返回一个空列表假装没有。
+- 已知限制：Google 可能拒绝「嵌在 App 里的浏览器」登录（页面会显示 Google 自己的提示），那种情况下没有别的退路。各处第三方协议来源记在 [`src/services/onlineMusic/UPSTREAMS.md`](src/services/onlineMusic/UPSTREAMS.md)。
 
 ## 汽水音乐音源
 

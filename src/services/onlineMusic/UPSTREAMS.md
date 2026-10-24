@@ -60,22 +60,31 @@
 - **我们改了什么**：不改包。协议上的问题在包的仓库里修好、发新版本，Folia 再升级依赖。
 - **上游变了怎么跟**：规则和验收步骤见 [`docs/bodian.md`](../../../docs/bodian.md) 的“会话”“验证”两节（版本必须钉死，锁文件只用 npm 上的版本）。测试里 `test/unit/onlineMusic/bodianAlbumPaging.test.ts`、`test/unit/gridView/bodianCollectionPaging.test.ts`、`test/unit/onlineMusic/loginFailurePlatforms.test.ts` 用真的 `createBodianApi`，只把发请求的那一层换成测试里写好的答复：包的接口或翻页规则变了，这几条会失败。`test/unit/electron/bodianApiBridge.test.ts` 管 IPC 和会话。
 
-## YouTube Music（`ytm`，仅桌面端）
+## YouTube Music（`ytm`）
 
 - **上游**：
-  - `youtubei.js`（仓库 LuanRT/YouTube.js）：向 YouTube 自己的 InnerTube 接口发请求，解析答复。
-  - `googlevideo`：按 SABR 读音频流（`electron/ytm/ytmApiBridge.cjs` 里和 youtubei.js 一起按需加载）。
-  - `bgutils-js`（仓库 LuanRT/BgUtils）：跑 Google 的 BotGuard 脚本，做出音频服务器要的 proof-of-origin 令牌（`electron/ytm/poToken.cjs`）。
-  - YouTube 自己的播放器脚本和 BotGuard 脚本：第三方代码，随时会变，放在没有 Node、没有网络的隐藏页面里跑（`electron/ytm/sandbox.cjs`）。
+  - `youtubei.js`（仓库 LuanRT/YouTube.js）：向 YouTube 自己的 InnerTube 接口发请求，解析答复。桌面端在主进程里用，Android 在 WebView 里用（`ytm/android/ytmAndroidBridge.ts`）。
+  - `googlevideo`：按 SABR 读音频流（`electron/ytm/ytmApiBridge.cjs` 里和 youtubei.js 一起按需加载），只有桌面端这一条在用。
+  - `bgutils-js`（仓库 LuanRT/BgUtils）：跑 Google 的 BotGuard 脚本，做出音频服务器要的 proof-of-origin 令牌（桌面端 `electron/ytm/poToken.cjs`，Android 端 `ytm/android/ytmAndroidToken.ts`）。
+  - YouTube 自己的播放器脚本和 BotGuard 脚本：第三方代码，随时会变，桌面端放在没有 Node、没有网络的隐藏窗口里跑（`electron/ytm/sandbox.cjs`），Android 放在页面里一块不可见的 iframe 里跑（`ytm/android/ytmAndroidSandbox.ts`）。
 - **版本**：根目录 `package.json` 钉死 `youtubei.js` 18.1.0、`googlevideo` 4.1.1、`bgutils-js` 4.0.3。
-- **我们包了什么**（都在 `electron/ytm/`）：
-  - 把 youtubei.js 的 `Platform.shim.eval` 换成在沙箱页面里执行（`ytmApiBridge.cjs`）。
-  - 取逐行时间的歌词时冒充手机 App：`MOBILE_CLIENT` 写死 `ANDROID_MUSIC` 7.21.50（同一文件），网页客户端只给纯文本歌词。
-  - 网页登录、收藏、列表页、探索页由我们自己的文件读网页客户端的答复（`webSignIn.cjs`、`webSaves.cjs`、`webPages.cjs`、`webExplore.cjs`），目录节点由 `tiles.cjs`、`catalog.cjs` 读。
+- **Android 那一套是移植来的**：`ytm/android/` 整套（会话门、原生登录、Keystore 会话存储、原生 fetch、目录读写、poToken、沙盒、历史）来自
+  [EasonLai96/folia-major](https://github.com/EasonLai96/folia-major) 的 `android-v23` 标签（与主线同为 AGPL-3.0），落地前逐文件读过它的
+  [`docs/android-auth-port-comparison.md`](https://github.com/EasonLai96/folia-major/blob/android-v23/docs/android-auth-port-comparison.md)。那份文档写明它核对过的两个 fork
+  —— `Nishino0525Nanase/folia-android`（Android YTM 登录 Activity 与页内 runtime 的最初写法）和 `Timingyyds/folia-android`（原生曲库、前台服务）——
+  以及它明确不抄的部分：去掉 UA 里 WebView 标记绕过 Google 检测的写法、不带来源清单的通用 HTTP 桥、加密音频解密。本仓库沿用同样的边界，那两个 fork 本身不是本仓库的依赖。
+- **我们包了什么**（桌面端都在 `electron/ytm/`，Android 端都在 `ytm/android/`）：
+  - 桌面端：把 youtubei.js 的 `Platform.shim.eval` 换成在沙箱页面里执行（`ytmApiBridge.cjs`）。
+  - Android 端：`Platform.shim.eval` 换成在页面里那块不可见的 iframe 里执行（`ytmAndroidBridge.ts` 的 `loadLibrary`）；请求一律经 `ytmNativeFetch.ts` 走原生 HTTP（WebView 的 fetch 过不了同源检查），poToken 也经它取。
+  - Android 端的登录这一处改了我们自己需要的东西：会话必须由 App 自己拿真账号验证过才交给原生加密落盘（`YtmSessionStore.java`，Android Keystore 的 AES-256-GCM），冷启动读回也要重新验证；登出连 Google / YouTube 自己的 cookie 一起清（只清这两家，别的平台一口不动）。
+  - Android 端把 WebView 的 secure-only cookie 自己签（`ytmAndroidAuth.ts`）：`SAPISID` / `__Secure-1PAPISID` / `__Secure-3PAPISID` 按 canonical 的 `https://www.youtube.com` 算 SAPISIDHASH 一族，带账户的请求用同一个 canonical Origin，绝不把 `https://localhost` 转发给 YouTube；账户头只给 `music.youtube.com` 和 `www.youtube.com` 两个精确主机，带它们的请求不让原生端跟随重定向。这两样缺一样 YouTube 就不认这次登录（这次移植要修的就是它）。
+  - 两端都要的：取逐行时间的歌词时冒充手机 App，客户端写死 `ANDROID_MUSIC` 7.21.50（桌面端同一文件，Android 端 `ytmAndroidBridge.ts`），网页客户端只给纯文本歌词。
+  - 桌面端：网页登录、收藏、列表页、探索页由我们自己的文件读网页客户端的答复（`webSignIn.cjs`、`webSaves.cjs`、`webPages.cjs`、`webExplore.cjs`），目录节点由 `tiles.cjs`、`catalog.cjs` 读；Android 端这套散布在 `android/ytmAndroidCatalog.ts`、`ytmAndroidHistory.ts`、`ytmAndroidAccount.ts` 里，读过之后统一折成桌面端同一份 wire 形状再交给 provider。
 - **上游变了怎么跟**：
   - 先看 youtubei.js 和 BgUtils 的发布说明，再在应用里用访客和登录的账号各放一首歌。
-  - `test/unit/ytm/` 下的测试都用替身或裁剪过的样本（例如 `ytmTiles.test.ts` 直接把样本交给 `tiles.cjs`、`catalog.cjs`，不跑 youtubei.js），上游改了解析结果它们抓不到。
-  - YouTube 改了播放器或 BotGuard，表现是音频请求 403 或歌放不出来；日志都以 `[Ytm]` 开头。
+  - `test/unit/ytm/` 下的测试都用替身或裁剪过的样本（例如 `ytmTiles.test.ts` 直接把样本交给 `tiles.cjs`、`catalog.cjs`，不跑 youtubei.js），上游改了解析结果它们抓不到。Android 这边新加的 `ytmAndroidGate.test.ts`、`ytmAndroidAuth.test.ts`、`ytmAndroidAuthFetch.test.ts`、`ytmAndroidSessionStore.test.ts`、`ytmAndroidSignIn.test.ts` 同样把原生插件和 HTTP 换成替身，管的是会话那道门与自己签的名；上游改了答复的样子它们也抓不到。
+  - YouTube 改了播放器或 BotGuard，表现是音频请求 403 或歌放不出来；日志都以 `[Ytm]` 开头。Android 端多一层：YouTube 改了登录的判定方式时，表现为「登录了但读不出账号」，要看 `validateSession` 那几行日志。
+  - Android 这套移植自上面那个 `android-v23` 标签。那边升了版本要跟着同步时，把它那份 `docs/android-auth-port-comparison.md` 再读一遍：那里写着哪些写法是刻意不带进来的。
   - 平台条目里更多实测（音质档位、会员判断、登录方式）在同目录 `README.md` 的 `ytm/ytmProvider.ts` 一条。
 
 ## Spotify（`spotify`，仅桌面端）

@@ -239,6 +239,7 @@ Special thanks to these projects and resources:
 - [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)
 - [paper-design/shaders](https://github.com/paper-design/shaders)
 - [yakult-green-tea/qq-music-api](https://github.com/yakult-green-tea/qq-music-api)
+- [EasonLai96/folia-major](https://github.com/EasonLai96/folia-major) — the Android YouTube Music sign-in (native sign-in activity, Keystore-encrypted session, secure-only cookie signing, BotGuard playback path) was ported from its `android-v23` release.
 
 Folia uses the [Apple Music-like Lyrics TTML word-by-word lyrics database](https://github.com/amll-dev/amll-ttml-db) for high-quality lyric files. Thanks to its authors and contributors.
 
