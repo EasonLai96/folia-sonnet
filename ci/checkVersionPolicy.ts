@@ -1,4 +1,4 @@
-// dev/ci/checkVersionPolicy.ts
+// ci/checkVersionPolicy.ts
 // 版本约束检查：CI 的 version-policy 任务和本地 npm run check:versions 跑的是这一份。
 // 规则来源：AGENTS.md 的「依赖」一节，以及 src/services/onlineMusic/UPSTREAMS.md 里每个平台的「版本」段。
 
@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // 用 import.meta.url 而不是 import.meta.dirname：这份文件也会被 vitest 打包执行，那里只保证有 url。
-export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 interface PlatformDep {
     name: string;
@@ -142,5 +142,5 @@ function main(): void {
     console.log(`版本约束检查通过：${pkg.version} → versionCode ${versionCodeOf(pkg.version)}；平台依赖 ${PLATFORM_DEPS.length} 个钉死，Docker 部署版本一致`);
 }
 
-// 只有直接 `node dev/ci/checkVersionPolicy.ts` 才跑检查；被单测 import 时不产生副作用。
+// 只有直接 `node ci/checkVersionPolicy.ts` 才跑检查；被单测 import 时不产生副作用。
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
