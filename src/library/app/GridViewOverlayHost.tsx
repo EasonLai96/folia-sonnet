@@ -23,7 +23,6 @@ import { createLibraryMutationPort } from './createLibraryMutationPort';
 import { useCollectionResource } from '../core/collection/resource/useCollectionResource';
 import { useCollectionMutations } from '../core/collection/mutations/useCollectionMutations';
 import { useArtistResource } from '../core/artist/useArtistResource';
-import type { LibraryLocalCatalogSnapshot } from '../core/home/home.contract';
 import { LocalLibraryEntityPanel } from '../../components/modal/LocalLibraryEntityPanel';
 import { LocalFolderSongInfoPanel } from '../../components/modal/LocalFolderSongInfoPanel';
 import { LocalSongMetadataMatchDialog } from '../../components/modal/LocalSongMetadataMatchDialog';

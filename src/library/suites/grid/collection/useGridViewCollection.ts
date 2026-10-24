@@ -3,7 +3,6 @@ import type { LocalSong, SongResult, UnifiedSong } from '../../../../types';
 import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { onlineFailureOf } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { formatLocalAlbumTrackLabel } from '../../../../utils/localSongSorting';
-import { collectionKey } from '../../../core/collection/collectionIdentity';
 import type { CollectionResource } from '../../../core/shared/resource.contract';
 import type { CollectionMutationController } from '../../../core/collection/mutations/mutations.contract';
 import { useCollectionResourceState } from '../../../core/collection/resource/useCollectionResourceState';
