@@ -18,6 +18,8 @@ import AppDialogs from './components/app/dialogs/AppDialogs';
 import MediaCacheMigrationNotice from './components/app/MediaCacheMigrationNotice';
 import { useProviderSignOut } from './components/app/dialogs/useProviderSignOut';
 import LoginHost from './components/login/LoginHost';
+import { rowStatus } from './components/login/platformRows';
+import SignInSpotlight from './components/login/SignInSpotlight';
 import { useSettingsDialogModel } from './components/app/dialogs/useSettingsDialogModel';
 import AppOverlays from './components/app/overlays/AppOverlays';
 import PonderHost from './components/ponder/PonderHost';
@@ -340,7 +342,6 @@ export default function App() {
         window.electron?.setAutomixEnabled?.(automixEnabled && transitionMode === 'automix');
     }, [automixEnabled, transitionMode]);
 
-    const startupExperience = useStartupExperienceGate();
     // 启动后自动查一次新版本，有新版本就弹提示（安卓才有；桌面端走 electron-updater）。
     const updatePrompt = useStartupUpdatePrompt();
 
@@ -871,6 +872,17 @@ export default function App() {
         switchCleanup: providerSwitchCleanup,
     });
     const { providers: onlineProviders, activeProviderId } = useLibraryAccountProviders(accountController);
+    /*
+     * 首启序列（免费软件声明 → 发版说明 → 那两页选择 → Ponder → 把登录按钮送到脸上）。
+     *
+     * 放在账户下面，是因为最后一步要知道两件事：有没有人已经登录（有就不再指那个按钮）、
+     * 有没有能登录的平台（一个都没有时指它也没有意义）。这两件事只在这里合成 ——
+     * store 之间不互相引用（storeContract 守着）。
+     */
+    const startupExperience = useStartupExperienceGate({
+        signedIn: onlineProviders.some(row => rowStatus(row) === 'signed-in'),
+        canSignIn: onlineProviders.some(row => rowStatus(row) !== 'off'),
+    });
     const activeProvider = useMemo(
         () => resolveActiveProviderSummary(onlineProviders, activeProviderId),
         [activeProviderId, onlineProviders],
@@ -3342,6 +3354,15 @@ export default function App() {
             />
             {/* 登录窗口挂在最外层：每个资料库界面（网格、Bravais、文本）都用 openLoginWindow 打开同一个窗口。 */}
             <LoginHost account={accountController} />
+            {/*
+                首启最后一步：等该确认的都确认完了，把首页那个登录按钮送到脸上去，点它才过得去。
+                它盖住整个应用，所以排在登录窗口之前 —— 点它的那一刻它就让位，窗口随即打开。
+            */}
+            <SignInSpotlight
+                isOpen={startupExperience.isSignInSpotlightOpen}
+                account={accountController}
+                onPressed={startupExperience.pressSignInSpotlight}
+            />
             {signOutDialog}
             <ReleaseNotesDialog
                 isOpen={startupExperience.isReleaseNotesOpen}
