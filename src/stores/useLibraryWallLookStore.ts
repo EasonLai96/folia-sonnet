@@ -13,7 +13,7 @@ import { normalizeLibraryWallSeamDirection, type LibraryWallSeamDirection } from
 // 信息条（缝）的材质：始终透明 seamClear（默认开，用户定 2026-10-09）与实色模式的预设 seamStyle（默认主题纸色，透明开着时不生效）；
 // 透出的播放页画面（backdrop）要不要画歌词文字 backdropLyrics、要不要模糊 backdropBlur（都默认关，§11「墙后的画面」）；
 // 信息条的方向 seamDirection：竖向 / 横向（从块的横向缝隙裂开成横条）/ 自动（按视口宽高比，默认），见 utils/libraryWallSeamDirection。
-// seamDirectionReverse：只翻「自动」那一支（默认关）——开着时竖屏用竖缝、横屏用横条（用户 2026-10-24）。
+// seamDirectionReverse：只翻「自动」那一支，**默认开**（用户定 2026-10-24）——开着时竖屏用竖缝、横屏用横条。
 // 放在 app 层而不是 suite 里，因为设置 UI（components/modal/settings）不能 import suite；bravais 的 stage 读这里。
 // 只在 bravais 是生效 suite 时才有界面入口（library/app/bravaisLibraryActive；界面设置的「Bravais」分组）。
 //
@@ -64,6 +64,8 @@ const readStoredWindowsPerBlock = (): number => clampLibraryWallWindowsPerBlock(
 const readStoredStackEdges = (): boolean => readStored(LIBRARY_WALL_STACK_EDGES_KEY) !== 'false';
 /** 默认关的开关：只认 'true' 为开。 */
 const readStoredFlag = (key: string): boolean => readStored(key) === 'true';
+/** 信息条方向的反向：默认开（用户定，2026-10-24）；只认 'false' 为关。 */
+const readStoredSeamDirectionReverse = (): boolean => readStored(LIBRARY_WALL_SEAM_DIRECTION_REVERSE_KEY) !== 'false';
 /** 信息条始终透明：默认开（用户定，2026-10-09）；只认 'false' 为关。 */
 const readStoredSeamClear = (): boolean => readStored(LIBRARY_WALL_SEAM_CLEAR_KEY) !== 'false';
 const readStoredSeamStyle = (): LibraryWallSeamStyle => normalizeLibraryWallSeamStyle(readStored(LIBRARY_WALL_SEAM_STYLE_KEY));
@@ -77,7 +79,7 @@ const readAll = () => ({
     backdropLyrics: readStoredFlag(LIBRARY_WALL_BACKDROP_LYRICS_KEY),
     backdropBlur: readStoredFlag(LIBRARY_WALL_BACKDROP_BLUR_KEY),
     seamDirection: normalizeLibraryWallSeamDirection(readStored(LIBRARY_WALL_SEAM_DIRECTION_KEY)),
-    seamDirectionReverse: readStoredFlag(LIBRARY_WALL_SEAM_DIRECTION_REVERSE_KEY),
+    seamDirectionReverse: readStoredSeamDirectionReverse(),
 });
 
 export type LibraryWallLookState = {
@@ -102,7 +104,7 @@ export type LibraryWallLookState = {
      * 歌手 / 专辑海报仍是竖的开口）；自动时竖着的屏幕用横向。
      */
     seamDirection: LibraryWallSeamDirection;
-    /** 信息条方向「自动」的反向开关：开着时竖屏用竖缝、横屏用横条。只在自动档下有意义。 */
+    /** 信息条方向「自动」的反向开关（默认开）：开着时竖屏用竖缝、横屏用横条。只在自动档下有意义。 */
     seamDirectionReverse: boolean;
     /** 非法值回默认档后再写入。 */
     setLook: (look: LibraryWallLook) => void;

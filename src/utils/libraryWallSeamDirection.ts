@@ -44,17 +44,20 @@ export const isPortraitWall = (width: number, height: number): boolean => (
 );
 
 /**
- * 反向（useLibraryWallLookStore 的 seamDirectionReverse，默认关）：只翻「自动」那一支。
+ * 反向（useLibraryWallLookStore 的 seamDirectionReverse）：只翻「自动」那一支。
  * 关着时竖屏→横条、横屏→竖缝；开着时竖屏→竖缝、横屏→横条。明确选了竖向 / 横向的不受影响
  * （那两个取值本身就是答案，再翻一次只是绕远路）。
+ *
+ * ⚠ 这里是**纯函数的中性默认**（不反向），不是用户那一份默认值 —— 用户的默认在
+ * useLibraryWallLookStore 里（2026-10-24：默认开），两处别互相抄。
  */
-export const DEFAULT_LIBRARY_WALL_SEAM_DIRECTION_REVERSE = false;
+export const NO_SEAM_DIRECTION_REVERSE = false;
 
 /** 此刻信息条该不该横着开：自动时看屏幕是不是竖着的（反向则反过来）。 */
 export const resolveLibraryWallSeamHorizontal = (
     direction: LibraryWallSeamDirection,
     portrait: boolean,
-    reverse = DEFAULT_LIBRARY_WALL_SEAM_DIRECTION_REVERSE,
+    reverse = NO_SEAM_DIRECTION_REVERSE,
 ): boolean => {
     if (direction !== 'auto') return direction === 'horizontal';
     return reverse ? !portrait : portrait;

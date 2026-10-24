@@ -23,6 +23,7 @@ const STACK_EDGES_KEY = 'library_wall_stack_edges';
 const SEAM_CLEAR_KEY = 'library_wall_seam_clear';
 const SEAM_STYLE_KEY = 'library_wall_seam_style';
 const SEAM_DIRECTION_KEY = 'library_wall_seam_direction';
+const SEAM_DIRECTION_REVERSE_KEY = 'library_wall_seam_direction_reverse';
 const BACKDROP_LYRICS_KEY = 'library_wall_backdrop_lyrics';
 const BACKDROP_BLUR_KEY = 'library_wall_backdrop_blur';
 
@@ -258,5 +259,20 @@ describe('useLibraryWallLookStore', () => {
         expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'Vertical' })).getState().seamDirection).toBe('auto');
         expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'vertical' })).getState().seamDirection).toBe('vertical');
         expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'vertical' }, { throwOnGet: true })).getState().seamDirection).toBe('auto');
+    });
+
+    // 反向只翻「自动」那一支，默认开（2026-10-24）：只认 'false' 为关，读不到也按默认开。
+    it('flips the automatic direction by default and persists the choice', async () => {
+        const store = await loadStore();
+        expect(store.getState().seamDirectionReverse).toBe(true);
+        expect(storage.size).toBe(0);
+
+        store.getState().setSeamDirectionReverse(false);
+        expect(storage.get(SEAM_DIRECTION_REVERSE_KEY)).toBe('false');
+        expect((await loadStore(Object.fromEntries(storage))).getState().seamDirectionReverse).toBe(false);
+
+        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'false' })).getState().seamDirectionReverse).toBe(false);
+        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'yes' })).getState().seamDirectionReverse).toBe(true);
+        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'false' }, { throwOnGet: true })).getState().seamDirectionReverse).toBe(true);
     });
 });
