@@ -314,6 +314,42 @@ public final class WallpaperLyricsState {
         return positionMs < nativeSeekPositionMs - SEEK_GUARD_TOLERANCE_MS;
     }
 
+    // ===== 心跳 =====
+    // 「锚点 + 墙钟」模型有个盲区：它只会一直往前走，没人告诉它播放还活着没有。
+    // 应用被划掉后台之后 WebView 没了、桥上的推送停了，但进程（连同这份静态状态）
+    // 还活着 —— 歌词就照着最后一首歌的时间轴一路走到头，进度条走满，什么都停不下来。
+    //
+    // 心跳 = 「播放管线还活着」的定期信号。写锚点的一方顺手戳一下（Web 的推送、
+    // 播放服务的巡检，见 FoliaPlaybackService 的 heartbeatTick），渲染入口
+    // （LyricsRenderer / 两层叠层）自己每帧/每轮巡检查 —— 超时就不画歌词和进度条，
+    // 只留背景。每个绘制入口都要自己读（老教训：指望别人转发开关一定会漏）。
+    private static volatile long lastHeartbeatAtMs = 0L;
+
+    /**
+     * 心跳超时。发心跳的节拍是 2 秒（JS 定时器与播放服务巡检都是），
+     * 8 秒 = 容得下四次没接着；再长的话划掉后台之后歌词要多挂好几秒才收。
+     */
+    public static final long HEARTBEAT_TIMEOUT_MS = 8000L;
+
+    /** 播放管线还活着：由任何一方（Web 推送 / 播放服务巡检）定期调用。 */
+    public static void heartbeat() {
+        lastHeartbeatAtMs = SystemClock.elapsedRealtime();
+    }
+
+    /**
+     * 心跳是否还新鲜。从未跳过（0）视为活着：冷启动恢复出来的那份是**暂停态**
+     * （restore 里 playing 固定 false），歌词冻着不会自己跑，不算「没人管还在走」。
+     */
+    public static boolean heartbeatAlive() {
+        long last = lastHeartbeatAtMs;
+        if (last == 0L) {
+            return true;
+        }
+        long age = SystemClock.elapsedRealtime() - last;
+        // age < 0 只可能是换了个时间的时钟（不至于发生），按过期处理更稳。
+        return age >= 0L && age <= HEARTBEAT_TIMEOUT_MS;
+    }
+
     // ===== 主题推送按内容去重 =====
     // 切歌那一推本来就被「等主题落定」的闸按住，但闸放开之后仍可能连着来两份：
     // 一份主题在途、一份主题落定（或封面补到）。叠层每收一次整包就重画一次，
@@ -354,6 +390,8 @@ public final class WallpaperLyricsState {
 
     /** 播放位置推进：只更新锚点，不动时间轴，也不落盘。 */
     public static void setAnchor(long positionMs, boolean playing) {
+        // 谁能写锚点谁就活着（Web 推送、播放服务、原生 seek），顺手把心跳带上。
+        heartbeat();
         Snapshot previous = current;
         if (isSeekRegression(positionMs)) {
             // seek 守卫窗内的旧位置回推：位置丢弃，playing 照收 —— 那是独立的事实。
@@ -423,6 +461,7 @@ public final class WallpaperLyricsState {
                                TimedLine[] lines, java.util.Map<String, Float> tuningPatch,
                                long positionMs, boolean playing) {
         Snapshot previous = current;
+        heartbeat();
         tuning = resolveTuning(tuningPatch);
         // seek 守卫窗内的位置回退：整包推送也照丢。锚点沿用快照里已有的（原生 seek
         // 刚写进去的那个），其余字段照常更新。
@@ -538,6 +577,7 @@ public final class WallpaperLyricsState {
                                      Boolean showTranslation, long durationMs,
                                      java.util.Map<String, Float> tuningPatch) {
         Snapshot previous = current;
+        heartbeat();
         tuning = resolveTuning(tuningPatch);
         Snapshot next = new Snapshot(previous.title, previous.artist, previous.cover,
                 previous.accent, previous.baseColor, previous.motion,

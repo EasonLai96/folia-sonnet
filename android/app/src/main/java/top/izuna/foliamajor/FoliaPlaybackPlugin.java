@@ -52,6 +52,18 @@ public class FoliaPlaybackPlugin extends Plugin {
         super.handleOnDestroy();
     }
 
+    /**
+     * WebView 这条播放管线还活着吗。
+     *
+     * 插件实例在桥销毁（Activity 被划掉后台销毁）时清空 —— 它就是「JS 还在不在」的判据：
+     * 实例在，WebView 就在（哪怕已退后台、定时器被挂起，音频照样在放）；
+     * 实例没了，WebView 就没了，JS 那边不可能再有声音。播放服务的心跳巡检靠它区分
+     * 「后台还在放」与「划掉之后的僵尸进程」（见 FoliaPlaybackService.heartbeatTick）。
+     */
+    static boolean isBridgeAlive() {
+        return instance != null;
+    }
+
     static void dispatchCommandFromReceiver(String command, long positionMs) {
         dispatchCommandFromReceiver(command, positionMs, null);
     }

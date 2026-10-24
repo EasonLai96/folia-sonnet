@@ -1749,6 +1749,15 @@ public final class WallpaperOverlay {
         if (lockScreenHost != null) {
             return true;
         }
+        /*
+         * 心跳断了：播放管线已经没了（应用被划掉后台 / WebView 死透），
+         * 页面里画的歌词是从快照里算出来的死数据。整层收起 —— 迟滞闸门
+         * （shouldHideNow）会让它先淡出再销毁，不会有突兀的一闪。
+         * 放在锁屏页那条之后：锁屏页有自己的生命周期与播放键，不吃这个心跳。
+         */
+        if (!WallpaperLyricsState.heartbeatAlive()) {
+            return false;
+        }
         // 锁屏页还没起来 / 起不来时，退回到悬浮窗那条路（带 FLAG_SHOW_WHEN_LOCKED）：
         // 部分 ROM 允许悬浮窗画在锁屏上，那就不用 Activity 也能看到。
         // 用户主动关掉过的话这条就不走了 —— 见 lockScreenDismissed。

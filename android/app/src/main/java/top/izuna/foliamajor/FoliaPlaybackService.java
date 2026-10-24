@@ -226,6 +226,36 @@ public class FoliaPlaybackService extends android.app.Service {
         }
     };
 
+    /**
+     * 壁纸心跳的巡检节拍（2 秒一敲），只在「真有东西在出声」时敲下去。
+     *
+     * 为什么要有它：壁纸歌词是「锚点 + 墙钟」自己往前走的，写锚点的一方死了它也不知道。
+     * 应用被划掉后台之后 WebView 连同桥一起销毁，但前台服务（连带整个进程、连同壁纸）
+     * 还活着 —— 没人踩刹车，歌词就照着最后一首歌的时间轴一路唱到头。
+     *
+     * 谁在真正出声，谁就能把心跳敲下去：
+     *  · WebView 管线活着（桥实例在）—— 哪怕退了后台、JS 定时器被挂起，音频照样在放；
+     *    暂停时也算活着：歌词冻在原地（和用户能看到的 App 状态一致），不算「没人管还在走」。
+     *  · WebView 已经没了但原生播放器在真的出声（镜像接管那条路）。
+     * 两个都不是 —— 播放已经死了，心跳就此断掉：壁纸与两层叠层在超时后只画背景，
+     * 不再画歌词和进度条（各绘制入口自己读 WallpaperLyricsState.heartbeatAlive）。
+     */
+    private static final long WALLPAPER_HEARTBEAT_TICK_MS = 2000L;
+
+    private final Runnable heartbeatTick = new Runnable() {
+        @Override
+        public void run() {
+            if (!running) {
+                return;
+            }
+            if (FoliaPlaybackPlugin.isBridgeAlive()
+                    || top.izuna.foliamajor.player.FoliaNativePlayerPlugin.isNativePlaying()) {
+                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.heartbeat();
+            }
+            mainHandler.postDelayed(this, WALLPAPER_HEARTBEAT_TICK_MS);
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -251,6 +281,8 @@ public class FoliaPlaybackService extends android.app.Service {
         promoteToForeground();
         ensureMediaSession();
         publishNotification();
+        // 壁纸心跳巡检开表（onDestroy 里撤）。服务在，巡检就在；它自己判断该不该敲。
+        mainHandler.postDelayed(heartbeatTick, WALLPAPER_HEARTBEAT_TICK_MS);
     }
 
     /**
@@ -511,6 +543,8 @@ public class FoliaPlaybackService extends android.app.Service {
         // 实例要没了：那次等确认的检查也跟着撤掉（它持着 this）。
         playConfirmPending = false;
         mainHandler.removeCallbacks(playConfirmCheck);
+        // 心跳巡检也跟着撤：服务都死了，没人有资格替播放管线敲心跳。
+        mainHandler.removeCallbacks(heartbeatTick);
         // 实例没了，前台状态必须跟着清：它是静态的，进程还在时插件靠它选
         // startService / startForegroundService。留着 true 会让下一次创建的实例跳过
         // startForeground()，而那条路是 startForegroundService 开的 —— 5 秒后就是

@@ -1,6 +1,6 @@
 import React from 'react';
 import { isCapacitorAndroid } from '../platform/runtime';
-import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, setWallpaperFloatingPreview, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
+import { clearLyricsWallpaper, publishLyricsWallpaper, pushLyricsFontToNative, setWallpaperAppearance, setWallpaperFloatingPreview, wallpaperHeartbeat, type FoliaWallpaperTimelineEntry } from '../platform/foliaWallpaper';
 import { getStoredUploadedLyricsFont } from '../services/customLyricsFont';
 import { flattenTuning, tuningFieldFor, withGlobalSettings } from '../platform/wallpaperVisualizerTuning';
 import { useVisualizerSettingsStore, type VisualizerSettingsState } from '../stores/useVisualizerSettingsStore';
@@ -84,6 +84,12 @@ const WALLPAPER_DRIFT_TOLERANCE_MS = 900;
  * 间隔留了三倍余量：后台节流漏掉一两次也不会把预览搞没。
  */
 const PREVIEW_RENEW_MS = 15_000;
+
+/**
+ * 心跳间隔。前台每两秒敲一下「播放管线还活着」；退到后台 JS 定时器被挂起后由
+ * 播放服务接管（原生 2 秒一敲）。原生侧的超时是 8 秒，容得下几次没接着。
+ */
+const HEARTBEAT_MS = 2_000;
 
 /*
  * 换歌那一推要「等一等」再发。
@@ -634,6 +640,25 @@ export const useLyricsWallpaperFeed = ({
             playing,
         });
     }, [active, playing]);
+
+    /*
+     * 心跳：只要壁纸推送开着就定期敲一下「我还活着」。
+     *
+     * 它与上面的锚点推送是两回事 —— 锚点只在换行 / 跳变时推，正常播放期间可能
+     * 几分钟都不吭声，指望不上当心跳。而原生那边「锚点 + 墙钟」只会一直往前走，
+     * 一旦写锚点的一方死透了（应用被划掉后台、WebView 销毁），没人踩刹车，
+     * 歌词就照最后一首歌的时间轴一路唱到头、进度条走满 —— 心跳超时就是那脚刹车：
+     * 壁纸与两层叠层收掉歌词和进度条，只留背景。暂停中也照敲：歌词冻在原地
+     * 是「用户看得见的状态」，不算没人管还在走。
+     *
+     * 只覆盖前台；退到后台 JS 定时器被挂起，由播放服务接管（音频还在放，
+     * 歌词就得继续走）。App 一死两条心跳一起停，超时后壁纸只剩背景。
+     */
+    React.useEffect(() => {
+        if (!active) return undefined;
+        const timer = window.setInterval(() => void wallpaperHeartbeat(), HEARTBEAT_MS);
+        return () => window.clearInterval(timer);
+    }, [active]);
 
     /*
      * 「音频**真的**在不在播」一变，就立刻把锚点同步过去。

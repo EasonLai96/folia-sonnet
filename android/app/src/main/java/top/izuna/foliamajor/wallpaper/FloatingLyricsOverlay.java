@@ -411,6 +411,12 @@ public final class FloatingLyricsOverlay {
         if (preview) return true;
 
         /*
+         * 心跳断了：播放管线已经没了（应用被划掉后台 / WebView 死透），
+         * 快照里的歌词是死数据，收起来（预览例外：那是用户正在设置页里调的东西）。
+         */
+        if (!WallpaperLyricsState.heartbeatAlive()) return false;
+
+        /*
          * 「在所有应用上叠加」：关掉时只在能**确认**「用户在桌面」的时候挂。
          *
          * 这一层原先压根不读这个开关 —— 精简样式于是在任何应用上都压着，

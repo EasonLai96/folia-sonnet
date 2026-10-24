@@ -609,7 +609,11 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         // 「跟随 + 叠层」时原生这层可以不画歌词/进度条：
         // 叠层跑的是播放页同一套可视化，自己也画歌词，两层叠在一起会重影。
         // 用 wp. 前缀的那两个开关控制，缺省照旧（画）。
-        if (!tb("wp.hideNativeProgress", false)) {
+        // 心跳断了就不画歌词和进度条：播放管线已经没了（应用被划掉后台 / WebView 死透），
+        // 时间轴上走到的位置是没人听的。背景照画 —— 壁纸还得是一张壁纸。
+        // 这里自己读心跳，不等别人转发（每个绘制入口都要自己读，见 WallpaperLyricsState）。
+        boolean playbackAlive = WallpaperLyricsState.heartbeatAlive();
+        if (playbackAlive && !tb("wp.hideNativeProgress", false)) {
             drawProgressBar(snapshot);
         }
         /*
@@ -619,7 +623,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
          * 还在中间画一整块的话，同一句会同时出现在两个地方 —— 扫光还不同步，看着像重影。
          * 背景照旧画：用户选的封面 / 渐变还在，中间空出来的那一块正好留给小窗。
          */
-        if (!tb("wp.hideNativeLyrics", false) && !nativeLyricsShadowedByFloating()) {
+        if (playbackAlive && !tb("wp.hideNativeLyrics", false) && !nativeLyricsShadowedByFloating()) {
             drawLyrics(snapshot);
         }
     }

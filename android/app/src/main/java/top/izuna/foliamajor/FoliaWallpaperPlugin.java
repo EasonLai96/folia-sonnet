@@ -434,6 +434,19 @@ public class FoliaWallpaperPlugin extends Plugin {
     }
 
     /**
+     * 心跳：Web 层每两秒敲一下「我还活着」。
+     *
+     * 什么都不推、什么都不改 —— 只是把壁纸那边的心跳时间戳刷新一次。
+     * 一旦它停了（应用被划掉后台 / WebView 死透），壁纸与两层叠层超时后就只画背景，
+     * 不再画没人听的歌词和进度条（见 WallpaperLyricsState.heartbeatAlive）。
+     */
+    @PluginMethod
+    public void heartbeat(PluginCall call) {
+        WallpaperLyricsState.heartbeat();
+        call.resolve();
+    }
+
+    /**
      * 壁纸那层「可视化叠层」要画在壁纸之上，必须有 SYSTEM_ALERT_WINDOW。
      *
      * 没拿到权限时叠层是**静默不启用**的（退回原生 GLES 渲染），
