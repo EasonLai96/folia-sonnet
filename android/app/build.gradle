@@ -18,7 +18,7 @@ if (hasReleaseKeystore) {
 // 升不上去了 —— 应用内那个「检查更新」也跟着白做。
 //
 // 由 package.json 的 version 推出来：major*1000000 + minor*100000 + patch*100 + build
-// （0.7.18 → 71800）。patch 与 build 各留两位（超过就截断 —— patch 到三位数本就该升 minor）。
+// （0.7.18 → 701800）。patch 与 build 各留两位（超过就截断 —— patch 到三位数本就该升 minor）。
 //
 // 第四位（`0.7.19.1` 里的 1）之前是不存在的：四位版本号被当成三段处理，于是
 // `0.7.19` 和 `0.7.19.1` 得到**同一个** versionCode。同 code 覆盖安装算不上降级、

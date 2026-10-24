@@ -69,6 +69,13 @@
 - 只有真浏览器里才看得到的问题放 `test/component/*.spec.ts`（`npm run test:component`）；整页的界面测试在 `test/ui/`；`npm run test:ui` 两种都跑。手动跑的脚本在 `test/manual/`。
 - `src/` 里不放测试。该跑哪一种、什么时候不要跑构建，见 `testing-strategy`。
 
+### CI
+
+- `.github/workflows/ci.yml`：PR 与 main 上并行跑类型检查、单测、`vite build` 打包冒烟、版本约束。出包不在这里。
+- 版本约束实现在 `dev/ci/checkVersionPolicy.ts`，本地跑 `npm run check:versions`：平台依赖钉死且根目录与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 Node 版本一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本与 `package.json` 同步。
+- `.github/workflows/android-release.yml`：推 `v*` 标签或手动 `workflow_dispatch` 出签名 APK/AAB；手动那条可以涨版本、打标签、发 Release，标签必须与 `package.json` 的版本一致。签名要 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 secrets，缺了只出未签名包。
+- 本地跑一遍与 CI 相同的门禁：`npm run typecheck && npm run test:unit && npm run check:versions`。
+
 ### 生成的文件不手改
 
 文件头写着由哪个 `npm run` 脚本生成的（`docs/CODEMAP.md`、`mods/folium.d.ts`、`docs/folium/api.md`），改它的源头，再跑那个脚本。`api/qq.js` 由 `npm run build:vercel-api` 从 `api-ts/qq.ts` 编出来。
