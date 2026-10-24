@@ -11,6 +11,8 @@ export type NativePlaybackEventType =
     | 'paused'
     | 'ended'
     | 'position'
+    /** 位置跳变（seek / 单曲循环回到开头）：允许时钟往回走。 */
+    | 'seeked'
     | 'buffering'
     | 'error'
     | 'idle';

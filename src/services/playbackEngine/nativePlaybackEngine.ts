@@ -4,10 +4,14 @@ import { nativePlayer, type NativePlaybackEvent } from './nativePlayerPlugin';
 //
 // 原生播放内核在 Web 侧的那一半：一个进程里只有一个播放器，所以这里是单例。
 //
-// 时钟是这里最容易做错的地方。原生播放器**不会**给逐帧位置 —— 它每 250ms 推一次
-// `position`，而歌词、进度条都是按帧读的。所以位置要按本地墙钟插值补出来：
+// 时钟是这里最容易做错的地方。原生播放器**不给逐帧位置** —— 它只在状态边界
+// （ready / playing / paused / buffering / seeked）带一次位置，而歌词、进度条是按帧读的。
+// 所以位置要按本地墙钟插值补出来：
 //
 //     真实位置 ≈ 最后一次上报的位置 + (现在 − 那次上报的时刻) × 倍速
+//
+// 这也是**不能按固定节拍把位置推过桥**的原因：每推一次就是一次
+// `evaluateJavascript`，主线程会周期性多出一帧等待（见 FoliaNativePlayerPlugin）。
 //
 // 绝不反过来做「Web 侧每秒调 getSnapshot 问一次」：Capacitor 的桥只有一条，
 // 轮询会和批量拉取那些操作抢同一条通道（成片 cookie 超时就是这么来的）。
@@ -18,21 +22,19 @@ import { nativePlayer, type NativePlaybackEvent } from './nativePlayerPlugin';
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /**
- * ⛔ 原生播放（P1）总闸：**已停用**。
+ * 原生播放（P1）总闸：**已打开**。
  *
- * 只断入口，引擎代码先留着（随时能拨回来）。拨回 `true` 就恢复原来的行为，
- * 设置里那一项会跟着回来 —— 下面的开关判定和 `nativeTakes` 全都挂在它上面。
+ * 曾经因为「开原生播放时 App 内那个歌词可视化页面隔几秒顿一下、关掉就好」停用过一阵。
+ * 停用期间反而确认了掉帧另有来源：120Hz 下 WebView 每秒 100 次
+ * `syncAndDrawFrame` + 周期性 React 提交，关掉原生时也会出现。
+ * 真正和原生播放相关的是**位置事件过桥的节拍**（见 FoliaNativePlayerPlugin 的
+ * `onEvent`）：现在前台由 Web 侧自己的时钟推进，只有状态边界才过桥，
+ * 不再按固定节拍往 WebView 里灌 JS。
  *
- * 为什么停：用户实测「开原生播放时 App 内那个歌词可视化页面隔几秒顿一下、关掉就好」，
- * 关掉之后那套排查（120Hz 下 WebView 每秒 100 次 `syncAndDrawFrame` + 周期性
- * React 提交）不再需要背着一条额外的变量。⚠️ 但它**不是**唯一嫌疑：关掉状态下也测到过
- * `busy 335/1011, 307 msgs` 与 1 秒级的 `[FoliaHitch]`，所以别以为停用它就等于治好了。
- *
- * ⚠️ 代价：媒体缓存副本与本地歌走 `blob:`，原生吃不下、本来就回落 `<audio>`；
- * 停用之后**所有**歌都走 `<audio>` + Web Audio 图。这条路是原来就有的，
- * 只是当初做原生播放就是为了绕开它。
+ * ⚠️ 代价：走 `blob:` 的本地歌原生吃不下，那种歌整首回落 `<audio>`；
+ * 原生出声时均衡器 / 音效 / 淡入淡出 / 混音过渡 / 频谱整体失效（都在 Web Audio 图上）。
  */
-export const NATIVE_PLAYBACK_ENABLED: boolean = false;
+export const NATIVE_PLAYBACK_ENABLED: boolean = true;
 
 class NativePlaybackEngine {
     private positionMs = 0;
@@ -44,14 +46,22 @@ class NativePlaybackEngine {
     /**
      * 上一次对外给过的位置（毫秒）。
      *
-     * 只进不退 —— 这是「歌词往回抽一下又恢复」的直接解药：位置采样本身会滞后
-     * （ExoPlayer 的位置是按音频轨道推进的，不是连续量），而暂停/缓冲这类事件又会
-     * 让插值那一截凭空消失，于是给出去的值会掉回 250ms 前，再被下一帧追上。
+     * 只进不退 —— 这是「歌词往回抽一下又恢复」的直接解药：暂停 / 缓冲 / 状态事件
+     * 带回的位置可能比已经画出去的那一帧稍旧，直接采用会让歌词往回抽一下。
      *
-     * 但也不能无上限地只进：那样采样一慢，假领先就会一直攒下去。所以再夹一个
-     * 「最多比原始采样领先 MAX_LEAD_MS」，两头一起看。
+     * 原生不再每 250ms 给采样值，所以这里**不能**再夹「最多领先多少」——那会把
+     * 由墙钟推进的时钟卡死。真正需要允许回退的只有显式 seek / 换源，那两处会
+     * 把基准一起复位。
      */
     private lastDeliveredMs = 0;
+    /**
+     * 正在缓冲：位置事件照收，但墙钟先别往前走。
+     *
+     * ExoPlayer 的 `isPlaying=false` 不等于暂停（缓冲、音频焦点被抢都会翻 false）。
+     * 这时候把 `playing` 置 false 会让界面以为停了；但继续按墙钟走又会跑到声音前面。
+     * 单独记一个状态：时钟冻在最后一次采样上，等 `playing` 回来再从播放器给的位置接上。
+     */
+    private stalled = false;
     private repeatMode = 0;
     private volume = 1;
     private currentUrl: string | null = null;
@@ -61,7 +71,7 @@ class NativePlaybackEngine {
     /**
      * 这个地址能不能交给原生。
      *
-     * `blob:` 不行 —— 那是 WebView 自己造的对象 URL（本地歌、以及**媒体缓存副本**），
+     * `blob:` 不行 —— 那是 WebView 自己造的对象 URL（本地导入的歌），
      * 原生进程根本看不到它。遇到这种地址整首回落到 `<audio>`，等缓存搬进私有目录
      * （后面的阶段）再说。
      */
@@ -87,25 +97,23 @@ class NativePlaybackEngine {
     }
 
     /**
-     * 插值出来的领先最多允许多少：采样滞后时的缓冲空间，也是假领先的上限。
+     * 墙钟插值后的当前位置（秒）。没有源时给 0。
      *
-     * ⚠️ 必须 **大于原生那边的位置过桥间隔**（`FoliaNativePlayerPlugin` 的
-     * `WEB_NOTIFY_INTERVAL_MS`，500ms）：过桥降频之后，两次采样之间要靠这里插值顶着，
-     * 上限比间隔还小的话位置会被夹住、进度条与歌词走走停停。多给 200ms 吃掉抖动。
+     * 原生只在这几个时刻报位置：ready / playing / paused / buffering / seek / ended。
+     * 其余时间由这里按 `performance.now()` 往前推 —— 这正是把「每 500ms 往 WebView
+     * 灌一次 JS」拿掉之后需要的那条时钟。音频与 `performance.now()` 走的是同一个
+     * monotonic 时钟，一首歌的长度里漂移可以忽略。
      */
-    private static readonly MAX_LEAD_MS = 700;
-
-    /** 插值后的当前位置（秒）。没有源时给 0。 */
     getPositionSec(): number {
         if (!this.hasSource) return 0;
-        const raw = this.playing
-            ? this.positionMs + Math.max(0, performance.now() - this.updatedAtMs) * this.rate
+        const now = performance.now();
+        const raw = this.playing && !this.stalled
+            ? this.positionMs + Math.max(0, now - this.updatedAtMs) * this.rate
             : this.positionMs;
-        const upper = this.durationMs > 0 ? Math.min(this.positionMs + NativePlaybackEngine.MAX_LEAD_MS, this.durationMs) : this.positionMs + NativePlaybackEngine.MAX_LEAD_MS;
-        // 不许往回走，也不许把假的领先越攒越多。
-        const delivered = Math.min(Math.max(raw, this.lastDeliveredMs), Math.max(upper, this.positionMs));
-        this.lastDeliveredMs = Math.max(0, delivered);
-        return this.lastDeliveredMs / 1000;
+        const capped = this.durationMs > 0 ? Math.min(raw, this.durationMs) : raw;
+        const delivered = Math.max(0, Math.min(Math.max(capped, this.lastDeliveredMs), this.durationMs > 0 ? this.durationMs : Number.POSITIVE_INFINITY));
+        this.lastDeliveredMs = delivered;
+        return delivered / 1000;
     }
 
     getDurationSec(): number {
@@ -117,6 +125,7 @@ class NativePlaybackEngine {
         this.currentUrl = url;
         this.hasSource = true;
         this.playing = false;
+        this.stalled = false;
         this.positionMs = options.startPositionMs ?? 0;
         this.durationMs = 0;
         this.updatedAtMs = performance.now();
@@ -133,19 +142,27 @@ class NativePlaybackEngine {
     async play(): Promise<void> {
         await nativePlayer.play();
         // 播放意图先记下：等 `playing` 事件回来之前，进度条不该停在原地不动。
+        // 从暂停那一帧的位置接着走，而不是从更旧的采样值重新追。
+        this.positionMs = this.getPositionSec() * 1000;
         this.playing = true;
+        this.stalled = false;
         this.updatedAtMs = performance.now();
     }
 
     async pause(): Promise<void> {
         await nativePlayer.pause();
+        // 冻在听众正看着的那一帧，别退回最后一次采样值。
+        this.positionMs = this.getPositionSec() * 1000;
         this.playing = false;
+        this.stalled = false;
+        this.updatedAtMs = performance.now();
     }
 
     async seek(seconds: number): Promise<void> {
         const targetMs = Math.max(0, Math.round(seconds * 1000));
         this.positionMs = targetMs;
         this.updatedAtMs = performance.now();
+        this.stalled = false;
         // 跳是唯一允许「往回走」的动作，所以这里必须把只进不退的基准一起复位。
         this.lastDeliveredMs = targetMs;
         await nativePlayer.seek(targetMs);
@@ -154,6 +171,7 @@ class NativePlaybackEngine {
     async stop(): Promise<void> {
         this.hasSource = false;
         this.playing = false;
+        this.stalled = false;
         this.positionMs = 0;
         this.durationMs = 0;
         this.lastDeliveredMs = 0;
@@ -208,21 +226,38 @@ class NativePlaybackEngine {
         switch (event.type) {
             case 'playing':
                 this.playing = true;
+                this.stalled = false;
                 this.updatedAtMs = now;
+                /*
+                 * 声音这一刻才真的开始。`play()` 到这一下之间可能隔着缓冲 / 起播，
+                 * 日志里是几百毫秒；那段时间墙钟已经走了，不能让歌词白白领先。
+                 * 以播放器给的位置为准把基准复位（这是允许往回走的状态边界）。
+                 */
+                this.lastDeliveredMs = this.positionMs;
                 break;
             case 'paused':
             case 'ended':
             case 'error':
             case 'idle':
                 this.playing = false;
+                this.stalled = false;
                 break;
             case 'buffering':
                 /*
                  * 缓冲期间播放器的 `isPlaying` 会翻成 false（ExoPlayer 的语义：没在出声）。
-                 * 但歌并没有停 —— 这里要是跟着置 false，进度条就停在原地、歌词不动，
-                 * 等缓冲结束再猛地跳一段，看着就是「一直抽搐」。所以缓冲不改这个标记：
-                 * 位置上报送着（缓冲时它本来不前进），插值也就不会跑飞。
+                 * 但歌并没有停 —— 这里要是跟着置 false，界面会以为停了。所以保留
+                 * `playing`，只把墙钟冻在最后一次采样上；等 `playing` 回来时事件会带上
+                 * 播放器真实位置，从那里接上，不会跑到声音前面，也不会在恢复时猛跳。
                  */
+                this.stalled = true;
+                break;
+            case 'seeked':
+                /*
+                 * 用户 seek / 单曲循环回到开头：位置是**允许往回走**的，
+                 * 所以把只进不退的基准一起复位。播放状态不变。
+                 */
+                this.stalled = false;
+                this.lastDeliveredMs = this.positionMs;
                 break;
             default:
                 break;

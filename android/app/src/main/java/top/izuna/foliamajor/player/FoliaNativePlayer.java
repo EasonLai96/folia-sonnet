@@ -52,7 +52,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 public final class FoliaNativePlayer {
 
     public interface Listener {
-        /** type: ready | playing | paused | ended | position | buffering | error */
+        /** type: ready | playing | paused | ended | position | seeked | buffering | error */
         void onEvent(String type, long positionMs, long durationMs, @Nullable String message);
     }
 
@@ -384,6 +384,23 @@ public final class FoliaNativePlayer {
                 return;
             }
             emit("buffering", cachedPositionMs, cachedDurationMs, null);
+        }
+
+        /**
+         * 位置跳变：用户 seek、单曲循环回到开头、以及播放器自己换媒体项。
+         *
+         * 原生不再每 250ms 把位置过桥（见 FoliaNativePlayerPlugin 的说明），
+         * Web 侧的时钟靠墙钟往前推 —— 所以「单曲循环回到 0」这种**允许往回走**的
+         * 跳变必须单独报一次，否则 Web 那边会一直停在 duration 上。
+         */
+        @Override
+        public void onPositionDiscontinuity(Player.PositionInfo oldPosition, Player.PositionInfo newPosition, int reason) {
+            ExoPlayer current = player;
+            if (current == null) return;
+            long position = newPosition == null ? current.getCurrentPosition() : newPosition.positionMs;
+            if (position < 0L) position = 0L;
+            cachedPositionMs = position;
+            emit("seeked", position, cachedDurationMs, null);
         }
 
         @Override
