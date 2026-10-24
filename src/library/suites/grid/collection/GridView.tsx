@@ -1,12 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { motion, useMotionValue, animate, AnimatePresence, useDragControls, useIsPresent } from 'framer-motion';
-import { ChevronLeft, Crosshair, Disc, Download, Play, Plus, Loader2, Heart, ListPlus, Pencil, RefreshCw, Trash2, Star, Tags } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { motion, animate, useDragControls, useIsPresent } from 'framer-motion';
 import GridPanelToggleIndicator from '../shared/GridPanelToggleIndicator';
 import { useTranslation } from 'react-i18next';
-import { SongResult, type LocalSong, type StatusMessage, Theme, type UnifiedSong } from '../../../../types';
-import { isSongUnavailable } from '../../../../services/onlineMusic/songAvailability';
-import { formatSongName } from '../../../../utils/songNameFormatter';
-import { getSizedCoverUrl } from '../../../../utils/coverUrl';
+import { SongResult, type LocalSong, type StatusMessage, Theme } from '../../../../types';
 import { getLowResCoverUrl, toHttps } from './gridViewText';
 import GridViewCutInPanel from './GridViewCutInPanel';
 import GridViewChrome from './GridViewChrome';
@@ -23,71 +19,33 @@ import GridViewStandInCard from './GridViewStandInCard';
 import GridViewCanvas from './GridViewCanvas';
 import GridViewDialogs from './GridViewDialogs';
 import GridViewTracksPanel from './GridViewTracksPanel';
-import { getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
-import { colorWithAlpha } from '../../../../utils/visualizer/colorMix';
-import { onlineFailureOf, type OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { onlineFailureMessage } from '../../../../services/onlineMusic/failure/onlineFailureTexts';
-import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 import { GridLocateButton } from '../../../../components/app/playing-song-locator/GridLocateButton';
 import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { usePlayingSongLocatorStore } from '../../../../stores/usePlayingSongLocatorStore';
-import { answerLocateRequest, locatePlayingSongOnPage } from '../../../../components/app/playing-song-locator/playingSongLocator';
 import { resolveLocateStep } from '../../../../components/app/playing-song-locator/resolveLocateStep';
 import { useFoliaHexViewport } from '../shared/useFoliaHexViewport';
-import { PolaroidCard, fullBleedScrim, type GridItem } from '../shared/PolaroidCard';
+import { PolaroidCard, type GridItem } from '../shared/PolaroidCard';
 import type { GridPlaybackMark } from '../shared/useGridStayPlayback';
-import { squareGridCardBox } from '../shared/gridCardLayout';
-import {
-    gridViewStateStorageKey,
-    readStoredGridViewState,
-    resolveGridRestoreIndex,
-    resolveGridRestoreTarget,
-    type GridRestoreTarget,
-    type StoredGridViewNavigationState,
-} from '../shared/gridViewRestore';
-import {
-    CARD_TITLE_ATTR,
-    GRID_CARD_ITEM_ID_ATTR,
-    MORPH_FRAME_ATTR,
-    MORPH_TARGET_ATTR,
-} from '../transitions/gridMorphContract';
+import { gridViewStateStorageKey, readStoredGridViewState, resolveGridRestoreTarget, type GridRestoreTarget } from '../shared/gridViewRestore';
 import { useMorphPageExit } from '../transitions/collectionMorphStore';
-import { playFlyIn } from '../transitions/morphFlyIn';
-import { handOverStandIn, type StandInHandover } from '../transitions/standInHandover';
-import {
-    collectionMorphEntranceTravel,
-    collectionMorphFlyIn,
-    collectionMorphSeed,
-    type CollectionMorphPlan,
-} from '../transitions/morphGeometry';
+import { type CollectionMorphPlan } from '../transitions/morphGeometry';
 import ActiveGridMarker from '../shared/ActiveGridMarker';
-import { createLazyGridItems } from './lazyGridItems';
-import {
-    applyHexCardFrameStyles,
-    computeHexCardFrame,
-    createHexCardFrameStyleCache,
-    HEX_CARD_CENTER_SCALE,
-    type HexCardFrameStyleCache,
-} from '../shared/hexCardTransform';
 import PlaylistSelectionDialog from '../../../../components/shared/PlaylistSelectionDialog';
 import TextInputDialog from '../../../../components/shared/TextInputDialog';
 import ConfirmDialog from '../../../../components/shared/ConfirmDialog';
-import { SidePanelList, TrackListItem } from '../../../../components/shared/SidePanelList';
+import { SidePanelList } from '../../../../components/shared/SidePanelList';
 import { GridListSearchButton } from '../../../../components/shared/GridListSearchButton';
-import { TrackSortDirectionButton, TrackSortMenu } from '../../../../components/shared/TrackSortMenu';
+import { TrackSortMenu } from '../../../../components/shared/TrackSortMenu';
 import { CustomSelect } from '../../../../components/shared/CustomSelect';
 import { deriveProgressiveLoadingState } from '../shared/progressiveGrid';
 import { useProgressiveItemEntrance } from '../shared/useProgressiveItemEntrance';
 import { useLocalCoverPreloader } from '../../../../hooks/useLocalCoverPreloader';
-import { formatLocalAlbumTrackLabel } from '../../../../utils/localSongSorting';
 import { resolveCollectionSyncCounts } from '../../../core/collection/collectionProgress';
-import { buildCoreSurfaceParams, buildGridSurfaceState, runGridSurfaceAction } from '../../../core/collection/collectionSurface';
 import { useGridSurfaceRegistration } from '../../../../hooks/useGridSurfaceRegistration';
 import type { CollectionResource } from '../../../core/shared/resource.contract';
-import type { CollectionMutationController, LibraryMutationResult } from '../../../core/collection/mutations/mutations.contract';
+import type { CollectionMutationController } from '../../../core/collection/mutations/mutations.contract';
 import type { LibraryDeclaredActions } from '../../../core/suite/suite.contract';
-import { useSidePanelBottomPx } from '../../../../hooks/usePlayerBottomBarBottomPx';
-import { hasBlockingWindow } from '../../../../utils/keyboardTargets';
 import { useGridViewSettingsStore } from '../../../../stores/useGridViewSettingsStore';
 import { collectionKey } from '../../../core/collection/collectionIdentity';
 import { useCollectionResourceState } from '../../../core/collection/resource/useCollectionResourceState';
@@ -95,11 +53,7 @@ import { useCollectionView } from '../../../core/collection/useCollectionView';
 import { useCommittedQuery } from '../../../core/shared/useCommittedQuery';
 import { useLibrarySessionQuery } from '../../../core/shared/useLibrarySessionQuery';
 import { useGridCommandFilter } from '../../../../hooks/useGridCommandFilter';
-import {
-    getLibraryBrowseSession,
-    registerLibrarySessionFlush,
-    useLibraryBrowseSessionStore,
-} from '../../../core/shared/useLibraryBrowseSessionStore';
+import { getLibraryBrowseSession, useLibraryBrowseSessionStore } from '../../../core/shared/useLibraryBrowseSessionStore';
 import { useTrackSorting } from '../../../core/collection/useTrackSorting';
 
 interface GridViewProps {
@@ -163,13 +117,9 @@ interface GridViewProps {
     declaredActions?: LibraryDeclaredActions;
 }
 
-const EMPTY_TRACKS: SongResult[] = [];
 // What a page that is given no `items` has for them: the one list, render after render. A list
 // made anew in every render made the grid's items anew, and with them every card on the page.
 const NO_ITEMS: GridItem[] = [];
-// Card box and hex spacing per container-width breakpoint. Module scope so the memo above
-const TRACK_REMOVAL_ANIMATION_MS = 460;
-const TRACK_REMOVAL_BEZIER = [0.22, 0.8, 0.24, 1] as const;
 
 export const GridView: React.FC<GridViewProps> = ({
     title,

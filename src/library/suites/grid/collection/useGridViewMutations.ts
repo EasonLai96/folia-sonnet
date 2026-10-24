@@ -9,7 +9,6 @@ import type {
     LibraryMutationResult,
 } from '../../../core/collection/mutations/mutations.contract';
 import type { CollectionResource } from '../../../core/shared/resource.contract';
-import type { PendingLocalRemoval } from './GridViewDialogs';
 import { TRACK_REMOVAL_ANIMATION_MS } from './useGridViewCards';
 
 // src/library/suites/grid/collection/useGridViewMutations.ts
