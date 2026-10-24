@@ -50,7 +50,7 @@
 | 32+ | `dev/probes/definition.ts` |
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
 | 32+ | `src/components/visualizer/definition.ts` |
-| 32+ | `src/components/wall/layout.ts` |
+| 32+ | `src/components/visualizer/registry.tsx` |
 | 32+ | `src/components/wall/wallSlots.ts` |
 | 32+ | `src/library/core/account/account.contract.ts` |
 | 32+ | `src/library/core/collection/collection.contract.ts` |
