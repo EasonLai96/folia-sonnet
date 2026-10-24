@@ -28,7 +28,7 @@ export function createLatticeLineView(pixi: Pixi, raster: LatticeRaster, parent:
     const blur = new pixi.BlurFilter({ strength: 0, quality: 2 }); container.filters = [blur];
     const pieces = new Map<number, PieceView>();
     const quad = createLatticeQuadGeometry(pixi);
-    const matchers = prepareWordColorMatchers(input.theme.wordColors);
+    const matchers = prepareWordColorMatchers(input.theme.wordColors, input.keywordColoringEnabled);
     const colors = resolveTokenColorMap(layout.pieces.map(p => p.token), buildWordColorRangesFromMatchers(entry.line.fullText, matchers));
     /*
      * 唱过去那一段的颜色：命中主题关键字（AI 主题的 wordColors）用关键字自己的颜色，
@@ -52,7 +52,7 @@ export function createLatticeLineView(pixi: Pixi, raster: LatticeRaster, parent:
     const resolvePieceColor = (piece: LyricPiece) => {
         if (piece.translation) return (input.subtitleTheme ?? input.theme).primaryColor;
         return colors.get(piece.token.key)
-            ?? resolveWordColor(piece.text, input.theme.wordColors, accent);
+            ?? resolveWordColor(piece.text, input.theme.wordColors, accent, { keywordColoringEnabled: input.keywordColoringEnabled });
     };
     const destroyPiece = (view: PieceView) => {
         view.sprite.destroy(); view.sweep.shader.destroy(); view.glow.forEach(sprite => sprite.destroy()); view.texture.destroy(true);

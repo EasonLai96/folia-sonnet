@@ -177,7 +177,6 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
     monet: {
         setter: 'handleSetMonetTuning',
         params: {
-            keywordColoringEnabled: { kind: 'boolean', zh: '关键词着色' },
             showDescription: { kind: 'boolean', zh: '显示简介' },
             fontScale: { kind: 'number', min: 0.7, max: 1.5, zh: '字号' },
             portraitStyle: { kind: 'select', options: ['square', 'rectangular'], zh: '封面样式' },
@@ -197,7 +196,6 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
             soulIntensity: { kind: 'number', min: 0.1, max: 1.5, zh: '灵魂出窍强度' },
             gradientEnabled: { kind: 'boolean', zh: '渐变跟唱' },
             gradientIntensity: { kind: 'number', min: 0.1, max: 1.5, zh: '渐变强度' },
-            keywordColoringEnabled: { kind: 'boolean', zh: '关键词着色' },
             soulActiveEnabled: { kind: 'boolean', zh: '当前字跟随漂移' },
             particleGlowEnabled: { kind: 'boolean', zh: '粒子光晕' },
             particleGlowIntensity: { kind: 'number', min: 0.1, max: 1.5, zh: '粒子光晕强度' },
@@ -306,7 +304,6 @@ export const MODE_PARAMS: Record<string, DirectorModeSpec> = {
             seamlessTransitions: { kind: 'boolean', zh: '无缝转场' },
             overlayFrame: { kind: 'boolean', zh: '画框' },
             textOnly: { kind: 'boolean', zh: '仅歌词文字' },
-            keywordColors: { kind: 'boolean', zh: '关键词着色' },
             themeIcons: { kind: 'boolean', zh: '主题图标' },
             themeColorMix: { kind: 'number', min: 0, max: 1, zh: '主题色占比' },
             renderQuality: { kind: 'select', options: ['full', 'balanced', 'low'], zh: '画质' },

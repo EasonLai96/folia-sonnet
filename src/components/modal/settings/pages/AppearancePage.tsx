@@ -65,6 +65,8 @@ const AppearancePage: React.FC = () => {
     })));
     const visualizerMode = useVisualizerSettingsStore(state => state.visualizerMode);
     const randomEnabled = useVisualizerSettingsStore(state => state.randomVisualizerModePerSong);
+    const keywordColoringEnabled = useVisualizerSettingsStore(state => state.keywordColoringEnabled);
+    const handleSetKeywordColoringEnabled = useVisualizerSettingsStore(state => state.handleSetKeywordColoringEnabled);
     const nativeBlurEnabled = usePlayerChromeSettingsStore(state => state.enablePlayerPageNativeBlur);
 
     return (
@@ -171,6 +173,9 @@ const AppearancePage: React.FC = () => {
                         onChange={themeControls.onToggleCustomThemePreferred}
                         disabled={!themeControls.hasCustomTheme}
                     />
+                </Row>
+                <Row option={O.keywordColoring} note={t('options.keywordColoringDesc')}>
+                    <Toggle checked={keywordColoringEnabled} onChange={handleSetKeywordColoringEnabled} />
                 </Row>
             </Group>
 

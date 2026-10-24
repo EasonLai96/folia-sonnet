@@ -8,6 +8,7 @@ export type LatticeLyricSource = Pick<VisualizerSharedProps,
 
 export type LatticeLyricInput = LatticeLyricSource & {
     songKey: string;
+    keywordColoringEnabled: boolean;
     reducedMotion: boolean;
     fontsEpoch: number;
 };

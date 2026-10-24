@@ -633,7 +633,6 @@ export const DioramaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Diorama
         soulActiveEnabled: dioramaTuning.soulActiveEnabled ?? DEFAULT_DIORAMA_TUNING.soulActiveEnabled,
         gradientEnabled: dioramaTuning.gradientEnabled ?? DEFAULT_DIORAMA_TUNING.gradientEnabled,
         gradientIntensity: Math.min(1.5, Math.max(0.1, dioramaTuning.gradientIntensity ?? DEFAULT_DIORAMA_TUNING.gradientIntensity)),
-        keywordColoringEnabled: dioramaTuning.keywordColoringEnabled ?? DEFAULT_DIORAMA_TUNING.keywordColoringEnabled,
     };
 
     const handleDioramaTuningChange = (patch: Partial<DioramaTuning>) => {
@@ -714,16 +713,6 @@ export const DioramaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Diorama
                 onSliderPointerDown={onSliderPointerDown}
                 onSliderCommit={onSliderCommit}
             />
-
-            {/* 关键字着色: a plain on/off - the colours themselves are the theme's 关键词 list, not a
-                strength. Independent of the follow-sing effects above: it sets the colour a unit RESTS
-                at, and they dye away from it and settle back onto it. */}
-            <Row label={t('options.dioramaKeywordColoring')}>
-                <Toggle
-                    checked={resolvedTuning.keywordColoringEnabled}
-                    onChange={(next) => handleDioramaTuningChange({ keywordColoringEnabled: next })}
-                />
-            </Row>
 
             <DioramaGeometrySettings
                 t={t}
