@@ -729,7 +729,7 @@ export default function App() {
         t,
     });
     const {
-        theme,
+        theme: rawTheme,
         setTheme,
         aiTheme,
         customTheme,
@@ -760,6 +760,17 @@ export default function App() {
         handleSongThemeAutoGenerateChange,
         handleThemeGenerationSourceChange,
     } = themeController;
+    /*
+     * 全局关键词着色总闸：关掉时**把主题里的高亮标记整个删掉**（用户口径：
+     * 「直接删除当前主题的所有高亮标记」）。在源头上删空，而不是在每个消费端
+     * 各拦一遍 —— 动画、海报墙、壁纸/悬浮推送、任何直接读 `theme.wordColors`
+     * 的地方拿到的都是没有高亮的主题，谁也漏不掉。开着时对象原样透传。
+     */
+    const keywordColoringEnabled = useVisualizerSettingsStore(state => state.keywordColoringEnabled);
+    const theme = useMemo(
+        () => (keywordColoringEnabled ? rawTheme : { ...rawTheme, wordColors: [] }),
+        [keywordColoringEnabled, rawTheme],
+    );
     // Folium: publish what is on screen to the main process (runtime snapshot
     // for main-side mods and the export service).
     useFoliumHostBridge(theme, isDaylight);
