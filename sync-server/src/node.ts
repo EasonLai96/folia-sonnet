@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { D1Emulator } from './d1-emulator.js';
 import app from './app.js';
 import { isUsingDefaultAdminCredentials, readAdminCredentials } from './admin.js';
+import { pruneHitLog } from './aiCache.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +56,26 @@ if (SYNC_TOKEN.length < 8) {
 const db = new D1Emulator(DB_PATH);
 /* 落到文件；老数据还在数据库里，读的时候会自己回退（见 fontBlobs.node.ts）。 */
 const fontBlobs = createNodeFontBlobStore(FONT_DIR, createD1FontBlobStore(db));
+
+/*
+ * 命中流水（ai_cache_hits）只留七天，但清理原来只挂在「前台看统计图」那条路上 ——
+ * 没人看图，流水就一直长。这里每小时清一次，顺手做一次 `PRAGMA optimize`
+ * （更新查询计划用的统计信息）。Workers 部署没有定时器，继续靠统计图那条路兜底。
+ */
+const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
+let maintenanceRunning = false;
+setInterval(() => {
+  if (maintenanceRunning) return;
+  maintenanceRunning = true;
+  Promise.all([
+    pruneHitLog(db),
+    Promise.resolve(db.optimize()),
+  ])
+    .catch(() => undefined)
+    .finally(() => {
+      maintenanceRunning = false;
+    });
+}, MAINTENANCE_INTERVAL_MS).unref();
 
 const logo = `
 \x1b[35m  _____    _ _          \x1b[36m ____                  \x1b[0m

@@ -355,21 +355,60 @@ const MAX_RESOLVE_SCAN_ROWS = 200;
 /** 一次查询里最多并列几条 LIKE 模式（拆段那一路用）。 */
 const MAX_RESOLVE_PATTERNS = 4;
 
-/** 捞回来的一行，还没打分。 */
+/** 捞回来的一行，还没打分。只带排序与打分要用的列，让扫描走覆盖索引。 */
 type ResolveRow = {
   cache_key: string;
   song_title: string | null;
-  provider: string | null;
-  model: string | null;
-  platform: string | null;
   updated_at: string | null;
-  payload_json: string | null;
+};
+
+/**
+ * 按主键把整行（含 payload_json）补回来。
+ *
+ * 模糊扫描只捞元数据（覆盖索引扫描，不碰大字段），捞到最终那几条之后再按主键取整行
+ * —— 点查走 (kind, cache_key) 主键，每次都是几微秒。分块是为了 Cloudflare D1 的
+ * 「单条查询最多 100 个绑定参数」限制，自托管那边一起遵守。
+ */
+const HYDRATE_CHUNK = 90;
+export const hydrateCacheRows = async (
+  db: D1Database,
+  wanted: readonly { kind: string; cache_key: string }[],
+): Promise<Map<string, AiCacheRow>> => {
+  const map = new Map<string, AiCacheRow>();
+  const byKind = new Map<string, string[]>();
+  wanted.forEach(({ kind, cache_key }) => {
+    const key = String(cache_key ?? '');
+    if (!kind || !key) return;
+    const bucket = byKind.get(kind);
+    if (bucket) {
+      if (!bucket.includes(key)) bucket.push(key);
+    } else {
+      byKind.set(kind, [key]);
+    }
+  });
+  for (const [kind, keys] of byKind) {
+    for (let index = 0; index < keys.length; index += HYDRATE_CHUNK) {
+      const chunk = keys.slice(index, index + HYDRATE_CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = await db
+        .prepare(
+          `SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at
+           FROM ai_cache WHERE kind = ? AND cache_key IN (${placeholders})`,
+        )
+        .bind(kind, ...chunk)
+        .all<AiCacheRow>();
+      (rows.results ?? []).forEach((row) => {
+        map.set(`${row.kind}\u0000${row.cache_key}`, row);
+      });
+    }
+  }
+  return map;
 };
 
 /**
  * 按一组 LIKE 模式捞行：一条 SQL 用 OR 把它们并在一起。
  *
- * 只捞这几列 —— payload 是留给最后那几条才 parse 的。
+ * 只捞这几列 —— payload 是留给最后那几条才取的（见 hydrateCacheRows）。
  */
 const scanResolveRows = async (
   db: D1Database,
@@ -382,7 +421,7 @@ const scanResolveRows = async (
   const where = terms.map(() => "song_title LIKE ? ESCAPE '\\'").join(' OR ');
   const rows = await db
     .prepare(
-      `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
+      `SELECT cache_key, song_title, updated_at
        FROM ai_cache
        WHERE kind = ? AND song_title <> '' AND (${where})
        ORDER BY updated_at DESC
@@ -444,22 +483,14 @@ export const findResolveCandidates = async (
   const smooth = songTitleLike(title) || loose;
   const rows = await db
     .prepare(
-      `SELECT cache_key, song_title, provider, model, platform, updated_at, payload_json
+      `SELECT cache_key, song_title, updated_at
        FROM ai_cache
        WHERE kind = ? AND song_title <> '' AND (song_title = ? OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\' OR song_title LIKE ? ESCAPE '\\')
        ORDER BY (song_title = ?) DESC, updated_at DESC
        LIMIT ?`,
     )
     .bind(kind, title, `%${escapeLike(loose)}%`, `%${escapeLike(smooth)}%`, `%${escapeLike(title)}%`, title, MAX_RESOLVE_SCAN_ROWS)
-    .all<{
-      cache_key: string;
-      song_title: string | null;
-      provider: string | null;
-      model: string | null;
-      platform: string | null;
-      updated_at: string | null;
-      payload_json: string | null;
-    }>();
+    .all<ResolveRow>();
 
   let ranked = rankResolveRows(rows.results ?? [], title);
 
@@ -492,19 +523,28 @@ export const findResolveCandidates = async (
     }
   }
 
+  /*
+   * 名次定完才按主键把整行（含 payload）补回来 —— 模糊扫描那几步只碰覆盖索引，
+   * 大字段一次都不读。扫到 200 行、只取 12 条候选，payload 的读取量从「全表」
+   * 缩到「这 12 条」。
+   */
+  const full = await hydrateCacheRows(db, ranked.map(({ row }) => ({ kind, cache_key: String(row.cache_key ?? '') })));
+
   return ranked.map(({ row }) => {
+    const hydrated = full.get(`${kind}\u0000${String(row.cache_key ?? '')}`);
+    const payloadJson = hydrated?.payload_json ?? null;
     let payload: unknown = null;
     try {
-      payload = JSON.parse(String(row.payload_json ?? ''));
+      payload = payloadJson ? JSON.parse(payloadJson) : null;
     } catch {
       payload = null;
     }
     return {
       key: String(row.cache_key ?? ''),
-      songTitle: String(row.song_title ?? ''),
-      platform: String(row.platform ?? ''),
-      provider: String(row.provider ?? ''),
-      model: String(row.model ?? ''),
+      songTitle: String(hydrated?.song_title ?? row.song_title ?? ''),
+      platform: String(hydrated?.platform ?? ''),
+      provider: String(hydrated?.provider ?? ''),
+      model: String(hydrated?.model ?? ''),
       updatedAt: String(row.updated_at ?? ''),
       words: isRecord(payload) ? readHighlightWords(payload) : [],
     };
@@ -679,19 +719,30 @@ export const adminCacheRoutes = (() => {
       .bind(...binds)
       .first<{ total: number }>();
 
-    const rows = await c.env.FOLIA_SYNC_DB
+    /*
+     * 两段式：先只捞元数据（排序与筛选在覆盖索引上完成，不碰大字段），再按主键把
+     * 这一页的 payload 补回来。原来带 payload_json 的整行扫描在 10w 条上每次都是
+     * 全表翻页 —— 管理页开一次就把整个事件循环卡住。
+     */
+    const metaRows = await c.env.FOLIA_SYNC_DB
       .prepare(
-        `SELECT kind, cache_key, payload_json, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at
+        `SELECT kind, cache_key, payload_bytes, song_title, provider, model, platform, hits, created_at, updated_at
          FROM ai_cache${clause}
          ORDER BY updated_at DESC
          LIMIT ?`,
       )
       .bind(...binds, limit)
-      .all<AiCacheRow>();
+      .all<Omit<AiCacheRow, 'payload_json'>>();
+
+    const payloadMap = await hydrateCacheRows(c.env.FOLIA_SYNC_DB, metaRows.results ?? []);
+    const entries = (metaRows.results ?? []).map((meta) => {
+      const hydrated = payloadMap.get(`${meta.kind}\u0000${meta.cache_key}`);
+      return mapRow({ ...meta, payload_json: hydrated?.payload_json ?? '' });
+    });
 
     return c.json({
       ok: true,
-      entries: (rows.results ?? []).map(mapRow),
+      entries,
       total: Number(totalRow?.total ?? 0),
       limit,
     });

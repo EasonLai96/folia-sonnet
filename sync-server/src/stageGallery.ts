@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { D1Database, Env } from './app.js';
+import { hydrateCacheRows } from './aiCache.js';
 import {
   DEFAULT_LIMIT,
   MAX_QUERY_CHARS,
@@ -57,30 +58,41 @@ const toEntry = (row: GalleryRow): GalleryEntry => ({
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
 /*
- * 空查询时给「最近更新的、记得住歌名的那些」—— 访客一进来就有东西可看，
- * 而不是对着一个空框。没记歌名的条目仍然存在，只是不出现在这一面。
+ * 两段式取数：先在覆盖索引 (kind, updated_at, song_title, cache_key) 上把要展示的
+ * 那几行的主键捞出来（过滤与排序全程不碰大字段 payload_json），再按主键把整行补回来。
+ *
+ * 原来一条 SELECT 连 payload 一起扫：10w 条、每条最大 64KB，一次检索就是全表翻页，
+ * 而且better-sqlite3 是同步执行 —— 扫描期间整个事件循环都被卡住。现在扫描只走索引，
+ * payload 只读「这一页」的那几十条。
  */
 const searchEntries = async (db: D1Database, query: string, limit: number): Promise<GalleryEntry[]> => {
-  if (query) {
-    const rows = await db
+  const keyRows = query
+    ? await db
       .prepare(
-        `SELECT ${SELECT_COLUMNS} FROM ai_cache
+        `SELECT cache_key FROM ai_cache
          WHERE kind = ? AND song_title LIKE ? ESCAPE '\\'
          ORDER BY updated_at DESC LIMIT ?`,
       )
       .bind(GALLERY_KIND, `%${escapeLike(query)}%`, limit)
-      .all<GalleryRow>();
-    return (rows.results ?? []).map(toEntry);
-  }
-  const rows = await db
-    .prepare(
-      `SELECT ${SELECT_COLUMNS} FROM ai_cache
-       WHERE kind = ? AND song_title IS NOT NULL AND song_title <> ''
-       ORDER BY updated_at DESC LIMIT ?`,
-    )
-    .bind(GALLERY_KIND, limit)
-    .all<GalleryRow>();
-  return (rows.results ?? []).map(toEntry);
+      .all<{ cache_key: string }>()
+    : await db
+      .prepare(
+        `SELECT cache_key FROM ai_cache
+         WHERE kind = ? AND song_title IS NOT NULL AND song_title <> ''
+         ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .bind(GALLERY_KIND, limit)
+      .all<{ cache_key: string }>();
+  const keys = (keyRows.results ?? []).map((row) => ({ kind: GALLERY_KIND, cache_key: String(row.cache_key ?? '') }));
+  if (keys.length === 0) return [];
+
+  const hydrated = await hydrateCacheRows(db, keys);
+  const entries: GalleryEntry[] = [];
+  keys.forEach(({ cache_key }) => {
+    const row = hydrated.get(`${GALLERY_KIND}\u0000${cache_key}`);
+    if (row) entries.push(toEntry(row));
+  });
+  return entries;
 };
 
 const findEntry = async (db: D1Database, key: string): Promise<GalleryEntry | null> => {

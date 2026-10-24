@@ -195,6 +195,20 @@ const ensureSchema = async (db: D1Database) => {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_updated_at ON ai_cache(updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_hits_at ON ai_cache_hits(at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_backups_key ON ai_cache_backups(kind, cache_key, archived_at)'),
+    /*
+     * 覆盖索引一：按 (kind, updated_at) 排序/扫描的入口 —— 访客检索页、管理列表、
+     * resolve 的模糊捞行。把 song_title、cache_key 也收进索引之后，这些查询**只扫索引
+     * 就能完成过滤与排序**，不必为每一行去碰大字段 payload_json（每条最大 64KB，
+     * 10w 行全表扫一次就是几个 GB 的页 —— 这是原来「扛不住」的主因）。
+     * 捞到最终那几条之后，再按主键把整行（含 payload）取回来。
+     */
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_kind_updated ON ai_cache(kind, updated_at, song_title, cache_key)'),
+    /*
+     * 覆盖索引二：/songs 的 `GROUP BY song_title` + `COUNT(DISTINCT song_title)`。
+     * SELECT 里要的每一列（updated_at/hits/cache_key/platform）都在索引里，
+     * 分组与聚合全程只扫索引，不碰大字段。
+     */
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_song_group ON ai_cache(song_title, updated_at, hits, cache_key, platform)'),
   ]);
 
   /*
