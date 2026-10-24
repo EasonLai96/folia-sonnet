@@ -38,7 +38,6 @@ type LatticeProps = {
     controls: LatticePlaybackActions;
     lyrics: LyricData | null;
     lyricSource: LatticeLyricSource;
-    lyricKeywordColoringEnabled: boolean;
     currentSong: SongResult | null;
     playerState: PlayerState;
     currentTime: MotionValue<number>;
@@ -66,7 +65,6 @@ export default function Lattice({
     controls,
     lyrics,
     lyricSource,
-    lyricKeywordColoringEnabled,
     currentSong,
     playerState,
     currentTime,
@@ -190,8 +188,7 @@ export default function Lattice({
         <LatticeTransportContext.Provider value={transport}>
         <LatticePlaybackProvider actions={controls} currentSong={currentSong} queue={queue} lyrics={lyrics}
             currentTime={currentTime} lyricCurrentTime={lyricCurrentTime} duration={playbackDuration} onSeek={onSeek} isDaylight={isDaylight}>
-        <LatticeLyricsProvider source={lyricSource} songKey={currentSong ? getPlaybackSongKey(currentSong) : ''}
-            keywordColoringEnabled={lyricKeywordColoringEnabled}>
+        <LatticeLyricsProvider source={lyricSource} songKey={currentSong ? getPlaybackSongKey(currentSong) : ''}>
         <section
             className={`lattice-root lattice-queue-root ${isDaylight ? 'is-daylight' : ''} ${vignette ? 'has-vignette' : ''} ${lightsOn ? '' : 'is-lights-out'} ${posterTintEnabled ? 'has-poster-tint' : ''} ${posterTintUseCustomColor ? 'uses-custom-poster-tint' : ''} ${surfaceOff ? 'is-handoff-surface-off' : ''} ${fadesIn && !reducedMotion ? 'is-returning' : ''}`}
             data-wall-handoff={handoffRole ?? undefined}

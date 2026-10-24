@@ -3189,7 +3189,6 @@ export default function App() {
                                     isStageActive: isNowPlayingStageActive, disabled: isNowPlayingControlDisabled }}
                                 lyrics={commandPaletteContext.shared.lyrics}
                                 lyricSource={visualizerRendererModel}
-                                lyricKeywordColoringEnabled={visualizerRendererModel.visualizerTunings.monet.keywordColoringEnabled}
                                 currentSong={displaySong}
                                 playerState={displayPlayerState}
                                 currentTime={currentTime}
