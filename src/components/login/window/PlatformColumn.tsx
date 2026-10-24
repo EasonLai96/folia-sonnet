@@ -103,19 +103,50 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
     /** 高亮这一块此刻量哪一行（「全部」也占一行的 id，好让 rowOf 一样找得到它）。 */
     const highlightId = lit?.providerId ?? (litAll ? ALL_PROVIDERS_ID : null);
     const listRef = useRef<HTMLDivElement>(null);
-    const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+    // 高亮那一块自己。它的位置和大小不进 React state —— 见下面 placeGlow 的说明。
+    const glowRef = useRef<HTMLDivElement>(null);
+    /** 上一次摆在那一块上的数；拿来和这次量的比，一样的就不动笔。 */
+    const glowBox = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
     // 列表的哪一头后面还有行：那一头淡出。
     const [more, setMore] = useState({ before: false, after: false });
     const rowOf = (id: string | null | undefined) => (
         id ? listRef.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null : null
     );
 
-    // 高亮那一块的位置和大小，每次画完从它所在的行量一遍（行的宽度跟着名字、头像和语言变）；数没变就不动。
-    useLayoutEffect(() => {
+    /*
+     * 把高亮那一块摆到它那一行的位置上。
+     *
+     * 为什么不记在 React state 里：位置和大小是从自己的 DOM 上量的，而「量 → 写 state →
+     * 重渲染 → 再量」是一个圈 —— 那个 effect 又跟着每次渲染都跑，于是它自己把自己转起来，
+     * 转起来就没有尽头（平板上点进汽水登录时整屏黑在那儿）。这个圈与量出来的数变没变无关：
+     * 哪怕每次量到的都一样，React 也要为这一次更新再渲染一遍这一层。所以量完直接写在那一块
+     * 的 style 上，不经过 React：state 少一样东西，这个圈就断了。
+     *
+     * 直接写 style 之后，每次渲染仍然会量一遍（行的宽跟着名字、头像和语言变，只能量）；
+     * 但量到的数没变就不动笔，不动笔就不会逼浏览器重画。
+     */
+    const placeGlow = () => {
+        const glow = glowRef.current;
+        if (!glow) return;
         const row = rowOf(highlightId);
-        const next = row ? { x: row.offsetLeft, y: row.offsetTop, w: row.offsetWidth, h: row.offsetHeight } : null;
-        setBox(current => (current?.x === next?.x && current?.y === next?.y && current?.w === next?.w && current?.h === next?.h ? current : next));
-    });
+        if (!row) {
+            if (glowBox.current === null) return;
+            glowBox.current = null;
+            glow.style.opacity = '0';
+            return;
+        }
+        const next = { x: row.offsetLeft, y: row.offsetTop, w: row.offsetWidth, h: row.offsetHeight };
+        const last = glowBox.current;
+        if (last && last.x === next.x && last.y === next.y && last.w === next.w && last.h === next.h) return;
+        glowBox.current = next;
+        glow.style.width = `${next.w}px`;
+        glow.style.height = `${next.h}px`;
+        glow.style.transform = `translate(${next.x}px, ${next.y}px)`;
+        glow.style.opacity = '1';
+    };
+
+    // 高亮那一块的位置和大小：每次画完从它所在的行量一遍。
+    useLayoutEffect(placeGlow);
 
     // 选中的行换了，把它滚进来。指针指着的行不滚：列表不在指针底下自己动，指针移开也不跳回去。
     useLayoutEffect(() => {
@@ -134,7 +165,8 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
         readMore();
         const list = listRef.current;
         if (!list || typeof ResizeObserver === 'undefined') return undefined;
-        const observer = new ResizeObserver(readMore);
+        // 列表自己变了大小时，那一块也要跟着摆一次：这不是渲染引起的，没人替它再量一遍。
+        const observer = new ResizeObserver(() => { placeGlow(); readMore(); });
         observer.observe(list);
         return () => observer.disconnect();
     }, [shown.length, showAll, lie]);
@@ -228,10 +260,15 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                 className={`relative min-h-0 rounded-lg outline-none ${lie === 'column' ? 'st-scroll flex flex-1 flex-col overflow-y-auto overscroll-contain' : 'login-row-scroll flex gap-1 overflow-x-auto overscroll-x-contain'}`}
                 style={fade ? { WebkitMaskImage: fade, maskImage: fade } : undefined}
             >
+                {/*
+                    高亮那一块：位置和大小由 placeGlow 直接写在它身上（不经过 React），
+                    这里只给个起始的不透明度，写死的内容不会再被 React 动。
+                */}
                 <div
+                    ref={glowRef}
                     aria-hidden
                     className="st-t-move pointer-events-none absolute left-0 top-0 rounded-lg bg-[var(--st-fill2)] transition-[transform,width,opacity]"
-                    style={box ? { width: box.w, height: box.h, transform: `translate(${box.x}px, ${box.y}px)`, opacity: 1 } : { opacity: 0 }}
+                    style={{ opacity: 0 }}
                 />
                 {showAll && (
                     <div
