@@ -3304,6 +3304,7 @@ export default {
     "geminiApiUrl": "Gemini 接口地址",
     "geminiApiUrlDesc": "留空用默认地址。官方域名连不上时可以填自己的反向代理，只填域名或前缀即可，后面会按官方路径补全。",
     "openaiApiKey": "密钥",
+    "openaiApiModelDesc": "例如 gpt-5.6-luna、gpt-4.1-mini、deepseek-v4-flash。",
     "aiApiKeySavedPlaceholder": "已保存（留空则保持不变）",
     "aiApiKeySavedDesc": "密钥已加密保存在本机，不会再显示。输入新密钥并保存可替换。",
     "aiApiKeyEndpointMismatchDesc": "已保存的密钥是之前 {{endpoint}} 用的，换了地址就不能再用。请输入新的密钥并保存。",

@@ -3303,6 +3303,7 @@ export default {
     "geminiApiUrl": "URL API Gemini",
     "geminiApiUrlDesc": "Kosongkan untuk memakai alamat bawaan. Bila host resmi tidak terjangkau, isi dengan reverse proxy Anda — cukup host atau awalan, jalur resminya ditambahkan otomatis.",
     "openaiApiKey": "Kunci API OpenAI",
+    "openaiApiModelDesc": "Diperlukan oleh banyak penyedia kompatibel OpenAI. Contoh: gpt-5.6-luna, gpt-4.1-mini, deepseek-v4-flash.",
     "aiApiKeySavedPlaceholder": "Tersimpan (kosongkan untuk mempertahankan)",
     "aiApiKeySavedDesc": "Kunci disimpan terenkripsi di perangkat ini dan tidak ditampilkan lagi. Masukkan kunci baru lalu simpan untuk menggantinya.",
     "aiApiKeyEndpointMismatchDesc": "Kunci tersimpan dibuat untuk {{endpoint}} dan tidak bisa dipakai di alamat lain. Masukkan kunci baru lalu simpan.",

@@ -44,6 +44,8 @@ const MODE_HINTS: Record<string, string> = {
     sonnet: '日式 MV 分镜、相机运动与转场，电影感强',
     tempera: '印刷色块与拼贴、逐字入场',
     lumiere: '光场与烟雾、辉光崩解，华丽',
+    hanabi: '花火粒子与夜空、升空绽放与拼贴，节庆感强',
+    prompt: '提示词输入框风格、逐词 token 与卡拉OK进度，极客感',
 };
 
 /** Chinese names, used in the prompt (it is written in Chinese) and as the UI fallback. */
@@ -62,6 +64,8 @@ const MODE_NAMES: Record<string, string> = {
     sonnet: '商籁',
     tempera: '凝彩',
     lumiere: '绘光',
+    hanabi: '花火',
+    prompt: '提示词',
 };
 
 /** i18n keys for the UI. `cadenza` is spelled `Cadenze` in the locale files. */
@@ -80,6 +84,8 @@ const MODE_LABEL_KEYS: Record<string, string> = {
     sonnet: 'ui.visualizerSonnet',
     tempera: 'ui.visualizerTempera',
     lumiere: 'ui.visualizerLumiere',
+    hanabi: 'ui.visualizerHanabi',
+    prompt: 'ui.visualizerPrompt',
 };
 
 export type DirectorParamSpec =

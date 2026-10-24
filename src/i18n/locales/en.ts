@@ -3303,6 +3303,7 @@ export default {
     "geminiApiUrl": "Gemini API URL",
     "geminiApiUrlDesc": "Leave blank to use the default address. If the official host is unreachable, point this at your own reverse proxy — a bare host or prefix is enough, the official path is appended.",
     "openaiApiKey": "OpenAI API Key",
+    "openaiApiModelDesc": "Required by many OpenAI-compatible providers. Examples: gpt-5.6-luna, gpt-4.1-mini, deepseek-v4-flash.",
     "aiApiKeySavedPlaceholder": "Saved (leave blank to keep it)",
     "aiApiKeySavedDesc": "The key is stored encrypted on this device and is not shown again. Enter a new key and save to replace it.",
     "aiApiKeyEndpointMismatchDesc": "The saved key was for {{endpoint}} and can't be used at a different address. Enter a new key and save.",
