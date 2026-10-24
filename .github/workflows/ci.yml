@@ -1,4 +1,13 @@
-name: PR Unit Tests
+name: CI
+
+# 重构期间的守门 CI：类型检查、单测、打包冒烟、版本约束。
+# 检查逻辑都在仓库根目录的 ci/（见 ci/README.md），这个文件只做组装。
+# APK/AAB 出包在 android-release.yml，不在这里重复跑。
+#
+# main 上也跑一次，唯一目的是把 node_modules 缓存写进 base 分支的 scope。Actions 的缓存
+# 作用域规则是「PR 能读 base 分支的缓存，分支之间互相不可见」，而这个 workflow 原本只在
+# pull_request 触发，于是缓存只会写进各个 PR 自己的 scope 并随 PR 合并作废——每个新分支、
+# 每个 fork PR 的首跑都必然冷启动装 1.4GB 依赖。
 
 on:
   pull_request:
@@ -7,10 +16,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-  # main 上也跑一次，唯一目的是把 node_modules 缓存写进 base 分支的 scope。Actions 的缓存
-  # 作用域规则是「PR 能读 base 分支的缓存，分支之间互相不可见」，而这个 workflow 原本只在
-  # pull_request 触发，于是缓存只会写进各个 PR 自己的 scope 并随 PR 合并作废——每个新分支、
-  # 每个 fork PR 的首跑都必然冷启动装 1.4GB 依赖。
   push:
     branches:
       - main
@@ -19,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-unit-tests-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   # main 上不抢占：那一跑是为了落缓存，被后一次推送掐掉就白跑了。
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -93,3 +98,53 @@ jobs:
       - name: Run sync-server typecheck
         run: npm run build:node
         working-directory: ./sync-server
+
+  build-web:
+    name: Build web bundle
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-ubuntu-latest-node24-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # typecheck 到不了 vite 的打包阶段：多页入口、postcss、public/ 资源、import.meta.glob
+      # 只有打包时才暴露，而重构最容易断在这一层。跑一遍 build 也算把 api-ts 的编译带上。
+      - name: Build web bundle
+        run: npm run build
+
+  version-policy:
+    name: Version policy
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # 不需要 npm ci：只读仓库里的 package.json、.nvmrc、workflow 文件。
+      - name: Check version policy
+        run: npm run check:versions
