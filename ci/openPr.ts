@@ -35,6 +35,8 @@ if (!title) {
     console.error('缺少标题。\n\n' + USAGE);
     process.exit(1);
 }
+// 收窄成 string：main() 里不能再带着 undefined 的类型。
+const prTitle: string = title;
 
 const base = optionValue('--base', 'dev');
 const watch = flags.has('--watch');
@@ -88,7 +90,7 @@ function main(): void {
         '- [ ] 远端 CI 全绿',
         '- [ ] 已拿到 review（至少 AI review）',
     ].join('\n');
-    const url = run('gh', ['pr', 'create', '--base', base, '--title', title, '--body', body], true);
+    const url = run('gh', ['pr', 'create', '--base', base, '--title', prTitle, '--body', body], true);
     console.log(url);
 
     console.log('\n[pr] 接下来必须做：\n  gh pr checks <编号> --watch     # 等到全绿\n  gh pr review <编号> --comment  # 至少一条 AI review，然后才能合');
