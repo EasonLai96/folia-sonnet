@@ -36,6 +36,8 @@ gh pr checks <PR号> --watch                             # 4. 盯 CI，绿了再
 
 没装 `gh`（GitHub 命令行）时：`winget install GitHub.cli`（macOS `brew install gh`），然后 `gh auth login` 按提示走一遍。
 
+**Windows 上的已知失败**：`npm run ci:local` 里 `test/unit/mod-system/modSignature.test.ts` 有一条用例要在临时目录建符号链接，没开「开发者模式」或不是管理员时会被 EPERM 拒。不是你改出来的；其余通过就能开 PR，这一项以 Linux 的 CI 为准。
+
 **合并前必须有 review**（至少一次 AI review，必须发在 GitHub 的 PR 上）：`gh pr review <PR号> --comment --body-file review.md`。只在聊天里说「看过了」不算。
 
 ## 加一个检查
