@@ -6,6 +6,7 @@ import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../servi
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { fetchCoverBytes } from '../services/coverBytes';
 import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
+import { applyNativeLikeOverrides, type NativeLikeOverrideInput } from '../services/onlineMusic/omni';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 
@@ -71,10 +72,15 @@ interface FoliaPlaybackPlugin {
    * index 是当前歌在窗口里的下标。原生只转存，冻结时才用它。
    */
   setQueueMirror(options: { queueJson: string; index: number }): Promise<void>;
+  /**
+   * 原生补写过的红心（WebView 冻结期间通知栏那颗心在服务器上写成功的）。
+   * App 启动时取走一次，对齐进账号缓存，App 里的心才不会与通知栏打架。
+   */
+  consumeLikeOverrides(): Promise<{ overrides: NativeLikeOverrideInput[] }>;
   /** 原生在用户点击通知栏/锁屏/耳机按键时派发的事件。 */
   addListener(
     eventName: 'foliaPlaybackCommand',
-    listener: (payload: { command: string; positionMs?: number }) => void,
+    listener: (payload: { command: string; positionMs?: number; songKey?: string }) => void,
   ): Promise<() => void>;
 }
 
@@ -157,6 +163,11 @@ type UseCapacitorPlaybackBridgeOptions = {
   canLike?: boolean;
   /** 通知栏 / 锁屏 / 耳机那颗心被按下。与面板里的喜爱按钮同一个动作。 */
   onToggleLike?: () => void;
+  /**
+   * 原生兜底切歌后 JS 醒来的认领：把队列跳到原生正在放的那首（按 songKey 找）。
+   * 不认领的话，App 打开时队列还停在旧歌上，与通知栏各说各话。
+   */
+  onSyncToSong?: (songKey: string) => void;
   /** 队列快照：镜像兜底的数据源。缺省时不推镜像。 */
   queue?: SongResult[];
   /** 当前这首歌已解析的播放地址（audioSrc）：镜像里当前条目就用它。 */
@@ -187,19 +198,39 @@ export const useCapacitorPlaybackBridge = ({
   queue,
   currentAudioUrl,
   resolvedUrlOf,
+  onSyncToSong,
 }: UseCapacitorPlaybackBridgeOptions): void => {
   const enabled = isCapacitorAndroid();
 
   // 这三个回调是每次渲染都可能换身份的内联函数，进 effect 依赖会把订阅反复重建。
-  const callbacksRef = React.useRef({ getCurrentTime, onSeek, onToggleLike });
-  callbacksRef.current = { getCurrentTime, onSeek, onToggleLike };
+  const callbacksRef = React.useRef({ getCurrentTime, onSeek, onToggleLike, onSyncToSong });
+  callbacksRef.current = { getCurrentTime, onSeek, onToggleLike, onSyncToSong };
+
+  // 原生补写的红心，App 这边开机认领：把账号缓存（likedSongIds）对齐到原生写入的
+  // 服务器真状态。不认领的话，打开 App 那一刻 JS 推的还是旧缓存，通知栏那颗心会被
+  // 它翻回去（原生侧有真源守卫拦着通知栏，但 App 里的心也对不上）。
+  React.useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void FoliaPlayback.consumeLikeOverrides()
+      .then(({ overrides }) => {
+        if (cancelled || !overrides || overrides.length === 0) return;
+        applyNativeLikeOverrides(overrides);
+      })
+      .catch(() => {
+        // 老版本原生没有这个方法：没有记录就没有可对齐的，静默跳过。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
 
   // 通知栏/锁屏/耳机的控制键走这里回到 Web 层。
   React.useEffect(() => {
     if (!enabled) return;
     let dispose: (() => void) | undefined;
     let cancelled = false;
-    void FoliaPlayback.addListener('foliaPlaybackCommand', ({ command, positionMs }) => {
+    void FoliaPlayback.addListener('foliaPlaybackCommand', ({ command, positionMs, songKey }) => {
       switch (command) {
         case 'play':
           void mediaSessionPlayRef.current?.();
@@ -225,6 +256,11 @@ export const useCapacitorPlaybackBridge = ({
           // 能不能用、成功与否、状态怎么存都归 Web 层那一份判断，原生不自己记账。
           // 状态变了会随下一次元数据推送回到通知栏，那颗心自己换形状。
           callbacksRef.current.onToggleLike?.();
+          break;
+        case 'syncTo':
+          // 原生兜底切歌后的认领：把队列跳到原生正在放的那首（守卫期间旧歌的
+          // metadata 会被原生拒收，见 FoliaPlaybackService.updateMetadata）。
+          if (songKey) callbacksRef.current.onSyncToSong?.(songKey);
           break;
       }
     }).then((off) => {

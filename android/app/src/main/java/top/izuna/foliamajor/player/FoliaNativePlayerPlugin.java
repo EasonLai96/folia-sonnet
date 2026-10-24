@@ -226,6 +226,19 @@ public class FoliaNativePlayerPlugin extends Plugin {
     }
 
     /**
+     * 播放器壳子在不在（不要求手上正拿着歌）。
+     *
+     * 镜像兜底切歌的资格判据用这个而不是 {@link #hasActiveMedia()}：当前这首完全可能
+     * 走的是 {@code <audio>}（有缓存的歌回落网页播放，原生手上没东西）—— 按
+     * hasActiveMedia 判，WebView 一冻结，通知栏切歌就永远没人接。JS 没回话的那一刻
+     * 原生直接 prepare 一条新地址接管播放，不需要原生「之前就在播」。
+     */
+    public static boolean hasPlayer() {
+        FoliaNativePlayerPlugin current = instance;
+        return current != null && current.player != null;
+    }
+
+    /**
      * 原生播放器**此刻是不是在播**。
      *
      * 和 `hasActiveMedia()` 是两件事：手上有一首不等于在播（暂停之后 `lastUrl` 还在）。

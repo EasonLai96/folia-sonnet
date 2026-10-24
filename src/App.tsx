@@ -155,7 +155,7 @@ import { useOnlineProviderAccountStore } from './stores/useOnlineProviderAccount
 import { useShallow } from 'zustand/react/shallow';
 import { clampMediaVolume, toSafeRemoteUrl } from './utils/appPlaybackHelpers';
 import { hasLoopedToStart } from './services/playedTrackCache';
-import { getOnlineProviderIdForSong, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong } from './utils/appPlaybackGuards';
+import { getOnlineProviderIdForSong, getPlaybackSongKey, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong } from './utils/appPlaybackGuards';
 import { writeLyricOffset } from './utils/lyrics/lyricOffsetMemory';
 import { FALLBACK_AI_DUAL_THEME } from './services/themeSanitizer';
 import { BASE_DUAL_THEME, DAYLIGHT_THEME, DEFAULT_THEME } from './services/baseThemes';
@@ -1614,6 +1614,12 @@ export default function App() {
         },
         // 与面板里的喜爱按钮同一个动作：能不能用、状态怎么存都归它，原生不自己记账。
         onToggleLike: handleLike,
+        // 原生兜底切歌后 JS 醒来的认领：把队列跳到原生正在放的那首。
+        // 队列里找不到（队列早换过了）就不动，等下一次正常的切歌对齐。
+        onSyncToSong: (songKey) => {
+            const song = playQueue.find((item) => getPlaybackSongKey(item) === songKey);
+            if (song) void playSong(song, playQueue);
+        },
     });
 
     // Capacitor Android 专有：把当前行与行内进度喂给原生歌词动态壁纸。

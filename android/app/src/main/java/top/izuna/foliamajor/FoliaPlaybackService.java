@@ -102,6 +102,12 @@ public class FoliaPlaybackService extends android.app.Service {
     // WebView 冻结时通知栏那颗心按它直接对各平台补写收藏（见 scheduleLikeFallback）。
     private String cachedProviderId = "";
     private String cachedServerSongId = "";
+    /**
+     * 原生兜底切歌的「真源」：镜像换源之后 JS 醒来第一份 metadata 推的还是它自己的
+     * 旧歌 —— 收下它通知栏就会弹回旧歌（「一打开 app 全部恢复原样」）。守卫期间
+     * 别的歌不收，同时发 syncTo 叫 JS 把队列跳到原生正在放这首；它推来同一首时解除。
+     */
+    private volatile String nativeSkipSongKey = null;
     /** 原生红心兜底在途标记：同一时刻只允许一发，连点两下不会发出两个相反的写入。 */
     private volatile boolean likeFallbackInFlight = false;
     /** JS 没回话等多久就原生补写红心。要长于 JS 正常处理一次收藏的耗时（写 + 复查），免得慢一点就双写。 */
@@ -420,6 +426,11 @@ public class FoliaPlaybackService extends android.app.Service {
                     // 由接收器转成这条 action 把兜底计时器挂上。
                     scheduleLikeFallback();
                     break;
+                case ACTION_MEDIA_COMMAND:
+                    // 通知栏 / 锁屏按钮的 next / previous / like：先进服务挂兜底，
+                    // JS 那份命令由服务统一发（接收器不再直派，免得两份）。
+                    handleMediaCommand(intent);
+                    break;
                 case ACTION_REFRESH_METADATA:
                     // ColorOS 原生歌词到的比播放晚（Web 层先拿到词）时用这条：
                     // 只按缓存重建 metadata 与 PlaybackState，不动前台化状态。
@@ -493,6 +504,50 @@ public class FoliaPlaybackService extends android.app.Service {
         sendBroadcast(intent);
     }
 
+    /** 带歌名的命令（syncTo：原生兜底切歌后叫 JS 把队列跳到原生正在放这首）。 */
+    private void sendCommand(String command, long positionMs, String songKey) {
+        Intent intent = new Intent(this, FoliaCommandReceiver.class);
+        intent.setAction(ACTION_WEB_COMMAND);
+        intent.putExtra(EXTRA_COMMAND, command);
+        intent.putExtra(EXTRA_COMMAND_POSITION, positionMs);
+        intent.putExtra(EXTRA_SONG_KEY, songKey);
+        sendBroadcast(intent);
+    }
+
+    /**
+     * 通知栏 / 锁屏按钮的 next / previous / like。
+     *
+     * 与 MediaSession 回调同一段逻辑：命令照旧广播给 JS，同时挂原生兜底计时器 ——
+     * JS 回话（推出新 metadata）就收手；WebView 冻结时由镜像换源 / 原生补写红心接管。
+     * 以前这一段只挂在 MediaSession 回调上，通知栏按钮根本到不了这里，
+     * 「上一首 / 下一首用不了」就是这条断链。
+     */
+    private void handleMediaCommand(Intent intent) {
+        String command = intent.getStringExtra(EXTRA_COMMAND);
+        if (command == null) {
+            return;
+        }
+        switch (command) {
+            case "next":
+                sendCommand("next");
+                scheduleSkipFallback(+1);
+                break;
+            case "previous":
+                sendCommand("previous");
+                scheduleSkipFallback(-1);
+                break;
+            case "like":
+                sendCommand("like");
+                scheduleLikeFallback();
+                break;
+            default:
+                // play / pause / stop / seek 没有原生兜底可做，原路转给 JS。
+                long positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L);
+                FoliaPlaybackPlugin.dispatchCommandFromReceiver(command, positionMs, null);
+                break;
+        }
+    }
+
     /**
      * 「下一首/上一首」的确认计时器：命令照旧广播给 JS，同时等它回话。
      *
@@ -504,8 +559,10 @@ public class FoliaPlaybackService extends android.app.Service {
         final long before = lastMetadataAtMs;
         mainHandler.postDelayed(() -> {
             if (lastMetadataAtMs != before) return;
-            // 原生手上没歌（原生播放没开）：镜像也没处换源，只能等 JS。
-            if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) return;
+            // 播放器壳子不在（WebView 从没起来过 / Bridge 已销毁）：镜像也没处换源，只能等 JS。
+            // 注意判的是 hasPlayer 而不是 hasActiveMedia —— 当前这首走 <audio> 时原生手上
+            // 没东西，但照样能 prepare 一条镜像地址接管播放。
+            if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasPlayer()) return;
             skipViaMirror(direction);
         }, SKIP_FALLBACK_MS);
     }
@@ -544,6 +601,10 @@ public class FoliaPlaybackService extends android.app.Service {
                 likeFallbackInFlight = false;
             }
             if (!ok) return;
+            // 记账：JS 醒来推旧状态时，updateMetadata 按这张表以原生写入为准；
+            // App 启动时 JS 也会取走这份记录对齐自己的账号缓存。
+            top.izuna.foliamajor.online.LikeOverrideStore.record(
+                    this, cachedSongKey, providerId, songId, wanted);
             // JS 醒来后推来的 liked 仍以它为准（它才是账号态的唯一写手）；
             // 这里先让通知栏别停在旧状态上。
             cachedLiked = wanted;
@@ -587,6 +648,8 @@ public class FoliaPlaybackService extends android.app.Service {
             cachedCanLike = false;
             cachedProviderId = "";
             cachedServerSongId = "";
+            // 真源守卫：JS 醒来推的还是旧歌时不许覆盖这里的结果（见 updateMetadata）。
+            nativeSkipSongKey = songKey;
         }
         String title = entry.optString("title", "");
         if (!title.isEmpty()) cachedTitle = title;
@@ -722,6 +785,27 @@ public class FoliaPlaybackService extends android.app.Service {
     }
 
     private void updateMetadata(Intent intent) {
+        /*
+         * 原生兜底切歌的真源守卫。
+         *
+         * WebView 冻结期间原生用镜像换过源之后，JS 醒来第一份 metadata 推的还是它
+         * 自己那份旧歌 —— 收下它，通知栏就弹回旧歌，原生正在放的歌反而没了名分
+         * （用户说的「一打开 app 立马恢复全部」）。JS 认领（推来同一首）之前别的歌
+         * 一概不收，同时发 syncTo 叫它把队列跳过来。代价：守卫期内用户在 App 里点的
+         * 别的歌也会被拽回来一次（窗口只有 JS 醒来到第一份推送之间那几秒），
+         * 但「通知栏与实际播放对不上」比这个难受得多。
+         */
+        if (nativeSkipSongKey != null && !nativeSkipSongKey.isEmpty()) {
+            String incomingKey = intent.getStringExtra(EXTRA_SONG_KEY);
+            if (incomingKey != null && !incomingKey.isEmpty()) {
+                if (incomingKey.equals(nativeSkipSongKey)) {
+                    nativeSkipSongKey = null; // JS 认领了，恢复正常通道。
+                } else {
+                    sendCommand("syncTo", 0L, nativeSkipSongKey);
+                    return; // 旧歌不收：缓存不动，lastMetadataAtMs 也不前进。
+                }
+            }
+        }
         // JS 回话了：skip 的确认计时器看到这个时间戳变化就会收手，不再用镜像兜底。
         lastMetadataAtMs = android.os.SystemClock.elapsedRealtime();
         String title = intent.getStringExtra(EXTRA_TITLE);
@@ -769,6 +853,26 @@ public class FoliaPlaybackService extends android.app.Service {
         }
         if (intent.hasExtra(EXTRA_CAN_LIKE)) {
             cachedCanLike = intent.getBooleanExtra(EXTRA_CAN_LIKE, false);
+        }
+        /*
+         * 红心真源守卫：原生补写成功的那一票记在盘上（LikeOverrideStore）。
+         * JS 推来的值与记录一致 = 它已经从服务器读回了真状态，记录解除；
+         * 不一致 = 它手上还是旧缓存，通知栏以原生写入为准，不让它把心翻回去。
+         */
+        if (cachedSongKey != null && !cachedSongKey.isEmpty() && intent.hasExtra(EXTRA_LIKED)) {
+            org.json.JSONObject likeOverrides =
+                    top.izuna.foliamajor.online.LikeOverrideStore.read(this);
+            org.json.JSONObject own = likeOverrides.optJSONObject(cachedSongKey);
+            if (own != null) {
+                boolean overrideLiked = own.optBoolean("liked", false);
+                boolean incomingLiked = intent.getBooleanExtra(EXTRA_LIKED, false);
+                if (incomingLiked == overrideLiked) {
+                    likeOverrides.remove(cachedSongKey);
+                    top.izuna.foliamajor.online.LikeOverrideStore.save(this, likeOverrides);
+                } else {
+                    cachedLiked = overrideLiked;
+                }
+            }
         }
         // 红心兜底用的服务器侧身份：与 songKey 一起到。没带就保留旧值
         //（老版本 Web 层不推这两个字段，那时原生兜底按「没身份」跳过）。
@@ -1060,15 +1164,16 @@ public class FoliaPlaybackService extends android.app.Service {
     /**
      * 往 Web 层发一条播放控制指令（上一首 / 下一首）。
      *
-     * 锁屏面板走的是**通知栏同一条路**：指令交给 FoliaCommandReceiver，由它派发给
-     * Capacitor 插件、再交给 Web 层。原生不自己另起一套播放器状态机 ——
-     * 真正知道"下一首是什么"的只有 Web 层（队列、随机、自动混播都在那边）。
+     * 锁屏面板走的是**通知栏同一条路**：指令交给 FoliaCommandReceiver。带
+     * EXTRA_FROM_BUTTONS（这是用户按的按钮，不是服务转给 JS 的回话），接收器会把
+     * next / previous / like 转进服务挂原生兜底。
      */
     static void sendPlaybackCommand(Context context, String command) {
         // 必须写死组件名：Android 8+ 的隐式广播不会投递给清单注册的接收器。
         Intent intent = new Intent(context, FoliaCommandReceiver.class);
         intent.setAction(ACTION_WEB_COMMAND);
         intent.putExtra(EXTRA_COMMAND, command);
+        intent.putExtra(EXTRA_FROM_BUTTONS, true);
         context.sendBroadcast(intent);
     }
 
@@ -1078,6 +1183,7 @@ public class FoliaPlaybackService extends android.app.Service {
         intent.setAction(ACTION_WEB_COMMAND);
         intent.putExtra(EXTRA_COMMAND, command);
         intent.putExtra(EXTRA_COMMAND_POSITION, positionMs);
+        intent.putExtra(EXTRA_FROM_BUTTONS, true);
         context.sendBroadcast(intent);
     }
 
@@ -1209,13 +1315,16 @@ public class FoliaPlaybackService extends android.app.Service {
     /**
      * 通知栏按钮。
      *
-     * 点下去直接广播给 FoliaCommandReceiver，由它交给插件派发给 Web 层。
-     * 用 command 的 hashCode 作 requestCode，三个按钮才不会互相复用同一个 PendingIntent。
+     * 点下去广播给 FoliaCommandReceiver；带 EXTRA_FROM_BUTTONS，接收器按它把
+     * next / previous / like 转进服务挂原生兜底（JS 那份命令由服务统一发），
+     * 其余命令照旧直派 JS。用 command 的 hashCode 作 requestCode，
+     * 三个按钮才不会互相复用同一个 PendingIntent。
      */
     private NotificationCompat.Action buildAction(int icon, CharSequence title, String command) {
         Intent intent = new Intent(this, FoliaCommandReceiver.class);
         intent.setAction(ACTION_WEB_COMMAND);
         intent.putExtra(EXTRA_COMMAND, command);
+        intent.putExtra(EXTRA_FROM_BUTTONS, true);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
@@ -1275,6 +1384,16 @@ public class FoliaPlaybackService extends android.app.Service {
     static final String EXTRA_SERVER_SONG_ID = "serverSongId";
     /** 通知栏/锁屏那颗心经 FoliaCommandReceiver 转进来的兜底挂载动作。 */
     static final String ACTION_SCHEDULE_LIKE_FALLBACK = "top.izuna.foliamajor.action.SCHEDULE_LIKE_FALLBACK";
+    /**
+     * 通知栏 / 锁屏按钮的命令进服务的通道。
+     *
+     * 这些按钮原先只广播给 FoliaCommandReceiver 直派 JS —— 服务的切歌 / 红心兜底挂在
+     * MediaSession 回调上，通知栏根本触发不到它，WebView 一冻结整排按钮就是死的。
+     * 现在按钮先经服务（它才能挂兜底计时器），JS 那份命令由服务统一发。
+     */
+    static final String ACTION_MEDIA_COMMAND = "top.izuna.foliamajor.action.MEDIA_COMMAND";
+    /** 标记「这条命令来自通知栏 / 锁屏按钮」，接收器按它决定要不要转进服务。 */
+    static final String EXTRA_FROM_BUTTONS = "fromButtons";
     /**
      * MediaSession 的自定义动作名：「喜欢 / 取消喜欢」。
      *

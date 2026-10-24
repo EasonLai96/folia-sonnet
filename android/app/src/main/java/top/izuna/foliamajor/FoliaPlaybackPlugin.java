@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.util.Log;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -52,9 +53,13 @@ public class FoliaPlaybackPlugin extends Plugin {
     }
 
     static void dispatchCommandFromReceiver(String command, long positionMs) {
+        dispatchCommandFromReceiver(command, positionMs, null);
+    }
+
+    static void dispatchCommandFromReceiver(String command, long positionMs, String songKey) {
         FoliaPlaybackPlugin current = instance;
         if (current != null) {
-            current.dispatchCommand(command, positionMs);
+            current.dispatchCommand(command, positionMs, songKey);
         }
     }
 
@@ -111,6 +116,39 @@ public class FoliaPlaybackPlugin extends Plugin {
      * 服务把它存成静态字段；{@code onSkipToNext/Previous} 的确认计时器发现 JS
      * 没回话时，就按这份快照在原生直接换源。只转存、不解析 —— 镜像的语义归服务。
      */
+    /**
+     * 原生补写过的红心（WebView 冻结期间通知栏那颗心在服务器上写成功的）。
+     *
+     * App 启动时 JS 调一次，取走并把盘上的记录清掉；拿到的每一条都要对齐进自己的
+     * 账号缓存（omni.applyNativeLikeOverrides），否则打开 App 那一刻 JS 推的还是
+     * 旧缓存，App 里的心与通知栏对不上。
+     */
+    @PluginMethod
+    public void consumeLikeOverrides(PluginCall call) {
+        org.json.JSONObject overrides =
+                top.izuna.foliamajor.online.LikeOverrideStore.consume(getContext());
+        JSArray list = new JSArray();
+        try {
+            java.util.Iterator<String> keys = overrides.keys();
+            while (keys.hasNext()) {
+                String songKey = keys.next();
+                org.json.JSONObject entry = overrides.optJSONObject(songKey);
+                if (entry == null) continue;
+                JSObject item = new JSObject();
+                item.put("songKey", songKey);
+                item.put("providerId", entry.optString("providerId", ""));
+                item.put("serverSongId", entry.optString("serverSongId", ""));
+                item.put("liked", entry.optBoolean("liked", false));
+                list.put(item);
+            }
+        } catch (Throwable ignored) {
+            // 解析不了就回空：最坏回到「App 里的心晚一点才对上」。
+        }
+        JSObject result = new JSObject();
+        result.put("overrides", list);
+        call.resolve(result);
+    }
+
     @PluginMethod
     public void setQueueMirror(PluginCall call) {
         Activity activity = getActivity();
@@ -188,9 +226,17 @@ public class FoliaPlaybackPlugin extends Plugin {
     }
 
     public void dispatchCommand(String command, long positionMs) {
+        dispatchCommand(command, positionMs, null);
+    }
+
+    public void dispatchCommand(String command, long positionMs, String songKey) {
         JSObject payload = new JSObject();
         payload.put("command", command);
         payload.put("positionMs", positionMs);
+        // syncTo 用：原生兜底切歌后叫 JS 把队列跳到原生正在放这首。
+        if (songKey != null) {
+            payload.put("songKey", songKey);
+        }
         notifyListeners(EVENT_COMMAND, payload);
     }
 

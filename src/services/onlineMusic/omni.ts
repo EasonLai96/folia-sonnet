@@ -289,6 +289,39 @@ const persistProviderLikedSongIds = async (providerId: OmniProviderId): Promise<
     }
 };
 
+export interface NativeLikeOverrideInput {
+    providerId: string;
+    serverSongId: string;
+    liked: boolean;
+}
+
+/**
+ * 原生红心兜底的认领。
+ *
+ * WebView 冻结期间通知栏那颗心已经在**服务器上**写成功了（原生直报），JS 手上的
+ * likedSongIds 缓存还是旧的 —— 打开 App 那一刻 App 里的心与通知栏就对不上。
+ * App 启动时从 FoliaPlayback.consumeLikeOverrides 拿到原生写入的记录，在这里把
+ * 账号缓存对齐过去。**只改本地缓存，不再写服务器** —— 服务器上已经是这个状态，
+ * 再写一遍是浪费；之后的账号读取也会从服务器带回同一个状态，两边天然收敛。
+ * 账号还没读进来（没 user）时跳过：那时也没有旧状态可翻，等读取即可。
+ */
+export const applyNativeLikeOverrides = (overrides: NativeLikeOverrideInput[]): void => {
+    const accounts = useOnlineProviderAccountStore.getState().accounts;
+    const updates = new Map<OmniProviderId, MediaId[]>();
+    for (const item of overrides) {
+        const providerId = item.providerId as OmniProviderId;
+        const account = accounts[providerId];
+        if (!account?.user || !item.serverSongId) continue;
+        const current = updates.get(providerId) ?? [...(account.likedSongIds || [])];
+        const filtered = current.filter(id => String(id) !== String(item.serverSongId));
+        updates.set(providerId, item.liked ? [...filtered, item.serverSongId as MediaId] : filtered);
+    }
+    updates.forEach((likedSongIds, providerId) => {
+        useOnlineProviderAccountStore.getState().updateAccount(providerId, { likedSongIds });
+        void persistProviderLikedSongIds(providerId);
+    });
+};
+
 // The presses on hearts (likePresses.ts), one provider's songs apart from another's. What is
 // wanted for a song whose request is not settled goes into the account store (`wantedLikes`),
 // where `isSongLiked` reads it and the screen follows it.
