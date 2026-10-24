@@ -674,6 +674,124 @@ final class LocalAudioServer {
     }
 
     /**
+     * 原生侧整首歌落盘：从 URL 直接下载进媒体缓存。
+     *
+     * 以前是 Web 抓完字节再 PUT 回来 —— 也就是说缓存这件事本身跑在 WebView 里，
+     * 应用退后台 / WebView 冻结时整首播完了也没人写缓存。下载挪到原生之后，
+     * 谁叫一声都能存。名字编码与 Web 侧 `cacheFileName` 完全一致（base64url 无
+     * padding，超长退化为 fnv1a 哈希），两边写的是同一批文件。
+     *
+     * 整首歌校验与 Web 侧同一条规则：MediaExtractor 探出来的时长不足歌长一半
+     * （且两边都报得出时长）的是试听片段，不存 —— 存了它，这首歌就永远播不了全的。
+     *
+     * @return 落盘文件的字节数；0 = 没存（下载失败 / 试听片段 / 名字不合法）。
+     */
+    long storeMediaCacheFromUrl(String cacheKey, String audioUrl, long limitBytes, long minDurationMs) {
+        String fileName = mediaCacheFileNameOf(cacheKey);
+        if (fileName == null || audioUrl == null || audioUrl.isEmpty()) {
+            return 0L;
+        }
+        File dir = mediaCacheDirectory();
+        File temp = null;
+        java.net.HttpURLConnection connection = null;
+        try {
+            connection = (java.net.HttpURLConnection) new java.net.URL(audioUrl).openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(15000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+            int code = connection.getResponseCode();
+            if (code < 200 || code >= 300) {
+                return 0L;
+            }
+            String storedName = fileName + "." + extensionForMime(connection.getContentType());
+            temp = new File(dir, storedName + ".part");
+            long written = 0L;
+            try (java.io.InputStream in = new BufferedInputStream(connection.getInputStream());
+                 OutputStream fileOut = new BufferedOutputStream(new FileOutputStream(temp))) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    fileOut.write(buffer, 0, read);
+                    written += read;
+                }
+            }
+            if (written <= 0L) {
+                temp.delete();
+                return 0L;
+            }
+            long durationUs = probeMediaDuration(temp);
+            if (minDurationMs > 0L && durationUs > 0L && durationUs < minDurationMs * 500L) {
+                // 试听片段：不存，也别让调用方把它当成整首歌的副本。
+                Log.i(TAG, "media cache refused a clip (" + (durationUs / 1000) + "ms of "
+                        + minDurationMs + "ms): " + cacheKey);
+                temp.delete();
+                return 0L;
+            }
+            File target = new File(dir, storedName);
+            if (target.isFile() && target.length() == written) {
+                temp.delete();
+                return written;
+            }
+            if (!temp.renameTo(target)) {
+                temp.delete();
+                Log.w(TAG, "media cache rename failed: " + fileName);
+                return 0L;
+            }
+            temp = null;
+            maintainMediaCache(dir, storedName, limitBytes);
+            Log.i(TAG, "media cache stored from url " + storedName + " (" + written + " bytes)");
+            return written;
+        } catch (Throwable error) {
+            Log.w(TAG, "storeMediaCacheFromUrl failed", error);
+            if (temp != null) temp.delete();
+            return 0L;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /** 与 Web 侧 `cacheFileName` 一致：base64url 无 padding；超长退化为 `h<fnv1a>`。 */
+    private static String mediaCacheFileNameOf(String cacheKey) {
+        if (cacheKey == null || cacheKey.isEmpty()) return null;
+        byte[] bytes = cacheKey.getBytes(StandardCharsets.UTF_8);
+        String encoded = android.util.Base64.encodeToString(bytes,
+                android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP).replace("=", "");
+        return encoded.length() <= 200 ? encoded : "h" + Long.toString(fnv1a36(cacheKey), 36);
+    }
+
+    /** Web 侧 fnv1a 的 Java 版：无符号 32 位，按 UTF-16 码元逐个喂（charCodeAt 语义）。 */
+    private static long fnv1a36(String value) {
+        int hash = 0x811c9dc5;
+        for (int i = 0; i < value.length(); i += 1) {
+            hash ^= value.charAt(i);
+            hash *= 0x01000193;
+        }
+        return hash & 0xFFFFFFFFL;
+    }
+
+    /** 文件里第一条音频轨的时长（微秒）；探不出回 -1（那就放行，交 Web 侧的校验兜底）。 */
+    private static long probeMediaDuration(File file) {
+        android.media.MediaExtractor extractor = new android.media.MediaExtractor();
+        try {
+            extractor.setDataSource(file.getAbsolutePath());
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                android.media.MediaFormat format = extractor.getTrackFormat(i);
+                String mime = format.getString(android.media.MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/")
+                        && format.containsKey(android.media.MediaFormat.KEY_DURATION)) {
+                    return format.getLong(android.media.MediaFormat.KEY_DURATION);
+                }
+            }
+            return -1L;
+        } catch (Throwable error) {
+            return -1L;
+        } finally {
+            extractor.release();
+        }
+    }
+
+    /**
      * 删一份副本。带 `size` 时只在这个长度上才删：调用方要删的是它读到的那一份，
      * 期间被写进来的新副本不是（见 Web 侧 removeAudioBlob 的 size 校验）。
      */

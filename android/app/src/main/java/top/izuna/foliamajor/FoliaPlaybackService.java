@@ -163,6 +163,15 @@ public class FoliaPlaybackService extends android.app.Service {
     private volatile long lastMetadataAtMs = 0L;
     /** JS 没回话等多久就自己动手。预取命中的下一首 2.5s 内足够换好源。 */
     private static final long SKIP_FALLBACK_MS = 2_500L;
+
+    /**
+     * 原生平台网关解析出来的地址，按 songKey 记着。
+     *
+     * 预取的意义：下一首的地址在当前这首开始放时就悄悄要好了，用户按下「下一首」
+     * 那一刻是现成的 —— 不然每次兜底切歌都要等一趟网络（用户报的「上下一首非常慢」）。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, String> resolvedUrlCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /**
      * 已经调用过 startForeground 了；见 promoteToForeground()。
      *
@@ -495,6 +504,11 @@ public class FoliaPlaybackService extends android.app.Service {
                     mirroredQueueJson = intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON);
                     mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1);
                     break;
+                case ACTION_UPDATE_QUEUE_INDEX:
+                    // 队列本体不变、只是换了一首正播的：轻量更新游标。全量队列一推
+                    // 几百 KB，不能跟着切歌一起反复过桥。
+                    mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1);
+                    break;
                 case ACTION_SCHEDULE_LIKE_FALLBACK:
                     // 通知栏 / 锁屏那颗心走 FoliaCommandReceiver，不经 MediaSession 回调，
                     // 由接收器转成这条 action 把兜底计时器挂上。
@@ -703,12 +717,92 @@ public class FoliaPlaybackService extends android.app.Service {
             int target = index + direction;
             if (target < 0 || target >= array.length()) return;
             org.json.JSONObject entry = array.getJSONObject(target);
-            String url = entry.optString("url", "");
-            // 地址没解析出来（预取没命中）：镜像帮不上，等 JS 醒来再切。
-            if (url.isEmpty()) return;
-            mirroredIndex = target;
-            nativePlayMirrorEntry(entry, url);
+            String songKey = entry.optString("songKey", "");
+            String url = songKey.isEmpty() ? null : resolvedUrlCache.get(songKey);
+            if (url == null || url.isEmpty()) {
+                url = entry.optString("url", "");
+            }
+            if (url != null && !url.isEmpty()) {
+                mirroredIndex = target;
+                nativePlayMirrorEntry(entry, url);
+                preloadMirrorNeighbors(array, target, direction);
+                return;
+            }
+            // 地址没解析出来（预取没命中）：原生平台网关直接向平台要一个。镜像窗口里
+            // 每首歌的身份（providerId / serverSongId / songmid）都在，缺的只是地址 ——
+            // 这就是「连按几首下一首就切不动」的解药。解析在后台线程（桥的线程规则），
+            // 成了回主线程换源；期间用户又按了的，以 mirroredIndex 为准作废重算。
+            resolveMirrorEntryAsync(array, entry, target, index, direction);
         } catch (org.json.JSONException ignored) {
+        }
+    }
+
+    /**
+     * 后台向平台要地址。只认「出发时那一格」还没被动过的请求：解析一趟网络的时间里
+     * 用户可能又按了下一首，回来的这一份已经不对题，丢弃（用户按的那一次有自己的请求）。
+     */
+    private void resolveMirrorEntryAsync(org.json.JSONArray array, org.json.JSONObject entry,
+                                         int target, int originIndex, int direction) {
+        final String providerId = entry.optString("providerId", "");
+        final String songId = entry.optString("serverSongId", "");
+        final String mid = entry.optString("providerMid", "");
+        final String hash = entry.optString("providerHash", "");
+        final String albumAudioId = entry.optString("providerAlbumAudioId", "");
+        if (providerId.isEmpty() || (songId.isEmpty() && mid.isEmpty() && hash.isEmpty())) {
+            return;
+        }
+        final String songKey = entry.optString("songKey", "");
+        new Thread(() -> {
+            String url = top.izuna.foliamajor.online.MusicGateway.resolvePlayUrl(
+                    providerId, songId, mid, hash, albumAudioId);
+            if (url == null || url.isEmpty()) {
+                return;
+            }
+            if (!songKey.isEmpty()) {
+                resolvedUrlCache.put(songKey, url);
+            }
+            mainHandler.post(() -> {
+                if (mirroredIndex != originIndex) return;
+                mirroredIndex = target;
+                nativePlayMirrorEntry(entry, url);
+                preloadMirrorNeighbors(array, target, direction);
+            });
+        }, "folia-resolve-url").start();
+    }
+
+    /**
+     * 悄悄把相邻两首的地址要回来。当前这首起播时下一首多半还没人要过 —— 等用户
+     * 按下「下一首」再要就是一趟看得见的等待；这时预取就是「秒切」和「转圈」的区别。
+     */
+    private void preloadMirrorNeighbors(org.json.JSONArray array, int target, int direction) {
+        int[] steps = {direction, direction * 2};
+        for (int step : steps) {
+            int idx = target + step;
+            if (idx < 0 || idx >= array.length()) continue;
+            try {
+                org.json.JSONObject entry = array.getJSONObject(idx);
+                String key = entry.optString("songKey", "");
+                if (key.isEmpty() || resolvedUrlCache.containsKey(key)) continue;
+                String existing = entry.optString("url", "");
+                if (!existing.isEmpty()) {
+                    resolvedUrlCache.put(key, existing);
+                    continue;
+                }
+                String providerId = entry.optString("providerId", "");
+                String songId = entry.optString("serverSongId", "");
+                String mid = entry.optString("providerMid", "");
+                String hash = entry.optString("providerHash", "");
+                String albumAudioId = entry.optString("providerAlbumAudioId", "");
+                if (providerId.isEmpty() || (songId.isEmpty() && mid.isEmpty() && hash.isEmpty())) continue;
+                new Thread(() -> {
+                    String url = top.izuna.foliamajor.online.MusicGateway.resolvePlayUrl(
+                            providerId, songId, mid, hash, albumAudioId);
+                    if (url != null && !url.isEmpty()) {
+                        resolvedUrlCache.put(key, url);
+                    }
+                }, "folia-preload-url").start();
+            } catch (org.json.JSONException ignored) {
+            }
         }
     }
 
@@ -736,14 +830,16 @@ public class FoliaPlaybackService extends android.app.Service {
         if (!artist.isEmpty()) cachedArtist = artist;
         String album = entry.optString("album", "");
         if (!album.isEmpty()) cachedAlbum = album;
-        // 镜像条目带上服务器侧身份与红心状态（Web 层只为「推镜像时正播着的那首」带
-        // liked/canLike）：原生兜底切歌之后，那颗心与红心兜底才不会一齐消失。
+        // 镜像条目带上服务器侧身份与红心状态（Web 层为每一条都带，见桥接 hook 的
+        // 说明）：原生兜底切歌之后，那颗心与红心兜底才不会一齐消失。
         String entryProvider = entry.optString("providerId", "");
         if (!entryProvider.isEmpty()) cachedProviderId = entryProvider;
         String entrySongId = entry.optString("serverSongId", "");
         if (!entrySongId.isEmpty()) cachedServerSongId = entrySongId;
         if (entry.has("liked")) cachedLiked = entry.optBoolean("liked", false);
         if (entry.has("canLike")) cachedCanLike = entry.optBoolean("canLike", false);
+        long entryDuration = entry.optLong("durationMs", 0L);
+        if (entryDuration > 0L) cachedDurationMs = entryDuration;
         cachedState = PlaybackStateCompat.STATE_PLAYING;
         cachedPlaying = true;
         cachedPositionMs = 0L;
@@ -755,10 +851,64 @@ public class FoliaPlaybackService extends android.app.Service {
         promoteToForeground();
         syncWallpaperAnchor(true);
         String artworkUrl = entry.optString("artworkUrl", "");
-        if (!artworkUrl.isEmpty() && !artworkUrl.equals(pendingArtworkUrl)) {
-            pendingArtworkUrl = artworkUrl;
-            fetchArtwork(artworkUrl);
+        if (!artworkUrl.isEmpty()) {
+            // 叠层那份 WebView 的封面读的是地址（GLES 那层读 base64，下载完在
+            // fetchArtwork 里补），通知栏那张也走这里。
+            top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setCoverUrl(artworkUrl);
+            if (!artworkUrl.equals(pendingArtworkUrl)) {
+                pendingArtworkUrl = artworkUrl;
+                fetchArtwork(artworkUrl);
+            }
         }
+        if (songChanged) {
+            fetchLyricForNativePlayback(songKey,
+                    entryProvider.isEmpty() ? cachedProviderId : entryProvider,
+                    entrySongId.isEmpty() ? cachedServerSongId : entrySongId,
+                    entry.optString("providerMid", ""),
+                    entry.optString("providerHash", ""),
+                    entryDuration);
+        }
+    }
+
+    /**
+     * 原生兜底切歌之后把这首歌的歌词拉回来直接喂给壁纸。
+     *
+     * WebView 冻结时 Web 那条「换歌推整条时间轴」不会来，壁纸与叠层就停在上一首的
+     * 歌词与封面上（用户报的「下一首歌词不会拉、壁纸封面歌词都不改」）。这里用原生
+     * 平台网关（MusicGateway）向平台要 LRC，解成时间轴就地发布 —— 覆盖范围与取流
+     * 地址一致：网易与 QQ。纯音乐 / 拉不到就保持原状（壁纸继续放上一首的歌词，
+     * 总比清空成黑屏好）。
+     */
+    private void fetchLyricForNativePlayback(String songKey, String providerId, String songId,
+                                             String mid, String hash, long durationMs) {
+        if (providerId.isEmpty() || (songId.isEmpty() && mid.isEmpty() && hash.isEmpty())) {
+            return;
+        }
+        final String title = cachedTitle;
+        final String artist = cachedArtist;
+        final String artworkUrl = pendingArtworkUrl;
+        new Thread(() -> {
+            top.izuna.foliamajor.online.MusicGateway.Lyric lyric =
+                    top.izuna.foliamajor.online.MusicGateway.fetchLyric(providerId, songId, mid, hash);
+            if (lyric == null || lyric.mainLrc.isEmpty()) {
+                return;
+            }
+            java.util.List<top.izuna.foliamajor.wallpaper.WallpaperLyricsState.TimedLine> lines =
+                    top.izuna.foliamajor.online.MusicGateway.parseLrc(lyric.mainLrc, lyric.transLrc);
+            if (lines.isEmpty()) {
+                return;
+            }
+            // 解析这一趟网络的时间里可能又切了一首：只认还在放的那首。
+            if (!songKey.equals(cachedSongKey)) {
+                return;
+            }
+            mainHandler.post(() -> {
+                if (!songKey.equals(cachedSongKey)) return;
+                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.publishNativeTrack(
+                        title, artist, artworkUrl, durationMs,
+                        lines.toArray(new top.izuna.foliamajor.wallpaper.WallpaperLyricsState.TimedLine[0]));
+            });
+        }, "folia-native-lyric").start();
     }
 
     /**
@@ -1032,6 +1182,17 @@ public class FoliaPlaybackService extends android.app.Service {
                 }
                 cachedArtwork = bitmap;
                 publishSnapshot();
+                // 封面顺手喂给壁纸 GLES 层：它读的是 base64，WebView 冻结时 Web 抓
+                // base64 那条路不会跑，原生兜底切歌后的封面只能从这里来。
+                try {
+                    java.io.ByteArrayOutputStream coverBuffer = new java.io.ByteArrayOutputStream();
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, coverBuffer);
+                    top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setCoverData(
+                            android.util.Base64.encodeToString(coverBuffer.toByteArray(),
+                                    android.util.Base64.NO_WRAP));
+                } catch (Throwable coverError) {
+                    Log.w(TAG, "Failed to feed the wallpaper cover", coverError);
+                }
                 // 封面补到了也顺手刷新一次 MediaSession：锁屏歌词页上的封面读的是 metadata，
                 // 只刷通知的话系统那边拿到的还是「没有封面」的那一份。
                 applyMetadata();
@@ -1431,6 +1592,8 @@ public class FoliaPlaybackService extends android.app.Service {
     static final String ACTION_UPDATE_QUEUE_MIRROR = "top.izuna.foliamajor.action.UPDATE_QUEUE_MIRROR";
     static final String EXTRA_QUEUE_MIRROR_JSON = "queueMirrorJson";
     static final String EXTRA_QUEUE_MIRROR_INDEX = "queueMirrorIndex";
+    /** 队列没变、只换正播那首：轻量推游标，见 ACTION_UPDATE_QUEUE_MIRROR。 */
+    static final String ACTION_UPDATE_QUEUE_INDEX = "top.izuna.foliamajor.action.UPDATE_QUEUE_INDEX";
     static final String ACTION_UPDATE_STATE = "top.izuna.foliamajor.action.UPDATE_STATE";
     /**
      * 按缓存重建一次 metadata + PlaybackState，不改动任何缓存字段。

@@ -196,6 +196,25 @@ public class FoliaPlaybackPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * 队列没变、只是换了一首正播的：只推游标。全量队列一推几百 KB，不能跟着
+     * 切歌反复过桥（桥只有一条，见 FoliaNativePlayerPlugin 的线程规则）。
+     */
+    @PluginMethod
+    public void setQueueMirrorIndex(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.resolve();
+            return;
+        }
+        Intent intent = new Intent(activity, FoliaPlaybackService.class);
+        intent.setAction(FoliaPlaybackService.ACTION_UPDATE_QUEUE_INDEX);
+        Integer index = call.getInt("index");
+        if (index != null) intent.putExtra(FoliaPlaybackService.EXTRA_QUEUE_MIRROR_INDEX, index);
+        startServiceCompat(activity, intent);
+        call.resolve();
+    }
+
     @PluginMethod
     public void setState(PluginCall call) {
         Activity activity = getActivity();

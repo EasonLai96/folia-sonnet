@@ -203,7 +203,7 @@ import { usePlayerBottomBarPositioningEntry } from './hooks/usePlayerBottomBarPo
 import { PlayerBottomBarLayoutContext } from './components/floating-player/PlayerBottomBarLayoutContext';
 import { useFoliumHostBridge } from './mods/runtime/hostBridge';
 import { useFoliumHostActions } from './mods/runtime/hostActions';
-import { getPrefetchedData, refreshPrefetchAfterQueueEdit } from './services/prefetchService';
+import { refreshPrefetchAfterQueueEdit } from './services/prefetchService';
 import { FoliumStageLayerSlot } from './mods/folium/registries/stageLayers';
 import { errorFields } from './utils/errorText';
 import { runsOnWindows } from './utils/platform';
@@ -1603,15 +1603,15 @@ export default function App() {
         onSeek: (seconds) => seekMainAudioRef.current(seconds),
         isLiked: nativeSongLiked,
         canLike: nativeCanLikeSong,
-        // 通知栏镜像：WebView 冻结后切歌的原生兜底数据源（见桥接 hook 的说明）。
+        // 队列快照：全量交给原生，地址由原生平台网关按需解析（不再依赖预取窗口）。
         queue: playQueue,
         currentAudioUrl: audioSrc,
-        resolvedUrlOf: (song) => {
-            // 预取命中才有地址：没解析过的条目镜像带空 url，原生兜底时会跳过它。
-            const prefetched = getPrefetchedData(song);
-            const url = prefetched?.audioUrl;
-            return url && url !== 'CACHED_IN_DB' ? url : null;
-        },
+        // 每条队列条目的红心状态：同步读账号缓存。原生兜底切到哪一首，
+        // 通知栏那颗心都不会消失。
+        likeStateOf: (song) => ({
+            liked: resolveSongLiked(song, { isLocalSongLiked, starredNavidromeSongIds, likedSongIds }),
+            canLike: !resolveLikeAvailability(song, false, false).disabled,
+        }),
         // 与面板里的喜爱按钮同一个动作：能不能用、状态怎么存都归它，原生不自己记账。
         onToggleLike: handleLike,
         // 原生兜底切歌后 JS 的认领（App 启动拉快照 + syncTo 命令共用这一个入口）：

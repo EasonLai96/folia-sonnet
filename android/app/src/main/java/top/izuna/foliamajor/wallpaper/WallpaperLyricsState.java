@@ -73,6 +73,55 @@ public final class WallpaperLyricsState {
         return lastCoverUrl;
     }
 
+    /**
+     * 原生兜底切歌后由服务直接发布歌词与歌名（见 MusicGateway 的说明）。
+     *
+     * WebView 冻结时 Web 那条 publish（换歌推整条时间轴）不会来，壁纸只能停在上
+     * 一首 —— 这里就地换掉标题、歌手、时间轴与时长，其余外观字段沿用当前快照，
+     * 别让一首歌换到一半把用户选的背景/配色也冲掉。
+     * 位置从 0 起播（原生刚 prepare 完），playing 置真。
+     */
+    public static void publishNativeTrack(String title, String artist, String coverUrl,
+                                          long durationMs, TimedLine[] lines) {
+        if (lines == null || lines.length == 0) {
+            return;
+        }
+        heartbeat();
+        setCoverUrl(coverUrl);
+        Snapshot previous = current;
+        current = new Snapshot(
+                title != null && !title.isEmpty() ? title : previous.title,
+                artist != null && !artist.isEmpty() ? artist : previous.artist,
+                previous.cover,
+                previous.accent, previous.baseColor, previous.motion,
+                previous.backgroundMode, previous.image, previous.font,
+                previous.visualizerMode, previous.blur,
+                previous.showProgress, previous.showTranslation,
+                durationMs > 0L ? durationMs : previous.durationMs,
+                lines, true,
+                SystemClock.elapsedRealtime(), 0L,
+                System.currentTimeMillis());
+    }
+
+    /**
+     * 原生把封面下载下来之后顺手喂给壁纸：GLES 那层的封面是 base64，
+     * WebView 冻结时 Web 抓 base64 那条路不会跑，只能从通知栏那份位图来。
+     */
+    public static void setCoverData(String coverBase64) {
+        if (coverBase64 == null || coverBase64.isEmpty()) {
+            return;
+        }
+        Snapshot previous = current;
+        current = new Snapshot(previous.title, previous.artist, coverBase64,
+                previous.accent, previous.baseColor, previous.motion,
+                previous.backgroundMode, previous.image, previous.font,
+                previous.visualizerMode, previous.blur,
+                previous.showProgress, previous.showTranslation,
+                previous.durationMs, previous.lines, previous.playing,
+                previous.anchorElapsedMs, previous.anchorPositionMs,
+                System.currentTimeMillis());
+    }
+
     public static final class TimedLine {
         public final String text;
         public final long startMs;

@@ -69,11 +69,13 @@ interface FoliaPlaybackPlugin {
   /** 停止播放时收掉前台服务与通知。 */
   stop(): Promise<void>;
   /**
-   * 队列镜像快照：WebView 冻结后通知栏切歌的原生兜底数据源。
-   * JS 活着时每次队列/当前歌变化都推一份（当前 ±10 首、带已解析地址的窗口），
-   * index 是当前歌在窗口里的下标。原生只转存，冻结时才用它。
+   * 队列快照：WebView 冻结后通知栏切歌的原生兜底数据源。
+   * 推**全量队列**（每条带平台身份，不带地址 —— 地址由原生平台网关按需解析，
+   * 也有预取缓存），index 是当前歌的下标。队列本体只在队列真的变了时才推。
    */
   setQueueMirror(options: { queueJson: string; index: number }): Promise<void>;
+  /** 队列没变、只是换了一首正播的：轻量推游标，不过大 JSON。 */
+  setQueueMirrorIndex(options: { index: number }): Promise<void>;
   /**
    * 问原生要当前的状态（原生是播放的真源）。
    * WebView 冻结期间通知栏的镜像换源、原生补写红心都发生在原生侧，JS 醒来后
@@ -143,12 +145,15 @@ type UseCapacitorPlaybackBridgeOptions = {
    * 不认领的话，App 打开时队列还停在旧歌上，与通知栏各说各话。
    */
   onSyncToSong?: (songKey: string, positionMs?: number) => boolean | void;
-  /** 队列快照：镜像兜底的数据源。缺省时不推镜像。 */
+  /** 队列快照：原生兜底切歌的数据源。缺省时不推。 */
   queue?: SongResult[];
-  /** 当前这首歌已解析的播放地址（audioSrc）：镜像里当前条目就用它。 */
+  /** 当前这首歌已解析的播放地址（audioSrc）。 */
   currentAudioUrl?: string | null;
-  /** 队列里其它条目的已解析地址（预取命中的才有）：没有的条目带空 url，原生会跳过。 */
-  resolvedUrlOf?: (song: SongResult) => string | null;
+  /**
+   * 每条队列条目的红心状态（同步读账号缓存，不发网络）：全量队列每一条都带，
+   * 原生兜底切到哪一首，通知栏那颗心都不会消失。
+   */
+  likeStateOf?: (song: SongResult) => { liked: boolean; canLike: boolean } | undefined;
 };
 
 /**
@@ -172,7 +177,7 @@ export const useCapacitorPlaybackBridge = ({
   onToggleLike,
   queue,
   currentAudioUrl,
-  resolvedUrlOf,
+  likeStateOf,
   onSyncToSong,
 }: UseCapacitorPlaybackBridgeOptions): void => {
   const enabled = isCapacitorAndroid();
@@ -306,43 +311,53 @@ export const useCapacitorPlaybackBridge = ({
     });
   }, [enabled, currentSong, cachedCoverUrl, isLiked, canLike]);
 
-  // 队列镜像：WebView 冻结后通知栏切歌的唯一依据。JS 活着时每次队列/当前歌变化
-  // 都把「当前 ±10 首、带已解析地址」的窗口推给原生；冻结时 onSkipToNext/Previous
-  // 的确认计时器发现 JS 没回话，就从这份镜像里取相邻一首直接交给原生播放器。
-  // resolvedUrlOf 是内联函数（每次渲染换身份），走 ref 不进依赖。
-  const mirrorSourceRef = React.useRef({ queue, currentAudioUrl, resolvedUrlOf });
-  mirrorSourceRef.current = { queue, currentAudioUrl, resolvedUrlOf };
+  // 队列快照：WebView 冻结后通知栏切歌的唯一依据。
+  //
+  // 推**全量队列**而不是「当前 ±10」的窗口：地址不再随条目带（原生平台网关按需
+  // 解析，当前这首歌也有预取），窗口就成了人为的天花板 —— 连切几首就到头
+  // （用户报的「下一首了五首就下不去了」），而网关面前队列里每一首都是平等的。
+  // 每一条都带平台身份（网易 id / QQ songmid / 酷狗 hash）与红心状态（likeStateOf
+  // 同步读账号缓存），原生兜底切到哪一首，那颗心都不会消失。
+  //
+  // 全量 JSON 一推几百 KB，桥只有一条 —— 所以只在**队列本体变化**时推；
+  // 换歌只走下面那个轻量游标 effect。likeStateOf 是内联函数，走 ref 不进依赖。
+  const mirrorSourceRef = React.useRef({ queue, likeStateOf, currentSong });
+  mirrorSourceRef.current = { queue, likeStateOf, currentSong };
   React.useEffect(() => {
-    if (!enabled || !currentSong) return;
-    const { queue: list, currentAudioUrl: activeUrl, resolvedUrlOf: urlOf } = mirrorSourceRef.current;
+    if (!enabled) return;
+    const { queue: list, likeStateOf: stateOf, currentSong: activeSong } = mirrorSourceRef.current;
     if (!list || list.length === 0) return;
-    const activeKey = getPlaybackSongKey(currentSong);
-    const index = list.findIndex((song) => getPlaybackSongKey(song) === activeKey);
-    if (index < 0) return;
-    const windowStart = Math.max(0, index - 10);
-    const windowList = list.slice(windowStart, Math.min(list.length, index + 11));
-    const entries = windowList.map((song) => {
-      const isCurrent = getPlaybackSongKey(song) === activeKey;
+    const entries = list.map((song) => {
       const identity = resolveLikeIdentity(song);
+      const likeState = stateOf?.(song);
       return {
         songKey: getPlaybackSongKey(song),
         title: song.name || '',
         artist: getSongArtistLabel(song) || '',
         album: getSongAlbumLabel(song) || '',
         artworkUrl: getSongCoverUrl(song) || '',
-        url: (isCurrent ? activeUrl : urlOf?.(song)) ?? '',
-        // 原生兜底切歌后，服务用这两样维持红心兜底的能力（网易 / QQ 才有）。
+        durationMs: getDurationMs(song),
+        // 原生兜底切歌后，服务用这些身份取流、拉歌词、维持红心（网易 / QQ / 酷狗）。
         providerId: identity.providerId,
         serverSongId: identity.serverSongId,
-        // 红心状态只有「推镜像时正播着的那首」是确定的：镜像推完用户可能切走，
-        // 其它歌在「我喜欢」里的状态这里拿不到，就不带，原生按未知处理（心先藏起来）。
-        ...(isCurrent ? { liked: isLiked, canLike } : {}),
+        providerMid: identity.providerMid,
+        providerHash: identity.providerHash,
+        providerAlbumAudioId: identity.providerAlbumAudioId,
+        liked: likeState?.liked ?? false,
+        canLike: likeState?.canLike ?? false,
       };
     });
-    void FoliaPlayback.setQueueMirror({ queueJson: JSON.stringify(entries), index: index - windowStart });
-    // isLiked/canLike 进依赖：当前条目带的红心状态要跟着收藏变化重推，否则原生兜底
-    // 切歌后拿到的 liked 是推送那一刻的旧值。
-  }, [enabled, currentSong, queue, currentAudioUrl, isLiked, canLike]);
+    const index = activeSong ? list.findIndex((song) => getPlaybackSongKey(song) === getPlaybackSongKey(activeSong)) : -1;
+    void FoliaPlayback.setQueueMirror({ queueJson: JSON.stringify(entries), index });
+  }, [enabled, queue]);
+
+  // 游标：队列没变、换了一首正播的。几百 KB 的全量 JSON 不跟着切歌过桥。
+  React.useEffect(() => {
+    if (!enabled || !currentSong || !queue || queue.length === 0) return;
+    const index = queue.findIndex((song) => getPlaybackSongKey(song) === getPlaybackSongKey(currentSong));
+    if (index < 0) return;
+    void FoliaPlayback.setQueueMirrorIndex({ index });
+  }, [enabled, currentSong, queue]);
 
   // 播放状态：playing 时服务进入前台，这是后台网络不被节流的关键。
   //
@@ -443,20 +458,24 @@ const getDurationMs = (song: SongResult): number => {
 };
 
 /**
- * 红心的原生兜底需要的歌曲身份：平台与平台侧歌曲 id。
+ * 原生播放延续需要的歌曲身份：平台 + 平台侧 id 们。
  *
- * 网易的收藏写入只认数字曲库 id（mediaId 就是它）；QQ 的写入要数字 songId
- * （正规化时存在 providerData.songId，mediaId 多数时候是 songmid，不能拿去猜）。
+ * 网易的收藏与取流只认数字曲库 id（mediaId 就是它）；QQ 的写入要数字 songId
+ * （正规化时存在 providerData.songId，mediaId 多数时候是 songmid，不能拿去猜），
+ * 取流（CgiGetVkey）只认 songmid；酷狗的取流与歌词都只认文件 hash。
  * 本地 / Navidrome / 舞台这些自家人没有平台身份，原生兜底对它们跳过。
  */
 const resolveLikeIdentity = (song: SongResult | null | undefined): {
   providerId: string;
   serverSongId: string;
+  providerMid: string;
+  providerHash: string;
+  providerAlbumAudioId: string;
 } => {
   const sourceRef = song?.sourceRef?.kind === 'online' ? song.sourceRef : undefined;
-  if (!sourceRef) return { providerId: '', serverSongId: '' };
+  if (!sourceRef) return { providerId: '', serverSongId: '', providerMid: '', providerHash: '', providerAlbumAudioId: '' };
   if (sourceRef.providerId === 'netease') {
-    return { providerId: 'netease', serverSongId: String(sourceRef.mediaId ?? '') };
+    return { providerId: 'netease', serverSongId: String(sourceRef.mediaId ?? ''), providerMid: '', providerHash: '', providerAlbumAudioId: '' };
   }
   if (sourceRef.providerId === 'qq') {
     const data = (sourceRef.providerData ?? {}) as Record<string, unknown>;
@@ -465,9 +484,25 @@ const resolveLikeIdentity = (song: SongResult | null | undefined): {
       : (typeof sourceRef.mediaId === 'string' && /^\d{1,15}$/.test(sourceRef.mediaId.trim())
         ? sourceRef.mediaId.trim()
         : '');
-    return { providerId: 'qq', serverSongId: id };
+    // songmid：取流认它。providerData 带了用它的；没带时 mediaId 多半就是 songmid。
+    const mid = typeof data.songmid === 'string' && data.songmid.trim()
+      ? data.songmid.trim()
+      : String(sourceRef.mediaId ?? '');
+    return { providerId: 'qq', serverSongId: id, providerMid: mid, providerHash: '', providerAlbumAudioId: '' };
   }
-  return { providerId: String(sourceRef.providerId), serverSongId: '' };
+  if (sourceRef.providerId === 'kugou') {
+    const data = (sourceRef.providerData ?? {}) as Record<string, unknown>;
+    return {
+      providerId: 'kugou',
+      serverSongId: '',
+      providerMid: '',
+      providerHash: typeof data.hash === 'string' ? data.hash : String(sourceRef.mediaId ?? ''),
+      providerAlbumAudioId: typeof data.albumAudioId === 'string' || typeof data.albumAudioId === 'number'
+        ? String(data.albumAudioId)
+        : '',
+    };
+  }
+  return { providerId: String(sourceRef.providerId), serverSongId: '', providerMid: '', providerHash: '', providerAlbumAudioId: '' };
 };
 
 /**

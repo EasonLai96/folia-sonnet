@@ -1197,6 +1197,37 @@ public class FoliaNativePlugin extends Plugin {
         }
     }
 
+    /**
+     * 原生侧整首歌落盘：从 URL 直接下载进媒体缓存。
+     *
+     * 以前写缓存的是 Web（抓完字节再 PUT 回回环服务），也就是说缓存这件事本身
+     * 跑在 WebView 里 —— 应用退后台 / WebView 冻结时整首播完了也没人写。这里把
+     * 下载挪进原生：谁叫一声都能存，不挑 WebView 的状态。
+     *
+     * 网络在后台线程（桥的线程规则：插件方法不许同步阻塞），落盘结果异步 resolve：
+     * stored = 字节数（0 = 没存，下载失败或被判定为试听片段）。
+     */
+    @PluginMethod
+    public void cacheAudioFromUrl(PluginCall call) {
+        final String cacheKey = call.getString("cacheKey");
+        final String url = call.getString("url");
+        final double limitBytes = call.getDouble("limitBytes", 0d) == null ? 0d : call.getDouble("limitBytes", 0d);
+        final double minDurationMs = call.getDouble("minDurationMs", 0d) == null ? 0d : call.getDouble("minDurationMs", 0d);
+        if (cacheKey == null || cacheKey.isEmpty() || url == null || url.isEmpty()) {
+            call.reject("cacheKey and url are required");
+            return;
+        }
+        if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
+        final LocalAudioServer server = localAudioServer;
+        new Thread(() -> {
+            long stored = server.storeMediaCacheFromUrl(cacheKey, url,
+                    (long) limitBytes, (long) minDurationMs);
+            JSObject result = new JSObject();
+            result.put("stored", stored);
+            call.resolve(result);
+        }, "folia-cache-audio").start();
+    }
+
     @PluginMethod
     public void clearMediaCache(PluginCall call) {
         try {
