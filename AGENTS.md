@@ -80,13 +80,14 @@
 ### CI
 
 - **开 PR 之前**跑 `npm run ci:local`（typecheck + 单测 + `vite build` + 版本约束，与 `.github/workflows/ci.yml` 同一套），红了不许开 PR。Windows 上 `test/unit/mod-system/modSignature.test.ts` 的符号链接用例会因权限失败（要开发者模式/管理员），这是环境限制：其余全绿照常开 PR，这一项以 Linux 的 CI 为准。
-- **开 PR 之后**跑 `gh pr checks <编号> --watch`，全绿才合并；红了当场修，不要交给别人。
-- **合并前必须 review，至少一次 AI review**，而且报告要发在 GitHub 上：`gh pr review <编号> --comment --body-file review.md`。只在聊天里说「看过了」不算，`gh pr view <编号> --json reviews` 里能查到才算。有未处理的 CHANGES_REQUESTED 不许合。
+- **开 PR 之后**盯 CI，全绿才合并：有 gh 用 `gh pr checks <编号> --watch`；没有 gh（或走 SSH 认证）就开 PR 页面的 **Checks** 标签。红了当场修，不要交给别人。
+- **合并前必须 review，至少一次 AI review**，而且报告要发在 GitHub 上：有 gh 用 `gh pr review <编号> --comment --body-file review.md`；没有 gh 就在 **Files changed → Review changes → Comment** 里写。只在聊天里说「看过了」不算，PR 的 Reviews 里能查到才算。有未处理的 CHANGES_REQUESTED 不许合。
+- **`gh` 只是便利工具，不是硬依赖。** 走 SSH 认证、没装 gh、或不想在本机登录 gh 的人都照常提 PR：`npm run pr -- "标题"` 会先跑本地门禁再 push（SSH 用自己的 key），检测不到可用的 gh 时打印 compare 链接，浏览器里点 Create pull request；之后的盯 CI 与写 review 都在网页完成。
 - GitHub 的原生 approval 只能由别人给，AI review 是评论、不会变成 approval：要硬拦就由 owner 在分支保护里开 Require a pull request before merging；要把 AI review 也变成硬门禁，需要给审查账号单独一个 GitHub 身份，或加一个「review 是否存在」的 required check（还没做）。
 - 检查逻辑都放 `ci/`，`.github/workflows/` 只留入口；沿用的旧 workflow 之后逐个替换，新流程不要再直接往 `.github/workflows/` 里加。
 - `.github/workflows/ci.yml`：PR 到 `dev` / `main`，以及这两个分支的 push 都会跑。出包不在这里。
 - 版本约束实现在 `ci/checkVersionPolicy.ts`，单独跑 `npm run check:versions`：平台依赖钉死且根目录与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 Node 版本一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本与 `package.json` 同步。
-- `.github/workflows/android-release.yml`：推 `release/*` 分支、`v*` 标签或手动 `workflow_dispatch` 出签名 APK/AAB；标签与分支名都必须与 `package.json` 的版本一致。签名要 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 secrets，缺了只出未签名包。
+- `.github/workflows/android-release.yml`：推 `release/*` 分支、`v*` 标签或手动 `workflow_dispatch` 出签名 APK/AAB；标签与分支名都必须与 `package.json` 的版本一致。签名要 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 secrets，缺了只出未签名包。配了 secrets 时 CI 会当场校验 keystore 的口令/alias，并对产物 APK 验签、比对证书指纹；换 keystore 必须同时更新那 4 个 secrets 和 workflow 里的 `EXPECTED_CERT_SHA256`（当前证书 `BC:10:0C:6E:…:50:DA`，`keytool -list -v` 可查）。
 
 ### 生成的文件不手改
 

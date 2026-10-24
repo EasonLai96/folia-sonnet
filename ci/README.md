@@ -24,7 +24,7 @@ git switch -c fix/登录超时 origin/dev                  # 1. 从 dev 切一�
 # ...改代码...
 git add -A && git commit -m "fix: 登录超时后不再卡住"    # 2. 提交
 npm run pr -- "fix: 登录超时后不再卡住"                  # 3. 本地门禁 → 推分支 → 建 PR（一条命令）
-gh pr checks <PR号> --watch                             # 4. 盯 CI，绿了再去要 review
+# 4. 盯 CI：有 gh 用 gh pr checks <PR号> --watch，没有就开 PR 页面的 Checks 标签
 ```
 
 `npm run pr` 会做这些事，做不了就当场说清楚原因：
@@ -32,14 +32,18 @@ gh pr checks <PR号> --watch                             # 4. 盯 CI，绿了再
 - 拒绝在 `main` / `dev` 上直接提 PR；
 - 拒绝还有没提交的改动；
 - 先跑 `npm run ci:local`（加 `--skip-ci` 可跳过，但 CI 照样拦你）；
-- `git push -u origin` 当前分支，再 `gh pr create --base dev`；
-- 最后打印「盯 CI」和「要 review」的命令。
+- `git push -u origin` 当前分支（HTTPS 或 SSH 都行，用你 git 自己的凭据）；
+- 有可用的 `gh` 就 `gh pr create --base dev`；没有就打印一个 **compare 链接**，浏览器打开点 Create pull request；
+- 最后打印「盯 CI」和「要 review」的下一步。
 
-没装 `gh`（GitHub 命令行）时：`winget install GitHub.cli`（macOS `brew install gh`），然后 `gh auth login` 按提示走一遍。
+**`gh` 是可选的**，不是硬依赖：
+- 装了且 `gh auth login` 过：全自动，`--watch` 能直接盯 CI；
+- 走 SSH 认证 / 没装 gh / 不想登录：`npm run pr` 照样 push 并打印浏览器链接，之后在 PR 页面的 **Checks** 标签盯 CI、在 **Files changed → Review changes → Comment** 写 review；
+- 想装：`winget install GitHub.cli`（macOS `brew install gh`），再 `gh auth login`。
 
 **Windows 上的已知失败**：`npm run ci:local` 里 `test/unit/mod-system/modSignature.test.ts` 有一条用例要在临时目录建符号链接，没开「开发者模式」或不是管理员时会被 EPERM 拒。不是你改出来的；其余通过就能开 PR，这一项以 Linux 的 CI 为准。
 
-**合并前必须有 review**（至少一次 AI review，必须发在 GitHub 的 PR 上）：`gh pr review <PR号> --comment --body-file review.md`。只在聊天里说「看过了」不算。
+**合并前必须有 review**（至少一次 AI review，必须发在 GitHub 的 PR 上）：有 gh 用 `gh pr review <PR号> --comment --body-file review.md`，没有就在网页 **Files changed → Review changes → Comment** 里写。只在聊天里说「看过了」不算。
 
 ## 加一个检查
 
