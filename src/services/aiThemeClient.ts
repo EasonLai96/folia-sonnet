@@ -12,12 +12,13 @@ import { applyStoredAnimationIntensityToDualTheme } from './themePreferences';
 import { parseAiThemeJsonInput, THEME_GENERATION_PROMPT_PREFIX, buildThemeSourcePrompt } from '../utils/aiThemePrompts';
 import { createAiFetch } from './aiNativeFetch';
 import {
+    aiProtocolOf,
     isAiConfigured,
-    isOpenAiCompatibleProvider,
     readAiSettings,
     resolveAiApiKey,
     resolveAiChatCompletionsUrl,
     resolveAiModel,
+    resolveAnthropicMessagesUrl,
     resolveGeminiGenerateContentUrl,
 } from './aiSettings';
 import { GEMINI_DEFAULT_MODEL } from '../../shared/geminiEndpoint.mjs';
@@ -117,6 +118,63 @@ const describeEmptyResponse = (scope: string, response: Response, choice: unknow
     return `Model returned an empty response (${scope}, status ${response.status}, finish=${finish}, message keys: ${messageKeys})`;
 };
 
+const anthropicHeaders = (apiKey: string): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    // 2023-06-01 stays: the later version only removes fields this app never sends.
+    'anthropic-version': '2023-06-01',
+});
+
+/** Anthropic 的回答是 content 数组里的 text 块；没有就用空串，由调用方报「空响应」。 */
+const extractAnthropicText = (data: unknown): string => {
+    const blocks = (data as { content?: unknown })?.content;
+    return Array.isArray(blocks)
+        ? blocks
+            .map((block) => (block as { type?: unknown; text?: unknown }))
+            .filter((block) => block.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text as string)
+            .join('')
+        : '';
+};
+
+const anthropicThemeRaw = (response: Response, data: unknown): AiThemeRawResponse => {
+    const text = extractAnthropicText(data);
+    if (!text.trim()) {
+        const keys = data && typeof data === 'object' ? Object.keys(data).join('|') : 'none';
+        throw new Error(`Model returned an empty response (anthropic, status ${response.status}, keys: ${keys})`);
+    }
+    const finishReason = typeof (data as { stop_reason?: unknown })?.stop_reason === 'string'
+        ? String((data as { stop_reason: string }).stop_reason)
+        : 'none';
+    return { text, finishReason, status: response.status, textLength: text.length };
+};
+
+const requestAnthropicThemeJson = async (systemPrompt: string, sourcePrompt: string): Promise<AiThemeRawResponse> => {
+    const settings = readAiSettings();
+    const apiKey = resolveAiApiKey(settings);
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+
+    const response = await createAiFetch()(resolveAnthropicMessagesUrl(settings), {
+        method: 'POST',
+        headers: anthropicHeaders(apiKey),
+        body: JSON.stringify({
+            model: resolveAiModel(settings),
+            // max_tokens 把推理也算进去，放宽到与 OpenAI 兼容那路同一个量级。
+            max_tokens: THEME_MAX_OUTPUT_TOKENS,
+            ...(systemPrompt ? { system: systemPrompt } : {}),
+            messages: [{ role: 'user', content: sourcePrompt }],
+        }),
+    });
+
+    if (!response.ok) {
+        const detail = await readErrorDetail(response);
+        throw new Error(`Anthropic API error (${response.status})${detail ? `: ${detail}` : ''}`);
+    }
+
+    const data = await response.json();
+    return anthropicThemeRaw(response, data);
+};
+
 const requestGeminiThemeJson = async (systemPrompt: string, sourcePrompt: string): Promise<AiThemeRawResponse> => {
     const settings = readAiSettings();
     const apiKey = settings.geminiApiKey.trim();
@@ -171,7 +229,7 @@ const requestOpenAiThemeJson = async (systemPrompt: string, sourcePrompt: string
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: sourcePrompt },
             ],
-            temperature: resolveTemperature(settings.openaiApiTemperature),
+            temperature: resolveTemperature(settings.apiTemperature),
             max_tokens: THEME_MAX_OUTPUT_TOKENS,
             // 只有 OpenAI 自己接受 json_schema，其余兼容端点统一要普通 JSON 模式。
             response_format: { type: 'json_object' },
@@ -215,17 +273,18 @@ export const generateThemeWithConfiguredAi = async (
     const snippet = String(lyricsText || '').slice(0, 2000);
     const sourcePrompt = buildThemeSourcePrompt(snippet, options?.isPureMusic === true, options?.songTitle);
     const provider = settings.provider;
-    const model = isOpenAiCompatibleProvider(provider)
-        ? resolveAiModel(settings)
-        : GEMINI_THEME_MODEL;
+    const protocol = aiProtocolOf(provider);
+    const model = protocol === 'gemini' ? GEMINI_THEME_MODEL : resolveAiModel(settings);
     const trigger: AiThemeTrigger = options?.trigger ?? 'unknown';
     const startedAt = Date.now();
     let stage: AiThemeStage = 'request';
 
     try {
-        const raw = isOpenAiCompatibleProvider(provider)
-            ? await requestOpenAiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt)
-            : await requestGeminiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt);
+        const raw = protocol === 'gemini'
+            ? await requestGeminiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt)
+            : protocol === 'anthropic'
+                ? await requestAnthropicThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt)
+                : await requestOpenAiThemeJson(THEME_GENERATION_PROMPT_PREFIX, sourcePrompt);
 
         stage = 'parse';
         let parsed: unknown;
@@ -291,8 +350,39 @@ export const testConfiguredAiConnection = async (): Promise<AiConnectionTestResu
     const startedAt = Date.now();
     const settings = readAiSettings();
 
+    const protocol = aiProtocolOf(settings.provider);
     try {
-        if (isOpenAiCompatibleProvider(settings.provider)) {
+        if (protocol === 'anthropic') {
+            const apiKey = resolveAiApiKey(settings);
+            if (!apiKey) {
+                return { ok: false, durationMs: 0, error: 'ANTHROPIC_API_KEY is not configured' };
+            }
+            const model = resolveAiModel(settings);
+            const response = await createAiFetch()(resolveAnthropicMessagesUrl(settings), {
+                method: 'POST',
+                headers: anthropicHeaders(apiKey),
+                body: JSON.stringify({
+                    model,
+                    max_tokens: 256,
+                    messages: [{ role: 'user', content: 'hello' }],
+                }),
+            });
+            const durationMs = Date.now() - startedAt;
+            if (!response.ok) {
+                const detail = await readErrorDetail(response);
+                return { ok: false, durationMs, status: response.status, model, error: detail || `HTTP ${response.status}` };
+            }
+            const data = await response.json();
+            return {
+                ok: true,
+                durationMs,
+                status: response.status,
+                model,
+                reply: extractAnthropicText(data).trim().slice(0, 200),
+            };
+        }
+
+        if (protocol === 'openai') {
             const apiKey = resolveAiApiKey(settings);
             if (!apiKey) {
                 return { ok: false, durationMs: 0, error: 'OPENAI_API_KEY is not configured' };

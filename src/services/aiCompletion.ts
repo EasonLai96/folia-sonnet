@@ -1,11 +1,12 @@
 import { createAiFetch } from './aiNativeFetch';
 import {
+    aiProtocolOf,
     isAiConfigured,
-    isOpenAiCompatibleProvider,
     readAiSettings,
     resolveAiApiKey,
     resolveAiChatCompletionsUrl,
     resolveAiModel,
+    resolveAnthropicMessagesUrl,
     resolveGeminiGenerateContentUrl,
     type AiProviderId,
 } from './aiSettings';
@@ -78,7 +79,7 @@ export const readAiTarget = (): { target: AiCompletionTarget; configured: boolea
     const configured = isAiConfigured(settings);
     // DeepSeek rides the OpenAI transport with a fixed endpoint: the target
     // keeps its own id so the UI can say which provider answered.
-    if (isOpenAiCompatibleProvider(settings.provider)) {
+    if (aiProtocolOf(settings.provider) !== 'gemini') {
         return {
             target: {
                 provider: settings.provider,
@@ -164,7 +165,7 @@ const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Prom
     const apiUrl = resolveAiChatCompletionsUrl(settings);
     const model = resolveAiModel(settings);
     const requested = Number(request.temperature);
-    const configured = Number.parseFloat(settings.openaiApiTemperature);
+    const configured = Number.parseFloat(settings.apiTemperature);
     const temperature = Number.isFinite(requested)
         ? Math.min(2, Math.max(0, requested))
         : Number.isFinite(configured) ? configured : DEFAULT_TEMPERATURE;
@@ -200,6 +201,44 @@ const runOpenAi = async (request: AiCompletionRequest, send: typeof fetch): Prom
         throw new Error('ai-bad-response (not JSON)');
     });
     const text = extractOpenAiText(payload);
+    if (!text.trim()) throw new Error('ai-empty-response');
+    return text;
+};
+
+const runAnthropic = async (request: AiCompletionRequest, send: typeof fetch): Promise<string> => {
+    const settings = readAiSettings();
+    const apiKey = resolveAiApiKey(settings);
+    if (!apiKey) throw new Error(AI_NOT_CONFIGURED);
+
+    const response = await send(resolveAnthropicMessagesUrl(settings), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            // 2023-06-01 stays: the later version only removes fields this app never sends.
+            'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+            model: resolveAiModel(settings),
+            max_tokens: request.maxTokens ?? 4096,
+            ...(request.system ? { system: request.system } : {}),
+            messages: [{ role: 'user', content: request.prompt }],
+        }),
+        signal: request.signal,
+    });
+
+    if (!response.ok) return failWithResponse(response);
+    const payload = await response.json().catch(() => {
+        throw new Error('ai-bad-response (not JSON)');
+    });
+    const blocks = (payload as { content?: unknown })?.content;
+    const text = Array.isArray(blocks)
+        ? blocks
+            .map((block) => (block as { type?: unknown; text?: unknown }))
+            .filter((block) => block.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text as string)
+            .join('')
+        : '';
     if (!text.trim()) throw new Error('ai-empty-response');
     return text;
 };
@@ -264,9 +303,11 @@ export const requestAiCompletion = async (request: AiCompletionRequest): Promise
          * 它判成 Gemini，于是去读空的 geminiApiKey 并抛「未配置」。表现就是：测试连接
          * 明明成功（那条路认的是 isOpenAiCompatibleProvider），点生成却说没配置密钥。
          */
-        const text = isOpenAiCompatibleProvider(target.provider)
-            ? await runOpenAi(request, send)
-            : await runGemini(request, send);
+        const text = aiProtocolOf(target.provider) === 'gemini'
+            ? await runGemini(request, send)
+            : aiProtocolOf(target.provider) === 'anthropic'
+                ? await runAnthropic(request, send)
+                : await runOpenAi(request, send);
         return { text, target };
     } catch (error) {
         if (error instanceof Error && error.message.startsWith('ai-')) throw error;

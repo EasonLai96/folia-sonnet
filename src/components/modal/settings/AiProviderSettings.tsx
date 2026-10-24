@@ -4,6 +4,9 @@ import { useTranslation } from 'react-i18next';
 import {
     readAiSettings,
     writeAiSettings,
+    AI_PROVIDER_IDS,
+    aiPresetOf,
+    aiProtocolOf,
     type AiProviderId,
 } from '../../../services/aiSettings';
 import { GEMINI_DEFAULT_API_BASE } from '../../../../shared/geminiEndpoint.mjs';
@@ -16,7 +19,7 @@ import {
     updateFoliaCloudSettings,
 } from '../../../services/foliaCloud';
 import { createAiFetch } from '../../../services/aiNativeFetch';
-import { Toggle } from './kit';
+import { Select, Toggle } from './kit';
 import {
     getDirectorStateVersion,
     readDirectorSettings,
@@ -33,6 +36,10 @@ import {
 // 安卓/网页版没有 Electron 主进程，AI 凭据由用户自己填并保存在本机 —— 这是「AI 主题」在
 // App 里能用的前提（generateThemeFromLyrics 的第三条路，见 services/aiThemeClient.ts）。
 // 桌面版沿用主进程的 AI 设置，这里不参与。
+//
+// 界面与上游桌面版同一套（服务商一个下拉，字段随服务商变），服务商清单也同一份
+// （shared/ai/providerRegistry.mjs）；差别只在凭据放哪 —— 上游交主进程保存，这里即改即存
+// 到本机。每家自己的 Key、模型与站点分开记，切过去再切回来都还在。
 
 type AiProviderSettingsProps = {
     settingsCardClass: string;
@@ -51,21 +58,18 @@ const CLOUD_CACHE_PROBE_KEY = '00000000000000000000000000000000';
  * 选完供应商，下一步就是去拿 Key。
  *
  * 各家开放平台的入口都不好找，而且改过好几次 —— 与其让用户自己去搜，不如把链接
- * 直接摆在选项下面。
+ * 直接摆在选项下面。没有把握的（站点要登录才看得到、或经常改版）就不给，别指错路。
  */
-const PROVIDER_CONSOLE_URLS: Record<AiProviderId, string> = {
+const PROVIDER_CONSOLE_URLS: Partial<Record<AiProviderId, string>> = {
     gemini: 'https://aistudio.google.com/apikey',
     deepseek: 'https://platform.deepseek.com/api_keys',
     openai: 'https://platform.openai.com/api-keys',
+    anthropic: 'https://console.anthropic.com/settings/keys',
+    kimi: 'https://platform.moonshot.cn/console/api-keys',
+    glm: 'https://open.bigmodel.cn/usercenter/apikeys',
+    qwen: 'https://bailian.console.aliyun.com/?apiKey=1#/api-key',
+    mimo: 'https://platform.xiaomimimo.com/apikey',
 };
-
-const providerLabelOf = (provider: AiProviderId, t: (key: string) => string): string => (
-    provider === 'deepseek'
-        ? 'DeepSeek'
-        : provider === 'openai'
-            ? t('options.otherCompatibleApi')
-            : 'Google Gemini'
-);
 
 const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardClass, isDaylight }) => {
     const { t } = useTranslation();
@@ -167,22 +171,29 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
         updateDirectorSettings({ blockedModes: next });
     };
 
-    const renderProviderOption = (id: AiProviderId, label: string) => {
-        const selected = settings.provider === id;
-        return (
-            <button
-                key={id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => update({ provider: id })}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${selected
-                    ? 'bg-white/15 text-[var(--text-primary)]'
-                    : 'opacity-55 hover:opacity-85 text-[var(--text-primary)]'}`}
-            >
-                {label}
-            </button>
-        );
-    };
+    /* 一行设置：左边名字，右边控件（与上游桌面版同一个排法）。 */
+    const renderRow = (label: string, control: React.ReactNode, hint?: string) => (
+        <div className="space-y-1.5 text-left">
+            <div className="flex items-center justify-between gap-4">
+                <span className="text-sm opacity-70 shrink-0" style={{ color: 'var(--text-secondary)' }}>{label}</span>
+                {control}
+            </div>
+            {hint && (
+                <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>{hint}</span>
+            )}
+        </div>
+    );
+
+    const provider = settings.provider;
+    const preset = aiPresetOf(provider);
+    const protocol = aiProtocolOf(provider);
+    const endpoints = preset?.endpoints ?? [];
+    const currentBaseUrl = provider === 'custom'
+        ? settings.customApiUrl.trim()
+        : settings.apiBaseUrls[provider]?.trim() || preset?.baseUrl || '';
+    const activeEndpoint = endpoints.find((endpoint) => endpoint.baseUrl === currentBaseUrl);
+    const consoleUrl = PROVIDER_CONSOLE_URLS[provider];
+    const apiKey = provider === 'gemini' ? settings.geminiApiKey : settings.apiKeys[provider] ?? '';
 
     return (
         <div className={`rounded-xl border overflow-hidden ${settingsCardClass}`}>
@@ -196,152 +207,138 @@ const AiProviderSettings: React.FC<AiProviderSettingsProps> = ({ settingsCardCla
                         {t('options.aiThemeDesc')}
                     </div>
                 </div>
-                <div className={`flex rounded-xl border p-1 shrink-0 ${isDaylight ? 'bg-black/[0.05] border-black/10' : 'bg-white/5 border-white/5'}`}>
-                    {renderProviderOption('gemini', 'Google Gemini')}
-                    {renderProviderOption('deepseek', 'DeepSeek')}
-                    {renderProviderOption('openai', t('options.otherCompatibleApi'))}
-                </div>
             </div>
 
-            <div className="px-4 pb-3 text-left">
-                <a
-                    href={PROVIDER_CONSOLE_URLS[settings.provider]}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-1 text-[11px] font-medium underline underline-offset-2 opacity-60 hover:opacity-100 transition-opacity"
-                    style={{ color: 'var(--text-secondary)' }}
-                >
-                    {t('options.openProviderConsole', { provider: providerLabelOf(settings.provider, t) })}
-                    <ExternalLink size={11} aria-hidden="true" />
-                </a>
-            </div>
+            <div className={`p-4 space-y-4 border-b ${rowDividerClass}`}>
+                {renderRow(
+                    t('options.aiProvider'),
+                    <Select<AiProviderId>
+                        value={provider}
+                        options={AI_PROVIDER_IDS.map((id) => ({ value: id, label: t('options.aiProvider_' + id) }))}
+                        onChange={(id) => update({ provider: id })}
+                        name={t('options.aiProvider')}
+                    />,
+                )}
+                {endpoints.length > 1 && provider !== 'custom' && renderRow(
+                    t('options.aiEndpoint'),
+                    <Select
+                        value={activeEndpoint?.id ?? ''}
+                        options={[
+                            ...(activeEndpoint ? [] : [{ value: '', label: currentBaseUrl }]),
+                            ...endpoints.map((endpoint) => ({ value: endpoint.id, label: t('options.aiEndpoint_' + endpoint.id) })),
+                        ]}
+                        onChange={(id) => {
+                            const next = endpoints.find((endpoint) => endpoint.id === id);
+                            if (next) update({ apiBaseUrls: { ...settings.apiBaseUrls, [provider]: next.baseUrl } });
+                        }}
+                        name={t('options.aiEndpoint')}
+                    />,
+                )}
+                {provider === 'custom' && renderRow(
+                    t('options.openaiApiUrl'),
+                    <input
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={settings.customApiUrl}
+                        onChange={(event) => update({ customApiUrl: event.target.value })}
+                        placeholder="https://api.openai.com/v1 or https://api.deepseek.com"
+                        className={fieldClass}
+                        style={{ color: 'var(--text-primary)' }}
+                    />,
+                )}
+                {provider === 'gemini' && renderRow(
+                    t('options.geminiApiUrl'),
+                    <input
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={settings.geminiApiUrl}
+                        onChange={(event) => update({ geminiApiUrl: event.target.value })}
+                        placeholder={GEMINI_DEFAULT_API_BASE}
+                        className={fieldClass}
+                        style={{ color: 'var(--text-primary)' }}
+                    />,
+                    t('options.geminiApiUrlDesc'),
+                )}
 
-            <div className={`p-4 space-y-3 border-b ${rowDividerClass}`}>
-                {settings.provider === 'deepseek' ? (
-                    /* DeepSeek is an OpenAI-compatible endpoint with a fixed
-                     * address and a known flash model, so the whole form is
-                     * one field: the key. */
-                    <label className="block space-y-1 text-left">
-                        <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                            {t('options.deepseekApiKey')}
+                <div className="space-y-1.5 text-left">
+                    <label className="block space-y-1">
+                        <span className="text-sm opacity-70" style={{ color: 'var(--text-secondary)' }}>
+                            {t('options.aiApiKey')}
+                            {provider !== 'custom' && preset?.label ? ` · ${preset.label}` : ''}
                         </span>
                         <input
                             type="password"
                             autoComplete="off"
                             spellCheck={false}
-                            value={settings.deepseekApiKey}
-                            onChange={(event) => update({ deepseekApiKey: event.target.value })}
-                            placeholder="sk-..."
+                            value={apiKey}
+                            onChange={(event) => update(provider === 'gemini'
+                                ? { geminiApiKey: event.target.value }
+                                : { apiKeys: { ...settings.apiKeys, [provider]: event.target.value } })}
+                            placeholder={provider === 'gemini' ? 'AIza...' : 'sk-...'}
                             className={fieldClass}
                             style={{ color: 'var(--text-primary)' }}
                         />
-                        <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
-                            {t('options.deepseekApiKeyDesc')}
-                        </span>
                     </label>
-                ) : settings.provider === 'gemini' ? (
-                    <>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.geminiApiKey')}
-                            </span>
-                            <input
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                                value={settings.geminiApiKey}
-                                onChange={(event) => update({ geminiApiKey: event.target.value })}
-                                placeholder="AIza..."
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                        </label>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.geminiApiUrl')}
-                            </span>
-                            <input
-                                type="text"
-                                autoComplete="off"
-                                spellCheck={false}
-                                value={settings.geminiApiUrl}
-                                onChange={(event) => update({ geminiApiUrl: event.target.value })}
-                                placeholder={GEMINI_DEFAULT_API_BASE}
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                            <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.geminiApiUrlDesc')}
-                            </span>
-                        </label>
-                    </>
-                ) : (
-                    <>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.openaiApiUrl')}
-                            </span>
-                            <input
-                                type="text"
-                                autoComplete="off"
-                                spellCheck={false}
-                                value={settings.openaiApiUrl}
-                                onChange={(event) => update({ openaiApiUrl: event.target.value })}
-                                placeholder="https://api.openai.com/v1 or https://api.deepseek.com"
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                        </label>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.openaiApiModel')}
-                            </span>
-                            <input
-                                type="text"
-                                autoComplete="off"
-                                spellCheck={false}
-                                value={settings.openaiApiModel}
-                                onChange={(event) => update({ openaiApiModel: event.target.value })}
-                                placeholder="gpt-5.6-luna / deepseek-v4-flash"
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                            <span className="block text-[10px] opacity-45" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.openaiApiModelDesc')}
-                            </span>
-                        </label>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.openaiApiTemperature')}
-                            </span>
-                            <input
-                                type="number"
-                                min="0"
-                                max="2"
-                                step="0.1"
-                                value={settings.openaiApiTemperature}
-                                onChange={(event) => update({ openaiApiTemperature: event.target.value })}
-                                placeholder="0.7"
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                        </label>
-                        <label className="block space-y-1 text-left">
-                            <span className="text-xs opacity-60" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.openaiApiKey')}
-                            </span>
-                            <input
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                                value={settings.openaiApiKey}
-                                onChange={(event) => update({ openaiApiKey: event.target.value })}
-                                placeholder="sk-..."
-                                className={fieldClass}
-                                style={{ color: 'var(--text-primary)' }}
-                            />
-                        </label>
-                    </>
+                    {consoleUrl && (
+                        <a
+                            href={consoleUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="inline-flex items-center gap-1 text-[11px] font-medium underline underline-offset-2 opacity-60 hover:opacity-100 transition-opacity"
+                            style={{ color: 'var(--text-secondary)' }}
+                        >
+                            {t('options.openProviderConsole', { provider: t('options.aiProvider_' + provider) })}
+                            <ExternalLink size={11} aria-hidden="true" />
+                        </a>
+                    )}
+                </div>
+
+                {protocol !== 'gemini' && renderRow(
+                    t('options.aiModel'),
+                    <input
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={settings.apiModels[provider] ?? ''}
+                        onChange={(event) => update({ apiModels: { ...settings.apiModels, [provider]: event.target.value } })}
+                        placeholder={preset?.recommendedModel || 'gpt-5.6-luna / deepseek-v4-flash'}
+                        className={fieldClass}
+                        style={{ color: 'var(--text-primary)' }}
+                    />,
+                    t('options.openaiApiModelDesc'),
+                )}
+                {protocol === 'openai' && preset?.temperature && renderRow(
+                    t('options.openaiApiTemperature'),
+                    <input
+                        type="number"
+                        min={preset.temperature.min}
+                        max={preset.temperature.max}
+                        step="0.1"
+                        value={settings.apiTemperature}
+                        onChange={(event) => update({ apiTemperature: event.target.value })}
+                        placeholder="0.7"
+                        className={`${fieldClass} max-w-[140px]`}
+                        style={{ color: 'var(--text-primary)' }}
+                    />,
+                )}
+                {protocol === 'openai' && preset?.stream && (
+                    <div className="flex items-center justify-between gap-4 text-left">
+                        <div className="space-y-1 min-w-0">
+                            <div className="text-sm opacity-70" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.openaiApiStream')}
+                            </div>
+                            <div className="text-xs opacity-50 max-w-[380px]" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.openaiApiStreamDesc')}
+                            </div>
+                        </div>
+                        <Toggle
+                            checked={settings.apiStream}
+                            onChange={(next) => update({ apiStream: next })}
+                            label={t('options.openaiApiStream')}
+                        />
+                    </div>
                 )}
 
                 <div className="flex flex-wrap items-center gap-3 text-left">
