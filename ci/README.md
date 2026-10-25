@@ -7,6 +7,7 @@
 - `checkVersionPolicy.ts`：版本约束检查，`npm run check:versions`。CI 的 `version-policy` job 和 `test/unit/versionPolicy.test.ts` 跑的是同一份实现。
   查的是：平台依赖钉死且与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 `node-version` 一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本和 `package.json` 同步。
 - `uiPolicy.ts`：两条重构门禁。`npm run check:ui` 禁止在 `src/components/ui/` 与设置页 kit 之外手写 `<button>/<input>/<select>/<textarea>`；`npm run check:size` 禁止文件超过 800 行。基线 `uiControlBaseline.json`、`fileSizeBaseline.json` 只许变小，收紧时跑 `node ci/uiPolicy.ts all --update`。
+- `checkSecrets.ts`：密钥泄漏门禁。`node ci/checkSecrets.ts` 扫 `.env.example` 与 `src/`、`electron/`、`shared/`、`api/`：名字里带 KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/AUTH 的 `VITE_` 变量（Vite 会把值内联进前端包），以及 `sk-`、`AIza`、`ghp_`、`github_pat_`、`xox[baprs]-`、`Bearer` 这类明文密钥形态；`node ci/checkSecrets.ts --dist dist` 在打包之后扫产物（CI 的 `build-web` 跑这条），查上面的形态和产物里出现的密钥环境变量值。假值走 `secretsAllowlist.json`，每条必须写理由。检查项清单与规则见 `docs/contracts/secrets-guard.md`。
 
 ## 为什么入口还在 .github/workflows
 
