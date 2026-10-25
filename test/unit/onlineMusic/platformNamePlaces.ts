@@ -50,7 +50,7 @@ export const PLATFORM_NAME_PLACES: Record<string, PlatformNamePlace> = {
     'src/components/app/appWiring/useAppAccountsAndStage.ts': { n: { netease: 5 }, kind: 'question', why: 'mounts the hook that hands out one platform\'s account (useNeteaseLibrary), from App.tsx' },
     'src/components/app/appWiring/useAppPlaybackQueue.ts': { n: { netease: 1, kugou: 1 }, kind: 'doc' },
     'src/components/app/command-palette-context/buildSettingsCommandContext.ts': { n: { netease: 2 }, kind: 'stored', why: 'the stored setting neteaseScrobbleEnabled and its i18n keys' },
-    'src/components/app/home/explore/exploreFeedMemory.ts': { n: { ytm: 1 }, kind: 'doc' },
+    'src/utils/exploreFeedMemory.ts': { n: { ytm: 1 }, kind: 'doc' },
     'src/components/app/home/explore/recentPlays.ts': { n: { ytm: 1 }, kind: 'doc' },
     'src/components/app/home/gridViewCollectionAdapters.ts': { n: { netease: 1 }, kind: 'doc' },
     'src/components/app/playback/bridges/usePlaybackReporter.ts': { n: { netease: 1 }, kind: 'stored', why: 'the stored setting neteaseScrobbleEnabled' },
