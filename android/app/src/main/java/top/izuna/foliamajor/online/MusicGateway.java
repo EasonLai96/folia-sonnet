@@ -445,6 +445,588 @@ public final class MusicGateway {
         }
     }
 
+    /** 平台「我喜欢」名单的缓存时长（各平台共用）。 */
+    private static final long LIKED_TTL_MS = 10 * 60_000L;
+
+    /**
+     * 各平台「我喜欢」名单查询的统一入口：歌在不在平台自己的名单里。
+     * 名单拿不到回 null（调用方保持原状），跟 {@link #neteaseIsLiked} 一个约定。
+     *
+     * 身份字段的对应关系（镜像条目里各平台都有的那几个）：网易/汽水/飞牛认
+     * serverSongId；QQ 认 songmid（providerMid），数字 id 兜底；酷狗认文件 hash
+     * （providerHash），mixsongid/album_audio_id 兜底。
+     */
+    public static Boolean likedListContains(String providerId, String songId, String mid, String hash) {
+        if (providerId == null) {
+            return null;
+        }
+        try {
+            switch (providerId) {
+                case "netease":
+                    return neteaseIsLiked(songId);
+                case "qq":
+                    return qqIsLiked(songId, mid);
+                case "kugou":
+                    return kugouIsLiked(hash, songId);
+                case "qishui":
+                    return qishuiIsLiked(songId);
+                case "feiniu":
+                    return feiniuIsLiked(songId);
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "likedListContains failed (" + providerId + ")", error);
+        }
+        return null;
+    }
+
+    /**
+     * 「我喜欢」名单缓存：按身份（uin / userid / 凭据串）隔离，换账号自动作废；
+     * 拉失败时同身份沿用旧名单（null = 从没拉到过）。加锁在实例上，五家互不堵。
+     */
+    private static final class LikedList {
+        private final Object lock = new Object();
+        private String identity;
+        private java.util.Set<String> ids;
+        private long readAtMs;
+
+        java.util.Set<String> snapshot(String who, java.util.function.Supplier<java.util.Set<String>> fetcher) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            java.util.Set<String> cached = ids;
+            if (cached != null && who != null && who.equals(identity) && now - readAtMs < LIKED_TTL_MS) {
+                return cached;
+            }
+            synchronized (lock) {
+                now = android.os.SystemClock.elapsedRealtime();
+                cached = ids;
+                if (cached != null && who != null && who.equals(identity) && now - readAtMs < LIKED_TTL_MS) {
+                    return cached;
+                }
+                java.util.Set<String> fresh = fetcher.get();
+                if (fresh != null) {
+                    identity = who;
+                    ids = fresh;
+                    readAtMs = now;
+                    return fresh;
+                }
+                // 拉失败沿用旧名单，但只有同身份的才可信（换了账号旧名单是别人的）。
+                return who != null && who.equals(identity) ? ids : null;
+            }
+        }
+    }
+
+    private static final LikedList qqLikedList = new LikedList();
+    private static final LikedList kugouLikedList = new LikedList();
+    private static final LikedList qishuiLikedList = new LikedList();
+    private static final LikedList feiniuLikedList = new LikedList();
+
+    // ==================== QQ「我喜欢」名单（CgiGetDiss dirid 201） ====================
+
+    private static Boolean qqIsLiked(String songId, String mid) {
+        String cleanMid = mid == null ? "" : mid.trim();
+        long id = parseSongId(songId);
+        if (cleanMid.isEmpty() && id <= 0) {
+            return null;
+        }
+        String cookie = cookieFor("https://u.y.qq.com/");
+        Map<String, String> parsed = LikeFallback.parseCookie(cookie);
+        long uin = qqUinOf(parsed);
+        if (uin <= 0) {
+            return null;
+        }
+        java.util.Set<String> list = qqLikedList.snapshot(String.valueOf(uin), () -> fetchQQLikedList(cookie, parsed, uin));
+        if (list == null) {
+            return null;
+        }
+        if (!cleanMid.isEmpty() && list.contains(cleanMid)) {
+            return Boolean.TRUE;
+        }
+        return id > 0 && list.contains(String.valueOf(id)) ? Boolean.TRUE : Boolean.FALSE;
+    }
+
+    /**
+     * 照 folia.js 的 user_liked_songs 主通道：musicu CgiGetDiss，dirid 201 就是
+     * 「我喜欢」歌单。song_num 一页 100（JS 那边 clamp 过的上限），封顶 8 页 ——
+     * 拉到封顶还没完就放弃（回 null 不缓存）：半份名单会把手里的歌错判成「没收藏」。
+     */
+    private static java.util.Set<String> fetchQQLikedList(String cookie, Map<String, String> parsed, long uin) {
+        String encryptedUin = LikeFallback.firstNonBlank(parsed,
+                "encryptUin", "encrypt_uin", "str_musicid", "wxuin");
+        if (encryptedUin == null || encryptedUin.isEmpty()) {
+            encryptedUin = String.valueOf(uin);
+        }
+        java.util.Set<String> out = new java.util.HashSet<>();
+        try {
+            for (int page = 0; page < 8; page++) {
+                JSONObject param = new JSONObject()
+                        .put("disstid", 0)
+                        .put("dirid", 201)
+                        .put("tag", true)
+                        .put("song_begin", page * 100)
+                        .put("song_num", 100)
+                        .put("userinfo", true)
+                        .put("orderlist", true)
+                        .put("enc_host_uin", encryptedUin);
+                JSONObject payload = new JSONObject()
+                        .put("comm", qqComm(cookie, 24))
+                        .put("req_0", new JSONObject()
+                                .put("module", "music.srfDissInfo.DissInfo")
+                                .put("method", "CgiGetDiss")
+                                .put("param", param));
+                JSONObject body = musicuPost(payload, cookie);
+                JSONObject block = body == null ? null : body.optJSONObject("req_0");
+                if (block == null || block.optInt("code", -1) != 0) {
+                    return null;
+                }
+                JSONObject data = block.optJSONObject("data");
+                JSONArray songs = data == null ? null
+                        : (data.optJSONArray("songlist") != null ? data.optJSONArray("songlist")
+                        : data.optJSONArray("songList"));
+                if (songs == null) {
+                    return null;
+                }
+                for (int i = 0; i < songs.length(); i++) {
+                    JSONObject song = songs.optJSONObject(i);
+                    if (song == null) continue;
+                    String songMid = song.optString("mid", "");
+                    if (!songMid.isEmpty()) out.add(songMid);
+                    long songId = song.optLong("id", -1L);
+                    if (songId > 0) out.add(String.valueOf(songId));
+                }
+                long total = data.optLong("total_song_num", data.optLong("total", -1L));
+                boolean hasMore = data.optBoolean("hasmore", false)
+                        || (total > 0 && (page + 1) * 100 < total);
+                if (!hasMore || songs.length() == 0) {
+                    Log.i(TAG, "qq liked list refreshed (" + out.size() + " songs)");
+                    return out;
+                }
+                if (page == 7) {
+                    // 封顶了还没完：半份名单不可信。
+                    Log.i(TAG, "qq liked list capped at " + out.size() + ", giving up");
+                    return null;
+                }
+            }
+            return out;
+        } catch (Exception error) {
+            Log.w(TAG, "qq liked list fetch failed", error);
+            return null;
+        }
+    }
+
+    // ==================== 酷狗「我喜欢」名单（cloudlist 签名直连） ====================
+
+    private static Boolean kugouIsLiked(String hash, String songId) {
+        String cleanHash = hash == null ? "" : hash.trim().toLowerCase();
+        String cleanSongId = songId == null ? "" : songId.trim();
+        if (cleanHash.isEmpty() && cleanSongId.isEmpty()) {
+            return null;
+        }
+        String cookie = cookieFor("https://www.kugou.com/");
+        Map<String, String> parsed = LikeFallback.parseCookie(cookie);
+        String userId = digitsOr(LikeFallback.firstNonBlank(parsed, "userid", "KugooID"), "0");
+        String token = LikeFallback.firstNonBlank(parsed, "token", "t");
+        if ("0".equals(userId) || token.isEmpty()) {
+            return null;
+        }
+        java.util.Set<String> list = kugouLikedList.snapshot(userId,
+                () -> fetchKugouLikedList(parsed, userId, token));
+        if (list == null) {
+            return null;
+        }
+        if (!cleanHash.isEmpty() && list.contains(cleanHash)) {
+            return Boolean.TRUE;
+        }
+        String digits = digitsOr(cleanSongId, "");
+        return !digits.isEmpty() && !digits.equals("0") && list.contains(digits)
+                ? Boolean.TRUE : Boolean.FALSE;
+    }
+
+    /** 「我喜欢」歌单的 listid（进程内缓存；照 JS fetchKGFavoriteListId 的 cloudlist 通道）。 */
+    private static volatile String kgFavListId = null;
+    private static volatile String kgFavListIdUser = null;
+    private static volatile long kgFavListIdAtMs = 0L;
+
+    private static String fetchKgFavoriteListId(Map<String, String> parsed, String userId, String token) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        String cached = kgFavListId;
+        if (cached != null && !cached.isEmpty() && userId.equals(kgFavListIdUser)
+                && now - kgFavListIdAtMs < LIKED_TTL_MS) {
+            return cached;
+        }
+        for (int type : new int[]{2, 0}) {
+            try {
+                // body 的 key 顺序照 JS（JSON.stringify 按插入序）——签名按服务端收到的字节算。
+                String bodyJson = "{\"userid\":" + userId + ",\"token\":\"" + jsonEscape(token)
+                        + "\",\"total_ver\":979,\"type\":" + type + ",\"page\":1,\"pagesize\":50}";
+                JSONObject body = kgPostCloudlist("/v7/get_all_list", bodyJson, true, parsed, userId, token);
+                JSONArray lists = extractKgCloudArray(body);
+                if (lists == null) continue;
+                String listId = "";
+                int bestScore = -1;
+                for (int i = 0; i < lists.length(); i++) {
+                    JSONObject item = lists.optJSONObject(i);
+                    if (item == null) continue;
+                    int score = scoreKgFavoriteList(item);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        String candidate = kgPlaylistListId(item);
+                        if (!candidate.isEmpty()) listId = candidate;
+                    }
+                }
+                if (!listId.isEmpty()) {
+                    kgFavListId = listId;
+                    kgFavListIdUser = userId;
+                    kgFavListIdAtMs = now;
+                    return listId;
+                }
+            } catch (Exception ignored) {
+                // 换下一个 type 再试。
+            }
+        }
+        return null;
+    }
+
+    /** 照 JS scoreKGFavoriteList：名字/标记打分，挑最像「我喜欢」的那个。 */
+    private static int scoreKgFavoriteList(JSONObject item) {
+        String name = firstNonBlank2(item, "name", "listname", "specialname", "list_name");
+        int score;
+        if (name.equalsIgnoreCase("我喜欢")) {
+            score = 1000;
+        } else if (name.contains("我喜欢")) {
+            score = 800;
+        } else if (item.optInt("is_favorite", 0) == 1) {
+            score = 700;
+        } else if (item.optInt("is_default", 0) == 1) {
+            score = 500;
+        } else if (name.matches("(?i)默认收藏|红心|^favorite$")) {
+            score = 300;
+        } else if ("2".equals(kgPlaylistListId(item)) && item.optInt("type", -1) != 1) {
+            score = 200;
+        } else {
+            return -1;
+        }
+        int count = 0;
+        for (String key : new String[]{"count", "song_count", "songcount", "count_total",
+                "total", "song_num", "trackCount", "track_count"}) {
+            int value = item.optInt(key, 0);
+            if (value > 0) {
+                count = value;
+                break;
+            }
+        }
+        return score + Math.min(500, count);
+    }
+
+    private static String kgPlaylistListId(JSONObject item) {
+        String direct = firstNonBlank2(item, "listid", "list_id", "global_list_id", "listId");
+        if (!direct.isEmpty()) return direct;
+        String globalId = firstNonBlank2(item, "global_collection_id", "globalCollectionId", "gid");
+        Matcher matcher = Pattern.compile("^collection_\\d+_\\d+_(\\d+)_\\d+$",
+                Pattern.CASE_INSENSITIVE).matcher(globalId);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /** 照 JS extractKGCloudLists：响应里挑第一个像列表的数组。 */
+    private static JSONArray extractKgCloudArray(JSONObject body) {
+        if (body == null) return null;
+        JSONArray direct = body.optJSONArray("info");
+        if (direct != null) return direct;
+        JSONObject data = body.optJSONObject("data");
+        if (data != null) {
+            for (String key : new String[]{"info", "files", "songs", "list", "lists",
+                    "playlist", "playlists", "list_info", "listInfo", "info_list",
+                    "collection_list", "collections"}) {
+                JSONArray value = data.optJSONArray(key);
+                if (value != null && value.length() > 0) return value;
+            }
+            for (String key : new String[]{"info", "files", "songs", "list", "lists"}) {
+                JSONArray value = data.optJSONArray(key);
+                if (value != null) return value;
+            }
+            JSONObject nested = data.optJSONObject("data");
+            if (nested != null) {
+                for (String key : new String[]{"info", "list", "files"}) {
+                    JSONArray value = nested.optJSONArray(key);
+                    if (value != null && value.length() > 0) return value;
+                }
+            }
+        }
+        for (String key : new String[]{"info", "list", "lists", "files"}) {
+            JSONArray value = body.optJSONArray(key);
+            if (value != null && value.length() > 0) return value;
+        }
+        return null;
+    }
+
+    private static java.util.Set<String> fetchKugouLikedList(Map<String, String> parsed,
+                                                             String userId, String token) {
+        try {
+            String listId = fetchKgFavoriteListId(parsed, userId, token);
+            if (listId == null || listId.isEmpty()) {
+                return null;
+            }
+            java.util.Set<String> out = new java.util.HashSet<>();
+            // 两页封顶 1000 首（JS 单页 500）；没拉完同样回 null 不缓存。
+            for (int page = 1; page <= 2; page++) {
+                String bodyJson = "{\"listid\":" + digitsOr(listId, "0") + ",\"page\":" + page
+                        + ",\"pagesize\":500,\"type\":0}";
+                JSONObject body = kgPostCloudlist("/v2/get_list_all_file", bodyJson, false, parsed, userId, token);
+                JSONArray tracks = extractKgCloudArray(body);
+                if (tracks == null || tracks.length() == 0) {
+                    return page == 1 ? null : out;
+                }
+                for (int i = 0; i < tracks.length(); i++) {
+                    JSONObject track = tracks.optJSONObject(i);
+                    if (track == null) continue;
+                    String hash = firstNonBlank2(track, "hash", "FileHash", "HASH").toLowerCase();
+                    if (!hash.isEmpty()) out.add(hash);
+                    String mixId = firstNonBlank2(track, "mixsongid", "album_audio_id",
+                            "AlbumAudioID", "MixSongID");
+                    if (!mixId.isEmpty()) out.add(mixId);
+                }
+                if (tracks.length() < 500) {
+                    Log.i(TAG, "kugou liked list refreshed (" + out.size() + " songs)");
+                    return out;
+                }
+                if (page == 2) {
+                    Log.i(TAG, "kugou liked list capped at " + out.size() + ", giving up");
+                    return null;
+                }
+            }
+            return out;
+        } catch (Exception error) {
+            Log.w(TAG, "kugou liked list fetch failed", error);
+            return null;
+        }
+    }
+
+    /**
+     * cloudlist 网关的签名 POST，照 JS kgPostAndroidSigned：
+     * 签名 = md5(盐 + 排序后 k=v 串 + body 原文 + 盐)，body 串必须与服务端
+     * 收到的一字不差（所以这里手工拼 JSON，保持与 JS 一致的 key 顺序）。
+     */
+    private static JSONObject kgPostCloudlist(String path, String bodyJson, boolean withPlat,
+                                              Map<String, String> parsed, String userId, String token) throws Exception {
+        String dfid = LikeFallback.firstNonBlank(parsed, "dfid");
+        if (dfid.isEmpty()) dfid = "-";
+        String mid = kgMid();
+        long clienttime = System.currentTimeMillis() / 1000L;
+        java.util.TreeMap<String, String> params = new java.util.TreeMap<>();
+        params.put("appid", KG_APPID);
+        params.put("clienttime", String.valueOf(clienttime));
+        params.put("clientver", KG_CLIENTVER);
+        params.put("dfid", dfid);
+        params.put("mid", mid);
+        params.put("token", token);
+        params.put("userid", userId);
+        params.put("uuid", "-");
+        if (withPlat) params.put("plat", "1");
+        StringBuilder paramsString = new StringBuilder();
+        StringBuilder query = new StringBuilder();
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            paramsString.append(entry.getKey()).append('=').append(entry.getValue());
+            query.append(query.length() > 0 ? '&' : "")
+                    .append(urlEncode(entry.getKey())).append('=').append(urlEncode(entry.getValue()));
+        }
+        query.append("&signature=").append(urlEncode(
+                md5(KG_SIGN_SALT + paramsString + bodyJson + KG_SIGN_SALT)));
+        HttpURLConnection connection = (HttpURLConnection)
+                new URL("https://gateway.kugou.com/cloudlist.service" + path + "?" + query).openConnection();
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(10000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Cookie", kgLeanCookie(parsed, userId, token, dfid));
+            connection.setRequestProperty("User-Agent", KG_ANDROID_UA);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("dfid", dfid);
+            connection.setRequestProperty("clienttime", String.valueOf(clienttime));
+            connection.setRequestProperty("mid", mid);
+            connection.setRequestProperty("kg-rc", "1");
+            connection.setRequestProperty("kg-thash", "5d816a0");
+            connection.setRequestProperty("kg-rec", "1");
+            connection.setRequestProperty("kg-rf", "B9EDA08A64250DEFFBCADDEE00F8F25F");
+            connection.setRequestProperty("x-router", "cloudlist.service.kugou.com");
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(bodyJson.getBytes(StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            String text = LikeFallback.readAll(connection);
+            if (status < 200 || status >= 300 || text.isEmpty()) {
+                return null;
+            }
+            return new JSONObject(text);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static String jsonEscape(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** firstNonBlank 的 JSONObject 版：第一个非空字段值。 */
+    private static String firstNonBlank2(JSONObject object, String... keys) {
+        for (String key : keys) {
+            String value = object.optString(key, "");
+            if (!value.isEmpty() && !"null".equals(value)) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
+    // ==================== 汽水「我喜欢」名单（协议页两跳） ====================
+
+    private static Boolean qishuiIsLiked(String songId) {
+        String id = songId == null ? "" : songId.trim();
+        if (id.isEmpty()) {
+            return null;
+        }
+        java.util.Set<String> list = qishuiLikedList.snapshot("host", MusicGateway::fetchQishuiLikedList);
+        return list == null ? null : list.contains(id);
+    }
+
+    /**
+     * 两跳：user.playlists 找「我喜欢」（base_info.type === 1；车机协议把真歌单
+     * 过滤掉后给的是虚拟 id qishui-liked）→ playlist.tracks 分页收曲目 id。
+     */
+    private static java.util.Set<String> fetchQishuiLikedList() {
+        try {
+            JSONObject playlistsBody = qishuiRequest("user.playlists", "{}");
+            if (playlistsBody == null) {
+                return null;
+            }
+            String likedId = "";
+            for (String arrayKey : new String[]{"playlists", "items"}) {
+                JSONArray items = playlistsBody.optJSONArray(arrayKey);
+                if (items == null) continue;
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject item = items.optJSONObject(i);
+                    if (item == null) continue;
+                    // 照协议页 likedPlaylist 的取法：row.playlist || row。
+                    JSONObject playlist = item.optJSONObject("playlist");
+                    if (playlist == null) playlist = item;
+                    JSONObject base = playlist.optJSONObject("base_info");
+                    int type = base == null ? playlist.optInt("type", -1) : base.optInt("type", -1);
+                    if (type != 1) continue;
+                    String candidate = base == null ? playlist.optString("id", "") : base.optString("id", "");
+                    if (!candidate.isEmpty()) {
+                        likedId = candidate;
+                        break;
+                    }
+                }
+                if (!likedId.isEmpty()) break;
+            }
+            if (likedId.isEmpty()) {
+                likedId = "qishui-liked";
+            }
+            java.util.Set<String> out = new java.util.HashSet<>();
+            for (int page = 0; page < 4; page++) {
+                JSONObject body = qishuiRequest("playlist.tracks",
+                        qishuiParams("id", likedId, "limit", "500", "offset", String.valueOf(page * 500)));
+                if (body == null) {
+                    return page == 0 ? null : out;
+                }
+                JSONArray tracks = body.optJSONArray("tracks");
+                if (tracks == null) tracks = body.optJSONArray("songs");
+                if (tracks == null || tracks.length() == 0) {
+                    return page == 0 ? null : out;
+                }
+                for (int i = 0; i < tracks.length(); i++) {
+                    JSONObject track = tracks.optJSONObject(i);
+                    String trackId = track == null ? "" : track.optString("id", "");
+                    if (!trackId.isEmpty()) out.add(trackId);
+                }
+                if (!body.optBoolean("hasMore", false) || tracks.length() < 500) {
+                    Log.i(TAG, "qishui liked list refreshed (" + out.size() + " songs)");
+                    return out;
+                }
+                if (page == 3) {
+                    Log.i(TAG, "qishui liked list capped at " + out.size() + ", giving up");
+                    return null;
+                }
+            }
+            return out;
+        } catch (Exception error) {
+            Log.w(TAG, "qishui liked list fetch failed", error);
+            return null;
+        }
+    }
+
+    // ==================== 飞牛「我喜欢」名单（favorite-track/list） ====================
+
+    private static Boolean feiniuIsLiked(String songId) {
+        String id = songId == null ? "" : songId.trim();
+        FeiniuCredentials creds = feiniuCreds;
+        if (id.isEmpty() || creds == null) {
+            return null;
+        }
+        java.util.Set<String> list = feiniuLikedList.snapshot(
+                creds.serverUrl + "|" + creds.token, () -> fetchFeiniuLikedList(creds));
+        return list == null ? null : list.contains(id);
+    }
+
+    private static java.util.Set<String> fetchFeiniuLikedList(FeiniuCredentials creds) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        try {
+            for (int page = 1; page <= 5; page++) {
+                HttpURLConnection connection = (HttpURLConnection) new URL(
+                        creds.serverUrl + "/music/api/v1/favorite-track/list?page=" + page
+                                + "&size=200").openConnection();
+                JSONObject body;
+                try {
+                    connection.setConnectTimeout(8000);
+                    connection.setReadTimeout(10000);
+                    connection.setRequestProperty("Cookie", feiniuCookieValue(creds));
+                    connection.setRequestProperty("Accept", "application/json");
+                    int status = connection.getResponseCode();
+                    String text = LikeFallback.readAll(connection);
+                    if (status < 200 || status >= 300 || text.isEmpty()) {
+                        return page == 1 ? null : out;
+                    }
+                    body = new JSONObject(text);
+                } finally {
+                    connection.disconnect();
+                }
+                // 数组字段照 pickFeiniuList 的 LIST_KEYS 顺序。
+                JSONArray items = null;
+                for (String key : new String[]{"list", "tracks", "items", "songs",
+                        "records", "rows", "data"}) {
+                    JSONArray value = body.optJSONArray(key);
+                    if (value == null) {
+                        JSONObject data = body.optJSONObject("data");
+                        if (data != null) value = data.optJSONArray(key);
+                    }
+                    if (value != null && value.length() > 0) {
+                        items = value;
+                        break;
+                    }
+                }
+                if (items == null || items.length() == 0) {
+                    return page == 1 ? null : out;
+                }
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject item = items.optJSONObject(i);
+                    String guid = item == null ? "" : item.optString("guid", "");
+                    if (!guid.isEmpty()) out.add(guid);
+                }
+                if (items.length() < 200) {
+                    Log.i(TAG, "feiniu liked list refreshed (" + out.size() + " songs)");
+                    return out;
+                }
+                if (page == 5) {
+                    Log.i(TAG, "feiniu liked list capped at " + out.size() + ", giving up");
+                    return null;
+                }
+            }
+            return out;
+        } catch (Exception error) {
+            Log.w(TAG, "feiniu liked list fetch failed", error);
+            return null;
+        }
+    }
+
     /**
      * 取流 / 缓存下载时要附带的请求头：目前只有飞牛要带会话 Cookie
      * （它的音频流认 music-token，不认就不给字节）。其余平台回空表。

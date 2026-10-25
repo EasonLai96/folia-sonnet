@@ -946,14 +946,20 @@ public class FoliaPlaybackService extends android.app.Service {
         // 冻结期间点过的心它不知道（用户原话「点了需要缓存，因为歌单不一定马上刷新」）。
         Boolean overridden = top.izuna.foliamajor.online.LikeOverrideStore.likedOf(this, songKey);
         if (overridden != null) cachedLiked = overridden;
-        // 「我喜欢」名单里的真状态（网易有原生通道）：镜像快照可能旧了 —— 比如用户
-        // 在网易自己的 App 里点过心。后台对一遍，不同就就地换心；补写记录比名单
-        // 新鲜（服务端不保证马上刷新），有记录时以记录为准。
-        if (songChanged && "netease".equals(cachedProviderId) && !cachedServerSongId.isEmpty()) {
+        // 「我喜欢」名单里的真状态（五家平台都有原生通道，见 MusicGateway.likedListContains）：
+        // 镜像快照可能旧了 —— 比如用户在平台自己的 App 里点过心。后台对一遍，不同就
+        // 就地换心；补写记录比名单新鲜（服务端不保证马上刷新），有记录时以记录为准。
+        if (songChanged && !cachedProviderId.isEmpty()
+                && (!cachedServerSongId.isEmpty()
+                || !entry.optString("providerMid", "").isEmpty()
+                || !entry.optString("providerHash", "").isEmpty())) {
             final String likedProviderId = cachedProviderId;
             final String likedSongId = cachedServerSongId;
+            final String likedMid = entry.optString("providerMid", "");
+            final String likedHash = entry.optString("providerHash", "");
             new Thread(() -> {
-                Boolean truth = top.izuna.foliamajor.online.MusicGateway.neteaseIsLiked(likedSongId);
+                Boolean truth = top.izuna.foliamajor.online.MusicGateway.likedListContains(
+                        likedProviderId, likedSongId, likedMid, likedHash);
                 if (truth == null) return;
                 mainHandler.post(() -> {
                     if (!likedProviderId.equals(cachedProviderId)
