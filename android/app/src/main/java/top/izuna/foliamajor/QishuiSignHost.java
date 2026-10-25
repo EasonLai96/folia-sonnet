@@ -207,6 +207,15 @@ final class QishuiSignHost {
         return ready;
     }
 
+    /**
+     * 播放服务那条路（经 {@link QishuiGatewayBridge}）用的：把带 #auth= 的加密
+     * 直链换成 loopback 解密代理地址。与页面里 FoliaQishuiHost.audioProxyUrl
+     * 是同一个出口、同一座服务器，只是给原生侧（不起页面协议的那条路）开一扇门。
+     */
+    String audioProxyUrlFor(String cleanUrl, String auth) {
+        return audioServer.buildProxyUrl(cleanUrl, auth);
+    }
+
     String getFailureReason() {
         return failureReason;
     }

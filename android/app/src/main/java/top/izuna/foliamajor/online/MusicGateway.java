@@ -38,8 +38,11 @@ import top.izuna.foliamajor.wallpaper.WallpaperLyricsState;
  * WebView 活着，没必要两套并存。等哪天前台也出问题再往这里搬。
  *
  * 登录态不另存：WebView 侧的 chrome.cookies 已经接在 CookieManager 上
- * （installCookieShim），直接读同一个罐子。酷狗没有原生通道（签名 + 会话换发那套
- * 太重），镜像里预取过地址的照样能切，没预取的等 JS。
+ * （installCookieShim），直接读同一个罐子。酷狗的签名直连照 KuGouMusicApi
+ * 复刻（会话从同一个罐里取）。汽水不走 HTTP：签名必须由签名宿主里那个真页面
+ * 算，这里经 {@link top.izuna.foliamajor.QishuiGatewayBridge} 同步要一次 request。
+ * 飞牛是纯 HTTP，但凭据（地址 / token / 中继）在 Web 层手里 —— 由它登录后经
+ * FoliaNative.setGatewayCredentials 推进来，见 {@link #setFeiniuCredentials}。
  */
 public final class MusicGateway {
 
@@ -86,6 +89,12 @@ public final class MusicGateway {
             if ("kugou".equals(providerId)) {
                 return kugouPlayUrl(hash, albumAudioId);
             }
+            if ("qishui".equals(providerId)) {
+                return qishuiPlayUrl(songId);
+            }
+            if ("feiniu".equals(providerId)) {
+                return feiniuPlayUrl(songId);
+            }
         } catch (Throwable error) {
             Log.w(TAG, "resolvePlayUrl failed (" + providerId + ")", error);
         }
@@ -105,10 +114,214 @@ public final class MusicGateway {
             if ("kugou".equals(providerId)) {
                 return kugouLyric(hash);
             }
+            if ("qishui".equals(providerId)) {
+                return qishuiLyric(songId);
+            }
+            if ("feiniu".equals(providerId)) {
+                return feiniuLyric(songId);
+            }
         } catch (Throwable error) {
             Log.w(TAG, "fetchLyric failed (" + providerId + ")", error);
         }
         return null;
+    }
+
+    // ==================== 汽水（签名宿主直调） ====================
+
+    /**
+     * 汽水的取流地址要过签名宿主里那个隐藏 WebView 的协议层（bdms.js 签名这一步
+     * 绕不开），所以这里只是把 request 同步化：拿到的就是协议层 song.url 的信封。
+     *
+     * 与 Web 层（qishuiProvider.getAudioSource）的一致性：trial（试听段）**不拒**
+     * —— 兜底切歌的目标是「别停」，试听总比没得放强；Web 层拒它是因为它还要进
+     * 缓存与时长统计，兜底这条路没有那些后续。加密直链（带 #auth=）换成本地
+     * 解密代理地址；代理没起来时放弃（给 ExoPlayer 一条解不开的密文没有意义）。
+     */
+    private static String qishuiPlayUrl(String songId) {
+        String id = songId == null ? "" : songId.trim();
+        if (id.isEmpty()) {
+            return null;
+        }
+        JSONObject envelope = qishuiRequest("song.url",
+                new JSONObject().put("id", id).put("quality", "standard"));
+        if (envelope == null || !envelope.optBoolean("ok", false)) {
+            return null;
+        }
+        JSONObject data = envelope.optJSONObject("data");
+        String url = data == null ? "" : data.optString("url", "");
+        if (url.isEmpty()) {
+            return null;
+        }
+        int authAt = url.indexOf("#auth=");
+        if (authAt < 0) {
+            // 明文直链（车机协议）：ExoPlayer 直接吃。
+            return url;
+        }
+        String cleanUrl = url.substring(0, authAt);
+        String auth = url.substring(authAt + "#auth=".length());
+        String proxied = top.izuna.foliamajor.QishuiGatewayBridge.audioProxyUrlFor(cleanUrl, auth);
+        return proxied.isEmpty() ? null : proxied;
+    }
+
+    /** 汽水歌词：协议层回 {lyric, tlyric, yrc, ytlrc}，壁纸用整行 LRC 那两个。 */
+    private static Lyric qishuiLyric(String songId) {
+        String id = songId == null ? "" : songId.trim();
+        if (id.isEmpty()) {
+            return null;
+        }
+        JSONObject envelope = qishuiRequest("lyric", new JSONObject().put("id", id));
+        if (envelope == null || !envelope.optBoolean("ok", false)) {
+            return null;
+        }
+        JSONObject data = envelope.optJSONObject("data");
+        if (data == null) {
+            return null;
+        }
+        return new Lyric(data.optString("lyric", ""), data.optString("tlyric", ""));
+    }
+
+    /** 同步过一次签名宿主（后台线程调）；拿不到信封回 null。 */
+    private static JSONObject qishuiRequest(String operation, JSONObject params) {
+        String envelope = top.izuna.foliamajor.QishuiGatewayBridge.requestSync(
+                operation, params.toString(), 12_000L);
+        if (envelope == null || envelope.isEmpty()) {
+            return null;
+        }
+        try {
+            return new JSONObject(envelope);
+        } catch (Exception error) {
+            Log.w(TAG, "qishui " + operation + " envelope is not JSON", error);
+            return null;
+        }
+    }
+
+    // ==================== 飞牛（凭据推送 + 纯 HTTP） ====================
+
+    /** 飞牛的会话三件套：地址、token、中继模式 —— 由 Web 层登录后推过来。 */
+    public static final class FeiniuCredentials {
+        public final String serverUrl;
+        public final String token;
+        public final boolean relayMode;
+
+        FeiniuCredentials(String serverUrl, String token, boolean relayMode) {
+            this.serverUrl = serverUrl;
+            this.token = token;
+            this.relayMode = relayMode;
+        }
+    }
+
+    private static volatile FeiniuCredentials feiniuCreds = null;
+
+    /**
+     * Web 层登录 / 登出 / 改地址 / 切中继时推送（FoliaNative.setGatewayCredentials）。
+     * token 为空视为登出。凭据只进内存：进程活着就有效，死了说明 Web 层同样要重登。
+     *
+     * 地址先照 Web 层 withSchemeAndPort 补齐：没写 scheme 的按 http；http 又没写
+     * 端口的补 5666（fnOS 网关就挂那儿）—— 不补的话拼出来的请求会打到 80 上，
+     * 收到一个 HTML 页，表现跟「服务不存在」一模一样。
+     */
+    public static void setFeiniuCredentials(String serverUrl, String token, boolean relayMode) {
+        String cleanUrl = serverUrl == null ? "" : serverUrl.trim().replaceFirst("/+$", "");
+        String cleanToken = token == null ? "" : token.trim();
+        if (cleanUrl.isEmpty() || cleanToken.isEmpty()) {
+            feiniuCreds = null;
+            return;
+        }
+        if (!cleanUrl.matches("(?i)^https?://.*")) {
+            cleanUrl = "http://" + cleanUrl;
+        }
+        if (cleanUrl.regionMatches(true, 0, "http://", 0, 7)) {
+            int slash = cleanUrl.indexOf('/', 7);
+            String hostPart = slash < 0 ? cleanUrl.substring(7) : cleanUrl.substring(7, slash);
+            if (!hostPart.contains(":")) {
+                cleanUrl = slash < 0
+                        ? cleanUrl + ":5666"
+                        : cleanUrl.substring(0, slash) + ":5666" + cleanUrl.substring(slash);
+            }
+        }
+        feiniuCreds = new FeiniuCredentials(cleanUrl, cleanToken, relayMode);
+    }
+
+    /** 飞牛资源请求的 Cookie：中继模式恒带 mode=relay（网关只认这个值）。 */
+    private static String feiniuCookieValue(FeiniuCredentials creds) {
+        return "music-token=" + creds.token + (creds.relayMode ? "; mode=relay" : "");
+    }
+
+    /**
+     * 飞牛取流：地址是确定性的（guid 拼出来就是），不用网络往返 ——
+     * 直接给直链。ExoPlayer 那一份 Cookie 由 {@link #headersForPlaybackUrl} 补。
+     */
+    private static String feiniuPlayUrl(String guid) {
+        FeiniuCredentials creds = feiniuCreds;
+        String id = guid == null ? "" : guid.trim();
+        if (creds == null || id.isEmpty()) {
+            return null;
+        }
+        return creds.serverUrl + "/music/api/v1/track/stream?guid=" + urlEncode(id);
+    }
+
+    /**
+     * 飞牛歌词：/lyric/list 回 {list:[{guid,content}],preferred}，
+     * 挑 preferred 那条，没有就第一条（照 Web 层 pickFeiniuLyricText）。
+     */
+    private static Lyric feiniuLyric(String guid) {
+        FeiniuCredentials creds = feiniuCreds;
+        String id = guid == null ? "" : guid.trim();
+        if (creds == null || id.isEmpty()) {
+            return null;
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(creds.serverUrl
+                    + "/music/api/v1/lyric/list?trackGUID=" + urlEncode(id)).openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(10000);
+            connection.setRequestProperty("Cookie", feiniuCookieValue(creds));
+            connection.setRequestProperty("Accept", "application/json");
+            int status = connection.getResponseCode();
+            String text = LikeFallback.readAll(connection);
+            if (status < 200 || status >= 300 || text.isEmpty()) {
+                return null;
+            }
+            JSONObject data = new JSONObject(text).optJSONObject("data");
+            if (data == null) {
+                return null;
+            }
+            JSONArray list = data.optJSONArray("list");
+            if (list == null || list.length() == 0) {
+                return null;
+            }
+            String preferred = data.optString("preferred", "");
+            String content = "";
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject entry = list.optJSONObject(i);
+                if (entry == null) continue;
+                String value = entry.optString("content", "");
+                if (value.isEmpty()) continue;
+                if (!preferred.isEmpty() && entry.optString("guid", "").equals(preferred)) {
+                    return new Lyric(value, "");
+                }
+                if (content.isEmpty()) content = value;
+            }
+            return content.isEmpty() ? null : new Lyric(content, "");
+        } catch (Exception error) {
+            Log.w(TAG, "feiniu lyric failed", error);
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /**
+     * 取流 / 缓存下载时要附带的请求头：目前只有飞牛要带会话 Cookie
+     * （它的音频流认 music-token，不认就不给字节）。其余平台回空表。
+     */
+    public static Map<String, String> headersForPlaybackUrl(String url) {
+        FeiniuCredentials creds = feiniuCreds;
+        if (creds == null || url == null || !url.startsWith(creds.serverUrl)) {
+            return Collections.emptyMap();
+        }
+        return Collections.singletonMap("Cookie", feiniuCookieValue(creds));
     }
 
     // ==================== 网易云（weapi 直连） ====================

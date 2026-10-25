@@ -6,6 +6,7 @@ import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../servi
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
 import { applyNativeLikeOverrides, type NativeLikeOverrideInput } from '../services/onlineMusic/omni';
+import { syncFeiniuGatewayCredentials } from '../services/onlineMusic/feiniuTransport';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 //
@@ -327,6 +328,9 @@ export const useCapacitorPlaybackBridge = ({
     if (!enabled) return;
     const { queue: list, likeStateOf: stateOf, currentSong: activeSong } = mirrorSourceRef.current;
     if (!list || list.length === 0) return;
+    // 飞牛的凭据要在队列之前到位：登录可能发生在插件可用之前（重启后桥晚一步），
+    // 这里每推一次队列顺手同步一遍 —— 一次几十字节的调用，换原生兜底不空手。
+    syncFeiniuGatewayCredentials();
     const entries = list.map((song) => {
       const identity = resolveLikeIdentity(song);
       const likeState = stateOf?.(song);
@@ -500,6 +504,17 @@ const resolveLikeIdentity = (song: SongResult | null | undefined): {
       providerAlbumAudioId: typeof data.albumAudioId === 'string' || typeof data.albumAudioId === 'number'
         ? String(data.albumAudioId)
         : '',
+    };
+  }
+  // 汽水与飞牛都只用一个 id：汽水的取流 / 歌词要 track id，飞牛要曲目 guid ——
+  // mediaId 就是它们，原生网关按 providerId 分流。
+  if (sourceRef.providerId === 'qishui' || sourceRef.providerId === 'feiniu') {
+    return {
+      providerId: sourceRef.providerId,
+      serverSongId: String(sourceRef.mediaId ?? ''),
+      providerMid: '',
+      providerHash: '',
+      providerAlbumAudioId: '',
     };
   }
   return { providerId: String(sourceRef.providerId), serverSongId: '', providerMid: '', providerHash: '', providerAlbumAudioId: '' };

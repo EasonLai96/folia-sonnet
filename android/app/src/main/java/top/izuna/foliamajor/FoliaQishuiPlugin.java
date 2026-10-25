@@ -36,6 +36,9 @@ public class FoliaQishuiPlugin extends Plugin {
                 return null;
             }
             host = new QishuiSignHost((MainActivity) activity);
+            // 播放服务（原生兜底切歌）要过这座宿主拿取流地址与歌词；它够不到
+            // 插件实例，注册到静态桥上（dispose 时注销）。
+            QishuiGatewayBridge.registerHost(host);
         }
         return host;
     }
@@ -101,6 +104,7 @@ public class FoliaQishuiPlugin extends Plugin {
     @PluginMethod
     public void dispose(PluginCall call) {
         if (host != null) {
+            QishuiGatewayBridge.unregisterHost(host);
             host.dispose();
             host = null;
         }

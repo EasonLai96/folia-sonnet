@@ -1836,6 +1836,26 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     /**
+     * 接收 Web 层推来的平台凭据（目前只有飞牛）。
+     *
+     * 飞牛是用户自己的 NAS：地址、token、中继开关都在 Web 层的会话存储里，
+     * 原生网关（MusicGateway）要拿它们拼取流地址与带 Cookie —— 登录 / 登出 /
+     * 改地址 / 切中继时各推一次（见 feiniuTransport.syncFeiniuGatewayCredentials）。
+     * token 为空＝登出，网关那边清掉。
+     */
+    @PluginMethod
+    public void setGatewayCredentials(PluginCall call) {
+        String provider = call.getString("provider", "");
+        if ("feiniu".equals(provider)) {
+            String serverUrl = call.getString("serverUrl", "");
+            String token = call.getString("token", "");
+            boolean relayMode = Boolean.TRUE.equals(call.getBoolean("relayMode", false));
+            top.izuna.foliamajor.online.MusicGateway.setFeiniuCredentials(serverUrl, token, relayMode);
+        }
+        call.resolve();
+    }
+
+    /**
      * 把一个 ref 指向的音频**复制一份进 App 私有目录**，返回 `imported-xxx` 形式的新 ref。
      *
      * 为什么需要它：MediaStore 那一路（扫描设备音乐库得到的歌）是按 id **现读用户原文件**的，

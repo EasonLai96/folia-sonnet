@@ -700,6 +700,12 @@ final class LocalAudioServer {
             connection.setReadTimeout(15000);
             connection.setInstanceFollowRedirects(true);
             connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+            // 飞牛这类「要会话 Cookie 才给字节」的源：网关认识自己的 URL，
+            // 要带什么头由它说（见 MusicGateway.headersForPlaybackUrl）。
+            for (Map.Entry<String, String> header
+                    : top.izuna.foliamajor.online.MusicGateway.headersForPlaybackUrl(audioUrl).entrySet()) {
+                connection.setRequestProperty(header.getKey(), header.getValue());
+            }
             int code = connection.getResponseCode();
             if (code < 200 || code >= 300) {
                 return 0L;

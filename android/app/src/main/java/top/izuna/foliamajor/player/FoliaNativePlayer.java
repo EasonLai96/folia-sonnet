@@ -81,6 +81,8 @@ public final class FoliaNativePlayer {
     private final Listener listener;
 
     @Nullable private ExoPlayer player;
+    /** 换源时要就地改默认请求头（飞牛的会话 Cookie），所以提成字段。 */
+    private DefaultHttpDataSource.Factory httpFactory;
     /** release 过就不再收播放器（线程已经 quit，再 post 会崩）。 */
     private volatile boolean released = false;
     /**
@@ -130,6 +132,9 @@ public final class FoliaNativePlayer {
         lastUrl = url;
         runOnPlayer(() -> {
             ExoPlayer current = ensurePlayer();
+            // 有些源要附带请求头（飞牛的音频流认 Cookie: music-token）：
+            // 每次换源都按地址重问一遍，没有就清空，别把上一首的头带给下一首。
+            applySourceHeaders(url);
             current.setMediaItem(MediaItem.fromUri(url));
             current.setRepeatMode(requestedRepeatMode);
             current.setVolume(requestedVolume);
@@ -295,11 +300,25 @@ public final class FoliaNativePlayer {
         });
     }
 
+    /**
+     * 换源前把取流头换成本地址该带的那一份（目前只有飞牛要带会话 Cookie，
+     * 见 MusicGateway.headersForPlaybackUrl）。没有就清空 —— 别把上一首的
+     * 头带给下一首。
+     */
+    private void applySourceHeaders(String url) {
+        DefaultHttpDataSource.Factory factory = httpFactory;
+        if (factory == null) return;
+        java.util.Map<String, String> headers =
+                top.izuna.foliamajor.online.MusicGateway.headersForPlaybackUrl(url);
+        factory.setDefaultRequestProperties(headers.isEmpty()
+                ? java.util.Collections.emptyMap() : headers);
+    }
+
     private ExoPlayer ensurePlayer() {
         ExoPlayer current = player;
         if (current != null) return current;
 
-        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+        httpFactory = new DefaultHttpDataSource.Factory()
             .setUserAgent(BROWSER_USER_AGENT)
             .setAllowCrossProtocolRedirects(true);
 
@@ -322,6 +341,7 @@ public final class FoliaNativePlayer {
          * 记住最后一首，重建时顺手装回去 —— 位置用缓存的最后一次上报。
          */
         if (lastUrl != null && current.getMediaItemCount() == 0) {
+            applySourceHeaders(lastUrl);
             current.setMediaItem(MediaItem.fromUri(lastUrl));
             current.setRepeatMode(requestedRepeatMode);
             current.setVolume(requestedVolume);
