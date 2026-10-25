@@ -17,11 +17,8 @@ import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
 import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
 import type { FontBlobStore } from './fontBlobs.js';
-<<<<<<< HEAD
 import { ensureAdminSessionSchema } from './adminSchema.js';
-=======
 import { compareAndSetSettings, readSettingsRow, settingsConfirmation, settingsRevision } from './settingsConfirmation.js';
->>>>>>> tmp35
 
 export type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement;
