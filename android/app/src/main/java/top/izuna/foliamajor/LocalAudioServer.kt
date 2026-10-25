@@ -23,7 +23,6 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.ArrayList
 import java.util.HashMap
-import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -272,9 +271,12 @@ class LocalAudioServer(context: Context) {
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
-    private val remoteAudioUrls: MutableMap<String, String> = LinkedHashMap()
-    /** 转发时要额外带上的请求头（按 token 存）；没有时为 null，见 {@link #registerRemoteAudio}。 */
-    private val remoteAudioHeaders: MutableMap<String, MutableMap<String, String>> = LinkedHashMap()
+    /** 凭据类资源不放行重定向：跟着跳转走会把请求头里的凭据带往别的主机。 */
+    private val credentialResourceClient: OkHttpClient = remoteAudioClient.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+    private val remoteAudioRegistry = RemoteAudioRegistry()
     private var serverSocket: ServerSocket? = null
     private var _port = 0
 
@@ -331,6 +333,15 @@ class LocalAudioServer(context: Context) {
     @Synchronized
     @Throws(IOException::class)
     fun registerRemoteAudio(value: String, headers: Map<String, String>?, allowAnyHost: Boolean): String {
+        return registerRemoteAudio(value, headers, allowAnyHost, true)
+    }
+
+    private fun registerRemoteAudio(
+        value: String,
+        headers: Map<String, String>?,
+        allowAnyHost: Boolean,
+        reusable: Boolean
+    ): String {
         val url = URL(value)
         val host = url.host?.lowercase(Locale.ROOT) ?: ""
         if (!("http" == url.protocol || "https" == url.protocol)
@@ -338,22 +349,29 @@ class LocalAudioServer(context: Context) {
             throw IOException("Unsupported remote audio host")
         }
         val localPort = start()
-        val token = android.util.Base64.encodeToString(
-            value.toByteArray(StandardCharsets.UTF_8),
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
-        )
-        synchronized(remoteAudioUrls) {
-            remoteAudioUrls.remove(token)
-            remoteAudioUrls[token] = value
-            remoteAudioHeaders.remove(token)
-            if (headers != null && !headers.isEmpty()) remoteAudioHeaders[token] = HashMap(headers)
-            while (remoteAudioUrls.size > 128) {
-                val oldest = remoteAudioUrls.keys.iterator().next()
-                remoteAudioUrls.remove(oldest)
-                remoteAudioHeaders.remove(oldest)
-            }
-        }
+        val token = if (reusable) remoteAudioRegistry.registerReusable(value, headers)
+        else remoteAudioRegistry.register(value, headers)
         return "http://127.0.0.1:" + localPort + REMOTE_AUDIO_PATH_PREFIX + token
+    }
+
+    /**
+     * 带凭据的资源：地址必须落在 `credentialOrigin` 这个 origin 上，
+     * 且每次注册都换一个 token（不复用、token 里也不含 URL）。
+     */
+    @Synchronized
+    @Throws(IOException::class)
+    fun registerScopedRemoteAudio(value: String, headers: Map<String, String>?, origin: String): String {
+        RemoteAudioRegistry.validateOrigin(value, origin)
+        return registerRemoteAudio(value, headers, true, false)
+    }
+
+    @Synchronized
+    @Throws(IOException::class)
+    fun unregisterRemoteAudio(value: String) {
+        val url = URL(value)
+        if (!("http" == url.protocol) || !("127.0.0.1" == url.host)
+            || url.port != _port || !url.path.startsWith(REMOTE_AUDIO_PATH_PREFIX)) return
+        remoteAudioRegistry.remove(url.path.substring(REMOTE_AUDIO_PATH_PREFIX.length))
     }
 
     /** 复制进私有目录的音频存放位置。 */
@@ -598,14 +616,15 @@ class LocalAudioServer(context: Context) {
         headers: Map<String, String>,
         token: String
     ) {
-        val target = synchronized(remoteAudioUrls) { remoteAudioUrls[token] }
-        if (target == null) {
+        val entry = remoteAudioRegistry.get(token)
+        if (entry == null) {
             Log.w(TAG, "remote audio token unknown: " + token)
             writeStatus(output, 404, "Not Found")
             return
         }
 
-        val extraHeaders: Map<String, String>? = synchronized(remoteAudioUrls) { remoteAudioHeaders[token] }
+        val target = entry.url
+        val extraHeaders: Map<String, String>? = entry.headers
         val request = Request.Builder().url(target)
         // 有些 CDN 看 UA / Referer 决定给不给资源，不带的话会回一段 HTML 而不是音频
         // —— 那种回包喂进 <audio> 正是「Format error」的经典来源。
@@ -620,7 +639,8 @@ class LocalAudioServer(context: Context) {
         val range = headers["range"]
         if (range != null && range.startsWith("bytes=")) request.header("Range", range)
 
-        val upstream = remoteAudioClient.newCall(request.build()).execute()
+        val upstream = if (entry.allowsRedirects()) remoteAudioClient.newCall(request.build()).execute()
+        else credentialResourceClient.newCall(request.build()).execute()
         try {
             val body = upstream.body
             if (!upstream.isSuccessful || body == null) {

@@ -182,6 +182,11 @@
     },
     {
       "method": "GET",
+      "path": "/settings/confirmation",
+      "handlerFile": "sync-server/src/app.ts"
+    },
+    {
+      "method": "GET",
       "path": "/stage",
       "handlerFile": "sync-server/src/stageGallery.ts"
     },

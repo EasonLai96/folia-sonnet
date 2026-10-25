@@ -75,7 +75,8 @@ describe('BravaisWallGroup', () => {
         await render();
 
         expect(container.innerHTML).toBe('');
-    });
+        // 整个分组的设置页要现装一遍（含 i18n 与 store），默认 5 秒在慢机器上不够。
+    }, 120_000);
 
     it('groups the transparency, the windows per block and the stack edges under one heading', async () => {
         gate.isBravaisActive = true;

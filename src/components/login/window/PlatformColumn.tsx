@@ -12,6 +12,7 @@ import { Tooltip } from '../../modal/settings/kit';
 import { AccountPicture, PlatformMark, platformMarkOf } from '../PlatformMark';
 import { rowStatus, type RowStatus } from '../platformRows';
 import { filterRows } from './loginView';
+import { TextField } from '../../ui';
 
 // src/components/login/window/PlatformColumn.tsx
 // 登录窗口里平台的那一列：每个平台一行（记号、名字和它下面的登录状态、已登录的头像），各行平分列的高，
@@ -103,54 +104,39 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
     /** 高亮这一块此刻量哪一行（「全部」也占一行的 id，好让 rowOf 一样找得到它）。 */
     const highlightId = lit?.providerId ?? (litAll ? ALL_PROVIDERS_ID : null);
     const listRef = useRef<HTMLDivElement>(null);
-    // 高亮那一块自己。它的位置和大小不进 React state —— 见下面 placeGlow 的说明。
-    const glowRef = useRef<HTMLDivElement>(null);
-    /** 上一次摆在那一块上的数；拿来和这次量的比，一样的就不动笔。 */
-    const glowBox = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+    const highlightRef = useRef<HTMLDivElement>(null);
     // 列表的哪一头后面还有行：那一头淡出。
     const [more, setMore] = useState({ before: false, after: false });
     const rowOf = (id: string | null | undefined) => (
         id ? listRef.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null : null
     );
 
-    /*
-     * 把高亮那一块摆到它那一行的位置上。
-     *
-     * 为什么不记在 React state 里：位置和大小是从自己的 DOM 上量的，而「量 → 写 state →
-     * 重渲染 → 再量」是一个圈 —— 那个 effect 又跟着每次渲染都跑，于是它自己把自己转起来，
-     * 转起来就没有尽头（平板上点进汽水登录时整屏黑在那儿）。这个圈与量出来的数变没变无关：
-     * 哪怕每次量到的都一样，React 也要为这一次更新再渲染一遍这一层。所以量完直接写在那一块
-     * 的 style 上，不经过 React：state 少一样东西，这个圈就断了。
-     *
-     * 直接写 style 之后，每次渲染仍然会量一遍（行的宽跟着名字、头像和语言变，只能量）；
-     * 但量到的数没变就不动笔，不动笔就不会逼浏览器重画。
-     */
-    const placeGlow = () => {
-        const glow = glowRef.current;
-        if (!glow) return;
+    // 高亮那一块的位置和大小，每次画完从它所在的行量一遍（行的宽度跟着名字、头像和语言变）；数没变就不动。
+    // 量到的像素只画到 DOM，不再写 React state：安卓弹层进场时行的位置可能逐次变化，
+    // 在无依赖的 layout effect 里 setState 会不断重画、重量，最终 React #185 把整个应用卸下。
+    const paintHighlight = () => {
+        const highlight = highlightRef.current;
+        if (!highlight) return;
         const row = rowOf(highlightId);
-        if (!row) {
-            if (glowBox.current === null) return;
-            glowBox.current = null;
-            glow.style.opacity = '0';
-            return;
+        const list = listRef.current;
+        const next = row && list ? {
+            width: `${row.offsetWidth}px`,
+            height: `${row.offsetHeight}px`,
+            transform: `translate(${row.offsetLeft - list.scrollLeft}px, ${row.offsetTop - list.scrollTop}px)`,
+            opacity: '1',
+        } : { width: '', height: '', transform: '', opacity: '0' };
+        for (const key of ['width', 'height', 'transform', 'opacity'] as const) {
+            if (highlight.style[key] !== next[key]) highlight.style[key] = next[key];
         }
-        const next = { x: row.offsetLeft, y: row.offsetTop, w: row.offsetWidth, h: row.offsetHeight };
-        const last = glowBox.current;
-        if (last && last.x === next.x && last.y === next.y && last.w === next.w && last.h === next.h) return;
-        glowBox.current = next;
-        glow.style.width = `${next.w}px`;
-        glow.style.height = `${next.h}px`;
-        glow.style.transform = `translate(${next.x}px, ${next.y}px)`;
-        glow.style.opacity = '1';
     };
-
-    // 高亮那一块的位置和大小：每次画完从它所在的行量一遍。
-    useLayoutEffect(placeGlow);
+    const paintHighlightRef = useRef(paintHighlight);
+    paintHighlightRef.current = paintHighlight;
+    useLayoutEffect(paintHighlight);
 
     // 选中的行换了，把它滚进来。指针指着的行不滚：列表不在指针底下自己动，指针移开也不跳回去。
     useLayoutEffect(() => {
         rowOf(chosenId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        paintHighlightRef.current();
     }, [chosenId, lie]);
 
     const readMore = () => {
@@ -161,15 +147,20 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
         setMore(current => (current.before === next.before && current.after === next.after ? current : next));
     };
     // 行数变了、横竖换了，和列表自己的大小变了（窗口变宽变窄）的时候都重看一遍。
+    // 名字、头像或字体改变也可能只让一行变高；只观察列表和行，不观察自己画的高亮。
     useEffect(() => {
-        readMore();
+        const updateLayout = () => {
+            paintHighlightRef.current();
+            readMore();
+        };
+        updateLayout();
         const list = listRef.current;
         if (!list || typeof ResizeObserver === 'undefined') return undefined;
-        // 列表自己变了大小时，那一块也要跟着摆一次：这不是渲染引起的，没人替它再量一遍。
-        const observer = new ResizeObserver(() => { placeGlow(); readMore(); });
+        const observer = new ResizeObserver(updateLayout);
         observer.observe(list);
+        list.querySelectorAll('[data-row]').forEach(row => observer.observe(row));
         return () => observer.disconnect();
-    }, [shown.length, showAll, lie]);
+    }, [shown, showAll, lie]);
 
     // 横着的那一排：竖着滚的滚轮也让它左右走（它没有滚动条）。已经到了那一头就不拦：滚轮照常去滚窗口里的内容。
     useEffect(() => {
@@ -238,7 +229,7 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
             {rows.length >= SEARCH_FROM && (
                 <label className="st-t-fast mb-1.5 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-[var(--st-fill)] px-2.5 text-[color:var(--st-t3)] transition-shadow focus-within:shadow-[inset_0_0_0_1.5px_var(--st-line2)]">
                     <Search size={14} className="shrink-0" />
-                    <input
+                    <TextField
                         value={query}
                         onChange={event => { setQuery(event.target.value); setPointed(null); }}
                         onKeyDown={handleKeyDown}
@@ -248,112 +239,115 @@ export const PlatformColumn: React.FC<PlatformColumnProps> = ({ rows, chosenId, 
                     />
                 </label>
             )}
-            <div
-                ref={listRef}
-                role="listbox"
-                tabIndex={0}
-                aria-label={t('home.onlineProvider')}
-                aria-activedescendant={highlightId ? `login-row-${highlightId}` : undefined}
-                onKeyDown={handleKeyDown}
-                onScroll={readMore}
-                onMouseLeave={() => setPointed(null)}
-                className={`relative min-h-0 rounded-lg outline-none ${lie === 'column' ? 'st-scroll flex flex-1 flex-col overflow-y-auto overscroll-contain' : 'login-row-scroll flex gap-1 overflow-x-auto overscroll-x-contain'}`}
-                style={fade ? { WebkitMaskImage: fade, maskImage: fade } : undefined}
-            >
-                {/*
-                    高亮那一块：位置和大小由 placeGlow 直接写在它身上（不经过 React），
-                    这里只给个起始的不透明度，写死的内容不会再被 React 动。
-                */}
+            <div className={`relative min-h-0 ${tall ? 'flex flex-1 flex-col' : ''}`}>
                 <div
-                    ref={glowRef}
-                    aria-hidden
-                    className="st-t-move pointer-events-none absolute left-0 top-0 rounded-lg bg-[var(--st-fill2)] transition-[transform,width,opacity]"
-                    style={{ opacity: 0 }}
-                />
-                {showAll && (
+                    ref={listRef}
+                    role="listbox"
+                    tabIndex={0}
+                    aria-label={t('home.onlineProvider')}
+                    aria-activedescendant={highlightId ? `login-row-${highlightId}` : undefined}
+                    onKeyDown={handleKeyDown}
+                    onScroll={() => { paintHighlightRef.current(); readMore(); }}
+                    onMouseLeave={() => setPointed(null)}
+                    className={`relative min-h-0 rounded-lg outline-none ${lie === 'column' ? 'st-scroll flex flex-1 flex-col overflow-y-auto overscroll-contain' : 'login-row-scroll flex gap-1 overflow-x-auto overscroll-x-contain'}`}
+                    style={fade ? { WebkitMaskImage: fade, maskImage: fade } : undefined}
+                >
+                    {/*
+                        高亮那一块：位置和大小由 placeGlow 直接写在它身上（不经过 React），
+                        这里只给个起始的不透明度，写死的内容不会再被 React 动。
+                        它必须是列表里的第一块：量测和绘制拿它当第一块看。
+                    */}
                     <div
-                        id={`login-row-${ALL_PROVIDERS_ID}`}
-                        data-row={ALL_PROVIDERS_ID}
-                        role="option"
-                        aria-selected={allScope}
-                        aria-label={t('home.allProviders')}
-                        onMouseEnter={() => setPointed(ALL_PROVIDERS_ID)}
-                        onClick={chooseAll}
-                        className={`st-t-fast relative flex cursor-pointer items-center rounded-lg transition-colors ${tall ? `${ROW_SIZE} w-full gap-3 px-2.5` : 'h-9 max-w-[168px] shrink-0 gap-2.5 px-2'} ${allScope || pointed === ALL_PROVIDERS_ID ? 'text-[color:var(--st-t1)]' : 'text-[color:var(--st-t2)]'}`}
-                    >
-                        {/* 开着的时候左边这一道和平台那一行那道一个意思：此刻在看的就是它。 */}
-                        {tall && (
-                            <i
-                                aria-hidden
-                                className={`st-t-fast absolute left-0 top-1/2 h-[38%] w-[3px] -translate-y-1/2 rounded-full transition-opacity ${allScope ? 'opacity-100' : 'opacity-0'}`}
-                                style={{ background: 'var(--st-t2)' }}
-                            />
-                        )}
-                        <span
-                            aria-hidden
-                            className="inline-grid shrink-0 place-items-center rounded-full bg-[var(--st-fill2)] text-[color:var(--st-t1)]"
-                            style={{ width: tall ? 30 : 22, height: tall ? 30 : 22 }}
-                        >
-                            <Layers size={tall ? 16 : 14} />
-                        </span>
-                        {tall ? (
-                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                <span className="truncate text-[13px] font-medium leading-[18px]">{t('home.allProviders')}</span>
-                                <span className="truncate text-[11.5px] leading-4 text-[color:var(--st-t3)]">
-                                    {allScope ? t('home.allProvidersActive') : t('home.allProvidersDetail', { count: mergeableCount })}
-                                </span>
-                            </span>
-                        ) : (
-                            <span className="min-w-0 flex-1 truncate text-[13px]">{t('home.allProviders')}</span>
-                        )}
-                    </div>
-                )}
-                {shown.map(row => {
-                    const status = rowStatus(row);
-                    const state = stateText(row, status);
-                    const name = row.shortName || row.displayName;
-                    const chosen = row.providerId === chosenId;
-                    const bright = chosen || row.providerId === lit?.providerId;
-                    const item = (
+                        ref={highlightRef}
+                        aria-hidden
+                        className="st-t-move pointer-events-none absolute left-0 top-0 rounded-lg bg-[var(--st-fill2)] transition-[transform,width,opacity]"
+                        style={{ opacity: 0 }}
+                    />
+                    {showAll && (
                         <div
-                            id={`login-row-${row.providerId}`}
-                            data-row={row.providerId}
+                            id={`login-row-${ALL_PROVIDERS_ID}`}
+                            data-row={ALL_PROVIDERS_ID}
                             role="option"
-                            // 黄点和头像是画出来的：读屏的人从这一句知道这一行是已登录、登录失效还是不能选。
-                            aria-label={state ? `${name} · ${state}` : undefined}
-                            aria-selected={chosen}
-                            aria-disabled={status === 'off' || undefined}
-                            onMouseEnter={() => { if (status !== 'off') setPointed(row.providerId); }}
-                            onClick={() => { if (status !== 'off') onChoose(row); }}
-                            className={`st-t-fast relative flex items-center rounded-lg transition-colors ${tall ? `${ROW_SIZE} w-full gap-3 px-2.5` : 'h-9 max-w-[168px] shrink-0 gap-2.5 px-2'} ${status === 'off' ? 'cursor-default opacity-[0.42]' : 'cursor-pointer'} ${bright ? 'text-[color:var(--st-t1)]' : 'text-[color:var(--st-t2)]'}`}
+                            aria-selected={allScope}
+                            aria-label={t('home.allProviders')}
+                            onMouseEnter={() => setPointed(ALL_PROVIDERS_ID)}
+                            onClick={chooseAll}
+                            className={`st-t-fast relative flex cursor-pointer items-center rounded-lg transition-colors ${tall ? `${ROW_SIZE} w-full gap-3 px-2.5` : 'h-9 max-w-[168px] shrink-0 gap-2.5 px-2'} ${allScope || pointed === ALL_PROVIDERS_ID ? 'text-[color:var(--st-t1)]' : 'text-[color:var(--st-t2)]'}`}
                         >
-                            {/* 选中的那一行左边一道平台的颜色：高亮跟着指针走，这一道留在选中的行上。 */}
+                            {/* 开着的时候左边这一道和平台那一行那道一个意思：此刻在看的就是它。 */}
                             {tall && (
                                 <i
                                     aria-hidden
-                                    className={`st-t-fast absolute left-0 top-1/2 h-[38%] w-[3px] -translate-y-1/2 rounded-full transition-opacity ${chosen ? 'opacity-100' : 'opacity-0'}`}
-                                    style={{ background: platformMarkOf(row.providerId, row.shortName).color }}
+                                    className={`st-t-fast absolute left-0 top-1/2 h-[38%] w-[3px] -translate-y-1/2 rounded-full transition-opacity ${allScope ? 'opacity-100' : 'opacity-0'}`}
+                                    style={{ background: 'var(--st-t2)' }}
                                 />
                             )}
-                            <PlatformMark providerId={row.providerId} label={row.shortName} size={tall ? 30 : 22} ranOut={status === 'ran-out'} />
+                            <span
+                                aria-hidden
+                                className="inline-grid shrink-0 place-items-center rounded-full bg-[var(--st-fill2)] text-[color:var(--st-t1)]"
+                                style={{ width: tall ? 30 : 22, height: tall ? 30 : 22 }}
+                            >
+                                <Layers size={tall ? 16 : 14} />
+                            </span>
                             {tall ? (
                                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                    <span className="truncate text-[13px] font-medium leading-[18px]">{name}</span>
-                                    <RowNote row={row} status={status} />
+                                    <span className="truncate text-[13px] font-medium leading-[18px]">{t('home.allProviders')}</span>
+                                    <span className="truncate text-[11.5px] leading-4 text-[color:var(--st-t3)]">
+                                        {allScope ? t('home.allProvidersActive') : t('home.allProvidersDetail', { count: mergeableCount })}
+                                    </span>
                                 </span>
                             ) : (
-                                <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
+                                <span className="min-w-0 flex-1 truncate text-[13px]">{t('home.allProviders')}</span>
                             )}
-                            {status === 'signed-in' && row.user && <AccountPicture user={row.user} size={tall ? 24 : 18} />}
                         </div>
-                    );
-                    return status === 'off'
-                        ? <Tooltip key={row.providerId} text={t(offTextKey(row))} className={tall ? `flex ${ROW_SIZE}` : 'shrink-0'}>{item}</Tooltip>
-                        : <React.Fragment key={row.providerId}>{item}</React.Fragment>;
-                })}
-                {shown.length === 0 && (
-                    <p className="py-6 text-center text-[13px] text-[color:var(--st-t3)]">{t('login.noPlatformMatch')}</p>
-                )}
+                    )}
+                    {shown.map(row => {
+                        const status = rowStatus(row);
+                        const state = stateText(row, status);
+                        const name = row.shortName || row.displayName;
+                        const chosen = row.providerId === chosenId;
+                        const bright = chosen || row.providerId === lit?.providerId;
+                        const item = (
+                            <div
+                                id={`login-row-${row.providerId}`}
+                                data-row={row.providerId}
+                                role="option"
+                                // 黄点和头像是画出来的：读屏的人从这一句知道这一行是已登录、登录失效还是不能选。
+                                aria-label={state ? `${name} · ${state}` : undefined}
+                                aria-selected={chosen}
+                                aria-disabled={status === 'off' || undefined}
+                                onMouseEnter={() => { if (status !== 'off') setPointed(row.providerId); }}
+                                onClick={() => { if (status !== 'off') onChoose(row); }}
+                                className={`st-t-fast relative flex items-center rounded-lg transition-colors ${tall ? `${ROW_SIZE} w-full gap-3 px-2.5` : 'h-9 max-w-[168px] shrink-0 gap-2.5 px-2'} ${status === 'off' ? 'cursor-default opacity-[0.42]' : 'cursor-pointer'} ${bright ? 'text-[color:var(--st-t1)]' : 'text-[color:var(--st-t2)]'}`}
+                            >
+                                {/* 选中的那一行左边一道平台的颜色：高亮跟着指针走，这一道留在选中的行上。 */}
+                                {tall && (
+                                    <i
+                                        aria-hidden
+                                        className={`st-t-fast absolute left-0 top-1/2 h-[38%] w-[3px] -translate-y-1/2 rounded-full transition-opacity ${chosen ? 'opacity-100' : 'opacity-0'}`}
+                                        style={{ background: platformMarkOf(row.providerId, row.shortName).color }}
+                                    />
+                                )}
+                                <PlatformMark providerId={row.providerId} label={row.shortName} size={tall ? 30 : 22} ranOut={status === 'ran-out'} />
+                                {tall ? (
+                                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                        <span className="truncate text-[13px] font-medium leading-[18px]">{name}</span>
+                                        <RowNote row={row} status={status} />
+                                    </span>
+                                ) : (
+                                    <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
+                                )}
+                                {status === 'signed-in' && row.user && <AccountPicture user={row.user} size={tall ? 24 : 18} />}
+                            </div>
+                        );
+                        return status === 'off'
+                            ? <Tooltip key={row.providerId} text={t(offTextKey(row))} className={tall ? `flex ${ROW_SIZE}` : 'shrink-0'}>{item}</Tooltip>
+                            : <React.Fragment key={row.providerId}>{item}</React.Fragment>;
+                    })}
+                    {shown.length === 0 && (
+                        <p className="py-6 text-center text-[13px] text-[color:var(--st-t3)]">{t('login.noPlatformMatch')}</p>
+                    )}
+                </div>
             </div>
         </div>
     );

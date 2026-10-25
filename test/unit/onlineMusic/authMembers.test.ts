@@ -24,12 +24,13 @@ const AUTH_MEMBERS: Record<string, string[]> = {
     bodian: [
         'cancelLogin', 'checkLogin', 'createQr', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout', 'startLogin',
     ],
-    // 安卓上登录诊断报告要说出「卡在哪」：这两个平台在安卓没有桌面端那座桥，
+    // 安卓上登录诊断报告要说出「卡在哪」：Spotify 在安卓没有桌面端那座桥，
     // 报告原来那一段是空的（"(none)"），所以补上 getLoginDiagnostics（与汽水 / QQ 同）。
     spotify: [
         'cancelLogin', 'checkLogin', 'describeLoginFailure', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout',
         'openLoginPage', 'startLogin',
     ],
+    // YTM 在安卓有一份登录诊断（账号没读出来时说清卡在哪）；上游把它去掉过，本分支这个 fork 保留着。
     ytm: [
         'cancelLogin', 'checkLogin', 'describeLoginFailure', 'getLoginDiagnostics', 'getLoginStatus', 'getLoginTexts', 'getLoginTtlMs', 'logout',
         'openLoginPage', 'opensLoginPageItself', 'signInRanOut', 'startLogin',

@@ -159,8 +159,9 @@ describe('QR login diagnostic report', () => {
                 // 汽水只有 provider 自己记的那几行（安卓没有主进程的请求记录可问），
                 // 所以下面只要求它们原样进报告，不套主进程那几条断言。
                 qishui: () => qishuiProvider.auth!.getLoginDiagnostics!(),
-                // Spotify 与 YouTube Music 同样只有 provider 自己那几行（安卓上它们没有主进程的请求记录）。
+                // Spotify 同样只有 provider 自己那几行（安卓上它没有主进程的请求记录）。
                 spotify: () => spotifyProvider.auth!.getLoginDiagnostics!(),
+                // YTM 也一样：账号没读出来时，它说的是自己那边卡在哪。
                 ytm: () => ytmProvider.auth!.getLoginDiagnostics!(),
             };
             const declaring = listOnlineMusicProviders().filter(provider => provider.auth?.getLoginDiagnostics).map(provider => provider.id);

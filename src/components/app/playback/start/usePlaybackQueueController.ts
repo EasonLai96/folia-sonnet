@@ -53,7 +53,7 @@ import { playbackFade } from '../../../../services/playbackFade';
 import { getProviderSongMetadata } from '../../../../services/onlineMusic/songMetadata';
 import { setStatusMessage as setStatusMsg } from '../../../../stores/useStatusMessageStore';
 import { setAudioSrc, setCachedCoverUrl, setCurrentLineIndex, setCurrentSong, setDuration, setIsFmMode, setPlayQueue, setPlayerState, startLoadingToPlay, usePlaybackStore } from '../../../../stores/usePlaybackStore';
-import { askedSongKeyRef, askForSong, playsDroppedSoFar, showSong, startOfAskedSong, startPlay, withdrawAsk } from '../currentSong';
+import { askedSongKeyRef, askForSong, makeSongCurrent, playsDroppedSoFar, showSong, startOfAskedSong, startPlay, withdrawAsk } from '../currentSong';
 import { loadOnlineSongAudio } from '../source/songAudioSource';
 import { onlineFailureToast } from '../source/onlineFailureToast';
 import { offersRetry, onlineFailureOf, stopsPlayback, type OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
@@ -559,7 +559,9 @@ export function usePlaybackQueueController({
                         if (ok) {
                             // 乐观 UI：原生还在解析 / 起播，界面先跟上；syncTo 到达后
                             // UI-only 认领补齐位置与时长（key 相等走早退分支，同样补 PLAYING）。
-                            setCurrentSong(song);
+                            // 这是一次交付，不是另一次问歌：画面交给这首歌用 `makeSongCurrent`
+                            // （问 + 显示一起），别绕过 currentSong 直接写 store。
+                            makeSongCurrent(song);
                             setPlayerState(PlayerState.PLAYING);
                             return;
                         }
@@ -889,6 +891,8 @@ export function usePlaybackQueueController({
             ? applyOnlineAudioSourceMetadata(song, preloadedOnlineAudioResult.replayGain)
             : song;
         const resolvedQueue = replacePlaybackSongInQueue(newQueue, resolvedSong);
+        // playSong 把两步拆开（这里登记在 currentSongArchitecture.test.ts 的 TWO_STEPS）：
+        // 先问，等歌词状态回来、确认这一单没被后来的播放顶掉，再把画面交出去。
         askForSong(song);
         // Which start of the song this is: a newer play of this same song asks again under the same key.
         const askedStart = startOfAskedSong();
@@ -917,6 +921,7 @@ export function usePlaybackQueueController({
         setCurrentLineIndex(-1);
         currentTime.set(0);
         setDuration(0);
+        // 与上面的 askForSong 是一对：歌词状态已经写完，这里才把画面交出去。
         showSong({ ...resolvedSong, onlineLyricsState: onlineLyricsState ?? undefined });
         setCachedCoverUrl(null);
         setAudioSrc(null);

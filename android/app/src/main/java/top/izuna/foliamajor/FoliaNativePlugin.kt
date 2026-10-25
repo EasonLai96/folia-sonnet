@@ -1854,7 +1854,10 @@ class FoliaNativePlugin : Plugin() {
         val allowAnyHost = java.lang.Boolean.TRUE.equals(call.getBoolean("allowAnyHost", false))
         try {
             if (localAudioServer == null) localAudioServer = LocalAudioServer(getContext())
-            val proxied = localAudioServer!!.registerRemoteAudio(url, headers, allowAnyHost)
+            val credentialOrigin = call.getString("credentialOrigin")
+            val proxied = if (credentialOrigin != null)
+                localAudioServer!!.registerScopedRemoteAudio(url, headers, credentialOrigin)
+            else localAudioServer!!.registerRemoteAudio(url, headers, allowAnyHost)
             val result = JSObject()
             result.put("url", proxied)
             result.put("proxied", true)
@@ -1865,6 +1868,26 @@ class FoliaNativePlugin : Plugin() {
             result.put("proxied", false)
             result.put("error", String.valueOf(error.message))
             call.resolve(result)
+        }
+    }
+
+    @PluginMethod
+    fun registerScopedRemoteAudio(call: PluginCall) {
+        if (call.getString("credentialOrigin") == null) {
+            call.reject("Credential origin is required")
+            return
+        }
+        registerRemoteAudio(call)
+    }
+
+    @PluginMethod
+    fun unregisterRemoteAudio(call: PluginCall) {
+        try {
+            val url = call.getString("url")
+            if (localAudioServer != null && url != null) localAudioServer!!.unregisterRemoteAudio(url)
+            call.resolve()
+        } catch (error: Exception) {
+            call.reject("Could not unregister remote resource")
         }
     }
 
