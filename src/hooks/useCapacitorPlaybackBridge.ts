@@ -263,10 +263,23 @@ export const useCapacitorPlaybackBridge = ({
           callbacksRef.current.onSeek?.(Math.max(0, (positionMs ?? 0) / 1000));
           break;
         case 'like':
-          // 通知栏 / 锁屏 / 耳机那颗心。与面板里的喜爱按钮走同一个 handleLike：
-          // 能不能用、成功与否、状态怎么存都归 Web 层那一份判断，原生不自己记账。
-          // 状态变了会随下一次元数据推送回到通知栏，那颗心自己换形状。
+          // 通知栏 / 锁屏 / 耳机那颗心（原生播放未激活时才走这条路）。
+          // 与面板里的喜爱按钮同一个 handleLike：能不能用、成功与否、状态怎么存
+          // 都归 Web 层那一份判断。状态变了会随下一次元数据推送回到通知栏。
           callbacksRef.current.onToggleLike?.();
+          break;
+        case 'likeDone':
+          /*
+           * 原生播放激活时通知栏那颗心由原生直接写（0 延迟亮心，见
+           * FoliaPlaybackService.handleTransportLike），这里只做对齐：
+           * 把原生写入的补写记录领回来更新账号缓存，App 里那颗心跟着变。
+           * 故意不调 onToggleLike —— 它会再写一遍平台，两次写状态翻两遍等于没点。
+           */
+          void FoliaPlayback.consumeLikeOverrides()
+            .then(({ overrides }) => {
+              if (overrides && overrides.length > 0) applyNativeLikeOverrides(overrides);
+            })
+            .catch(() => undefined);
           break;
         case 'syncTo':
           // 原生兜底切歌后的认领：把队列跳到原生正在放的那首（守卫期间旧歌的

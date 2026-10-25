@@ -1621,6 +1621,26 @@ export default function App() {
             if (currentSong && getPlaybackSongKey(currentSong) === songKey) return true;
             const song = playQueue.find((item) => getPlaybackSongKey(item) === songKey);
             if (!song) return false;
+            /*
+             * 原生正在放这首：只把**界面**认领过去，绝不走 playSong —— 它会重新
+             * 解析地址并换 audioSrc，那条 effect 会把原生刚切好的歌重新 prepare
+             * 一遍、从头再放（两头打架）。界面认领不动 audioSrc：原生播放器手里
+             * 的源就是真源，Web 这边只跟进显示（歌词/封面由 currentSong 的
+             * effect 自己去拉）。
+             */
+            if (nativeTakesRef.current) {
+                setCurrentSong(song);
+                if (positionMs && positionMs > 0) currentTime.set(positionMs / 1000);
+                const candidate = song as SongResult & { duration?: number; durationMs?: number };
+                const ms = candidate.durationMs ?? candidate.duration;
+                if (typeof ms === 'number' && Number.isFinite(ms) && ms > 0) {
+                    setDuration(ms > 0 && ms < 1000 ? ms : ms / 1000);
+                }
+                // 原生切歌（nativePlayMirrorEntry）是直接起播的，界面对齐成在播。
+                setPlayerState(PlayerState.PLAYING);
+                void persistLastPlaybackCache(song, playQueue);
+                return true;
+            }
             void playSong(song, playQueue).then(() => {
                 if (positionMs && positionMs > 0) seekMainAudioRef.current(positionMs / 1000);
             });

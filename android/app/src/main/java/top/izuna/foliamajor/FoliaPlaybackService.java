@@ -425,43 +425,23 @@ public class FoliaPlaybackService extends android.app.Service {
 
             @Override
             public void onSkipToNext() {
-                sendCommand("next");
-                scheduleSkipFallback(+1);
+                handleTransportSkip(+1);
             }
 
             @Override
             public void onSkipToPrevious() {
-                sendCommand("previous");
-                scheduleSkipFallback(-1);
+                handleTransportSkip(-1);
             }
 
             /**
              * 通知栏进度条被拖动。
              *
              * 光有 ACTION_SEEK_TO 还不够：系统只在 actions 里看到它时才把那条
-             * 进度条画成可拖的样子，真正拖完之后调的就是这里。位置以毫秒传回 Web 层，
-             * 由那边去 seek 音频 —— 原生不自己碰播放器。
+             * 进度条画成可拖的样子，真正拖完之后调的就是这里。
              */
             @Override
             public void onSeekTo(long pos) {
-                sendCommand("seek", pos);
-                /*
-                 * 壁纸 / 悬浮窗那边的锚点**这里就对齐**，不等 Web 层回话。
-                 *
-                 * 不能指望 Web 层那条 seek 检测（`useLyricsWallpaperFeed` 里的轮询）：
-                 * App 退到后台之后 WebView 的 JS 定时器会被系统挂起，而拖通知栏进度条
-                 * 恰恰就是在后台发生的 —— 那条路一挂，锚点永远不更新，歌词就停在原地。
-                 *
-                 * 更糟的是原生这边还在按**旧**锚点往前外推：拖回开头之后它还会一路
-                 * 算到歌曲末尾，于是整句被判成唱完、整行颜色一下填满，
-                 * 等 Web 层终于推来一次锚点才弹回去 —— 就是那个「闪一下」。
-                 */
-                boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
-                // setSeekAnchor：写锚点的同时打开回弹守卫窗 —— JS 那边音频还没 seek 完时
-                // 推来的旧位置（守卫窗内的位置回退）会被状态层丢掉，见 WallpaperLyricsState。
-                top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setSeekAnchor(pos, playing);
-                top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
-                        .shared(FoliaPlaybackService.this).invalidateOverlay();
+                handleTransportSeek(pos);
             }
 
             @Override
@@ -488,10 +468,7 @@ public class FoliaPlaybackService extends android.app.Service {
             @Override
             public void onCustomAction(String action, android.os.Bundle extras) {
                 if (ACTION_TOGGLE_LIKE.equals(action)) {
-                    sendCommand("like");
-                    // 命令照旧给 JS（它才是账号态的唯一写手），同时挂一个原生兜底：
-                    // WebView 冻结时 JS 永远不会回话，超时后由这里直接对各平台补写。
-                    scheduleLikeFallback();
+                    handleTransportLike();
                 }
             }
         });
@@ -667,6 +644,75 @@ public class FoliaPlaybackService extends android.app.Service {
     }
 
     /**
+     * 原生播放激活：原生播放器手上真有这首歌（在放或暂停着）。
+     *
+     * 这个状态下通知栏 / 锁屏 / 耳机的操作**直接在原生做完**，不再走
+     * 「广播给 JS、等它回话、超时才原生兜底」那条链 —— 那条链的兜底要
+     * 2.5~5 秒才轮到原生，用户看到的就是「秒切不秒、红心过一会才亮、
+     * 进度条拖了没反应」。原生激活意味着地址、队列镜像、红心身份原生全有，
+     * 没有任何一件事必须等 WebView。
+     */
+    private boolean nativePlaybackActive() {
+        return top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia();
+    }
+
+    /** 下一首 / 上一首（通知栏、锁屏、耳机线控共用）。 */
+    private void handleTransportSkip(int direction) {
+        if (nativePlaybackActive()) {
+            // 镜像直接切：预取命中是瞬时的，没命中也就一趟平台请求（后台线程）。
+            // App 内的队列对齐靠原生守卫（JS 推旧 metadata 时发 syncTo）与
+            // 打开 App 时的快照认领，不在这里广播 "next" —— JS 那条 playSong
+            // 慢链会跟原生抢同一首歌。
+            skipViaMirror(direction);
+            return;
+        }
+        sendCommand(direction > 0 ? "next" : "previous");
+        scheduleSkipFallback(direction);
+    }
+
+    /** 拖进度条（通知栏、锁屏共用）。 */
+    private void handleTransportSeek(long positionMs) {
+        if (nativePlaybackActive()) {
+            long pos = Math.max(0L, positionMs);
+            top.izuna.foliamajor.player.FoliaNativePlayerPlugin.seekFromSystem(pos);
+            cachedPositionMs = pos;
+            publishSnapshot();
+            applyPlaybackState();
+            publishNotification();
+        } else {
+            sendCommand("seek", positionMs);
+        }
+        /*
+         * 壁纸 / 悬浮窗那边的锚点**这里就对齐**，不等 Web 层回话。
+         *
+         * 不能指望 Web 层那条 seek 检测（`useLyricsWallpaperFeed` 里的轮询）：
+         * App 退到后台之后 WebView 的 JS 定时器会被系统挂起，而拖通知栏进度条
+         * 恰恰就是在后台发生的 —— 那条路一挂，锚点永远不更新，歌词就停在原地。
+         */
+        boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
+        // setSeekAnchor：写锚点的同时打开回弹守卫窗 —— JS 那边音频还没 seek 完时
+        // 推来的旧位置（守卫窗内的位置回退）会被状态层丢掉，见 WallpaperLyricsState。
+        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setSeekAnchor(
+                Math.max(0L, positionMs), playing);
+        top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                .shared(FoliaPlaybackService.this).invalidateOverlay();
+    }
+
+    /** 「喜欢 / 取消喜欢」（通知栏、锁屏、系统媒体控制器共用）。 */
+    private void handleTransportLike() {
+        if (nativePlaybackActive()) {
+            // 0 延迟亮心：toggleLikeNatively 先翻状态再后台写平台，失败自己翻回。
+            // 不发 "like"：JS handleLike 也会写一遍平台，两次写状态翻两遍等于没点。
+            // App 里那颗心的对齐在写成功之后（toggleLikeNatively 里发 likeDone）——
+            // 发早了 JS 还 consume 不到记录（记录是写成功才落盘的）。
+            toggleLikeNatively();
+            return;
+        }
+        sendCommand("like");
+        scheduleLikeFallback();
+    }
+
+    /**
      * 通知栏 / 锁屏按钮的 next / previous / like。
      *
      * 与 MediaSession 回调同一段逻辑：命令照旧广播给 JS，同时挂原生兜底计时器 ——
@@ -681,40 +727,19 @@ public class FoliaPlaybackService extends android.app.Service {
         }
         switch (command) {
             case "next":
-                sendCommand("next");
-                scheduleSkipFallback(+1);
+                handleTransportSkip(+1);
                 break;
             case "previous":
-                sendCommand("previous");
-                scheduleSkipFallback(-1);
+                handleTransportSkip(-1);
                 break;
             case "like":
-                sendCommand("like");
-                scheduleLikeFallback();
+                handleTransportLike();
                 break;
             case "seek":
                 long positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L);
-                /*
-                 * 拖通知栏进度条。WebView 冻结时 JS 收不到这条广播 —— 拖了就是
-                 * 白拖（「进度条无法使用」）。桥已经没了、原生手上真有歌时直接在
-                 * 原生侧跳；桥活着时照旧交 JS（哪怕原生在播，engine.seek 也会回到
-                 * 原生播放器，两头各跳各的反而打架）。
-                 */
-                if (!FoliaPlaybackPlugin.isBridgeAlive()
-                        && top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
-                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.seekFromSystem(positionMs);
-                    cachedPositionMs = Math.max(0L, positionMs);
-                    boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
-                    top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setSeekAnchor(
-                            Math.max(0L, positionMs), playing);
-                    top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
-                            .shared(this).invalidateOverlay();
-                    publishSnapshot();
-                    applyPlaybackState();
-                    publishNotification();
-                    break;
-                }
-                FoliaPlaybackPlugin.dispatchCommandFromReceiver(command, positionMs, null);
+                // 原生激活时直接在原生跳（handleTransportSeek），不等桥死；
+                // 桥活着但原生手上没歌（<audio> 在播）时照旧交 JS。
+                handleTransportSeek(positionMs);
                 break;
             default:
                 // play / pause / stop 没有原生兜底可做，原路转给 JS。
@@ -806,6 +831,9 @@ public class FoliaPlaybackService extends android.app.Service {
             // 原生兜底切歌也读它（nativePlayMirrorEntry），切歌不打回原形。
             top.izuna.foliamajor.online.LikeOverrideStore.record(
                     this, songKey, providerId, songId, wanted);
+            // 落了盘再知会 JS：App 里那颗心按这张表对齐（consume → applyNativeLikeOverrides）。
+            // 发早了记录还没落，JS 那边什么都领不到。
+            mainHandler.post(() -> sendCommand("likeDone"));
         }, "folia-like-fallback").start();
     }
 
@@ -927,6 +955,13 @@ public class FoliaPlaybackService extends android.app.Service {
             cachedServerSongId = "";
             // 真源守卫：JS 醒来推的还是旧歌时不许覆盖这里的结果（见 updateMetadata）。
             nativeSkipSongKey = songKey;
+            /*
+             * 界面认领也**主动**发一份，不等 JS 自己推 metadata 时被守卫拦下再补。
+             * 通知栏切歌常常就发生在用户盯着 App 的时候 —— 守卫那条路要等 JS 恰好
+             * 推一次 metadata 才触发，界面的歌词封面可能一直停在旧歌上。JS 侧
+             * （onSyncToSong）在原生播放激活时只对齐显示，不会重装源，两边不打架。
+             */
+            sendCommand("syncTo", 0L, songKey);
         }
         String title = entry.optString("title", "");
         if (!title.isEmpty()) cachedTitle = title;

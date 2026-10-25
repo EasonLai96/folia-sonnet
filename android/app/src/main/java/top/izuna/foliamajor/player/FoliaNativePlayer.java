@@ -199,18 +199,30 @@ public final class FoliaNativePlayer {
     }
 
     public void seek(long positionMs) {
+        long target = Math.max(0, positionMs);
+        /*
+         * ⭐ 位置在**调用线程**立刻写进缓存，不等播放器线程（照 prepare 的纪律）。
+         *
+         * 拖通知栏/锁屏进度条那一发是：seekFromSystem → 服务马上 applyPlaybackState，
+         * 它读 currentPositionMs() —— 这时真正的 seekTo 还排在播放器线程队列里，
+         * 读到的是**上一次**的位置。通知栏与锁屏那条进度条于是先弹回旧位置、
+         * 等下一次状态边界才跳到新位置（「显示会回弹」「同步的是上一次拖动的位置」）。
+         * cachedPositionMs 是 volatile，提前写安全；精确值（夹过 duration 的）
+         * 由播放器线程 seekTo 之后再覆盖一遍。
+         */
+        cachedPositionMs = target;
         runOnPlayer(() -> {
             ExoPlayer current = player;
             if (current == null) return;
-            long target = Math.max(0, positionMs);
+            long clamped = target;
             long duration = current.getDuration();
             // C.TIME_UNSET（负数）表示还不知道多长，这时候别去夹。
             if (duration > 0) {
-                target = Math.min(target, duration);
+                clamped = Math.min(clamped, duration);
             }
-            current.seekTo(target);
-            cachedPositionMs = target;
-            emit("position", target, duration > 0 ? duration : 0L, null);
+            current.seekTo(clamped);
+            cachedPositionMs = clamped;
+            emit("position", clamped, duration > 0 ? duration : 0L, null);
         });
     }
 
