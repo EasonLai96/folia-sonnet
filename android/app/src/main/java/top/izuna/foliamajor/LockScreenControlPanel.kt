@@ -187,11 +187,11 @@ class LockScreenControlPanel(private val activity: Activity) {
      * 面板自己不决定"收起"：它只是把这一下报告给锁屏页，由那边统一翻转状态 ——
      * 面板与页面两处都能收起，状态却只有一份。
      */
-    private var blankTapHandler: Runnable? = null
+    private var _blankTapHandler: Runnable? = null
 
     /** 点面板空白处的回调（锁屏页设进来）。 */
     fun setBlankTapHandler(handler: Runnable?) {
-        blankTapHandler = handler
+        _blankTapHandler = handler
     }
 
     /**
@@ -1218,8 +1218,8 @@ class LockScreenControlPanel(private val activity: Activity) {
 
     /** 面板上的空白被点了一下：交给锁屏页统一翻转（它那边也接整屏的空白）。 */
     private fun reportBlankTap() {
-        if (blankTapHandler != null) {
-            blankTapHandler?.run()
+        if (_blankTapHandler != null) {
+            _blankTapHandler?.run()
         }
     }
 

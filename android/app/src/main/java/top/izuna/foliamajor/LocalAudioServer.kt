@@ -276,18 +276,18 @@ class LocalAudioServer(context: Context) {
     /** 转发时要额外带上的请求头（按 token 存）；没有时为 null，见 {@link #registerRemoteAudio}。 */
     private val remoteAudioHeaders: MutableMap<String, MutableMap<String, String>> = LinkedHashMap()
     private var serverSocket: ServerSocket? = null
-    private var port = 0
+    private var _port = 0
 
     @Synchronized
     @Throws(IOException::class)
     fun start(): Int {
         val socket = serverSocket
-        if (socket != null && !socket.isClosed) return port
+        if (socket != null && !socket.isClosed) return _port
         // 端口交给系统分配（0）：写死一个的话，被别的进程占了就起不来，
         // 而每次启动拿到的端口都可能不同，所以 URL 不能持久化，播放前要重新拼（见插件的 localAudioServerPort）。
         val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
-        port = server.localPort
+        _port = server.localPort
         executor.execute {
             while (!serverSocket!!.isClosed) {
                 try {
@@ -299,15 +299,15 @@ class LocalAudioServer(context: Context) {
                 }
             }
         }
-        return port
+        return _port
     }
 
     fun getPort(): Int {
-        return port
+        return _port
     }
 
     /**
-     * 把一个远端音频地址挂到本地服务上，返回 `http://127.0.0.1:<port>/remote-audio/<token>`。
+     * 把一个远端音频地址挂到本地服务上，返回 `http://127.0.0.1:<_port>/remote-audio/<token>`。
      *
      * 为什么要绕这一圈：<audio> 带 crossOrigin="anonymous"，而 Kuwo（波点）的 CDN
      * 根本不下发 Access-Control-Allow-Origin —— 请求连字节都拿不到，报出来却是

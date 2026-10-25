@@ -2024,10 +2024,15 @@ class FoliaNativePlugin : Plugin() {
         val target = File(directory, "imported-" + stableFileId(displayName!!, size, directory))
         if (target.isFile && target.length() > 0) return target.name
 
+        // 取本地 val 再判：sourceUri / sourceFile 各对应一种 ref 形态，正常只会有一个非空。
+        // 老写法是 `FileInputStream(sourceFile!!)` —— ref 既不是 file- 前缀也不是数字时
+        // 两个都是 null，当场 NPE；改成显式判空后这条路变成「返回 null（拷不了）」。
+        val localSourceFile = sourceFile
         val source: InputStream? = if (sourceUri != null)
             resolver.openInputStream(sourceUri)
-        else
-            java.io.FileInputStream(sourceFile!!)
+        else if (localSourceFile != null)
+            java.io.FileInputStream(localSourceFile)
+        else null
         if (source == null) return null
         source.use { `in` ->
             FileOutputStream(target).use { sink ->

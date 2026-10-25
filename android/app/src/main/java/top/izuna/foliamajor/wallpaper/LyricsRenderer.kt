@@ -826,7 +826,7 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
     /** SurfaceTexture 给的采样变换（含 Y 轴翻转），每帧跟着 updateTexImage 一起取。 */
     private val videoTransform = FloatArray(16)
     /** 壁纸不可见时把解码器也停掉：视频本身很耗电，没必要在黑屏后面继续解。 */
-    private var videoActive = true
+    private var _videoActive = true
 
     private var style: Style = LYRICS_STYLE
     /** 歌词动画实验台里当前生效那个模式的配置（扁平键值表，见 WallpaperLyricsState.tuning）。 */
@@ -1533,7 +1533,7 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
             player.setOnPreparedListener { mp ->
                 videoWidth = mp.getVideoWidth()
                 videoHeight = mp.getVideoHeight()
-                if (videoActive) {
+                if (_videoActive) {
                     try {
                         mp.start()
                     } catch (ignored: Throwable) {
@@ -1650,7 +1650,7 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
      * 息屏后那几个小时就是纯耗电。
      */
     fun setVideoActive(active: Boolean) {
-        videoActive = active
+        _videoActive = active
         val player = videoPlayer ?: return
         try {
             if (active) {

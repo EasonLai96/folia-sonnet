@@ -269,11 +269,11 @@ class ColorOsLyricBridge private constructor() {
          * 服务每次构造 metadata 时自己来这里取，谁先谁后都对。
          */
         @Volatile
-        private var pending: Payload? = null
+        private var _pending: Payload? = null
 
         @JvmStatic
         fun setPending(json: String?, hasTranslation: Boolean, songKey: String?) {
-            pending = if (json == null || json.isEmpty())
+            _pending = if (json == null || json.isEmpty())
                 null
             else
                 Payload(json, hasTranslation, songKey)
@@ -281,7 +281,7 @@ class ColorOsLyricBridge private constructor() {
 
         @JvmStatic
         fun clear() {
-            pending = null
+            _pending = null
         }
 
         /**
@@ -293,7 +293,7 @@ class ColorOsLyricBridge private constructor() {
          */
         @JvmStatic
         fun lyricInfoFor(songKey: String?): String? {
-            val current = pending
+            val current = _pending
             if (current == null) {
                 return null
             }
@@ -306,7 +306,7 @@ class ColorOsLyricBridge private constructor() {
         /** 有没有翻译 lane —— 决定要不要挂 Bridge 的公共翻译按钮。 */
         @JvmStatic
         fun hasTranslationFor(songKey: String?): Boolean {
-            val current = pending
+            val current = _pending
             if (current == null || !current.hasTranslation) {
                 return false
             }

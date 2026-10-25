@@ -67,9 +67,9 @@ class WallpaperOverlay(private val context: Context) {
     private var pushScheduled = false
 
     /** 壁纸当前是否可见（由壁纸服务的 onVisibilityChanged 设置）。 */
-    private var wallpaperVisible = false
+    private var _wallpaperVisible = false
     /** 应用侧托管：叠层总开关打开时由应用进程直接挂着，不要求系统壁纸是我们。 */
-    private var appDriven = false
+    private var _appDriven = false
 
     /**
      * 屏幕是否亮着。
@@ -87,12 +87,12 @@ class WallpaperOverlay(private val context: Context) {
      * Folia 自己的界面是否在前台。
      *
      * 它只回答「用户是不是在用 App」这一件事。**不要**再用它反推「用户是不是在桌面」：
-     * 系统壁纸不是我们的时候，壁纸服务根本不会被创建、`wallpaperVisible` 永远是 false，
+     * 系统壁纸不是我们的时候，壁纸服务根本不会被创建、`_wallpaperVisible` 永远是 false，
      * 于是早期版本拿「App 不在前台」当桌面，结果「在所有应用上叠加」关掉也照样压在
      * 别的应用上面（开关等于没有）。桌面的判据只有一条：**我们自己的壁纸正在画**
      * （见 {@link #desktopConfirmed()}）。
      */
-    private var appForeground = false
+    private var _appForeground = false
 
     /**
      * 音频采集。
@@ -105,10 +105,10 @@ class WallpaperOverlay(private val context: Context) {
     /** 由 MainActivity 的生命周期报告。 */
     fun setAppForeground(value: Boolean) {
         runOnUi {
-            if (appForeground == value) {
+            if (_appForeground == value) {
                 return@runOnUi
             }
-            appForeground = value
+            _appForeground = value
             scheduleWatch()
         }
     }
@@ -138,7 +138,7 @@ class WallpaperOverlay(private val context: Context) {
      * 音乐锁屏页面。非空时叠层挂到**它的窗口**上（TYPE_APPLICATION_PANEL + 它的 token），
      * 于是同一层 WebView 就画在锁屏之上 —— 见 LockScreenMusicActivity 里为什么不走悬浮窗。
      */
-    private var lockScreenHost: Activity? = null
+    private var _lockScreenHost: Activity? = null
 
     /**
      * 因为「这一轮已经没东西可显示」退过场（歌词唱完 / 是纯音乐）。
@@ -222,7 +222,7 @@ class WallpaperOverlay(private val context: Context) {
      * 按设置收起才对。
      */
     private fun pausedHideWaived(): Boolean {
-        return lockScreenPauseHold && lockScreenHost != null
+        return lockScreenPauseHold && _lockScreenHost != null
     }
 
     /** 见 lockScreenUnlockedAtMs。给 LockScreenMusicActivity 起来时自检用。 */
@@ -275,7 +275,7 @@ class WallpaperOverlay(private val context: Context) {
          *
          * 少了这一句就是「上滑之后抽搐一下又回来」：
          * finish() 到 onDestroy（宿主置空）之间还有几百毫秒，这段时间
-         * `lockScreenHost != null` 仍然成立，shouldShow() 因此一直是 true；
+         * `_lockScreenHost != null` 仍然成立，shouldShow() 因此一直是 true；
          * 淡出刚起步，巡检下一轮看到 want=true 就把正在淡出的窗口**反向淡回**
          * —— 用户看到的正是一下一下的抽搐，而不是退出。
          */
@@ -304,10 +304,10 @@ class WallpaperOverlay(private val context: Context) {
      * 面板拿到这个通知就把自己摘了再挂一次，重新回到最上面。
      */
     @Volatile
-    private var windowAttachedListener: Runnable? = null
+    private var _windowAttachedListener: Runnable? = null
 
     fun setWindowAttachedListener(listener: Runnable?) {
-        windowAttachedListener = listener
+        _windowAttachedListener = listener
     }
 
     /**
@@ -318,7 +318,7 @@ class WallpaperOverlay(private val context: Context) {
      */
     fun setLockScreenHost(activity: Activity?) {
         runOnUi {
-            if (lockScreenHost == activity) {
+            if (_lockScreenHost == activity) {
                 return@runOnUi
             }
             if (activity != null) {
@@ -331,7 +331,7 @@ class WallpaperOverlay(private val context: Context) {
              * 拖着它的话，回到桌面后暂停中的叠层会一直挂着（那里没有播放键，纯浪费）。
              */
             lockScreenPauseHold = false
-            lockScreenHost = activity
+            _lockScreenHost = activity
             if (added) {
                 detach("宿主交接（锁屏页" + (if (activity == null) "退场" else "起来") + "，窗口类型要换）")
             }
@@ -409,7 +409,7 @@ class WallpaperOverlay(private val context: Context) {
      */
 
     private fun maybeStartLockScreen() {
-        if (lockScreenHost != null) return
+        if (_lockScreenHost != null) return
         // 总开关关了就不许再起（见 overlayMasterEnabled：关了还起就是闪烁的来源）。
         if (!overlayMasterEnabled()) return
         if (!lockScreenWanted()) return
@@ -456,7 +456,7 @@ class WallpaperOverlay(private val context: Context) {
      * 之后就再没有别的事件会去补。巡检每轮问一句，代价可以忽略。
      */
     private fun ensureLockScreenAttempt() {
-        if (lockScreenHost != null) return
+        if (_lockScreenHost != null) return
         // 用户刚关掉过：别再硬塞回去（见 lockScreenDismissed）。
         if (lockScreenDismissed) return
         // 这一轮已经播完了：等换一首有歌词的歌再说（见 lockScreenContentDone）。
@@ -520,7 +520,7 @@ class WallpaperOverlay(private val context: Context) {
     private val lockScreenProbe = object : Runnable {
         override fun run() {
             lockScreenProbePending = false
-            if (lockScreenHost != null) {
+            if (_lockScreenHost != null) {
                 lockScreenStarted = true
                 lockScreenBlocked = false
                 return
@@ -563,7 +563,7 @@ class WallpaperOverlay(private val context: Context) {
     )
 
     fun lockScreenStatus(): LockScreenStatus {
-        return LockScreenStatus(lockScreenStarted, lockScreenBlocked, lockScreenHost != null,
+        return LockScreenStatus(lockScreenStarted, lockScreenBlocked, _lockScreenHost != null,
                 lockScreenAttempts, lockScreenLastError, lockScreenLastExit)
     }
 
@@ -599,7 +599,7 @@ class WallpaperOverlay(private val context: Context) {
         if (lyricsFinished(snapshot)) {
             return "歌词已唱完，且开了「唱完自动隐藏」"
         }
-        if (lockScreenHost != null) {
+        if (_lockScreenHost != null) {
             return "未知（锁屏页仍在，但被判为不该显示）"
         }
         return "不在锁屏上，桌面条件也不满足"
@@ -647,7 +647,7 @@ class WallpaperOverlay(private val context: Context) {
         if (contentDone) {
             lockScreenContentDone = true
         }
-        val host = lockScreenHost
+        val host = _lockScreenHost
         if (host == null) return
         /*
          * 最短可见时长：刚露面就被判退场的话，用户看到的就是「亮屏闪一下就没了，
@@ -688,7 +688,7 @@ class WallpaperOverlay(private val context: Context) {
         if (contentDone) {
             lockScreenContentDone = true
         }
-        val host = lockScreenHost
+        val host = _lockScreenHost
         if (host == null) return
         try {
             host.finish()
@@ -742,7 +742,7 @@ class WallpaperOverlay(private val context: Context) {
                      * 重新起算：按 Activity 创建时刻算的话，等到亮屏时早已超过 1.2 秒，
                      * 保护形同虚设，"亮屏闪一下就没"照样发生。
                      */
-                    if (lockScreenHost != null) {
+                    if (_lockScreenHost != null) {
                         lockScreenShownAtMs = SystemClock.elapsedRealtime()
                     }
                     refreshKeyguardLocked()
@@ -856,10 +856,10 @@ class WallpaperOverlay(private val context: Context) {
     }
 
     private fun applyAppDriven(enabled: Boolean) {
-        if (appDriven == enabled) {
+        if (_appDriven == enabled) {
             return
         }
-        appDriven = enabled
+        _appDriven = enabled
         if (!enabled) {
             // 关开关是用户动作：稳定结论立刻归 false（否则它要等迟滞才翻，
             // 期间巡检认为"还该显示"，刚收下又被唤醒），然后同样走渐隐。
@@ -1032,9 +1032,9 @@ class WallpaperOverlay(private val context: Context) {
              * 总开关关掉是**立刻**生效的，不等迟滞：迟滞是给信号抖动准备的，
              * 用户亲手拨的开关不是抖动，多留 1.2 秒就是多闪一下。
              */
-            if (lockScreenHost != null && !overlayMasterEnabled()) {
+            if (_lockScreenHost != null && !overlayMasterEnabled()) {
                 finishLockScreen(false)
-            } else if (lockScreenHost != null && !want) {
+            } else if (_lockScreenHost != null && !want) {
                 /*
                  * 只有**真的没内容**才钉住「本次锁屏周期内别再起来」（见 isContentExhausted）。
                  * 一律钉死的话，总开关拨回来 / 样式切回跟随后，锁屏页却再也不出现了。
@@ -1391,7 +1391,7 @@ class WallpaperOverlay(private val context: Context) {
     fun attach() {
         if (added) return
         // 挂在锁屏页面上时不需要 SYSTEM_ALERT_WINDOW：那是子窗口，权限跟着宿主 Activity 走。
-        if (lockScreenHost == null && !canOverlay(context)) return
+        if (_lockScreenHost == null && !canOverlay(context)) return
         /*
          * 新挂的这份页面加载时会自己读一遍存储，手上就是最新那份 tuning ——
          * 「等主题落定」的那段到此为止。不清的话，一个早就过去的待定会一直按住这次挂载
@@ -1451,7 +1451,7 @@ class WallpaperOverlay(private val context: Context) {
          * 而且会继承宿主的 showWhenLocked，于是锁屏上看到的就是桌面叠层那一层本身，
          * 而不是另起一份浏览器（另起一份意味着两套状态、两份 rAF 开销，还必然对不上）。
          */
-        val hosted = lockScreenHost != null
+        val hosted = _lockScreenHost != null
         val lp = WindowManager.LayoutParams(
                 screenWidth,
                 screenHeight,
@@ -1483,7 +1483,7 @@ class WallpaperOverlay(private val context: Context) {
                 PixelFormat.TRANSLUCENT)
         params = lp
         if (hosted) {
-            val host = lockScreenHost
+            val host = _lockScreenHost
             if (host != null) {
                 lp.token = host.window.decorView.windowToken
             }
@@ -1526,8 +1526,8 @@ class WallpaperOverlay(private val context: Context) {
             attachAtMs = SystemClock.elapsedRealtime()
             noteOverlayEvent("attach（" + (if (hosted) "宿主=音乐锁屏页" else "系统悬浮窗") + "，"
                     + screenWidth + "x" + screenHeight + "）")
-            // 见 windowAttachedListener：让锁屏面板有机会重新排到这一层之上。
-            val listener = windowAttachedListener
+            // 见 _windowAttachedListener：让锁屏面板有机会重新排到这一层之上。
+            val listener = _windowAttachedListener
             if (listener != null) {
                 try {
                     listener.run()
@@ -1629,7 +1629,7 @@ class WallpaperOverlay(private val context: Context) {
          * 真正的省电交给 watchTask 里那句 `if (added && !screenOn) detach()`（摘窗口），
          * 不需要连宿主一起结束。
          */
-        if (!screenOn && lockScreenHost == null) {
+        if (!screenOn && _lockScreenHost == null) {
             return false
         }
         val snapshot = WallpaperLyricsState.get()
@@ -1667,7 +1667,7 @@ class WallpaperOverlay(private val context: Context) {
             return false
         }
         // 音乐锁屏：已经挂在锁屏页面上了就照常画（那层窗口本来就在 keyguard 之上）。
-        if (lockScreenHost != null) {
+        if (_lockScreenHost != null) {
             return true
         }
         /*
@@ -1692,7 +1692,7 @@ class WallpaperOverlay(private val context: Context) {
          *
          * 少了这一句，上滑退出的观感就是「抽搐一下又回来了」：
          * Activity finish → 宿主置空 → 锁屏那支被 dismissed 挡住 → 但壁纸此刻仍是可见的
-         * （锁屏上壁纸照样在画），于是最后那句 `wallpaperVisible` 给出 true，
+         * （锁屏上壁纸照样在画），于是最后那句 `_wallpaperVisible` 给出 true，
          * 叠层立刻以悬浮窗的形式重新挂上淡入 —— 用户刚退掉的又自己出现。
          * 开着「在所有应用上叠加」时更是必然复发（那一支根本不看 keyguard）。
          */
@@ -1718,13 +1718,13 @@ class WallpaperOverlay(private val context: Context) {
          *  · 壁纸可见性 —— 只有**我们自己的壁纸正在画**的时候系统才给这个回调，
          *    它连锁屏/切桌面都判断得准。没有它就没有"用户在桌面"这条信息。
          *
-         * ⚠️ 这里曾经是 `isOurWallpaperSet() ? wallpaperVisible : true` —— 兜底那一支
+         * ⚠️ 这里曾经是 `isOurWallpaperSet() ? _wallpaperVisible : true` —— 兜底那一支
          * 把「没有信号」当成「在桌面」，于是没设我们壁纸的用户即使把「在所有应用上叠加」
          * 关掉，叠层照样压在别的应用上面（开关等于没有，用户报的就是这一条）。
          * 现在：拿不到信号就当**不确定**，不挂。要在别的应用上也看得见，
          * 请把「在所有应用上叠加」打开。
          */
-        if (appForeground) {
+        if (_appForeground) {
             return false
         }
         return desktopConfirmed()
@@ -1735,10 +1735,10 @@ class WallpaperOverlay(private val context: Context) {
      *
      * 这是「在所有应用上叠加」关掉时唯一的桌面判据，两层叠层（这一层的 WebView 与
      * {@code FloatingLyricsOverlay}）共用它，免得两边各判一套、一个关得掉一个关不掉。
-     * 必须在主线程上读（`wallpaperVisible` 由主线程的可见性回调写）。
+     * 必须在主线程上读（`_wallpaperVisible` 由主线程的可见性回调写）。
      */
     fun desktopConfirmed(): Boolean {
-        return isOurWallpaperSet() && wallpaperVisible
+        return isOurWallpaperSet() && _wallpaperVisible
     }
 
     /** 迟滞之后的稳定结论：现在到底该不该显示。 */
@@ -1930,13 +1930,13 @@ class WallpaperOverlay(private val context: Context) {
     }
 
     private fun applyWallpaperVisible(value: Boolean) {
-        wallpaperVisible = value
+        _wallpaperVisible = value
         if (value) {
             // 回到桌面是用户看得见的动作：直接对齐，不等迟滞（否则每次切回桌面
             // 都要等一秒才淡入，看起来像"慢半拍"）。
             alignWantShowNow()
             ensureShown()
-        } else if (!appDriven) {
+        } else if (!_appDriven) {
             /*
              * 开了「在所有应用上叠加」就别收 —— 壁纸不可见不等于用户不想看它。
              *

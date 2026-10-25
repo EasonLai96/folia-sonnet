@@ -170,7 +170,7 @@ class QishuiSignHost(private val activity: MainActivity) {
     @Volatile
     private var ready = false
     @Volatile
-    private var failureReason: String? = null
+    private var _failureReason: String? = null
     private val ticketSeq = AtomicInteger(1)
     private val pending = ConcurrentHashMap<String, Pending>()
 
@@ -179,7 +179,7 @@ class QishuiSignHost(private val activity: MainActivity) {
 
     /** 宿主自己要用的 cookie：协议层的「当前会话」就是它。 */
     @Volatile
-    private var sessionCookie = ""
+    private var _sessionCookie = ""
 
     /**
      * OkHttp 收到的 set-cookie 自己攒一份。登录态（sessionid 等）正是这么下发的，
@@ -268,7 +268,7 @@ class QishuiSignHost(private val activity: MainActivity) {
     }
 
     fun getFailureReason(): String? {
-        return failureReason
+        return _failureReason
     }
 
     /** 主线程上创建隐藏 WebView 并加载引导页；可重复调用（已建好就直接返回）。 */
@@ -283,7 +283,7 @@ class QishuiSignHost(private val activity: MainActivity) {
             created = WebView(activity)
         } catch (error: Throwable) {
             val reason = "webview-create-failed: " + error.message
-            failureReason = reason
+            _failureReason = reason
             Log.w(TAG, reason)
             return
         }
@@ -406,11 +406,11 @@ class QishuiSignHost(private val activity: MainActivity) {
     }
 
     fun setSessionCookie(cookie: String?) {
-        sessionCookie = if (cookie == null) "" else cookie
+        _sessionCookie = if (cookie == null) "" else cookie
     }
 
     fun getSessionCookie(): String {
-        return sessionCookie
+        return _sessionCookie
     }
 
     /** 主线程：把隐藏 WebView 摘下来并销毁；不管它现在是好的还是已经废了。 */
@@ -445,7 +445,7 @@ class QishuiSignHost(private val activity: MainActivity) {
     private fun onSigningRendererGone(crashed: Boolean) {
         Log.w(TAG, "the signing webview's renderer is gone (crashed=" + crashed + "); the bridge is rebuilt")
         mainHandler.post {
-            failureReason = if (crashed) "renderer-crashed" else "renderer-killed"
+            _failureReason = if (crashed) "renderer-crashed" else "renderer-killed"
             dropWebView()
             // 在途的票据要有结局：这一座已经废了，等它回话是等不到的。
             synchronized(waiting) { waiting.clear() }
@@ -454,7 +454,7 @@ class QishuiSignHost(private val activity: MainActivity) {
             }
             pending.clear()
             // 就地重建：下一次请求（用户刷新二维码）落在一座好的上。
-            // 页面 ready 时 HostBridge.onReady 会把 failureReason 清掉。
+            // 页面 ready 时 HostBridge.onReady 会把 _failureReason 清掉。
             ensureStarted()
         }
     }
@@ -478,8 +478,8 @@ class QishuiSignHost(private val activity: MainActivity) {
         @JavascriptInterface
         fun onReady(cookie: String?) {
             ready = true
-            failureReason = null
-            if (cookie != null) sessionCookie = cookie
+            _failureReason = null
+            if (cookie != null) _sessionCookie = cookie
             Log.i(TAG, "signing host ready")
             // 排队的请求现在可以发了（@JavascriptInterface 跑在桥线程，派发回主线程）。
             mainHandler.post { this@QishuiSignHost.drainWaiting() }
@@ -487,7 +487,7 @@ class QishuiSignHost(private val activity: MainActivity) {
 
         @JavascriptInterface
         fun onFailure(reason: String?) {
-            failureReason = reason
+            _failureReason = reason
             Log.w(TAG, "signing host failed: " + reason)
         }
 
@@ -500,7 +500,7 @@ class QishuiSignHost(private val activity: MainActivity) {
         /** 页面把当前会话 cookie 回传（登录后 / 登出后都会调）。 */
         @JavascriptInterface
         fun setCookie(cookie: String?) {
-            sessionCookie = if (cookie == null) "" else cookie
+            _sessionCookie = if (cookie == null) "" else cookie
         }
 
         /**
@@ -516,7 +516,7 @@ class QishuiSignHost(private val activity: MainActivity) {
             synchronized(jarCookies) {
                 jarCookies.clear()
             }
-            sessionCookie = ""
+            _sessionCookie = ""
             try {
                 CookieManager.getInstance().removeAllCookies(null)
             } catch (error: Throwable) {
@@ -846,8 +846,8 @@ class QishuiSignHost(private val activity: MainActivity) {
             // 登录态：优先用宿主自己记的会话 cookie，其次才是 WebView cookie 罐里的。
             // 走 cookieHeaderFor 的并集（自攒的 jar + CookieManager），别只读后者 ——
             // 假 XHR 不走真实网络，CookieManager 里未必有 OkHttp 收到的那批。
-            val cookie = if (sessionCookie != null && sessionCookie.isNotEmpty())
-                sessionCookie
+            val cookie = if (_sessionCookie != null && _sessionCookie.isNotEmpty())
+                _sessionCookie
             else
                 cookieHeaderFor(url)
             if (cookie != null && cookie.isNotEmpty()) builder.header("Cookie", cookie)

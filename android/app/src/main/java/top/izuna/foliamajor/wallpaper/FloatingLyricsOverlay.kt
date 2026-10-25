@@ -115,7 +115,7 @@ class FloatingLyricsOverlay private constructor(context: Context) {
         /**
          * 开关：在 App 里也把这一层挂出来，好让设置页当场看到改动（预览）。
          *
-         * 没有它的话「实时预览」是个空话 —— 正常逻辑里 `appForeground` 一命中就不挂，
+         * 没有它的话「实时预览」是个空话 —— 正常逻辑里 `_appForeground` 一命中就不挂，
          * 而调设置恰恰是在 App 里做的，滑条拖到头也看不见任何东西。
          * 由设置页挂载期间置 1、离开置 0。
          */
@@ -142,7 +142,7 @@ class FloatingLyricsOverlay private constructor(context: Context) {
          *
          * 问「App 现在在前台吗」的不止一个进程：壁纸服务（LyricsWallpaperService）
          * 跑着**同一份** FloatingLyricsOverlay，而它永远收不到 Activity 的 onResume / onPause。
-         * 于是它的 appForeground 恒为 false —— App 开在前台、播放页自己正画着
+         * 于是它的 _appForeground 恒为 false —— App 开在前台、播放页自己正画着
          * 可视化歌词，壁纸那边还挂了一颗悬浮窗，屏幕上就是两份一模一样的（用户原话）。
          *
          * 租约而不是一个布尔开关：应用被杀时不会有机会把开关写成 false，
@@ -321,11 +321,11 @@ class FloatingLyricsOverlay private constructor(context: Context) {
     private var chipView: LockChipView? = null
     private var chipParams: WindowManager.LayoutParams? = null
     private var chipAdded = false
-    private var appForeground = false
+    private var _appForeground = false
     /**
      * 本进程是不是**有 Activity 的那个**（= 应用进程）。
      *
-     * 只有应用进程会被 MainActivity 调 setAppForeground，所以它那份 appForeground
+     * 只有应用进程会被 MainActivity 调 setAppForeground，所以它那份 _appForeground
      * 才是真话；壁纸进程没人调，那个字段恒为 false，不能拿来用（见 FOREGROUND_LEASE_MS）。
      */
     private var appForegroundKnown = false
@@ -351,12 +351,12 @@ class FloatingLyricsOverlay private constructor(context: Context) {
     /** 应用在前台时收起来：桌面歌词是给「不在应用里」的时候看的。 */
     fun setAppForeground(foreground: Boolean) {
         appForegroundKnown = true
-        if (appForeground == foreground) {
-            // 状态没变也要续一次：这是心跳，壁纸进程全靠它（见 appForeground()）。
+        if (_appForeground == foreground) {
+            // 状态没变也要续一次：这是心跳，壁纸进程全靠它（见 _appForeground()）。
             if (foreground) pingForeground()
             return
         }
-        appForeground = foreground
+        _appForeground = foreground
         /*
          * 退到后台就把预览掐掉。
          *
@@ -383,8 +383,8 @@ class FloatingLyricsOverlay private constructor(context: Context) {
      * 本进程就是应用进程时，直接说自己那份（它是 Activity 回调喂出来的真话）；
      * 壁纸进程则看盘上那个心跳过没过期（见 FOREGROUND_LEASE_MS 上那段）。
      */
-    private fun appForeground(): Boolean {
-        if (appForegroundKnown) return appForeground
+    private fun _appForeground(): Boolean {
+        if (appForegroundKnown) return _appForeground
         return SystemClock.elapsedRealtime() -
                 prefs.getLong(KEY_FOREGROUND_PING, 0L) < FOREGROUND_LEASE_MS
     }
@@ -525,7 +525,7 @@ class FloatingLyricsOverlay private constructor(context: Context) {
          * 预览窗口同时被强制成不吃触摸（见 buildParams），不会挡住底下的滑条。
          */
         val preview = previewMode()
-        if (appForeground() && !preview) return false
+        if (_appForeground() && !preview) return false
 
         val snapshot = WallpaperLyricsState.get()
         // 只有「精简」样式挂这一层：跟随样式走的是 WebView 叠层（那一层不挂是另一套逻辑）。
@@ -579,7 +579,7 @@ class FloatingLyricsOverlay private constructor(context: Context) {
             return
         }
         // 前台心跳：壁纸进程（同一个类、另一个进程）全靠它知道 App 在不在前台。
-        if (appForegroundKnown && appForeground) pingForeground()
+        if (appForegroundKnown && _appForeground) pingForeground()
         val want = shouldShow()
         if (want && !added) {
             // 淡出半路又该显示了：先把 alpha 拉回 1 再挂（不撤的话挂上来是半透明）。
