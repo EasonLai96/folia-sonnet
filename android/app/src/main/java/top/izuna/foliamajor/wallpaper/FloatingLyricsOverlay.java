@@ -457,10 +457,14 @@ public final class FloatingLyricsOverlay {
         if (appForegroundKnown && appForeground) pingForeground();
         boolean want = shouldShow();
         if (want && !added) {
+            // 淡出半路又该显示了：先把 alpha 拉回 1 再挂（不撤的话挂上来是半透明）。
+            cancelFadeOut();
             attach();
         } else if (!want && added) {
-            detach();
+            // 摘窗之前先淡出：暂停隐藏 / 心跳隐藏都不许突然消失（用户原话）。
+            startFadeOut();
         } else if (want && added) {
+            cancelFadeOut();
             // 转屏 / 换分辨率之后原来那个坐标可能已经出屏了，拉回来（不然小窗"消失"了）。
             reclampIfNeeded();
             // 模式 / 锁 / 预览租约 三者都可能在两次巡检之间变，它们自己不带布局动作，
@@ -611,6 +615,8 @@ public final class FloatingLyricsOverlay {
     }
 
     private void detach() {
+        // 淡出链路收尾：窗口都没了，步进回调不许再跑。
+        cancelFadeOut();
         detachLockChip();
         if (!added || view == null) return;
         // 视图自己排的下一帧不能留着：窗口已经摘了，那条 Runnable 还会把 view 拽着不让它回收。
@@ -623,6 +629,63 @@ public final class FloatingLyricsOverlay {
         view = null;
         added = false;
         lastTouchable = null;
+    }
+
+    // ------------------------------------------------------------------
+    // 淡出：摘窗之前把窗口 alpha 走到 0，别突然消失
+    // ------------------------------------------------------------------
+
+    /** 淡出时长：快得跟手、慢得不突兀。 */
+    private static final long FADE_OUT_MS = 320L;
+    private boolean fadingOut = false;
+    private float fadeFromAlpha = 1f;
+    private long fadeStartMs = 0L;
+
+    private final Runnable fadeStep = new Runnable() {
+        @Override
+        public void run() {
+            if (!fadingOut || !added || params == null || view == null) return;
+            float t = (SystemClock.elapsedRealtime() - fadeStartMs) / (float) FADE_OUT_MS;
+            if (t >= 1f) {
+                fadingOut = false;
+                detach();
+                return;
+            }
+            params.alpha = fadeFromAlpha * (1f - t);
+            try {
+                windowManager.updateViewLayout(view, params);
+            } catch (Throwable ignored) {
+                // 窗口已经被系统摘了：下一拍的 detach 自己会兜住。
+            }
+            handler.postDelayed(this, 16L);
+        }
+    };
+
+    /** 该收了：从当前 alpha 起步，320ms 淡到 0 再真正摘窗。 */
+    private void startFadeOut() {
+        if (!added || params == null || view == null) {
+            detach();
+            return;
+        }
+        if (fadingOut) return;
+        fadingOut = true;
+        fadeFromAlpha = params.alpha;
+        fadeStartMs = SystemClock.elapsedRealtime();
+        handler.post(fadeStep);
+    }
+
+    /** 淡出半路又该显示了（恢复播放 / 心跳回来了）：alpha 立刻回 1，摘窗取消。 */
+    private void cancelFadeOut() {
+        if (!fadingOut) return;
+        fadingOut = false;
+        handler.removeCallbacks(fadeStep);
+        if (added && params != null && view != null && params.alpha != 1f) {
+            params.alpha = 1f;
+            try {
+                windowManager.updateViewLayout(view, params);
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     // ------------------------------------------------------------------

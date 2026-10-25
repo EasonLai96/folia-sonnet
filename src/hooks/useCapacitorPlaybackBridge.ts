@@ -8,6 +8,7 @@ import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackE
 import { applyNativeLikeOverrides, type NativeLikeOverrideInput } from '../services/onlineMusic/omni';
 import { syncFeiniuGatewayCredentials } from '../services/onlineMusic/feiniuTransport';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
+import { buildQueueMirrorEntries, getMirrorDurationMs, resolveLikeIdentity } from '../utils/queueMirrorEntry';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 //
@@ -101,6 +102,17 @@ interface FoliaPlaybackPlugin {
     };
   }>;
   /**
+   * 两轨合一：App 内点歌 / 切歌全走原生桥执行。
+   * 原生先把调用者手里最新的队列落进镜像，再找这首歌：地址有缓存直接放，
+   * 没有就按需解析后放。回 ok=false（原生没激活 / 定位不到）时调用方回退 Web 全流程。
+   */
+  playFromQueue(options: { songKey: string; queueJson: string; index: number }): Promise<{ ok: boolean }>;
+  /**
+   * 上下首分流：原生在镜像里定位当前首的相邻一首直接放。
+   * skipped=false 表示定位不到相邻首（队列到头 / FM / 原生没激活），调用方回退 Web 逻辑。
+   */
+  requestSkip(options: { direction: number }): Promise<{ skipped: boolean }>;
+  /**
    * 原生补写过的红心（WebView 冻结期间通知栏那颗心在服务器上写成功的）。
    * App 启动时取走一次，对齐进账号缓存，App 里的心才不会与通知栏打架。
    */
@@ -147,6 +159,11 @@ type UseCapacitorPlaybackBridgeOptions = {
    * 不认领的话，App 打开时队列还停在旧歌上，与通知栏各说各话。
    */
   onSyncToSong?: (songKey: string, positionMs?: number) => boolean | void;
+  /**
+   * 两轨合一的失败回执：原生解析这首歌的播放地址失败。调用方把歌拉黑并回退
+   * Web 全流程（playSong 直通），不重试不卡住。
+   */
+  onNativePlayFailed?: (songKey: string) => void;
   /** 队列快照：原生兜底切歌的数据源。缺省时不推。 */
   queue?: SongResult[];
   /** 当前这首歌已解析的播放地址（audioSrc）。 */
@@ -181,12 +198,13 @@ export const useCapacitorPlaybackBridge = ({
   currentAudioUrl,
   likeStateOf,
   onSyncToSong,
+  onNativePlayFailed,
 }: UseCapacitorPlaybackBridgeOptions): void => {
   const enabled = isCapacitorAndroid();
 
   // 这三个回调是每次渲染都可能换身份的内联函数，进 effect 依赖会把订阅反复重建。
-  const callbacksRef = React.useRef({ getCurrentTime, onSeek, onToggleLike, onSyncToSong });
-  callbacksRef.current = { getCurrentTime, onSeek, onToggleLike, onSyncToSong };
+  const callbacksRef = React.useRef({ getCurrentTime, onSeek, onToggleLike, onSyncToSong, onNativePlayFailed });
+  callbacksRef.current = { getCurrentTime, onSeek, onToggleLike, onSyncToSong, onNativePlayFailed };
 
   // 原生补写的红心，App 这边开机认领：把账号缓存（likedSongIds）对齐到原生写入的
   // 服务器真状态。不认领的话，打开 App 那一刻 JS 推的还是旧缓存，通知栏那颗心会被
@@ -286,6 +304,11 @@ export const useCapacitorPlaybackBridge = ({
           // metadata 会被原生拒收，见 FoliaPlaybackService.updateMetadata）。
           if (songKey) callbacksRef.current.onSyncToSong?.(songKey);
           break;
+        case 'nativePlayFailed':
+          // 两轨合一的失败回执：原生按需解析地址失败（URL 为 null）。JS 把这首歌
+          // 拉黑（本次会话内不再分流给它）并回退 Web 全流程自己放，不卡住不重试。
+          if (songKey) callbacksRef.current.onNativePlayFailed?.(songKey);
+          break;
       }
     }).then((off) => {
       if (cancelled) off();
@@ -316,7 +339,7 @@ export const useCapacitorPlaybackBridge = ({
       artist: getSongArtistLabel(currentSong) || '',
       album: getSongAlbumLabel(currentSong) || '',
       artworkUrl: coverUrl || null,
-      durationMs: getDurationMs(currentSong),
+      durationMs: getMirrorDurationMs(currentSong),
       providerBadge: resolveProviderBadge(currentSong),
       songKey,
       liked: isLiked,
@@ -366,26 +389,7 @@ export const useCapacitorPlaybackBridge = ({
     // 飞牛的凭据要在队列之前到位：登录可能发生在插件可用之前（重启后桥晚一步），
     // 这里每推一次队列顺手同步一遍 —— 一次几十字节的调用，换原生兜底不空手。
     syncFeiniuGatewayCredentials();
-    const entries = list.map((song) => {
-      const identity = resolveLikeIdentity(song);
-      const likeState = stateOf?.(song);
-      return {
-        songKey: getPlaybackSongKey(song),
-        title: song.name || '',
-        artist: getSongArtistLabel(song) || '',
-        album: getSongAlbumLabel(song) || '',
-        artworkUrl: getSongCoverUrl(song) || '',
-        durationMs: getDurationMs(song),
-        // 原生兜底切歌后，服务用这些身份取流、拉歌词、维持红心（网易 / QQ / 酷狗）。
-        providerId: identity.providerId,
-        serverSongId: identity.serverSongId,
-        providerMid: identity.providerMid,
-        providerHash: identity.providerHash,
-        providerAlbumAudioId: identity.providerAlbumAudioId,
-        liked: likeState?.liked ?? false,
-        canLike: likeState?.canLike ?? false,
-      };
-    });
+    const entries = buildQueueMirrorEntries(list, stateOf);
     const index = activeSong ? list.findIndex((song) => getPlaybackSongKey(song) === getPlaybackSongKey(activeSong)) : -1;
     void FoliaPlayback.setQueueMirror({ queueJson: JSON.stringify(entries), index });
   }, [enabled, queue]);
@@ -488,73 +492,6 @@ export const useCapacitorPlaybackBridge = ({
   }, [enabled, playerState, currentSong]);
 };
 
-const getDurationMs = (song: SongResult): number => {
-  const candidate = (song as SongResult & { duration?: number; durationMs?: number });
-  const ms = candidate.durationMs ?? candidate.duration;
-  if (typeof ms !== 'number' || !Number.isFinite(ms)) return 0;
-  // 有些音源给的是秒。
-  return ms > 0 && ms < 1000 ? Math.round(ms * 1000) : Math.round(ms);
-};
-
-/**
- * 原生播放延续需要的歌曲身份：平台 + 平台侧 id 们。
- *
- * 网易的收藏与取流只认数字曲库 id（mediaId 就是它）；QQ 的写入要数字 songId
- * （正规化时存在 providerData.songId，mediaId 多数时候是 songmid，不能拿去猜），
- * 取流（CgiGetVkey）只认 songmid；酷狗的取流与歌词都只认文件 hash。
- * 本地 / Navidrome / 舞台这些自家人没有平台身份，原生兜底对它们跳过。
- */
-const resolveLikeIdentity = (song: SongResult | null | undefined): {
-  providerId: string;
-  serverSongId: string;
-  providerMid: string;
-  providerHash: string;
-  providerAlbumAudioId: string;
-} => {
-  const sourceRef = song?.sourceRef?.kind === 'online' ? song.sourceRef : undefined;
-  if (!sourceRef) return { providerId: '', serverSongId: '', providerMid: '', providerHash: '', providerAlbumAudioId: '' };
-  if (sourceRef.providerId === 'netease') {
-    return { providerId: 'netease', serverSongId: String(sourceRef.mediaId ?? ''), providerMid: '', providerHash: '', providerAlbumAudioId: '' };
-  }
-  if (sourceRef.providerId === 'qq') {
-    const data = (sourceRef.providerData ?? {}) as Record<string, unknown>;
-    const id = typeof data.songId === 'string' && /^\d{1,15}$/.test(data.songId.trim())
-      ? data.songId.trim()
-      : (typeof sourceRef.mediaId === 'string' && /^\d{1,15}$/.test(sourceRef.mediaId.trim())
-        ? sourceRef.mediaId.trim()
-        : '');
-    // songmid：取流认它。providerData 带了用它的；没带时 mediaId 多半就是 songmid。
-    const mid = typeof data.songmid === 'string' && data.songmid.trim()
-      ? data.songmid.trim()
-      : String(sourceRef.mediaId ?? '');
-    return { providerId: 'qq', serverSongId: id, providerMid: mid, providerHash: '', providerAlbumAudioId: '' };
-  }
-  if (sourceRef.providerId === 'kugou') {
-    const data = (sourceRef.providerData ?? {}) as Record<string, unknown>;
-    return {
-      providerId: 'kugou',
-      serverSongId: '',
-      providerMid: '',
-      providerHash: typeof data.hash === 'string' ? data.hash : String(sourceRef.mediaId ?? ''),
-      providerAlbumAudioId: typeof data.albumAudioId === 'string' || typeof data.albumAudioId === 'number'
-        ? String(data.albumAudioId)
-        : '',
-    };
-  }
-  // 汽水与飞牛都只用一个 id：汽水的取流 / 歌词要 track id，飞牛要曲目 guid ——
-  // mediaId 就是它们，原生网关按 providerId 分流。
-  if (sourceRef.providerId === 'qishui' || sourceRef.providerId === 'feiniu') {
-    return {
-      providerId: sourceRef.providerId,
-      serverSongId: String(sourceRef.mediaId ?? ''),
-      providerMid: '',
-      providerHash: '',
-      providerAlbumAudioId: '',
-    };
-  }
-  return { providerId: String(sourceRef.providerId), serverSongId: '', providerMid: '', providerHash: '', providerAlbumAudioId: '' };
-};
-
 /**
  * 通知栏封面角标用哪颗图标。
  *
@@ -569,3 +506,5 @@ export const resolveProviderBadge = (song: SongResult | null | undefined): strin
 };
 
 export { ACTION_UPDATE_METADATA, ACTION_UPDATE_STATE, ACTION_STOP_FOREGROUND, ACTION_WEB_COMMAND, EXTRA_COMMAND };
+// 两轨合一：点歌 / 切歌的分流（usePlaybackQueueController）也走同一个插件句柄。
+export { FoliaPlayback };

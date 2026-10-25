@@ -122,6 +122,48 @@ public class FoliaPlaybackPlugin extends Plugin {
     }
 
     /**
+     * App 内点歌 / 切歌走原生（两轨合一）：
+     *
+     * JS 把刚排好的队列（镜像条目格式）与目标歌一并交过来，原生在后台向平台
+     * 要地址（MusicGateway 直连，带预取）、装源起播，再发 syncTo 让界面认领。
+     * WebView 里那套 omni 解析 → setAudioSrc 的慢链不再参与，两边抢一首歌的
+     * 时序 bug 就此绝迹。回 {@code ok=false} 时（镜像定位不到 / 服务不在）JS
+     * 回退到自己的全流程。
+     */
+    @PluginMethod
+    public void playFromQueue(PluginCall call) {
+        FoliaPlaybackService service = FoliaPlaybackService.activeService();
+        if (service == null) {
+            JSObject result = new JSObject();
+            result.put("ok", false);
+            call.resolve(result);
+            return;
+        }
+        String songKey = call.getString("songKey", "");
+        String queueJson = call.getString("queueJson", "");
+        int index = call.getInt("index", -1);
+        boolean ok = service.playFromQueue(songKey, queueJson, index);
+        JSObject result = new JSObject();
+        result.put("ok", ok);
+        call.resolve(result);
+    }
+
+    /**
+     * App 内的下一首 / 上一首走原生：与通知栏同一条直连路径（预取命中即瞬时）。
+     * 回 {@code skipped=false} 时（队列缺位 / 越界）JS 回退自己的全流程。
+     */
+    @PluginMethod
+    public void requestSkip(PluginCall call) {
+        FoliaPlaybackService service = FoliaPlaybackService.activeService();
+        Integer direction = call.getInt("direction", 1);
+        int step = direction == null ? 1 : (direction < 0 ? -1 : 1);
+        boolean skipped = service != null && service.transportSkip(step);
+        JSObject result = new JSObject();
+        result.put("skipped", skipped);
+        call.resolve(result);
+    }
+
+    /**
      * 队列镜像快照：WebView 冻结后通知栏切歌的原生兜底数据源。
      *
      * JS 活着时每次队列/当前歌变化都推一份（当前 ±10 首、带已解析地址的窗口）。

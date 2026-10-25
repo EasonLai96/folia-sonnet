@@ -630,6 +630,10 @@ export default function App() {
         nativeTakesRef.current = nativeTakes;
     }, [nativeTakes]);
 
+    // 两轨合一：原生解析失败过的歌（会话级黑名单）。这些歌不再分流给原生，
+    // playSong 直接走 Web 全流程；重启 App 即清空（会话级，不落盘）。
+    const nativeFailedKeysRef = useRef<Set<string>>(new Set());
+
     const syncOutputGain = useCallback((targetVolume: number, smoothing = 0.015) => {
         const clampedVolume = clampMediaVolume(targetVolume);
 
@@ -1187,6 +1191,15 @@ export default function App() {
         lastAudioRecoverySourceRef,
         getDisplaySong,
         endHeldTransition,
+        // 两轨合一：点歌 / 切歌的分流。nativeTakes 是「这一首交给原生」的即时判定，
+        // 但分流发生在回调里（用户按下时才跑），所以传 ref —— 跟 transport 回调同一套纪律。
+        nativePlaybackRef: nativeTakesRef,
+        // 队列里每首歌的红心状态：同步读账号缓存，随队列一起落进原生镜像。
+        nativeLikeStateOf: (song) => ({
+            liked: resolveSongLiked(song, { isLocalSongLiked, starredNavidromeSongIds, likedSongIds }),
+            canLike: !resolveLikeAvailability(song, false, false).disabled,
+        }),
+        nativeFailedKeysRef,
     });
     const handleSearchResultArtistOpen = useCallback(async (
         track: UnifiedSong,
@@ -1618,7 +1631,17 @@ export default function App() {
         // 把队列跳到原生正在放的那首，并把它已经放到的位置对齐过去。
         // 队列里找不到（还没恢复 / 队列早换过了）回 false，调用方会重试。
         onSyncToSong: (songKey, positionMs) => {
-            if (currentSong && getPlaybackSongKey(currentSong) === songKey) return true;
+            if (currentSong && getPlaybackSongKey(currentSong) === songKey) {
+                // key 相等也要补齐：乐观 setCurrentSong 之后的 syncTo、以及 WebView
+                // 冻结期间原生一直在放的启动快照认领都走这里 —— 界面得跟上
+                // 「原生在放」这个事实，不能因为 key 相等就什么都不做。
+                if (nativeTakesRef.current) {
+                    if (positionMs && positionMs > 0) currentTime.set(positionMs / 1000);
+                    setPlayerState(PlayerState.PLAYING);
+                    void persistLastPlaybackCache(currentSong, playQueue);
+                }
+                return true;
+            }
             const song = playQueue.find((item) => getPlaybackSongKey(item) === songKey);
             if (!song) return false;
             /*
@@ -1645,6 +1668,13 @@ export default function App() {
                 if (positionMs && positionMs > 0) seekMainAudioRef.current(positionMs / 1000);
             });
             return true;
+        },
+        // 两轨合一的失败回执：原生按需解析这首歌的地址失败。拉黑（会话内不再分流
+        // 给原生）并回退 Web 全流程自己放，不重试不卡住。
+        onNativePlayFailed: (failedSongKey) => {
+            nativeFailedKeysRef.current.add(failedSongKey);
+            const failedSong = playQueue.find((item) => getPlaybackSongKey(item) === failedSongKey);
+            if (failedSong) void playSong(failedSong, playQueue, false, { shouldNavigateToPlayer: false });
         },
     });
 

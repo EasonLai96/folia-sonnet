@@ -266,6 +266,14 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
     private float animatedIndex = 0f;
     private float animatedProgress = 0f;
     /**
+     * 播放 UI（歌词 + 进度条）的整体淡入淡出系数 0..1。
+     *
+     * 暂停时（wp.hideWhenPaused 开着）与心跳断掉时都趋向 0 —— 但**带动画**，
+     * 不是突然消失（用户原话：隐藏加动画不要突然消失，心跳隐藏也是）。
+     * 每帧朝目标平滑逼近（见 onDrawFrame），画歌词 / 进度条时把 alpha 乘上它。
+     */
+    private float uiAlpha = 1f;
+    /**
      * 换行走入：新的一句成为焦点时的滑入进度 0..1（1 = 已经站定）。
      * 这是原生层唯一「额外」的动画 —— 去掉线条背景之后画面太静，加这一点点就够。
      */
@@ -612,8 +620,17 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         // 心跳断了就不画歌词和进度条：播放管线已经没了（应用被划掉后台 / WebView 死透），
         // 时间轴上走到的位置是没人听的。背景照画 —— 壁纸还得是一张壁纸。
         // 这里自己读心跳，不等别人转发（每个绘制入口都要自己读，见 WallpaperLyricsState）。
+        //
+        // ⭐ 暂停时**也收 UI**，而且两条路都带淡出动画（uiAlpha 平滑逼近，不许突然消失）：
+        //   · 暂停：wp.hideWhenPaused（与叠层/小窗同一套开关）开着时收；
+        //   · 心跳断：原来是一帧内直接停画 —— 观感就是「啪一下没了」，现在同样淡出。
+        // 逼近速度 6（时间常数 ≈170ms）：约半秒淡完，快得跟手、慢得不突兀。
         boolean playbackAlive = WallpaperLyricsState.heartbeatAlive();
-        if (playbackAlive && !tb("wp.hideNativeProgress", false)) {
+        boolean wantPlaybackUi = playbackAlive
+                && (snapshot.playing || !tb("wp.hideWhenPaused", true));
+        uiAlpha = approach(uiAlpha, wantPlaybackUi ? 1f : 0f, deltaSeconds, 6f);
+        boolean drawPlaybackUi = uiAlpha > 0.004f;
+        if (drawPlaybackUi && !tb("wp.hideNativeProgress", false)) {
             drawProgressBar(snapshot);
         }
         /*
@@ -623,7 +640,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
          * 还在中间画一整块的话，同一句会同时出现在两个地方 —— 扫光还不同步，看着像重影。
          * 背景照旧画：用户选的封面 / 渐变还在，中间空出来的那一块正好留给小窗。
          */
-        if (playbackAlive && !tb("wp.hideNativeLyrics", false) && !nativeLyricsShadowedByFloating()) {
+        if (drawPlaybackUi && !tb("wp.hideNativeLyrics", false) && !nativeLyricsShadowedByFloating()) {
             drawLyrics(snapshot);
         }
     }
@@ -788,7 +805,8 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
         float top = surfaceHeight * 0.082f;
 
         // 轨道：一层很淡的白，深色与浅色底图上都看得出边界。
-        drawTexturedQuad(solidTexture, left, top, width, height, 1f, 1f, 1f, 0.15f, -1f, 0f, 1f);
+        // alpha 乘 uiAlpha：暂停 / 心跳断的淡出走的就是它（见 onDrawFrame）。
+        drawTexturedQuad(solidTexture, left, top, width, height, 1f, 1f, 1f, 0.15f * uiAlpha, -1f, 0f, 1f);
         if (ratio <= 0f) {
             return;
         }
@@ -803,7 +821,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             float g = coverTint[1] + (coverTint2[1] - coverTint[1]) * t;
             float b = coverTint[2] + (coverTint2[2] - coverTint[2]) * t;
             drawTexturedQuad(solidTexture, left + i * segment, top,
-                    segment + 0.6f, height, r, g, b, 0.92f, -1f, 0f, 1f);
+                    segment + 0.6f, height, r, g, b, 0.92f * uiAlpha, -1f, 0f, 1f);
         }
     }
 
@@ -1275,8 +1293,9 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             }
             // 亮度衰减最多算到 FALLOFF_MAX_DISTANCE 行：再往外还继续压暗的话，
             // 最外侧那行轮到它做飞出/出现动画时已经暗得看不见了 —— 等于没有动画。
+            // alpha 乘 uiAlpha：暂停 / 心跳断时整块歌词一起淡出（见 onDrawFrame）。
             float alpha = clamp(1f - style.falloff * Math.min(distance, FALLOFF_MAX_DISTANCE),
-                    0f, 1f) * edgeAlpha;
+                    0f, 1f) * edgeAlpha * uiAlpha;
             boolean isCurrent = distance < 0.5f;
             /*
              * **每一行有自己的进度**，不是全场共用一个值：
@@ -1387,7 +1406,7 @@ public final class LyricsRenderer implements GLSurfaceView.Renderer {
             if (giant != null) {
                 float ratio = Math.min(1f, width / giant.width);
                 drawCentered(giant, centerY - lineStep * 0.15f,
-                        giant.width * ratio, giant.height * ratio, 0.055f, -1f);
+                        giant.width * ratio, giant.height * ratio, 0.055f * uiAlpha, -1f);
             }
         }
     }

@@ -57,6 +57,11 @@ public class FoliaPlaybackService extends android.app.Service {
     /** 活着的服务实例：getPlaybackSnapshot（JS 问原生要状态）从这里读。 */
     private static volatile FoliaPlaybackService snapshotSource = null;
 
+    /** 插件直调原生切歌 / 点歌时的实例入口（onCreate 赋值，onDestroy 清）。 */
+    static FoliaPlaybackService activeService() {
+        return snapshotSource;
+    }
+
     /** 服务是否还活着。public：coloros 包要判断「有没有必要发刷新 intent」。 */
     public static boolean isRunning() {
         return running;
@@ -656,18 +661,79 @@ public class FoliaPlaybackService extends android.app.Service {
         return top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia();
     }
 
-    /** 下一首 / 上一首（通知栏、锁屏、耳机线控共用）。 */
-    private void handleTransportSkip(int direction) {
+    /** App 内下一首/上一首走原生的公开入口（插件直调，同步回执能不能受理）。 */
+    public boolean transportSkip(int direction) {
+        return handleTransportSkip(direction);
+    }
+
+    /**
+     * 下一首 / 上一首（通知栏、锁屏、耳机线控、App 内按钮共用）。
+     *
+     * 回 true = 已受理（原生切了，或已交给 JS 那条路）；false = 镜像里定位不到
+     * 相邻首（App 内按钮据此回退到 Web 全流程，通知栏路径不回退、等 JS）。
+     */
+    private boolean handleTransportSkip(int direction) {
         if (nativePlaybackActive()) {
             // 镜像直接切：预取命中是瞬时的，没命中也就一趟平台请求（后台线程）。
             // App 内的队列对齐靠原生守卫（JS 推旧 metadata 时发 syncTo）与
             // 打开 App 时的快照认领，不在这里广播 "next" —— JS 那条 playSong
             // 慢链会跟原生抢同一首歌。
-            skipViaMirror(direction);
-            return;
+            return skipViaMirror(direction);
         }
         sendCommand(direction > 0 ? "next" : "previous");
         scheduleSkipFallback(direction);
+        return true;
+    }
+
+    /** App 内点歌 / 切歌走原生（两轨合一）的入口：见 FoliaPlaybackPlugin.playFromQueue。 */
+    public boolean playFromQueue(String songKey, String queueJson, int index) {
+        if (songKey == null || songKey.isEmpty()) {
+            return false;
+        }
+        // 调用方手里的队列是最新的（JS 刚排好、镜像 effect 可能还没跑），先落下来。
+        if (queueJson != null && !queueJson.isEmpty()) {
+            mirroredQueueJson = queueJson;
+            mirroredIndex = index;
+        }
+        String json = mirroredQueueJson;
+        if (json == null) {
+            return false;
+        }
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(json);
+            int target = index;
+            if (target < 0) {
+                // 没带 index 就在镜像里找。
+                for (int i = 0; i < array.length(); i++) {
+                    org.json.JSONObject item = array.optJSONObject(i);
+                    if (item != null && songKey.equals(item.optString("songKey", ""))) {
+                        target = i;
+                        break;
+                    }
+                }
+            }
+            if (target < 0 || target >= array.length()) {
+                return false;
+            }
+            org.json.JSONObject entry = array.optJSONObject(target);
+            if (entry == null) {
+                return false;
+            }
+            mirroredIndex = target;
+            String url = resolvedUrlCache.get(songKey);
+            if (url == null || url.isEmpty()) {
+                url = entry.optString("url", "");
+            }
+            if (url != null && !url.isEmpty()) {
+                nativePlayMirrorEntry(entry, url);
+                preloadMirrorNeighbors(array, target, +1);
+                return true;
+            }
+            resolveMirrorEntryAsync(array, entry, target, target, +1);
+            return true;
+        } catch (org.json.JSONException ignored) {
+            return false;
+        }
     }
 
     /** 拖进度条（通知栏、锁屏共用）。 */
@@ -837,15 +903,18 @@ public class FoliaPlaybackService extends android.app.Service {
         }, "folia-like-fallback").start();
     }
 
-    /** 从镜像队列取相邻一首，原生直接换源并自更新通知元数据。 */
-    private void skipViaMirror(int direction) {
+    /**
+     * 从镜像队列取相邻一首，原生直接换源并自更新通知元数据。
+     * 回 false = 镜像缺位 / 越界（调用方据此决定要不要回退到 JS 全流程）。
+     */
+    private boolean skipViaMirror(int direction) {
         String json = mirroredQueueJson;
         int index = mirroredIndex;
-        if (json == null || index < 0) return;
+        if (json == null || index < 0) return false;
         try {
             org.json.JSONArray array = new org.json.JSONArray(json);
             int target = index + direction;
-            if (target < 0 || target >= array.length()) return;
+            if (target < 0 || target >= array.length()) return false;
             org.json.JSONObject entry = array.getJSONObject(target);
             String songKey = entry.optString("songKey", "");
             String url = songKey.isEmpty() ? null : resolvedUrlCache.get(songKey);
@@ -856,14 +925,16 @@ public class FoliaPlaybackService extends android.app.Service {
                 mirroredIndex = target;
                 nativePlayMirrorEntry(entry, url);
                 preloadMirrorNeighbors(array, target, direction);
-                return;
+                return true;
             }
             // 地址没解析出来（预取没命中）：原生平台网关直接向平台要一个。镜像窗口里
             // 每首歌的身份（providerId / serverSongId / songmid）都在，缺的只是地址 ——
             // 这就是「连按几首下一首就切不动」的解药。解析在后台线程（桥的线程规则），
             // 成了回主线程换源；期间用户又按了的，以 mirroredIndex 为准作废重算。
             resolveMirrorEntryAsync(array, entry, target, index, direction);
+            return true;
         } catch (org.json.JSONException ignored) {
+            return false;
         }
     }
 
@@ -886,6 +957,13 @@ public class FoliaPlaybackService extends android.app.Service {
             String url = top.izuna.foliamajor.online.MusicGateway.resolvePlayUrl(
                     providerId, songId, mid, hash, albumAudioId);
             if (url == null || url.isEmpty()) {
+                // App 内点歌走原生（两轨合一）时的失败回执：JS 收到后把这首歌
+                // 标进本会话的黑名单并回退到 Web 全流程，别让界面停在转圈。
+                // 通知栏兜底切歌的失败本来就没有 JS 可回退，多发的这条它自己不认。
+                if (!songKey.isEmpty()) {
+                    final String failedKey = songKey;
+                    mainHandler.post(() -> sendCommand("nativePlayFailed", 0L, failedKey));
+                }
                 return;
             }
             if (!songKey.isEmpty()) {
