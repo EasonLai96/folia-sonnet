@@ -161,6 +161,7 @@ describe('BravaisWallGroup', () => {
         expect(listsGroup()).toBe(false);
         gate.isBravaisActive = true;
         expect(listsGroup()).toBe(true);
-        // The search module loads the whole command registry the first time.
-    }, 30000);
+        // The search module loads the whole command registry the first time. On a cold, busy
+        // machine that one import has been measured at 30s+ here, so the budget has to clear it.
+    }, 120_000);
 });

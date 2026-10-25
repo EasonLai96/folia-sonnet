@@ -268,21 +268,34 @@ class FoliaNativePlayerPlugin : Plugin() {
                 payload.put("positionMs", positionMs.toDouble())
                 payload.put("durationMs", durationMs.toDouble())
                 /*
-                 * ⭐ **播完了自动下一首（桥已死的那条路）。**
+                 * ⭐ **播完了自动下一首。**
                  *
                  * 「ended」这个状态边界过桥给 JS 的播放管线，自动切歌一直归它管；
                  * 但 WebView 冻结 / 已销毁时这一下没人接 —— 一首放完就停在那儿
-                 * （用户报的「播放完毕之后不会自动下一首」）。桥不在时把这一下
-                 * 转成一条 next 指令进服务，走镜像换源那套兜底（预取好了就是秒切）；
-                 * 桥还在时绝不多手 —— JS 自己会切，两头各切各的就是双倍跳歌。
+                 * （用户报的「播放完毕之后不会自动下一首」）。下面那段把这一下
+                 * 转成一条 next 指令进服务，由服务去分「JS 接住了没有」。
                  */
-                if ("ended" == type
-                    && !top.izuna.foliamajor.FoliaPlaybackPlugin.isBridgeAlive()) {
+                if ("ended" == type) {
+                    /*
+                     * 播完了 = 这首真的走完了，**两条路都要接住**。
+                     *
+                     * 老判据是「桥死了才兜底」—— 但桥活着不等于 JS 在跑：退到后台之后
+                     * 插件实例还在（`isBridgeAlive()` 为真），WebView 的 JS 却被系统挂起，
+                     * `onEnded` 那条回调根本不会执行。于是「后台放完一首就不动了」。
+                     * 这也是用户报的「原生的放完了不会自动下一首」。
+                     *
+                     * 所以改成「先按 JS 那条路发一次 next，再挂一个原生兜底」：
+                     *   · JS 活着 → 它自己切歌，并推出新 metadata（服务那边看得到）；
+                     *   · JS 被挂起 → 到点由镜像在原生换源（skipViaMirror，队尾会回绕）。
+                     * 兜底是**幂等**的：JS 若已经切过去，镜像游标与当前歌对不上就不动手
+                     * （见 scheduleSkipFallback 判据），不会双倍跳歌。
+                     */
                     MAIN.post {
                         val context = instance?.getContext()
-                        if (context != null) {
+                        if (context != null
+                            && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
                             top.izuna.foliamajor.FoliaPlaybackService
-                                .requestNativeAutoNext(context)
+                                    .requestNativeAutoNext(context)
                         }
                     }
                 }

@@ -1090,6 +1090,14 @@ class MusicGateway private constructor() {
             return null
         }
 
+        /**
+         * 网易歌词：要整行（lrc）也**要逐字（yrc）**。
+         *
+         * yv 以前填的是 0，平台只回整行 LRC —— 原生兜底（WebView 冻结时）喂给壁纸的
+         * 时间轴就只有整行，那一段的逐字动画自然没了。这里把 yv 打开，平台回 yrc
+         * 时用逐字那份；没有逐字（很多歌本来就没有）就仍用 lrc，与以前一致。
+         * 翻译同时要把逐字的翻译（ytlrc）带上，否则逐字那份会丢翻译。
+         */
         private fun neteaseLyric(songId: String?): Lyric? {
             val id = parseSongId(songId)
             if (id <= 0) {
@@ -1100,9 +1108,14 @@ class MusicGateway private constructor() {
                     .put("id", id)
                     .put("cp", false)
                     .put("tv", 0).put("lv", 0).put("rv", 0).put("kv", 0)
-                    .put("yv", 0).put("ytv", 0).put("yrv", 0)
+                    .put("yv", 1).put("ytv", 0).put("yrv", 0)
                     .put("csrf_token", csrfOf(cookie))
             val body = weapiPost("/api/song/lyric/v1", data, cookie)
+            val yrc = textOf(body.optJSONObject("yrc"))
+            val ytlrc = textOf(body.optJSONObject("ytlrc"))
+            if (!yrc.isEmpty()) {
+                return Lyric(yrc, if (!ytlrc.isEmpty()) ytlrc else textOf(body.optJSONObject("tlyric")))
+            }
             return Lyric(
                     textOf(body.optJSONObject("lrc")),
                     textOf(body.optJSONObject("tlyric")))

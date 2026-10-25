@@ -32,7 +32,10 @@ class FoliaCommandReceiver : BroadcastReceiver() {
 
         if (intent.getBooleanExtra(FoliaPlaybackService.EXTRA_FROM_BUTTONS, false)) {
             when (command) {
-                "next", "previous", "like" -> {
+                // play / pause 也要转进服务：锁屏与通知栏按下来的时候 WebView 在后台，
+                // 直派 JS 会落进被系统挂起的定时器里（「按了播放一点反应都没有」）。
+                // 服务那边先动原生播放器，再把 JS 那份照发。
+                "next", "previous", "like", "play", "pause", "stop" -> {
                     forwardToService(context, command, positionMs)
                     return
                 }

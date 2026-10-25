@@ -109,6 +109,16 @@ class FoliaWallpaperPlugin : Plugin() {
              */
             if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.isNativePlaying()) {
                 WallpaperLyricsState.setAnchor(positionMs, isPlaying)
+            } else {
+                /*
+                 * 位置让位的那一支**不能把 playing 也一起吞掉**。
+                 *
+                 * 以前这里是整块跳过：原生在播时 Web 推来的一切（包括「我按了暂停」）
+                 * 都不落地。于是叠层按 playing=true 一路外推、发现原生不再报位置也没人
+                 * 告诉它停 —— 表现就是用户说的「原生在放的时候按暂停，歌词还在走」。
+                 * 位置归原生，但「播 / 停」这个事实两边都可能是最先知道的，必须收下。
+                 */
+                WallpaperLyricsState.setPlaying(isPlaying)
             }
         } else {
             val motion: Float? = call.getFloat("motion")

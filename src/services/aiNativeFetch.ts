@@ -20,6 +20,17 @@ type NativeAiPlugin = NativeHttpPlugin & {
         body?: string;
         cached?: boolean;
     } | null>;
+    /*
+     * 原生替网页发一次 AI 请求（FoliaNativePlugin.aiRequest）。
+     *
+     * 可选：老版本 App 没有这个方法，回落 httpRequest。
+     */
+    aiRequest?: (options: {
+        url: string;
+        method: string;
+        headers: Record<string, string>;
+        body: string;
+    }) => Promise<{ ok?: boolean; status?: number; body?: string } | null>;
 };
 
 const getNativePlugin = (): NativeAiPlugin | null => {
@@ -67,7 +78,79 @@ export const fetchAiCacheViaNative = async (
 };
 
 /**
+ * 原生替网页发一次 AI 请求（`FoliaNativePlugin.aiRequest`）。
+ *
+ * 与 `createAiFetch` 的区别只在「谁来发」：
+ *   · `createAiFetch` 也是走原生 OkHttp（见 nativeHttpFetch），但**发起方是网页**——
+ *     退到后台后 WebView 的 JS 被系统挂起，请求出得去，回来的那一刻却没人接着跑，
+ *     于是「后台切歌，AI 主题一次都没生成」。
+ *   · 这里整趟都交给原生：OkHttp 在自己的线程池里做完，结果原样交回。
+ *
+ * 拿不到（老版本没这个方法 / 桥出错）返回 null，调用方回落 `createAiFetch`。
+ */
+export const requestAiViaNative = async (
+    url: string,
+    init: { method?: string; headers?: Record<string, string>; body?: string },
+): Promise<{ ok: boolean; status: number; body: string } | null> => {
+    const plugin = getNativePlugin();
+    if (!plugin?.aiRequest) return null;
+    try {
+        const result = await plugin.aiRequest({
+            url,
+            method: (init.method || 'POST').toUpperCase(),
+            headers: init.headers ?? {},
+            body: init.body ?? '',
+        });
+        if (!result || typeof result.body !== 'string') return null;
+        return {
+            ok: result.ok !== false,
+            status: typeof result.status === 'number' ? result.status : 200,
+            body: result.body,
+        };
+    } catch {
+        return null;
+    }
+};
+
+/**
  * 返回一个与 fetch 同形的函数：安卓上走原生桥，其他平台回落到全局 fetch。
  * 只覆盖 AI 需要的用法（JSON 文本请求体），不做流式读取。
+ *
+ * 页面**在后台**时改走 `aiRequest`（整趟由原生做完）。两条路都过 OkHttp，区别是谁在
+ * 推进：`createNativeFetch` 的发起与回调都在网页里，后台 JS 被挂起之后请求出得去、
+ * 结果回不来 —— 「后台切歌，AI 主题一次都没生成」。`aiRequest` 不依赖 JS 在跑。
+ * 前台仍然走老路：它对流式、header 细节的覆盖更全，而前台没有挂起这回事。
  */
-export const createAiFetch = (): typeof fetch => createNativeFetch(AI_REQUEST_TIMEOUT_MS);
+export const createAiFetch = (): typeof fetch => {
+    const base = createNativeFetch(AI_REQUEST_TIMEOUT_MS);
+    const plugin = getNativePlugin();
+    if (!plugin?.aiRequest) return base;
+
+    return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const pageStyle = typeof document !== 'undefined' ? document.visibilityState : 'visible';
+        if (pageStyle === 'visible') {
+            return base(input, init);
+        }
+        const request = typeof Request !== 'undefined' && input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        const headers = new Headers(request?.headers || init?.headers || {});
+        const headerObject: Record<string, string> = {};
+        headers.forEach((value, name) => {
+            headerObject[name] = value;
+        });
+        const rawBody = init?.body ?? null;
+        const bodyText = typeof rawBody === 'string' ? rawBody : rawBody == null ? '' : String(rawBody);
+
+        const result = await requestAiViaNative(url, {
+            method: init?.method || request?.method || 'POST',
+            headers: headerObject,
+            body: bodyText,
+        });
+        // 原生那条路不通（老版本 / 出错）：前台那条兜着，别把这次请求丢掉。
+        if (!result) return base(input, init);
+        return new Response(result.body, {
+            status: result.status,
+            headers: { 'content-type': 'application/json' },
+        });
+    }) as typeof fetch;
+};

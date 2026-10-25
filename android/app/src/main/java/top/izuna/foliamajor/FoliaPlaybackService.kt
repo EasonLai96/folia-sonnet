@@ -364,7 +364,20 @@ class FoliaPlaybackService : android.app.Service() {
      * 再夹进 [0, 时长]：万一已经跑飞了，至少先落回一个合法位置。
      */
     private fun syncWallpaperAnchor(playing: Boolean) {
-        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setAnchor(clampedAnchorPosition(), playing)
+        /*
+         * 只同步「播 / 停」这个事实，**不重设位置**。
+         *
+         * 以前这里连位置一起写（取壁纸侧自己算出来的那个）。问题是这个函数在播放 / 暂停
+         * 每一拍都会被调，而壁纸侧的位置是「锚点 + 墙钟」外推出来的 —— 把它当成新锚点写
+         * 回去，等于把外推量抹平后重新起算，一次两次看不出来，**但用户拖完进度条之后
+         * 紧接着按暂停 / 播放时，这一写就把刚拖到的位置连同外推误差一起钉住**：
+         * 悬浮叠层先跳到拖动目标、又弹回旧位置、再跟上，也就是那个「回弹」
+         * （用户原话：「拖动进度条回弹是叠加悬浮窗歌词回弹（跟随播放页）」）。
+         *
+         * 位置该由真正知道它的那一方写：拖动走 setSeekAnchor（见 handleTransportSeek），
+         * Web 层的推送走 publish / setAnchor。这里只需要把 playing 翻过去。
+         */
+        top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setPlaying(playing)
         top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
                 .shared(this).invalidateOverlay()
     }
@@ -660,8 +673,35 @@ class FoliaPlaybackService : android.app.Service() {
                 // 桥活着但原生手上没歌（<audio> 在播）时照旧交 JS。
                 handleTransportSeek(positionMs)
             }
+            "play" -> {
+                /*
+                 * 与 MediaSession 的 onPlay 同一条纪律：命令同时直接给原生播放器一份。
+                 *
+                 * 之前这里和 pause 一起落在下面的 else 里，只转给 JS —— 而通知栏 / 锁屏按
+                 * 播放的时候 WebView 在后台，JS 定时器被系统挂起，`resumePlayback` 压根
+                 * 跑不起来。表现就是「后台按了播放，一点反应都没有」。上一首 / 下一首
+                 * 早就有原生兜底了，播放 / 暂停反而没有，这条链路一直是断的。
+                 */
+                try {
+                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
+                } catch (ignored: Throwable) {
+                    // 原生播放器不在（没开原生播放 / 插件没编进来）：交给 Web 那条路。
+                }
+                FoliaPlaybackPlugin.dispatchCommandFromReceiver(command,
+                        intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L), null)
+            }
+            "pause" -> {
+                // 同上，方向相反（见 MediaSession 的 onPause）。
+                try {
+                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.pauseFromSystem()
+                } catch (ignored: Throwable) {
+                    // 同上。
+                }
+                FoliaPlaybackPlugin.dispatchCommandFromReceiver(command,
+                        intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L), null)
+            }
             else -> {
-                // play / pause / stop 没有原生兜底可做，原路转给 JS。
+                // stop 没有原生兜底可做，原路转给 JS。
                 FoliaPlaybackPlugin.dispatchCommandFromReceiver(command,
                         intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L), null)
             }
@@ -758,7 +798,7 @@ class FoliaPlaybackService : android.app.Service() {
 
     /**
      * 从镜像队列取相邻一首，原生直接换源并自更新通知元数据。
-     * 回 false = 镜像缺位 / 越界（调用方据此决定要不要回退到 JS 全流程）。
+     * 回 false = 镜像缺位（调用方据此决定要不要回退到 JS 全流程）。
      */
     private fun skipViaMirror(direction: Int): Boolean {
         val json = mirroredQueueJson
@@ -766,25 +806,45 @@ class FoliaPlaybackService : android.app.Service() {
         if (json == null || index < 0) return false
         try {
             val array = org.json.JSONArray(json)
+            val count = array.length()
+            if (count == 0) return false
+            /*
+             * 走到头**回绕**，而不是停下。
+             *
+             * 以前这里越界就 return false，交给 JS 全流程 —— 而这一步多半发生在 WebView
+             * 被挂起的时候（正是这条兜底存在的场合），于是最后一首放完就彻底没声音了
+             * （用户报的「原生的放完了不会自动下一首」）。回绕与 Web 层的队列语义一致：
+             * 列表循环绕回第一首，单曲循环/顺序播放由 JS 那条路优先处理（它先认领就没
+             * 走到这里）。随机播放更该回绕 —— 见下面那段「随机」处理。
+             */
             val target = index + direction
-            if (target < 0 || target >= array.length()) return false
-            val entry = array.getJSONObject(target)
+            val wrapped = when {
+                target < 0 -> count - 1
+                target >= count -> 0
+                else -> target
+            }
+            val entry = array.getJSONObject(wrapped)
             val songKey = entry.optString("songKey", "")
             var url = if (songKey.isEmpty()) null else resolvedUrlCache.get(songKey)
             if (url == null || url.isEmpty()) {
                 url = entry.optString("url", "")
             }
             if (url != null && !url.isEmpty()) {
-                mirroredIndex = target
+                mirroredIndex = wrapped
                 nativePlayMirrorEntry(entry, url)
-                preloadMirrorNeighbors(array, target, direction)
+                /*
+                 * 回绕那一格是队首：预取方向也要跟着换（否则会去预取队首的「下一首」，
+                 * 而那首刚刚才放完，真正该备的是队首之后那一首 —— 上面已经这么做，
+                 * 这里只是把回绕也纳入同一套）。
+                 */
+                preloadMirrorNeighbors(array, wrapped, direction)
                 return true
             }
             // 地址没解析出来（预取没命中）：原生平台网关直接向平台要一个。镜像窗口里
             // 每首歌的身份（providerId / serverSongId / songmid）都在，缺的只是地址 ——
             // 这就是「连按几首下一首就切不动」的解药。解析在后台线程（桥的线程规则），
             // 成了回主线程换源；期间用户又按了的，以 mirroredIndex 为准作废重算。
-            resolveMirrorEntryAsync(array, entry, target, index, direction)
+            resolveMirrorEntryAsync(array, entry, wrapped, index, direction)
             return true
         } catch (ignored: org.json.JSONException) {
             return false
@@ -1826,8 +1886,12 @@ class FoliaPlaybackService : android.app.Service() {
         /**
          * 播放器播完了、桥已经没了（WebView 冻结 / 已销毁）时叫下一首：
          * 转成一条 next 指令进服务，走镜像换源那套兜底（预取命中就是秒切）。
-         * 桥还活着时播放器插件根本不会调这里 —— 自动切归 JS 的播放管线，
-         * 别两头各切各的（双倍跳歌）。
+         *
+         * **JS 活着时也发**：发出去的是「命令 + 兜底计时器」这一套（见 handleMediaCommand
+         * 的 next 分支），JS 在窗口内推出了新 metadata 计时器就收手，不会双倍跳歌；
+         * 它被挂起时才轮到镜像换源。以前这里直接调 skipViaMirror，等于绕过了那道
+         * 幂等判据 —— 而现在「播完」两条路都要接住（见 FoliaNativePlayerPlugin 里
+         * ended 那段注释）。
          */
         @JvmStatic
         fun requestNativeAutoNext(context: Context?) {

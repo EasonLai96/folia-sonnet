@@ -12,6 +12,7 @@ import { useStageSettingsStore } from '../stores/useStageSettingsStore';
 import { findLatestActiveLineIndex } from '../utils/appPlaybackHelpers';
 import { fetchCoverBytes } from '../services/coverBytes';
 import { actuallyPlaying } from '../stores/motionSignals';
+import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
 import type { Line, Theme } from '../types';
 
 // src/hooks/useLyricsWallpaperFeed.ts
@@ -432,6 +433,59 @@ export const useLyricsWallpaperFeed = ({
     // 于是封面（以及从封面取的高亮色）永远推不到壁纸那边 —— 表现就是「歌词始终纯白」。
     const [wallpaperCover, setWallpaperCover] = React.useState<string | null>(null);
 
+    /*
+     * 回到前台 / 页面重新可见：**先把位置对齐到原生，再推**。
+     *
+     * 退到后台之后 WebView 的 JS 定时器被系统挂起，`getCurrentTime()` 停在挂起那一刻；
+     * 而原生那边这段时间一直在放。回到前台时如果照旧拿这个旧值去推整条时间轴
+     * （换歌 / 歌词变化的那个 effect 恰好会在挂起期间累积的所有变更上重跑一次），
+     * 就会把**过期位置**写进锚点 —— 壁纸和叠层立刻从正确的那一句跳回几十秒前，
+     * 也就是用户报的「打开前台后错误的歌词会覆盖后台的」。
+     *
+     * 判据用 visibilitychange + resume 两个事件：前者是切前后台，后者是 Capacitor
+     * 自己补的（有些 ROM 上只来一个）。只对齐位置，不在这里推送 —— 推送交给下面
+     * 那几个按内容变化触发的 effect，它们会在这一拍之后拿到已经对齐的值。
+     */
+    React.useEffect(() => {
+        if (!active) return undefined;
+        const resync = () => {
+            /*
+             * 原生在抽头（桥活着且手上真有歌）时，位置以它为准：
+             * 引擎内部是「锚点 + 墙钟」，getPositionSec() 回来的就是原生此刻的位置。
+             * 原生没在播（走 <audio> / 已释放）时什么都不同步，用的是 Web 自己的时钟。
+             */
+            if (!nativePlaybackEngine.isPlaying()) return;
+            const nativeSec = nativePlaybackEngine.getPositionSec();
+            if (!Number.isFinite(nativeSec) || nativeSec < 0) return;
+            pushLyricsWallpaperPosition.current(nativeSec);
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') resync();
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        window.addEventListener('resume', resync);
+        window.addEventListener('focus', resync);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('resume', resync);
+            window.removeEventListener('focus', resync);
+        };
+    }, [active]);
+
+    /*
+     * 「把某个位置推给原生」这一支单独抽出来，供上面的回前台对齐使用。
+     *
+     * 写成 ref 是为了不让上面那个 effect 依赖一长串值（依赖一变就重挂监听，
+     * 反而更容易漏掉真正该对齐的那一次）。
+     */
+    const pushLyricsWallpaperPosition = React.useRef<(seconds: number) => void>(() => {});
+    pushLyricsWallpaperPosition.current = (seconds: number) => {
+        void publishLyricsWallpaper({
+            positionMs: Math.round(seconds * 1000),
+            playing: latest.current.playing,
+        });
+    };
+
     // 关掉开关时清一次，别让壁纸停在过期的那一行上。
     React.useEffect(() => {
         if (enabled && !feedEnabled) {
@@ -546,6 +600,12 @@ export const useLyricsWallpaperFeed = ({
          *
          * 闸只在「换了一首歌」时开：歌词晚到、改设置这些**不**重开它 ——
          * 那些本来就该当场生效，按住反而成了「改了半天没反应」。
+         *
+         * ⚠️ 后台**不等**：`setTimeout` 在后台会被系统节流（重的直接冻住），
+         * 等主题那一拍可能一分钟后才跑，而这一分钟里多半又切了歌 —— cleanup 把定时器
+         * 清掉，这一首的整条时间轴（连同 AI 主题的 wordColors）就一次都没推出去，
+         * 桌面叠层一直挂着上一首的样子（用户原话：「AI 主题获取也需要走原生，
+         * 不然后台没有」）。前台那 650ms 是为了少打一次推送，后台没人看着，不值得赌。
          */
         const songKey = `${title ?? ''}\u0000${artist ?? ''}`;
         if (songGateRef.current.key !== songKey) songGateRef.current = { key: songKey, since: Date.now() };
@@ -557,7 +617,8 @@ export const useLyricsWallpaperFeed = ({
             || (Boolean(coverUrl) && !wallpaperCover)
             || Date.now() - since < THEME_SETTLE_MIN_MS
         );
-        if (!waiting) {
+        const pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        if (!waiting || pageHidden) {
             send();
             return;
         }

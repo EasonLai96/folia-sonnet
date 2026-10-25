@@ -519,6 +519,80 @@ class FoliaNativePlugin : Plugin() {
         }
     }
 
+    /**
+     * 原生替网页发一次 AI 请求，把**响应体原文**交回去。
+     *
+     * 为什么不能只用 `httpRequest`：那条路是**网页发起**的，退到后台之后
+     * WebView 的 JS 会被系统挂起 —— 请求的发起、以及回调回来那一刻的执行都卡在那儿，
+     * 于是「后台切歌，AI 主题一次都不生成/不拉缓存」（用户原话）。
+     * `aiCloudCacheGet` 已经按这个思路做过缓存那条支路；这里补上生成那条：
+     * OkHttp 在自己的线程池里把整趟做完，网页什么时候回来问都能拿到结果。
+     *
+     * 请求的构造（URL / 头 / body）完全由网页算好传下来 —— 各家服务商的协议、
+     * 密钥、提示词都在 JS 那一份里维护，原生不复制一遍，免得两边漂移。
+     * 这里只负责「发出去、拿回文本」。
+     */
+    @PluginMethod
+    fun aiRequest(call: PluginCall) {
+        val url = call.getString("url", "")
+        val bodyText = call.getString("body", "")
+        if (url == null || url.isEmpty()) {
+            call.reject("Missing request url")
+            return
+        }
+        try {
+            val builder = Request.Builder().url(url)
+            val headers = call.getObject("headers")
+            if (headers != null) {
+                val headerNames = headers.keys()
+                while (headerNames.hasNext()) {
+                    val headerName = headerNames.next()
+                    val headerValue = headers.opt(headerName)
+                    if (headerValue != null) {
+                        builder.header(headerName, sanitizeHeaderValue(String.valueOf(headerValue)))
+                    }
+                }
+            }
+            val method = call.getString("method", "POST") ?: "POST"
+            var body: RequestBody? = null
+            if (bodyText != null && bodyText.isNotEmpty()) {
+                val contentType = if (headers == null) null else optHeader(headers, "content-type")
+                val mediaType = (if (contentType == null || contentType.isEmpty())
+                    "application/json;charset=UTF-8" else contentType).toMediaTypeOrNull()
+                body = bodyText.toRequestBody(mediaType)
+            }
+            if (body == null && requiresRequestBody(method)) {
+                body = ByteArray(0).toRequestBody(null)
+            }
+            builder.method(method, body)
+            // AI 的往返本来就慢，这里给足时间；等待交给 OkHttp 线程池，不占桥线程。
+            call.setKeepAlive(true)
+            client.newCall(builder.build()).enqueue(object : Callback {
+                override fun onFailure(httpCall: Call, error: IOException) {
+                    call.reject(error.message, error)
+                }
+
+                override fun onResponse(httpCall: Call, response: Response) {
+                    try {
+                        response.use { result ->
+                            val responseBody = result.body
+                            val text = if (responseBody == null) "" else responseBody.string()
+                            val out = JSObject()
+                            out.put("ok", result.isSuccessful)
+                            out.put("status", result.code)
+                            out.put("body", text)
+                            call.resolve(out)
+                        }
+                    } catch (error: IOException) {
+                        call.reject(error.message, error)
+                    }
+                }
+            })
+        } catch (error: IllegalArgumentException) {
+            call.reject(error.message, error)
+        }
+    }
+
     override fun load() {
         instance = this
         // 意图可能比 Web 层更早到（Activity.onCreate 交过来时 Bridge 还没建好），先攒在静态

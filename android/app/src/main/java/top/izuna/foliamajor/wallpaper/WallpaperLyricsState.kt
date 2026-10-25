@@ -440,6 +440,31 @@ class WallpaperLyricsState private constructor() {
             return current
         }
 
+        /**
+         * 只翻「播 / 停」，位置**按外推后的当前值重新起算**。
+         *
+         * 这是同步播放状态时该用的那一个：调用方（播放服务在通知栏 / 锁屏按下的那一刻）
+         * 并不知道真实位置，知道的是「屏幕上此刻画到哪儿了」—— 那就把外推结果当作新锚点，
+         * 这样 playing 翻转不会让画面跳，也不会把别处刚写进去的位置盖掉。
+         *
+         * 与 {@link #setAnchor} 的区别：那个是「我告诉你位置是多少」，位置由调用方负责，
+         * 用错地方就会把拖动后的新位置顶回旧值（见 FoliaPlaybackService 里那条注释）。
+         */
+        @JvmStatic
+        fun setPlaying(playing: Boolean) {
+            heartbeat()
+            val previous = current
+            if (previous.playing == playing) {
+                // 同一个状态重复同步：什么都不用做，别白白重设锚点。
+                return
+            }
+            current = Snapshot(previous.title, previous.artist, previous.cover, previous.accent,
+                    previous.baseColor, previous.motion, previous.backgroundMode, previous.image,
+                    previous.font, previous.visualizerMode, previous.blur, previous.showProgress,
+                    previous.showTranslation, previous.durationMs, previous.lines, playing,
+                    SystemClock.elapsedRealtime(), previous.positionMs(), previous.stamp)
+        }
+
         /** 播放位置推进：只更新锚点，不动时间轴，也不落盘。 */
         @JvmStatic
         fun setAnchor(positionMs: Long, playing: Boolean) {

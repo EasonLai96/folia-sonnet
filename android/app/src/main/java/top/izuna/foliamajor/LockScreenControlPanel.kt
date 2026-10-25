@@ -12,6 +12,7 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.SystemClock
 
 import androidx.core.graphics.drawable.DrawableCompat
 import android.util.TypedValue
@@ -176,6 +177,13 @@ class LockScreenControlPanel(private val activity: Activity) {
     private var seeking = false
     /** 拖动中的预览位置；-1 = 不预览（跟着播放走）。 */
     private var seekPreviewMs = -1L
+    /**
+     * 松手之后预览最多留到什么时候（`SystemClock.elapsedRealtime()`）。
+     *
+     * 松手后音频要过一会儿才真的 seek 过去，这段时间继续画预览，避免进度条先弹回旧位置；
+     * 快照追上目标（或这个时限到）就交回快照，见 applyProgress。
+     */
+    private var seekPreviewDeadlineMs = 0L
 
     private var tracking = false
     private var gestureConsumed = false
@@ -549,6 +557,7 @@ class LockScreenControlPanel(private val activity: Activity) {
         playPauseButton = null
         seeking = false
         seekPreviewMs = -1L
+        seekPreviewDeadlineMs = 0L
     }
 
     /** UI 此刻是不是收起的（点锁屏空白处切换）。 */
@@ -799,10 +808,25 @@ class LockScreenControlPanel(private val activity: Activity) {
                     if (seeking) {
                         val target = positionFromRatio(event.x / width.toFloat())
                         seeking = false
-                        seekPreviewMs = -1L
                         if (target >= 0L) {
+                            /*
+                             * 松手之后**先不要把预览清掉**。
+                             *
+                             * 以前这里把 seekPreviewMs 直接置 -1，于是下一轮巡检（每秒一次）
+                             * 在「命令刚到、音频还没 seek 过去」那一拍画的仍是快照里的旧位置 ——
+                             * 用户看到进度条先弹回原处，过一下才跳回来，也就是那个「回弹」。
+                             *
+                             * 现在把预览位置留到快照真的追上它为止（见 applyProgress：
+                             * 锚点落在目标附近，或超过 1.2 秒还没追上，就交回快照）。
+                             */
+                            seekPreviewMs = target
+                            seekPreviewDeadlineMs = SystemClock.elapsedRealtime() + 1200L
                             FoliaPlaybackService.sendPlaybackCommand(activity, "seek", target)
+                        } else {
+                            seekPreviewMs = -1L
+                            seekPreviewDeadlineMs = 0L
                         }
+                        applyProgress()
                     }
                     true
                 }
@@ -836,6 +860,22 @@ class LockScreenControlPanel(private val activity: Activity) {
         }
         val info = FoliaPlaybackService.snapshot()
         val duration = if (info == null) 0L else info.durationMs
+        /*
+         * 预览位置一直留到快照真的追上它（见 ACTION_UP 那段注释）：松手之后音频要过一会儿
+         * 才真的 seek 过去，这段时间里如果直接画快照，进度条会先弹回旧位置。
+         *
+         * 追上 = 快照报的位置已经落在目标附近；兜底 1.2 秒 —— 那次 seek 要是没成
+         * （地址没解析出来之类），不能把预览一直挂着，否则进度条从此不再跟随播放。
+         */
+        if (seekPreviewMs >= 0L && !seeking) {
+            val current = if (info == null) 0L else info.positionMs
+            val caughtUp = Math.abs(current - seekPreviewMs) <= 1000L
+            val expired = SystemClock.elapsedRealtime() > seekPreviewDeadlineMs
+            if (caughtUp || expired) {
+                seekPreviewMs = -1L
+                seekPreviewDeadlineMs = 0L
+            }
+        }
         val position = if (seekPreviewMs >= 0L)
             seekPreviewMs
         else
@@ -1157,6 +1197,24 @@ class LockScreenControlPanel(private val activity: Activity) {
         top.izuna.foliamajor.wallpaper.WallpaperOverlay
                 .shared(activity)
                 .holdLockScreenWhilePaused(playing)
+        /*
+         * 这一页是**锁屏上**的一页，也就是说按下它的时候 WebView 在后台。
+         *
+         * 老路只有「广播 → 插件 → JS」：后台的 JS 定时器会被系统挂起，`resumePlayback`
+         * / `pausePlayback` 压根跑不起来 —— 用户看到的是「锁屏上按了暂停，没反应；
+         * 按了播放，也没反应」。所以原生这一侧先自己动手（与 MediaSession 的
+         * onPlay / onPause 同一条纪律），JS 那条命令照发，界面与歌词归它。
+         * 原生手上没歌（当前这首走的是 `<audio>`）时这两句是空操作，交给 JS 照旧。
+         */
+        try {
+            if (playing) {
+                top.izuna.foliamajor.player.FoliaNativePlayerPlugin.pauseFromSystem()
+            } else {
+                top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
+            }
+        } catch (ignored: Throwable) {
+            // 原生播放器不在（没开原生播放 / 插件没编进来）：交给下面那条广播。
+        }
         FoliaPlaybackService.sendPlaybackCommand(activity, if (playing) "pause" else "play")
         /*
          * 状态要经 Web 层绕一圈才回到快照里（这条面板是每秒拉一次的）。
@@ -1184,6 +1242,12 @@ class LockScreenControlPanel(private val activity: Activity) {
         button.scaleType = ImageView.ScaleType.CENTER_INSIDE
         button.contentDescription = "喜欢"
         button.setOnClickListener { view ->
+            /*
+             * 同暂停那颗键：锁屏上按下来的时候 WebView 在后台，光发广播到不了 JS。
+             * 原生在放（地址、红心身份原生全有）时直接由服务补写各平台，
+             * 成功后再发 likeDone 让 App 里那颗心对齐 —— 见 handleTransportLike。
+             * 走带 EXTRA_FROM_BUTTONS 的广播，接收器会把它转进服务那条路。
+             */
             FoliaPlaybackService.sendPlaybackCommand(activity, "like")
         }
         return button
