@@ -6,6 +6,7 @@ import ThemedDialog from '../../../../shared/ThemedDialog';
 import { Button, Link, Reveal, Row, Status, TextField, Toggle, useSettingsKitTheme } from '../../kit';
 import { O } from './options';
 import { useSyncServer } from './useSyncServer';
+import { TextField as UiTextField } from '@/components/ui';
 
 // src/components/modal/settings/pages/integration/SyncServerRows.tsx
 // The sync server rows of the 连接与集成 page: the switch, the server's address and token under it,
@@ -69,7 +70,7 @@ export const SyncServerRows: React.FC = () => {
                     <Button variant="primary" onClick={sync.save} disabled={!sync.dirty}>
                         {t('options.r2SyncSave')}
                     </Button>
-                    <input
+                    <UiTextField
                         ref={importInputRef}
                         type="file"
                         accept="application/zip,.zip,application/json,.json"
