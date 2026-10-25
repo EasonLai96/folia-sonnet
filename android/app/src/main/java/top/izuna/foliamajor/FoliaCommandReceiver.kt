@@ -35,7 +35,12 @@ class FoliaCommandReceiver : BroadcastReceiver() {
                 // play / pause 也要转进服务：锁屏与通知栏按下来的时候 WebView 在后台，
                 // 直派 JS 会落进被系统挂起的定时器里（「按了播放一点反应都没有」）。
                 // 服务那边先动原生播放器，再把 JS 那份照发。
-                "next", "previous", "like", "play", "pause", "stop" -> {
+                //
+                // seek 同理：锁屏面板拖进度条发来的就是这一条，原生激活时服务直接在
+                // 播放器上跳（handleTransportSeek），绝不指望后台里那个被冻结的 JS；
+                // 原生没接（<audio> 在播）才轮到 Web 那条路。漏了它，锁屏拖动在前台
+                // 服务活着而 WebView 被冻结/节流时就是「拖了没反应」。
+                "next", "previous", "like", "play", "pause", "stop", "seek" -> {
                     forwardToService(context, command, positionMs)
                     return
                 }

@@ -15,6 +15,7 @@ import { useNavidromeScrobbleReporter } from '../../../hooks/useNavidromeScrobbl
 import { useScreenAwake } from '../../../hooks/useScreenAwake';
 import { useTranscodeFallback } from '../../../hooks/useTranscodeFallback';
 import { getSongArtistLabel } from '../../../services/onlineMusic/songMetadata';
+import { loadOnlineSongLyrics } from '../../../services/onlinePlayback';
 import { nativePlaybackEngine } from '../../../services/playbackEngine/nativePlaybackEngine';
 import { useNativePlaybackRuntime } from '../../../services/playbackEngine/useNativePlaybackRuntime';
 import { currentTime } from '../../../stores/motionSignals';
@@ -59,8 +60,9 @@ export const useAppPlaybackBridges = (model: Input) => {
         handleStageExternalPlayRequest, handleToggleLoopMode, incomingLyricTimelineOffsetMs, isElectronWindow,
         isLocalSongLiked, isLyricsLoading, isNowPlayingControlDisabledRef, isNowPlayingStageActive,
         isPlayerCapStageActive, likedSongIds, localSongs, lyrics, nativeActive, nativeFailedKeysRef, nativeTakesRef,
+        playQueue,
         navigateBackFromPlayer, navigateToPlayer, pendingResumeTimeRef, playerChromeVisibilityMode, playSong,
-        recoverOnlinePlaybackSource, setPlayerChromeVisibilityModeTo, setPlayerState, shouldAutoPlay,
+        recoverOnlinePlaybackSource, setLyricsStable, setPlayerChromeVisibilityModeTo, setPlayerState, shouldAutoPlay,
         shouldRefreshCurrentOnlineAudioSource, skipAfterPlaybackFailure, stageActiveEntryKind, stageLyricsClockRef,
         stageLyricsSession, stageStatus, starredNavidromeSongIds, syncNowPlayingClock, syncOutputGain,
         syncStageLyricsClock, t, theme, themeSettling
@@ -251,6 +253,34 @@ export const useAppPlaybackBridges = (model: Input) => {
                 // 原生切歌（nativePlayMirrorEntry）是直接起播的，界面对齐成在播。
                 setPlayerStateInStore(PlayerState.PLAYING);
                 void persistPlaybackCache(song, state.playQueue);
+                /*
+                 * 歌词跟着认领走：原生的 UI-only 认领**不经过 playSong**，而歌词的
+                 * 加载在 playSong 那条链里 —— 不补这一步，store 里躺着的就还是上一首
+                 * 的歌词。壁纸推送（useLyricsWallpaperFeed）在标题一变就整包下发，
+                 * 于是「旧歌词 + 新标题」把原生兜底刚发对的 timeline 又盖回去
+                 * （用户报的「下一首歌词还是上一首的，偶发」—— 谁后到谁赢，所以偶发）。
+                 * AI 动画导演与每歌随机动画同样盯着 currentSong / lyrics：没有这一步，
+                 * 前台服务活着时切歌它们一个都拿不到新歌词，主题与动画参数全停在旧歌上。
+                 *
+                 * 先清掉旧歌词再异步拉：清掉的那一拍壁纸短暂空窗，好过挂着别首的词。
+                 */
+                setLyricsStable(null);
+                const claimedKey = songKey;
+                void (async () => {
+                    try {
+                        await loadOnlineSongLyrics(song, null, null, {
+                            isCurrent: () => {
+                                const now = usePlaybackStore.getState().currentSong;
+                                return Boolean(now && getPlaybackSongKey(now) === claimedKey);
+                            },
+                            onLyrics: (resolved) => setLyricsStable(resolved),
+                            onDone: () => undefined,
+                        });
+                    } catch {
+                        // 拉不到（本地 / Navidrome / 平台不认）就保持空：壁纸空窗，
+                        // 原生兜底那条 publishNativeTrack 已经先发对了的场合不受影响。
+                    }
+                })();
                 return true;
             }
             void playSong(song, state.playQueue).then(() => {
@@ -266,6 +296,18 @@ export const useAppPlaybackBridges = (model: Input) => {
             const song = state.playQueue.find((item) => getPlaybackSongKey(item) === songKey);
             if (song) void playSong(song, state.playQueue);
         },
+        /*
+         * 队列镜像与红心状态：这两个 prop 也在 App.tsx 拆分（4de8e8be）时被弄丢了 ——
+         * queue 缺席时镜像 effect 直接早退（useCapacitorPlaybackBridge 里
+         * `if (!list || list.length === 0) return`），原生那边的队列快照从此不再更新，
+         * WebView 冻结后的通知栏切歌只能靠启动时的旧快照兜底；likeStateOf 缺席时
+         * 全量镜像每一条的红心状态都落到 false，原生兜底切到哪一首那颗心都是空的。
+         */
+        queue: playQueue,
+        likeStateOf: (song) => ({
+            liked: resolveSongLiked(song, { isLocalSongLiked, starredNavidromeSongIds, likedSongIds }),
+            canLike: !resolveLikeAvailability(song, false, isNowPlayingStageActive).disabled,
+        }),
     });
 
     // Capacitor Android 专有：把当前行与行内进度喂给原生歌词动态壁纸。
