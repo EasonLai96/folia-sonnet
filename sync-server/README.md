@@ -309,7 +309,8 @@ http://127.0.0.1:13000
 | --- | --- | --- | --- |
 | `GET` | `/health` | 无 | 连通性和 schema 版本检查 |
 | `GET` | `/state` | Bearer | 读取设置/主题更新时间和主题数量 |
-| `GET` / `PUT` | `/settings` | Bearer | 读取或按时间戳更新视觉设置快照 |
+| `GET` / `PUT` | `/settings` | Bearer | 读取视觉设置；旧客户端按时间戳写，新客户端按 revision CAS 写 |
+| `GET` | `/settings/confirmation` | Bearer | 读取 `settings-cas-v1` 快照与 opaque revision（禁止缓存） |
 | `GET` | `/themes/manifest` | Bearer | 读取 256 个主题 bucket 摘要 |
 | `POST` | `/themes/get` | Bearer | 按稳定 fingerprint 读取主题 |
 | `POST` | `/themes/put` | Bearer | 批量写入主题，旧时间戳不会覆盖新记录 |
@@ -331,6 +332,14 @@ http://127.0.0.1:13000
 字体文件**只能由后台管理人员上传**，上传时在管理员浏览器里用 canvas 把预览图烤成 PNG 一并存库，所以客户端列目录时只需要几 KB 的预览图，几 MB 的字体本体只有点「使用」那一刻才会下载。
 
 客户端是本地优先的：AI 主题和主题同步 registry 保存在本机 IndexedDB，启动时会自动做主题同步；视觉设置的拉取/推送、完整 sync library 的 zip 导入导出由存储设置页面或命令面板触发。主题 registry 从旧 localStorage 迁移到 IndexedDB 时会执行一次性兼容迁移。
+
+视觉设置确认协议（增量扩展，不降低 `/health`、`/state`、manifest 的 wire version **2**）：
+
+- `/settings/confirmation` 返回 `{ protocol: 'settings-cas-v1', revision, record }`；空库两者为 `null`。revision 为现有行完整 JSON 和时间戳的 SHA-256，不是客户端时钟；同 timestamp 不同内容也会改变 revision。
+- 新客户端向 `PUT /settings` 的原有 record 添加 `expectedRevision`（空库为 `null`）。服务端比较 revision，并以单条 SQLite/D1 `UPDATE ... WHERE value_json = ? AND updated_at = ? RETURNING ...` 或空库 `INSERT ... ON CONFLICT DO NOTHING RETURNING ...` 确认实际写入；竞争返回 **409**，不自动覆盖重试。成功返回 `accepted: true`、本次完整 record、revision；客户端检查 payload 后才保存同步基准。服务端为兼容旧读者生成单调 `updatedAt`，正确性不依赖设备时钟。
+- 无数据库迁移、无新列；要求宿主 SQLite/D1 支持 `RETURNING`。旧客户端不带 `expectedRevision` 时保持原时间戳 LWW 行为和 `{ok:true}` 响应（包括旧请求可能 no-op 的历史行为）；其局限并未被新协议追溯修复；旧 LWW writer 在 CAS 成功之后仍可按它的时间戳覆盖新记录，混用期间不能保证所有客户端都遵守冲突决议。settings payload 接受 **1 / 2**，修复此前客户端导出1、服务端要求2的既有不一致；客户端读 parser 接受两者，导出仍保留1以兼容既有文件。
+- **先升级服务端，再升级客户端**。新客户端连接没有 confirmation 端点的旧服务端会明确失败，不退回盲写/盲 ACK；主题同步仍可单独使用。首次没有已确认基准时保守提示冲突，不用旧 timestamp 猜测本地是否改过；显式保留本地也受 CAS 保护。冲突窗口打开后云端又变更，需要重新选择。
+- 本地仅导入或导入推送失败都保留 dirty 状态；不会把备份文件日期当作云端同步证据。推送期间的本地编辑不会被记为已同步。基准按 `[enabled, URL, token]` 的 SHA-256 隔离（不存明文 token）；切换 URL/凭据后需要建立新基准，旧冲突选择也不能跨配置复用。此修复不包含旧服务端 schema 初始化/batch 的事务缺陷，部署时建议同时合入独立的 P06 修复；本协议的 CAS 写入本身只用单条 SQL，不依赖 batch。
 
 服务端实现位于 `src/app.ts`，Node 入口位于 `src/node.ts`，Cloudflare 入口位于 `src/cloudflare.ts`；`src/d1-emulator.ts` 为 Node 环境提供 D1 兼容实现。三种部署方式共用同一套路由和 D1/SQLite 兼容的数据访问模型。Cloudflare 配置模板是 `wrangler.toml`，安装脚本生成的 `wrangler.local.toml` 不应提交。
 
