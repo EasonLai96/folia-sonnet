@@ -142,8 +142,7 @@ public final class MusicGateway {
         if (id.isEmpty()) {
             return null;
         }
-        JSONObject envelope = qishuiRequest("song.url",
-                new JSONObject().put("id", id).put("quality", "standard"));
+        JSONObject envelope = qishuiRequest("song.url", qishuiParams("id", id, "quality", "standard"));
         if (envelope == null || !envelope.optBoolean("ok", false)) {
             return null;
         }
@@ -169,7 +168,7 @@ public final class MusicGateway {
         if (id.isEmpty()) {
             return null;
         }
-        JSONObject envelope = qishuiRequest("lyric", new JSONObject().put("id", id));
+        JSONObject envelope = qishuiRequest("lyric", qishuiParams("id", id));
         if (envelope == null || !envelope.optBoolean("ok", false)) {
             return null;
         }
@@ -180,10 +179,27 @@ public final class MusicGateway {
         return new Lyric(data.optString("lyric", ""), data.optString("tlyric", ""));
     }
 
+    /**
+     * 参数拼成 JSON 字符串（签名宿主的 request 就是收字符串）。JSONObject.put 是
+     * 受检异常，链式 new 在 try 外面编译不过 —— 统一在这里包掉：全是字符串对，
+     * 理论上抛不出来。
+     */
+    private static String qishuiParams(String... pairs) {
+        try {
+            JSONObject params = new JSONObject();
+            for (int i = 0; i + 1 < pairs.length; i += 2) {
+                params.put(pairs[i], pairs[i + 1]);
+            }
+            return params.toString();
+        } catch (Exception error) {
+            return "{}";
+        }
+    }
+
     /** 同步过一次签名宿主（后台线程调）；拿不到信封回 null。 */
-    private static JSONObject qishuiRequest(String operation, JSONObject params) {
+    private static JSONObject qishuiRequest(String operation, String paramsJson) {
         String envelope = top.izuna.foliamajor.QishuiGatewayBridge.requestSync(
-                operation, params.toString(), 12_000L);
+                operation, paramsJson, 12_000L);
         if (envelope == null || envelope.isEmpty()) {
             return null;
         }
