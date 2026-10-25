@@ -334,10 +334,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      */
     private fun applySourceHeaders(url: String) {
         val factory = httpFactory ?: return
-        val headers: java.util.Map<String, String> =
-            top.izuna.foliamajor.online.MusicGateway.headersForPlaybackUrl(url)
-        factory.setDefaultRequestProperties(if (headers.isEmpty())
-            java.util.Collections.emptyMap() else headers)
+        val headers = top.izuna.foliamajor.online.MusicGateway.headersForPlaybackUrl(url)
+        // media3 的 setDefaultRequestProperties 收 Map<String, String>（Kotlin 形态即可）。
+        factory.setDefaultRequestProperties(headers)
     }
 
     private fun ensurePlayer(): ExoPlayer {

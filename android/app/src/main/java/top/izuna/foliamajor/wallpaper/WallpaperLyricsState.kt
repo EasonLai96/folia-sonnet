@@ -423,16 +423,16 @@ class WallpaperLyricsState private constructor() {
          * 原生按表名取值。同名冲突不存在 —— 同一时刻只有一个模式在渲染。
          */
         @Volatile
-        private var tuning: java.util.Map<String, Float> = java.util.Collections.emptyMap()
+        private var tuning: Map<String, Float> = emptyMap()
 
         @JvmStatic
-        fun tuning(): java.util.Map<String, Float> {
+        fun tuning(): Map<String, Float> {
             return tuning
         }
 
         /** null 表示「这次没带配置来」，沿用上一次的。 */
-        private fun resolveTuning(incoming: java.util.Map<String, Float>?): java.util.Map<String, Float> {
-            return if (incoming == null) tuning else java.util.Collections.unmodifiableMap(incoming)
+        private fun resolveTuning(incoming: Map<String, Float>?): Map<String, Float> {
+            return if (incoming == null) tuning else java.util.Collections.unmodifiableMap(incoming) as Map<String, Float>
         }
 
         @JvmStatic
@@ -543,7 +543,7 @@ class WallpaperLyricsState private constructor() {
                     accent: Int, baseColor: Int, motion: Float, backgroundMode: String?,
                     imageBase64: String?, visualizerMode: String?, blur: Float,
                     showProgress: Boolean?, showTranslation: Boolean?, durationMs: Long,
-                    lines: Array<TimedLine>?, tuningPatch: java.util.Map<String, Float>?,
+                    lines: Array<TimedLine>?, tuningPatch: Map<String, Float>?,
                     positionMs: Long, playing: Boolean) {
             val previous = current
             heartbeat()
@@ -661,7 +661,7 @@ class WallpaperLyricsState private constructor() {
         fun setAppearance(context: Context?, backgroundMode: String?, imageBase64: String?,
                           visualizerMode: String?, blur: Float, showProgress: Boolean?,
                           showTranslation: Boolean?, durationMs: Long,
-                          tuningPatch: java.util.Map<String, Float>?) {
+                          tuningPatch: Map<String, Float>?) {
             val previous = current
             heartbeat()
             tuning = resolveTuning(tuningPatch)
@@ -855,7 +855,7 @@ class WallpaperLyricsState private constructor() {
         private val EPHEMERAL_TUNING_KEYS: Set<String> =
                 java.util.Collections.singleton("wp.floatingPreview")
 
-        private fun encodeTuning(values: java.util.Map<String, Float>?): String {
+        private fun encodeTuning(values: Map<String, Float>?): String {
             if (values == null || values.isEmpty()) {
                 return ""
             }
@@ -874,9 +874,9 @@ class WallpaperLyricsState private constructor() {
             return joined.toString()
         }
 
-        private fun decodeTuning(encoded: String?): java.util.Map<String, Float> {
+        private fun decodeTuning(encoded: String?): Map<String, Float> {
             if (encoded == null || encoded.isEmpty()) {
-                return java.util.Collections.emptyMap()
+                return emptyMap()
             }
             val values = java.util.HashMap<String, Float>()
             for (pair in encoded.split(TUNING_PAIR_SEPARATOR)) {
@@ -890,7 +890,7 @@ class WallpaperLyricsState private constructor() {
                     // 单个值坏了不影响其余配置项。
                 }
             }
-            return java.util.Collections.unmodifiableMap(values)
+            @Suppress("UNCHECKED_CAST") return java.util.Collections.unmodifiableMap(values) as Map<String, Float>
         }
 
         private fun parseLong(value: String): Long {

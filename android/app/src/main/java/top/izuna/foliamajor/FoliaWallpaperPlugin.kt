@@ -593,7 +593,7 @@ class FoliaWallpaperPlugin : Plugin() {
          * 拿不到（没传 / 不是数字）的字段直接跳过 —— 缺项时渲染器会退回默认值。
          */
         @Suppress("UNCHECKED_CAST")
-        private fun readTuning(tuning: JSObject?): java.util.Map<String, Float>? {
+        private fun readTuning(tuning: JSObject?): Map<String, Float>? {
             if (tuning == null) {
                 return null
             }
@@ -608,9 +608,8 @@ class FoliaWallpaperPlugin : Plugin() {
                     values.put(key, if (value) 1f else 0f)
                 }
             }
-            // Kotlin 转换注：java.util.Map 在 Kotlin 里是个独立的名义类型，HashMap 直接
-            // 返回会「类型不符」，这里显式转一次（JVM 层 HashMap 本来就是 java.util.Map）。
-            return values as java.util.Map<String, Float>
+            // Kotlin 侧统一收 Kotlin Map；HashMap 在 JVM 层本就实现了它，无需再转。
+            return values
         }
 
         private fun parseColor(value: String?): Int {

@@ -454,19 +454,19 @@ class LockScreenControlPanel(private val activity: Activity) {
         val cardHeight = Math.max(root.measuredHeight, Math.round(48f * density))
         growExitRunway(
                 Math.round(ExitMotion.upDistance * density) + Math.round(2f * density),
-                margin + cardHeight
-                        + Math.round(ExitMotion.overshoot * density)
-                        + Math.round(2f * density)
-                        + Math.round(24f * density))
+                margin + cardHeight +
+                        Math.round(ExitMotion.overshoot * density) +
+                        Math.round(2f * density) +
+                        Math.round(24f * density))
 
         val params = WindowManager.LayoutParams(
                 screenWidth - margin * 2,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
                 // 可触摸（按钮要能点）、不抢焦点、窗口外的事件交还给后面的窗口。
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 android.graphics.PixelFormat.TRANSLUCENT)
         params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         /*
@@ -1014,8 +1014,8 @@ class LockScreenControlPanel(private val activity: Activity) {
 
     /** 出屏要走的距离：卡片**上沿**到屏幕底，再加余量。按真实位置算，不写死。 */
     private fun measureExitTravel(): Int {
-        val overshoot = Math.round(ExitMotion.overshoot
-                * activity.resources.displayMetrics.density)
+        val overshoot = Math.round(ExitMotion.overshoot *
+                activity.resources.displayMetrics.density)
         val location = IntArray(2)
         cardView!!.getLocationOnScreen(location)
         val screenHeight = activity.resources.displayMetrics.heightPixels

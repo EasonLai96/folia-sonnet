@@ -38,7 +38,7 @@ import java.util.regex.Pattern
 class FloatingWordColors private constructor() {
 
     /** 一条着色规则（主题里的一项 wordColors）。 */
-    class Rule private constructor(color: Int, phrase: String?, words: Array<String>?, priority: Int) {
+    class Rule internal constructor(color: Int, phrase: String?, words: Array<String>?, priority: Int) {
         @JvmField internal val color: Int = color
         /** 中日韩：整条短语。null = 这条走西文按词匹配。 */
         @JvmField internal val phrase: String? = phrase
@@ -290,7 +290,7 @@ class FloatingWordColors private constructor() {
         /** 与 Web 侧同一个归一化：转小写 + 去掉非 `\w`。 */
         private fun normalize(value: String?): String {
             if (value == null) return ""
-            return NON_WORD.matcher(value.toLowerCase(Locale.ROOT)).replaceAll("")
+            return NON_WORD.matcher(value.lowercase(Locale.ROOT)).replaceAll("")
         }
 
         private fun parseColor(value: String?): Int {

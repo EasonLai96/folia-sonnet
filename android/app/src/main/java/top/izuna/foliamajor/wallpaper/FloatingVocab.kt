@@ -272,7 +272,8 @@ class FloatingVocab private constructor() {
             // FNV-1a（0x811c9dc5 是 2166136261 的补码写法，直接写十进制字面量会溢出 int）。
             var hash = 0x811c9dc5
             for (index in word.indices) {
-                hash = hash xor word[index].code
+                // Char.code 在 Kotlin 2.x 标 Int，xor Long 需要显式转。
+                hash = hash xor word[index].code.toLong()
                 hash *= 16777619
             }
             val unsigned = hash.toLong() and 0xFFFFFFFFL

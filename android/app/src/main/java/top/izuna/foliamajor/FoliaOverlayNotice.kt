@@ -147,7 +147,8 @@ class FoliaOverlayNotice private constructor() {
                 label.setPadding(padH, padV, padH, padV)
                 // 每行 24sp 的行高，与 Web 上那条（line-height: 24px）一致：
                 // 14sp 的字本身占不满 24，补上这 10sp 的间距就是那个行高。
-                label.setLineSpacing((10 * app.resources.displayMetrics.scaledDensity).toInt(), 1f)
+                // setLineSpacing 第一参数是 float，先乘出 px 再转。
+                label.setLineSpacing(10f * app.resources.displayMetrics.scaledDensity, 1f)
                 label.background = noticeBackground(density)
 
                 val wrap = FrameLayout(app)
@@ -165,10 +166,14 @@ class FoliaOverlayNotice private constructor() {
                     WindowManager.LayoutParams.TYPE_PHONE
                 // 不吃点击：它只是「说一句话」，点它跟点它盖住的那一层是同一回事
                 // （Web 上那条不带按钮时也是 pointer-events 只在自己身上）。
-                params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                /*
+                 * `or` 必须留在上一行行尾：Kotlin 2.3 把握手行首的运算符读成新的语句，
+                 * 于是 169 行起每行都报「Expecting an element」。
+                 */
+                params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 params.format = android.graphics.PixelFormat.TRANSLUCENT
                 params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                 // 离底边 30dp **再加**底部安全区：贴在手势条上面的话既挡手势也容易被系统收走。

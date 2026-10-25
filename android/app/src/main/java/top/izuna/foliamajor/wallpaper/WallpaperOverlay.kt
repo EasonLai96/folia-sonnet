@@ -100,7 +100,11 @@ class WallpaperOverlay(private val context: Context) {
      * 叠层是独立 WebView，拿不到主应用那个 AnalyserNode，而主应用的 rAF 在后台会被
      * 系统停掉 —— 所以画面的音频响应只能靠这里从系统混音里抓。见 WallpaperAudioTap。
      */
-    private val audioTap = WallpaperAudioTap(this::pushAudioFrame)
+    private val audioTap = WallpaperAudioTap(object : WallpaperAudioTap.Listener {
+        override fun onAudioFrame(frame: WallpaperAudioTap.Frame) {
+            pushAudioFrame(frame)
+        }
+    })
 
     /** 由 MainActivity 的生命周期报告。 */
     fun setAppForeground(value: Boolean) {
@@ -248,8 +252,8 @@ class WallpaperOverlay(private val context: Context) {
 
     private fun noteOverlayEvent(what: String) {
         val seconds = SystemClock.elapsedRealtime() / 1000L
-        val line = "[" + (seconds / 60L) + ":"
-                + String.format(java.util.Locale.US, "%02d", seconds % 60L) + "] " + what
+        val line = "[" + (seconds / 60L) + ":" +
+                String.format(java.util.Locale.US, "%02d", seconds % 60L) + "] " + what
         Log.w(TAG, "overlay " + line)
         synchronized(overlayEvents) {
             overlayEvents.addFirst(line)
@@ -472,10 +476,10 @@ class WallpaperOverlay(private val context: Context) {
 
     private fun startLockScreenActivity() {
         val intent = Intent(context, LockScreenMusicActivity::class.java)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                or Intent.FLAG_ACTIVITY_NO_ANIMATION
-                or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP)
         // 第一条路：直接起。命中「应用有可见窗口」那条豁免时就是它成的。
         try {
             context.startActivity(intent)
@@ -542,12 +546,12 @@ class WallpaperOverlay(private val context: Context) {
              * 把当时的环境一起记进事件流水：设置页直接显示给用户，
              * 免得再问一遍「什么机型、悬浮窗开了吗」。
              */
-            noteOverlayEvent("锁屏页起不来（" + lockScreenAttempts + " 次）→ "
-                    + top.izuna.foliamajor.lockscreen.RomPermissionGuide.describe(context))
-            Log.w(TAG, "Lock screen page never came up after " + lockScreenAttempts
-                    + " attempts (last error: " + lockScreenLastError + ")"
-                    + " — likely blocked by the background activity start restriction"
-                    + " or the ROM's 'show on lock screen' permission")
+            noteOverlayEvent("锁屏页起不来（" + lockScreenAttempts + " 次）→ " +
+                    top.izuna.foliamajor.lockscreen.RomPermissionGuide.describe(context))
+            Log.w(TAG, "Lock screen page never came up after " + lockScreenAttempts +
+                    " attempts (last error: " + lockScreenLastError + ")" +
+                    " — likely blocked by the background activity start restriction" +
+                    " or the ROM's 'show on lock screen' permission")
         }
     }
 
@@ -776,8 +780,8 @@ class WallpaperOverlay(private val context: Context) {
                                      * 事情完全不同（前者无解，后者该换复查时机）。
                                      */
                                     lockScreenLastExit =
-                                            "亮屏后系统报告已解锁（设备可能没有锁屏密码，"
-                                                    + "或人脸/指纹已自动解锁）"
+                                            "亮屏后系统报告已解锁（设备可能没有锁屏密码，" +
+                                                    "或人脸/指纹已自动解锁）"
                                     finishLockScreen(false)
                                 }
                             }, 900L)
@@ -1202,8 +1206,8 @@ class WallpaperOverlay(private val context: Context) {
         fadeInPending = false
         fadeInDeadlineMs = 0L
         fadingOut = true
-        noteOverlayEvent("fadeOut（从 alpha=" + Math.round(currentAlphaOrDefault() * 100f) / 100f
-                + "，因为 " + describeHideReason() + "）")
+        noteOverlayEvent("fadeOut（从 alpha=" + Math.round(currentAlphaOrDefault() * 100f) / 100f +
+                "，因为 " + describeHideReason() + "）")
         fadeStartMs = SystemClock.elapsedRealtime()
         fadeFromAlpha = currentAlphaOrDefault()
         stepFade()
@@ -1362,8 +1366,8 @@ class WallpaperOverlay(private val context: Context) {
             relayout()
             // 淡到底先休眠，不立刻销毁（见 DORMANT_MAX_MS）。
             dormantSinceMs = SystemClock.elapsedRealtime()
-            noteOverlayEvent("淡出到底 → 进入休眠（窗口留着，透明；" + DORMANT_MAX_MS / 1000L
-                    + "s 内还没该显示就摘掉）")
+            noteOverlayEvent("淡出到底 → 进入休眠（窗口留着，透明；" + DORMANT_MAX_MS / 1000L +
+                    "s 内还没该显示就摘掉）")
             // 已经收起来了：稳定结论跟着归 false，回来要重新挣（见 settleHidden）。
             settleHidden()
             return
@@ -1460,13 +1464,13 @@ class WallpaperOverlay(private val context: Context) {
                 else
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 // 不吃触摸（桌面照常点）、不抢焦点（不影响输入法/按键）、不受系统栏限制铺满全屏。
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         // NOT_TOUCHABLE 已经让事件穿到下层了，NOT_TOUCH_MODAL 是再兜一层：
                         // 窗口外的事件一律交给后面的窗口，不参与"是否模态"的判定。
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         /*
                          * 硬件加速：这一位必须**显式给**。
                          *
@@ -1524,8 +1528,8 @@ class WallpaperOverlay(private val context: Context) {
             windowManager.addView(view, lp)
             added = true
             attachAtMs = SystemClock.elapsedRealtime()
-            noteOverlayEvent("attach（" + (if (hosted) "宿主=音乐锁屏页" else "系统悬浮窗") + "，"
-                    + screenWidth + "x" + screenHeight + "）")
+            noteOverlayEvent("attach（" + (if (hosted) "宿主=音乐锁屏页" else "系统悬浮窗") + "，" +
+                    screenWidth + "x" + screenHeight + "）")
             // 见 _windowAttachedListener：让锁屏面板有机会重新排到这一层之上。
             val listener = _windowAttachedListener
             if (listener != null) {
@@ -1538,8 +1542,8 @@ class WallpaperOverlay(private val context: Context) {
             schedulePush()
         } catch (error: Throwable) {
             // 部分 ROM 即使给了权限也会拒绝 TYPE_APPLICATION_OVERLAY，静默退回原生渲染。
-            noteOverlayEvent("attach 失败（" + error.javaClass.simpleName
-                    + "），叠层不挂了")
+            noteOverlayEvent("attach 失败（" + error.javaClass.simpleName +
+                    "），叠层不挂了")
             webView = null
         }
     }
@@ -1594,8 +1598,8 @@ class WallpaperOverlay(private val context: Context) {
             return
         }
         val livedFor = if (attachAtMs > 0L) SystemClock.elapsedRealtime() - attachAtMs else -1L
-        noteOverlayEvent("detach（" + why + "）"
-                + (if (livedFor >= 0L) "，这一份只活了 " + livedFor + "ms" else ""))
+        noteOverlayEvent("detach（" + why + "）" +
+                (if (livedFor >= 0L) "，这一份只活了 " + livedFor + "ms" else ""))
         val manager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         try {
             manager.removeView(view)
@@ -1960,7 +1964,7 @@ class WallpaperOverlay(private val context: Context) {
     private var lastTuningHash: String? = null
 
     /** 上一次生效的那份 tuning 本体（见 describeTuningDiff）。 */
-    private var lastTuningSnapshot: java.util.Map<String, Float> = java.util.Collections.emptyMap()
+    private var lastTuningSnapshot: Map<String, Float> = emptyMap()
 
     /** 上一轮**看到**的 tuning（不等于已经生效的那份，见 lastTuningHash）。 */
     private var lastObservedHash: String? = null
@@ -2000,7 +2004,7 @@ class WallpaperOverlay(private val context: Context) {
      * 而用户报的正是「放着放着突然消失再淡入」。把变化的键名列出来，
      * 一眼就能看出是用户真的改了设置，还是某个字段在自己抖（那才是 bug）。
      */
-    private fun describeTuningDiff(current: java.util.Map<String, Float>): String {
+    private fun describeTuningDiff(current: Map<String, Float>): String {
         val previous = lastTuningSnapshot
         val changed = java.util.ArrayList<String>()
         for (entry in current.entries) {
@@ -2058,8 +2062,8 @@ class WallpaperOverlay(private val context: Context) {
             tuningLastChangeAtMs = now
             if (tuningPendingSinceMs == 0L) {
                 tuningPendingSinceMs = now
-                noteOverlayEvent("tuning 变了，先等它稳住再重载（最多 " + TUNING_SETTLE_MAX_MS
-                        + "ms）—— 变化的字段：" + describeTuningDiff(tuning))
+                noteOverlayEvent("tuning 变了，先等它稳住再重载（最多 " + TUNING_SETTLE_MAX_MS +
+                        "ms）—— 变化的字段：" + describeTuningDiff(tuning))
             }
         }
         /*
@@ -2076,8 +2080,8 @@ class WallpaperOverlay(private val context: Context) {
             return
         }
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < TUNING_RELOAD_INTERVAL_MS) {
-            noteOverlayEvent("tuning 变了但被 3s 节流挡住，欠着下次补 —— 变化的字段："
-                    + describeTuningDiff(tuning))
+            noteOverlayEvent("tuning 变了但被 3s 节流挡住，欠着下次补 —— 变化的字段：" +
+                    describeTuningDiff(tuning))
             return
         }
         lastTuningHash = hash
@@ -2121,8 +2125,8 @@ class WallpaperOverlay(private val context: Context) {
     private fun reloadForRecovery(reason: String) {
         val elapsed = SystemClock.elapsedRealtime() - lastLoadAtMs
         if (lastLoadAtMs > 0L && elapsed < MIN_RELOAD_INTERVAL_MS) {
-            Log.w(TAG, "Skipping overlay reload (" + reason + "): last load was "
-                    + elapsed + "ms ago")
+            Log.w(TAG, "Skipping overlay reload (" + reason + "): last load was " +
+                    elapsed + "ms ago")
             noteOverlayEvent("自愈重载被 30s 节流挡掉（" + reason + "，上一次加载在 " + elapsed + "ms 前）")
             return
         }
@@ -2153,8 +2157,8 @@ class WallpaperOverlay(private val context: Context) {
         if (view == null) {
             return
         }
-        noteOverlayEvent("loadPage（" + reason + "）"
-                + (if (added) "，窗口留着，alpha 会先压回 0" else "，窗口还没挂"))
+        noteOverlayEvent("loadPage（" + reason + "）" +
+                (if (added) "，窗口留着，alpha 会先压回 0" else "，窗口还没挂"))
         // 每次（重新）加载都从"未就绪"算起，等 onPageFinished 再置回 true。
         pageReady = false
         lastLoadAtMs = SystemClock.elapsedRealtime()
@@ -2381,16 +2385,16 @@ class WallpaperOverlay(private val context: Context) {
                          * 拿它当 mismatch 的话，每换一次歌就要重载一份页面。
                          */
                         mismatch = true
-                        mismatchWhy = "时间轴对不上（页面 " + pageLineCount + " 行 /「"
-                                + pageFirstLine + "」，原生 " + expectedLineCount + " 行 /「"
-                                + expectedFirstLine + "」）"
+                        mismatchWhy = "时间轴对不上（页面 " + pageLineCount + " 行 /「" +
+                                pageFirstLine + "」，原生 " + expectedLineCount + " 行 /「" +
+                                expectedFirstLine + "」）"
                     } else if (pagePositionMs >= 0L
                             && Math.abs(pagePositionMs - expectedPositionMs) > POSITION_DRIFT_TOLERANCE_MS) {
                         // 歌词和时间轴都对，但两边各推各的、差出好几秒（页面锚点过期）。
                         mismatch = true
-                        mismatchWhy = "位置漂移 " + (pagePositionMs - expectedPositionMs) + "ms（容差 "
-                                + POSITION_DRIFT_TOLERANCE_MS + "ms；页面 " + pagePositionMs
-                                + " / 原生 " + expectedPositionMs + "）"
+                        mismatchWhy = "位置漂移 " + (pagePositionMs - expectedPositionMs) + "ms（容差 " +
+                                POSITION_DRIFT_TOLERANCE_MS + "ms；页面 " + pagePositionMs +
+                                " / 原生 " + expectedPositionMs + "）"
                     }
                 } catch (parseError: Throwable) {
                     // 页面表达式返回了意料外的东西：当作对不上，补推一次最安全。
@@ -2398,8 +2402,8 @@ class WallpaperOverlay(private val context: Context) {
                     // 看不出拿到的到底是什么形态，白查了很久。
                     val excerpt = if (raw.length > 80) raw.substring(0, 80) + "…" else raw
                     mismatch = true
-                    mismatchWhy = "页面状态读不出来（" + parseError.javaClass.simpleName
-                            + "；原文「" + excerpt.replace('\n', ' ').replace('\r', ' ') + "」）"
+                    mismatchWhy = "页面状态读不出来（" + parseError.javaClass.simpleName +
+                            "；原文「" + excerpt.replace('\n', ' ').replace('\r', ' ') + "」）"
                 }
                 if (!mismatch) {
                     contentMismatchStreak = 0
@@ -2481,22 +2485,22 @@ class WallpaperOverlay(private val context: Context) {
             return
         }
         val snapshot = WallpaperLyricsState.get()
-        val signature = snapshot.playing.toString()
-                + "@" + snapshot.anchorPositionMs
-                + "@" + snapshot.title
-                + "@" + snapshot.artist
-                + "@" + snapshot.lines.size
-                + "@" + snapshot.visualizerMode
-                + "@" + snapshot.backgroundMode
-                + "@" + snapshot.showTranslation
-                + "@" + snapshot.stamp
+        val signature = snapshot.playing.toString() +
+                "@" + snapshot.anchorPositionMs +
+                "@" + snapshot.title +
+                "@" + snapshot.artist +
+                "@" + snapshot.lines.size +
+                "@" + snapshot.visualizerMode +
+                "@" + snapshot.backgroundMode +
+                "@" + snapshot.showTranslation +
+                "@" + snapshot.stamp +
                 // 封面必须进签名：它是异步抓的（App 先推「有歌名」，几十到几百毫秒后
                 // 封面才跟着下一次 publish 到）。不进签名的话那一次 publish 其它字段全没变，
                 // 会被这里直接判定成「状态没变」跳过 —— 叠层的封面就永远停在
                 // 「第一份 payload 里的那个值」，也就是永远没有。
                 // 只取散列，不把上百 KB 的 base64 拼进签名（Java 的 String hashCode 有缓存，
                 // 同一个 String 对象后续取散列是常数级）。
-                + "@" + (snapshot.cover?.hashCode() ?: 0)
+                "@" + (snapshot.cover?.hashCode() ?: 0)
         /*
          * 封面走**单独一条通道**，不跟着整包走。
          *
@@ -2530,8 +2534,8 @@ class WallpaperOverlay(private val context: Context) {
              * "状态没变就再也不推" 类 bug 的根源。
              */
             view.evaluateJavascript(
-                    "(function(){if(window.__foliaWallpaperPush){window.__foliaWallpaperPush("
-                            + payload + ");}return window.__foliaWallpaperPushCount||0;})()") { value ->
+                    "(function(){if(window.__foliaWallpaperPush){window.__foliaWallpaperPush(" +
+                            payload + ");}return window.__foliaWallpaperPushCount||0;})()") { value ->
                 try {
                     if (value != null && Integer.parseInt(value.trim()) > 0) {
                         pushConfirmed = true
@@ -2612,9 +2616,9 @@ class WallpaperOverlay(private val context: Context) {
         }
         try {
             view.evaluateJavascript(
-                    "(function(){if(window.__foliaWallpaperPushCover){"
-                            + "window.__foliaWallpaperPushCover(" + payload.toString() + ");return 1;}"
-                            + "return 0;})()",
+                    "(function(){if(window.__foliaWallpaperPushCover){" +
+                            "window.__foliaWallpaperPushCover(" + payload.toString() + ");return 1;}" +
+                            "return 0;})()",
                     null)
         } catch (ignored: Throwable) {
             // 页面还在导航期会静默失败；把判重键清掉，下一轮巡检会再推一次。
@@ -2679,9 +2683,9 @@ class WallpaperOverlay(private val context: Context) {
         val view = webView ?: return
         try {
             view.evaluateJavascript(
-                    "(function(){if(window.__foliaWallpaperPushAudio){"
-                            + "window.__foliaWallpaperPushAudio(" + payload + ");return 1;}"
-                            + "return 0;})()",
+                    "(function(){if(window.__foliaWallpaperPushAudio){" +
+                            "window.__foliaWallpaperPushAudio(" + payload + ");return 1;}" +
+                            "return 0;})()",
                     null)
         } catch (ignored: Throwable) {
             // 页面还在导航期会静默失败。
@@ -3099,7 +3103,7 @@ class WallpaperOverlay(private val context: Context) {
          * 页面在 `__foliaWallpaperPush` 里维护 `__foliaWallpaperLatest` / `__foliaWallpaperReceivedAt`。
          */
         private const val PAGE_STATE_EXPR =
-                "(function(){var l=window.__foliaWallpaperLatest;if(!l)"
+                "(function(){var l=window.__foliaWallpaperLatest;if(!l)" +
                 /*
                  * 直接返回**对象**，不要 JSON.stringify 成字符串。
                  *
@@ -3108,12 +3112,12 @@ class WallpaperOverlay(private val context: Context) {
                  * 剥不干净的，解析必炸（见 decodeEvaluatedJson）。返回对象时回调拿到的
                  * 本身就是合法 JSON，省掉这一层来回。
                  */
-                + "return {t:'',n:-1,p:-1};"
-                + "var ls=l.lines||[];"
-                + "var pos=l.playing?(l.positionMs+(performance.now()"
-                + "-window.__foliaWallpaperReceivedAt)):l.positionMs;"
-                + "return {t:(l.title||''),n:ls.length,"
-                + "f:(ls.length?(ls[0].text||''):''),p:Math.round(pos)};})()"
+                "return {t:'',n:-1,p:-1};" +
+                "var ls=l.lines||[];" +
+                "var pos=l.playing?(l.positionMs+(performance.now()" +
+                "-window.__foliaWallpaperReceivedAt)):l.positionMs;" +
+                "return {t:(l.title||''),n:ls.length," +
+                "f:(ls.length?(ls[0].text||''):''),p:Math.round(pos)};})()"
 
         /**
          * 位置核对的容差。两边都是「锚点 + 各自的墙钟」外推，正常漂移不到一秒；
@@ -3141,7 +3145,7 @@ class WallpaperOverlay(private val context: Context) {
          * 用 https 而不是 file:// 是因为页面是 ES module，file:// 下会被当跨源资源拒绝加载。
          */
         private fun guessMime(path: String): String {
-            val lower = path.toLowerCase(Locale.US)
+            val lower = path.lowercase(Locale.US)
             if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "text/javascript"
             if (lower.endsWith(".css")) return "text/css"
             if (lower.endsWith(".html")) return "text/html"

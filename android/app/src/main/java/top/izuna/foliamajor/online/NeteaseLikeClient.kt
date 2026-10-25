@@ -24,8 +24,8 @@ class NeteaseLikeClient private constructor() {
     companion object {
         private const val TAG = "NeteaseLikeClient"
         private const val UA =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                        + "Chrome/124.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/124.0.0.0 Safari/537.36"
 
         /**
          * @return 写入是否**确认**生效。写请求通了但复查不出来按失败算：宁可让 JS 醒来后再补，
@@ -55,8 +55,8 @@ class NeteaseLikeClient private constructor() {
                     arrayOf("/weapi/song/like",
                             "{\"trackId\":" + trackId + ",\"like\":" + liked + "}"),
                     arrayOf("/weapi/radio/like",
-                            "{\"alg\":\"itembased\",\"trackId\":" + trackId
-                                    + ",\"like\":" + liked + ",\"time\":\"3\"}"))
+                            "{\"alg\":\"itembased\",\"trackId\":" + trackId +
+                                    ",\"like\":" + liked + ",\"time\":\"3\"}"))
             for (attempt in attempts) {
                 try {
                     val body = weapiPost("https://music.163.com" + attempt[0],
@@ -124,8 +124,8 @@ class NeteaseLikeClient private constructor() {
             data.put("csrf_token", LikeFallback.parseCookie(cookieHeader)
                     .getOrDefault("__csrf", ""))
             val encrypted = WeapiCrypto.encrypt(data.toString())
-            val form = "params=" + URLEncoder.encode(encrypted[0], "UTF-8")
-                    + "&encSecKey=" + URLEncoder.encode(encrypted[1], "UTF-8")
+            val form = "params=" + URLEncoder.encode(encrypted[0], "UTF-8") +
+                    "&encSecKey=" + URLEncoder.encode(encrypted[1], "UTF-8")
             val connection = URL(url).openConnection() as HttpURLConnection
             try {
                 connection.requestMethod = "POST"

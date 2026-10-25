@@ -19,7 +19,6 @@ import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
 
-import java.util.List
 
 /**
  * 适配手机厂商的屏幕顶部显示（挖孔 / 刘海 / 曲面），让界面真正铺满整块屏幕。
@@ -90,11 +89,11 @@ class PhoneFitCutout private constructor() {
                 }
                 // 不再为系统栏留位。
                 WindowCompat.setDecorFitsSystemWindows(window, false)
-                window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
-                    or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
+                window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or
+                    WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
                 // 系统栏透明，避免顶部出现一条不透明色带。
                 window.statusBarColor = Color.TRANSPARENT
                 window.navigationBarColor = Color.TRANSPARENT
@@ -254,7 +253,7 @@ class PhoneFitCutout private constructor() {
             while (node != null && node !== decor) {
                 if (node.getTag(CHAIN_ISOLATION_TAG.hashCode()) == null) {
                     node.setTag(CHAIN_ISOLATION_TAG.hashCode(), true)
-                    node.isFitsSystemWindows = false
+                    node.setFitsSystemWindows(false)
                     ViewCompat.setOnApplyWindowInsetsListener(node) { view, insets ->
                         if (view.paddingLeft != 0
                             || view.paddingTop != 0
@@ -522,7 +521,7 @@ class PhoneFitCutout private constructor() {
                         )
                         val rects = JSONArray()
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            val bounding: List<Rect>? = cutout.boundingRects
+                            val bounding = cutout.boundingRects
                             if (bounding != null) {
                                 for (r in bounding) {
                                     rects.put(rect(r.left, r.top, r.right, r.bottom))

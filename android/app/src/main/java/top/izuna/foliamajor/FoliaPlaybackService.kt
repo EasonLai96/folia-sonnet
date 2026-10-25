@@ -134,8 +134,8 @@ class FoliaPlaybackService : android.app.Service() {
              */
             if (playNudges < MAX_PLAY_NUDGES) {
                 playNudges++
-                Log.w(TAG, "Play command never took effect; nudging the web layer ("
-                        + playNudges + "/" + MAX_PLAY_NUDGES + ")")
+                Log.w(TAG, "Play command never took effect; nudging the web layer (" +
+                        playNudges + "/" + MAX_PLAY_NUDGES + ")")
                 sendCommand("play")
             }
         }
@@ -342,8 +342,8 @@ class FoliaPlaybackService : android.app.Service() {
         })
         session.setActive(true)
         // 通知栏的播放/暂停等动作直接复用 MediaSession 的控制，不再各自维护一套。
-        session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
-                or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
+        session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
         session.setPlaybackState(PlaybackStateCompat.Builder()
                 .setActions(supportedActions())
                 .setState(PlaybackStateCompat.STATE_NONE, 0, 1.0f)
@@ -1055,8 +1055,7 @@ class FoliaPlaybackService : android.app.Service() {
             if (lyric == null || lyric.mainLrc.isEmpty()) {
                 return@Thread
             }
-            val lines: java.util.List<top.izuna.foliamajor.wallpaper.WallpaperLyricsState.TimedLine> =
-                    top.izuna.foliamajor.online.MusicGateway.parseLrc(lyric.mainLrc, lyric.transLrc)
+            val lines = top.izuna.foliamajor.online.MusicGateway.parseLrc(lyric.mainLrc, lyric.transLrc)
             if (lines.isEmpty()) {
                 return@Thread
             }

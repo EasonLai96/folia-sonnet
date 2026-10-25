@@ -144,9 +144,11 @@ class WebViewUpgrade private constructor() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // API 26+ 的官方入口，返回的就是系统当前选定的那个 WebView 实现。
                 val info = WebView.getCurrentWebViewPackage()
-                val major = if (info == null) -1 else parseMajor(info.versionName)
-                if (major > 0) {
-                    return Info(info.packageName, info.versionName, major, "package")
+                if (info != null) {
+                    val major = parseMajor(info.versionName)
+                    if (major > 0) {
+                        return Info(info.packageName, info.versionName, major, "package")
+                    }
                 }
                 return Info(null, null, -1, "unknown")
             }

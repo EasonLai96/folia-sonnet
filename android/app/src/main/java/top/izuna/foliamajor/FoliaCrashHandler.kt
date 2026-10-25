@@ -62,9 +62,9 @@ class FoliaCrashHandler private constructor() {
         private fun showCrashScreen(context: Context, trace: String, saved: File?) {
             try {
                 val intent = Intent(context, CrashActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
                 intent.putExtra(CrashActivity.EXTRA_TRACE, trace)
                 intent.putExtra(CrashActivity.EXTRA_SAVED_PATH,
                         if (saved == null) "" else saved.absolutePath)
@@ -87,9 +87,13 @@ class FoliaCrashHandler private constructor() {
                 if (!dir.exists() && !dir.mkdirs()) {
                     return null
                 }
-                val name = "crash-"
-                        + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-                        + ".log"
+                /*
+                 * Kotlin 2.3 收紧了以 `+` 开头的续行解析：它会被读成一元 `+`，
+                 * 报 `Unresolved reference 'unaryPlus'`。把 `+` 收进上一行。
+                 */
+                val name = "crash-" +
+                        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) +
+                        ".log"
                 val file = File(dir, name)
                 PrintWriter(FileWriter(file)).use { writer ->
                     writer.println(deviceInfo(context))
@@ -103,15 +107,16 @@ class FoliaCrashHandler private constructor() {
         }
 
         private fun deviceInfo(context: Context): String {
-            return "Folia crash report"
-                    + "\n  time      : " + Date()
-                    + "\n  device    : " + Build.MANUFACTURER + " " + Build.MODEL
-                    + "\n  android   : " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
-                    + "\n  abi       : " + java.util.Arrays.toString(Build.SUPPORTED_ABIS)
+            // 同上：`+` 必须留在上一行行尾（Kotlin 2.3 把行首的 `+` 当一元算符）。
+            return "Folia crash report" +
+                    "\n  time      : " + Date() +
+                    "\n  device    : " + Build.MANUFACTURER + " " + Build.MODEL +
+                    "\n  android   : " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")" +
+                    "\n  abi       : " + java.util.Arrays.toString(Build.SUPPORTED_ABIS) +
                     // 白屏 / 脚本报错类问题几乎都跟引擎版本有关，写进报告里好横向对比设备。
                     // 这里没有 WebView 实例（可能崩在 Bridge 建起来之前），少一路 UA 兜底无所谓。
-                    + "\n  webview   : " + WebViewUpgrade.describe(context, null)
-                    + "\n"
+                    "\n  webview   : " + WebViewUpgrade.describe(context, null) +
+                    "\n"
         }
 
         private fun stackTraceToString(throwable: Throwable): String {

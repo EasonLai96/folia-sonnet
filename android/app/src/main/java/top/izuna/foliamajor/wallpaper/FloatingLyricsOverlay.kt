@@ -25,7 +25,6 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 
-import java.util.List
 
 /**
  * 壁纸样式 = 「精简」时挂的那颗**简易桌面歌词悬浮窗**。
@@ -902,9 +901,9 @@ class FloatingLyricsOverlay private constructor(context: Context) {
         val y = if (p == null) 0 else p.y
         val lp = WindowManager.LayoutParams(
                 size, size, x, y, windowType(),
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 android.graphics.PixelFormat.TRANSPARENT)
         lp.gravity = Gravity.TOP or Gravity.LEFT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1000,9 +999,9 @@ class FloatingLyricsOverlay private constructor(context: Context) {
             y = clampInt(y, 0, Math.max(0, screenH - height))
         }
 
-        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         /*
          * 这一层此刻该不该「整层不吃触摸」。
          *

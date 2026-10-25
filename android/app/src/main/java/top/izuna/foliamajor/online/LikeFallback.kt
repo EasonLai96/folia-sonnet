@@ -10,7 +10,6 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.nio.charset.StandardCharsets
 import java.util.LinkedHashMap
-import java.util.Map
 
 /**
  * WebView 冻结时通知栏红心的原生兜底入口：按平台把「补写收藏」分发到各家的直连客户端。

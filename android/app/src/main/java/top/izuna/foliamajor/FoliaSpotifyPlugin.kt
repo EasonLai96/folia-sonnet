@@ -100,9 +100,9 @@ class FoliaSpotifyPlugin : Plugin() {
         }
 
         private fun pageOf(text: String): String {
-            return ("<!doctype html><meta charset=\"utf-8\"><title>Folia</title><body style=\"margin:0;display:grid;"
-                + "place-items:center;height:100vh;background:#121212;color:#fff;font:16px system-ui,sans-serif\">"
-                + text + "</body>")
+            return ("<!doctype html><meta charset=\"utf-8\"><title>Folia</title><body style=\"margin:0;display:grid;" +
+                "place-items:center;height:100vh;background:#121212;color:#fff;font:16px system-ui,sans-serif\">" +
+                text + "</body>")
         }
 
         private fun query(raw: String): MutableMap<String, String> {
@@ -409,10 +409,10 @@ class FoliaSpotifyPlugin : Plugin() {
         val head = (if (status == 200)
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
         else
-            "HTTP/1.1 404 Not Found\r\n")
-            + "Content-Length: " + body.size + "\r\n"
-            + "Cache-Control: no-store\r\n"
-            + "Connection: close\r\n\r\n"
+            "HTTP/1.1 404 Not Found\r\n") +
+            "Content-Length: " + body.size + "\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Connection: close\r\n\r\n"
         out.write(head.toByteArray(StandardCharsets.UTF_8))
         if (body.size > 0) out.write(body)
         out.flush()

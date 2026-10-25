@@ -202,9 +202,10 @@ class FoliaPlaybackPlugin : Plugin() {
                 top.izuna.foliamajor.online.LikeOverrideStore.consume(getContext())
         val list = JSArray()
         try {
-            val keys: java.util.Iterator<String> = overrides.keys()
+            // keys() 返回的是 Kotlin 可空迭代器；直接用 Kotlin 形态接，空键跳过。
+            val keys = overrides.keys()
             while (keys.hasNext()) {
-                val songKey = keys.next()
+                val songKey = keys.next() ?: continue
                 val entry = overrides.optJSONObject(songKey)
                 if (entry == null) continue
                 val item = JSObject()

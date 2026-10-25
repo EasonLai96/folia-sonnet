@@ -9,7 +9,6 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import java.util.Map
 
 /**
  * QQ 音乐红心的原生写入：musicu.fcg 直连 u.y.qq.com，WebView 冻结时通知栏红心的兜底。
@@ -24,8 +23,8 @@ class QqLikeClient private constructor() {
     companion object {
         private const val TAG = "QqLikeClient"
         private const val UA =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                        + "Chrome/124.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/124.0.0.0 Safari/537.36"
         private const val MUSICU = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json"
 
         @JvmStatic
@@ -142,7 +141,8 @@ class QqLikeClient private constructor() {
             }
             val result = data.opt("result")
             if (result is Number) {
-                val value = result.intValue()
+                // Number.intValue() 是 Java 写法；Kotlin 里用 toInt()。
+                val value = result.toInt()
                 if (value != 0 && value != 200) {
                     return false
                 }

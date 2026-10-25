@@ -168,8 +168,8 @@ class RomPermissionGuide private constructor() {
         @JvmStatic
         fun describe(context: Context?): String {
             val rom = romLabel()
-            return (if (rom.isEmpty()) "非 ColorOS" else rom)
-                    + "，悬浮窗" + (if (canDrawOverlays(context)) "已授权" else "未授权")
+            return (if (rom.isEmpty()) "非 ColorOS" else rom) +
+                    "，悬浮窗" + (if (canDrawOverlays(context)) "已授权" else "未授权")
         }
 
         /** Android 版本，诊断里一并带上（后台启动限制 14 起明显收紧）。 */

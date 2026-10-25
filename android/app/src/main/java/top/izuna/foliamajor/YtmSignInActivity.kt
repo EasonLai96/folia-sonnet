@@ -83,7 +83,8 @@ class YtmSignInActivity : AppCompatActivity() {
             val manager = CookieManager.getInstance()
             val expired = java.util.ArrayList<Array<String>>()
             for (source in ERASE_COOKIE_URLS) {
-                val host: String?
+                // catch 分支里要给 host 兜 null，所以用 var 而不是「先声明后赋值」的 val。
+                var host: String?
                 try {
                     host = Uri.parse(source).host
                 } catch (ignored: Exception) {
@@ -152,13 +153,11 @@ class YtmSignInActivity : AppCompatActivity() {
         webView!!.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
-                val host = if (uri.host == null) "" else uri.host
-                // https 且是 Google / YouTube 的域才放行；地址还得干净：URL 里没有用户信息
-                //（userinfo，比如 https://evil@example.com/），端口就是默认的 443。别的
-                //（http、自定义端口、intent:// 等自有协议）都不去。
+                // uri.host / uri.scheme 标可空；这里全部按非空缺省兜住。
+                val host = uri.host ?: ""
                 val https = "https" == uri.scheme
                 val plainAddress = uri.userInfo == null && (uri.port == -1 || uri.port == 443)
-                val allowed = https && plainAddress && !host.isEmpty() && isAllowedDomain(host)
+                val allowed = https && plainAddress && host.isNotEmpty() && isAllowedDomain(host)
                 if (!allowed) {
                     Log.w(TAG, "the sign-in blocked a navigation to " + host)
                     return true
@@ -230,8 +229,9 @@ class YtmSignInActivity : AppCompatActivity() {
 
     /** 起屏时这台 WebView 的 UA：之后的会话请求跟着它发（桌面版也是「登录用的 UA + cookie」一对），不另编一个。 */
     private fun readUserAgent(): String {
-        return if (webView != null && webView!!.settings != null)
-            String.valueOf(webView!!.settings.userAgentString) else ""
+        val wv = webView ?: return ""
+        val ua = wv.settings?.userAgentString ?: return ""
+        return ua
     }
 
     /**

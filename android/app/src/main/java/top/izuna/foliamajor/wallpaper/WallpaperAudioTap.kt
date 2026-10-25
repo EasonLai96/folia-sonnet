@@ -131,13 +131,20 @@ class WallpaperAudioTap {
                 failed = true
                 return
             }
-            val sampling = probe.samplingRate
+            val sampling = probe.getSamplingRate()
             if (sampling <= 0) {
                 release(probe)
                 failed = true
                 return
             }
-            val maxRate = probe.maxCaptureRate
+            // getMaxCaptureRate 在部分 ROM 上被裁掉（报 NoSuchMethodError），反射兜底；
+            // 取不到就按 0 处理（下面 maxRate > 0 才会拿它做上限）。
+            val maxRate: Int = try {
+                val m = Visualizer::class.java.getMethod("getMaxCaptureRate")
+                (m.invoke(probe) as Int)
+            } catch (ignored: Throwable) {
+                0
+            }
             // 单位是毫赫兹：20000 mHz = 20 次/秒。
             var rate = CAPTURE_FPS * 1000
             if (maxRate > 0) {

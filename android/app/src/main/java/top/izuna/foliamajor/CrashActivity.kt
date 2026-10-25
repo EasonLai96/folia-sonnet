@@ -48,9 +48,16 @@ class CrashActivity : AppCompatActivity() {
         root.addView(title, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+        /*
+         * 换行后以 `+` 开头的那句：这是 Kotlin 2.3 的解析收紧。
+         *
+         * 老编译器把它读成「上一行的字符串 + 下一行」，2.3 起会读成一元 `+`（因为
+         * `text` 的类型是 CharSequence，两边都可能是一元的），于是报
+         * `Unresolved reference 'unaryPlus'`。把 `+` 收进上一行，意图就唯一了。
+         */
         val hint = TextView(this)
-        hint.text = "把下面这段发给开发者。日志同时已保存到：\n"
-                + (if (savedPath.isEmpty()) "(保存失败)" else savedPath)
+        hint.text = "把下面这段发给开发者。日志同时已保存到：\n" +
+                (if (savedPath.isEmpty()) "(保存失败)" else savedPath)
         hint.setTextColor(Color.parseColor("#9ca3af"))
         hint.setTextSize(12f)
         hint.setPadding(0, dp(8), 0, dp(12))

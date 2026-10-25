@@ -100,8 +100,8 @@ class ColorOsLyricBridge private constructor() {
             }
             val result = runDetection()
             detection = result
-            Log.i(TAG, "ColorOS 原生歌词通道" + (if (result.supported) "开启" else "关闭")
-                    + "：major=" + result.colorOsMajor + "，依据=" + result.detail)
+            Log.i(TAG, "ColorOS 原生歌词通道" + (if (result.supported) "开启" else "关闭") +
+                    "：major=" + result.colorOsMajor + "，依据=" + result.detail)
             return result
         }
 
@@ -111,8 +111,8 @@ class ColorOsLyricBridge private constructor() {
         }
 
         private fun runDetection(): Detection {
-            val fingerprint = (Build.BRAND + " " + Build.MANUFACTURER + " " + Build.PRODUCT + " "
-                    + Build.DEVICE + " " + Build.MODEL + " " + Build.DISPLAY + " " + Build.FINGERPRINT)
+            val fingerprint = (Build.BRAND + " " + Build.MANUFACTURER + " " + Build.PRODUCT + " " +
+                    Build.DEVICE + " " + Build.MODEL + " " + Build.DISPLAY + " " + Build.FINGERPRINT)
                     .lowercase(Locale.US)
             var family = false
             for (marker in FAMILY_MARKERS) {

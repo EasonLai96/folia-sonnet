@@ -20,7 +20,7 @@ import top.izuna.foliamajor.wallpaper.WallpaperLyricsState
  * 原生平台网关：WebView 冻结 / 已死时，播放延续需要的平台读取直接从这里出网。
  *
  * 为什么要它：应用的取流地址、歌词、红心状态原本全在 Web 层那套 JS 里
- * （nativeBridge/api/*.js），WebView 一冻结整条链就断 —— 原生兜底切歌只能用镜像里
+ * （nativeBridge/api/ 下的 JS），WebView 一冻结整条链就断 —— 原生兜底切歌只能用镜像里
  * 预取过的那几个地址（「连按五首就切不动」），歌词与封面没人拉（壁纸停在上一首），
  * 红心状态也没处问。这个类把**播放延续需要的那一小块**平台逻辑用 Java 复刻：
  *
@@ -94,8 +94,8 @@ class MusicGateway private constructor() {
     companion object {
         private const val TAG = "MusicGateway"
         private const val UA =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                        + "Chrome/124.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/124.0.0.0 Safari/537.36"
         private const val MUSICU = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json"
         private const val QQ_FALLBACK_SIP = "https://ws.stream.qqmusic.qq.com/"
 
@@ -271,7 +271,8 @@ class MusicGateway private constructor() {
             if (!cleanUrl.matches(Regex("(?i)^https?://.*"))) {
                 cleanUrl = "http://" + cleanUrl
             }
-            if (cleanUrl.regionMatches(true, 0, "http://", 0, 7)) {
+            // Kotlin 的 regionMatches 参数序：ignoreCase 在最后，不是第一位。
+            if (cleanUrl.regionMatches(0, "http://", 0, 7, ignoreCase = true)) {
                 val slash = cleanUrl.indexOf('/', 7)
                 val hostPart = if (slash < 0) cleanUrl.substring(7) else cleanUrl.substring(7, slash)
                 if (!hostPart.contains(":")) {
@@ -314,8 +315,8 @@ class MusicGateway private constructor() {
             }
             var connection: HttpURLConnection? = null
             try {
-                val conn = URL(creds.serverUrl
-                        + "/music/api/v1/lyric/list?trackGUID=" + urlEncode(id)).openConnection()
+                val conn = URL(creds.serverUrl +
+                        "/music/api/v1/lyric/list?trackGUID=" + urlEncode(id)).openConnection()
                         as HttpURLConnection
                 connection = conn
                 conn.connectTimeout = 8000
@@ -368,8 +369,8 @@ class MusicGateway private constructor() {
             }
             var connection: HttpURLConnection? = null
             try {
-                val conn = URL(creds.serverUrl + "/music/api/v1/"
-                        + (if (liked) "favorite-track/create" else "favorite-track/delete"))
+                val conn = URL(creds.serverUrl + "/music/api/v1/" +
+                        (if (liked) "favorite-track/create" else "favorite-track/delete"))
                         .openConnection() as HttpURLConnection
                 connection = conn
                 conn.requestMethod = "POST"
@@ -620,7 +621,7 @@ class MusicGateway private constructor() {
         // ==================== 酷狗「我喜欢」名单（cloudlist 签名直连） ====================
 
         private fun kugouIsLiked(hash: String?, songId: String?): Boolean? {
-            val cleanHash = hash?.trim()?.toLowerCase() ?: ""
+            val cleanHash = hash?.trim()?.lowercase() ?: ""
             val cleanSongId = songId?.trim() ?: ""
             if (cleanHash.isEmpty() && cleanSongId.isEmpty()) {
                 return null
@@ -665,8 +666,8 @@ class MusicGateway private constructor() {
             for (type in intArrayOf(2, 0)) {
                 try {
                     // body 的 key 顺序照 JS（JSON.stringify 按插入序）——签名按服务端收到的字节算。
-                    val bodyJson = "{\"userid\":" + userId + ",\"token\":\"" + jsonEscape(token)
-                            + "\",\"total_ver\":979,\"type\":" + type + ",\"page\":1,\"pagesize\":50}"
+                    val bodyJson = "{\"userid\":" + userId + ",\"token\":\"" + jsonEscape(token) +
+                            "\",\"total_ver\":979,\"type\":" + type + ",\"page\":1,\"pagesize\":50}"
                     val body = kgPostCloudlist("/v7/get_all_list", bodyJson, true, parsed, userId, token)
                     val lists = extractKgCloudArray(body)
                     if (lists == null) continue
@@ -776,8 +777,8 @@ class MusicGateway private constructor() {
                 val out = HashSet<String>()
                 // 两页封顶 1000 首（JS 单页 500）；没拉完同样回 null 不缓存。
                 for (page in 1..2) {
-                    val bodyJson = "{\"listid\":" + digitsOr(listId, "0") + ",\"page\":" + page
-                            + ",\"pagesize\":500,\"type\":0}"
+                    val bodyJson = "{\"listid\":" + digitsOr(listId, "0") + ",\"page\":" + page +
+                            ",\"pagesize\":500,\"type\":0}"
                     val body = kgPostCloudlist("/v2/get_list_all_file", bodyJson, false, parsed, userId, token)
                     val tracks = extractKgCloudArray(body)
                     if (tracks == null || tracks.length() == 0) {
@@ -785,7 +786,7 @@ class MusicGateway private constructor() {
                     }
                     for (i in 0 until tracks.length()) {
                         val track = tracks.optJSONObject(i) ?: continue
-                        val hash = firstNonBlank2(track, "hash", "FileHash", "HASH").toLowerCase()
+                        val hash = firstNonBlank2(track, "hash", "FileHash", "HASH").lowercase()
                         if (!hash.isEmpty()) out.add(hash)
                         val mixId = firstNonBlank2(track, "mixsongid", "album_audio_id",
                                 "AlbumAudioID", "MixSongID")
@@ -935,7 +936,7 @@ class MusicGateway private constructor() {
                 for (page in 0 until 4) {
                     val body = qishuiRequest("playlist.tracks",
                             qishuiParams("id", likedId, "limit", "500", "offset",
-                                    String.valueOf(page * 500)))
+                                    (page * 500).toString()))
                     if (body == null) {
                         return if (page == 0) null else out
                     }
@@ -984,8 +985,8 @@ class MusicGateway private constructor() {
             try {
                 for (page in 1..5) {
                     val connection = URL(
-                            creds.serverUrl + "/music/api/v1/favorite-track/list?page=" + page
-                                    + "&size=200").openConnection() as HttpURLConnection
+                            creds.serverUrl + "/music/api/v1/favorite-track/list?page=" + page +
+                                    "&size=200").openConnection() as HttpURLConnection
                     val body: JSONObject = try {
                         connection.connectTimeout = 8000
                         connection.readTimeout = 10000
@@ -1131,8 +1132,8 @@ class MusicGateway private constructor() {
             val form = StringBuilder()
                     .append("params=").append(urlEncode(encrypted[0]))
                     .append("&encSecKey=").append(urlEncode(encrypted[1]))
-            val connection = (URL("https://music.163.com/weapi/"
-                    + path.replaceFirst(Regex("^/+"), "").replaceFirst(Regex("^api/"), ""))
+            val connection = (URL("https://music.163.com/weapi/" +
+                    path.replaceFirst(Regex("^/+"), "").replaceFirst(Regex("^api/"), ""))
                     .openConnection()) as HttpURLConnection
             try {
                 connection.requestMethod = "POST"
@@ -1351,7 +1352,7 @@ class MusicGateway private constructor() {
         private var kgMidCache: String? = null
 
         private fun kugouPlayUrl(hash: String?, albumAudioId: String?): String? {
-            val cleanHash = hash?.trim()?.toLowerCase() ?: ""
+            val cleanHash = hash?.trim()?.lowercase() ?: ""
             if (cleanHash.isEmpty()) {
                 return null
             }

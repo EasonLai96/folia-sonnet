@@ -46,10 +46,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.ArrayList
 import java.util.HashMap
-import java.util.Iterator
 import java.util.LinkedHashMap
-import java.util.List
-import java.util.Map
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -69,7 +66,7 @@ import okhttp3.ResponseBody
 /**
  * 本地登录的原生底座。
  *
- * 内置在 App 里的那份接口代码（src/nativeBridge/api/*.js，从浏览器扩展搬过来的）需要两件
+ * 内置在 App 里的那份接口代码（src/nativeBridge/api/ 下的 JS，从浏览器扩展搬过来的）需要两件
  * WebView 给不了的东西：读改写各家音乐的 Cookie，以及不受 CORS 限制的跨域请求。
  * 这里把它们分别接到 Android CookieManager 与 OkHttp 上，于是登录、扫码、取曲库全流程
  * 都在设备本地完成 —— 不再需要用户自己搭任何后端。
@@ -190,7 +187,9 @@ class FoliaNativePlugin : Plugin() {
             if (headers == null) return null
             val direct = headers.opt(name)
             if (direct != null) {
-                val value = String.valueOf(direct)
+                // Kotlin 里 `String.valueOf` 不指到 java.lang.String（Kotlin 的 String 没有它），
+                // 用 `Objects.toString` 兜 null 之外的一切值，语义与 Java 那份一致。
+                val value = java.lang.String.valueOf(direct)
                 return if (value.isEmpty()) null else value
             }
             val keys = headers.keys()
@@ -199,7 +198,7 @@ class FoliaNativePlugin : Plugin() {
                 if (key != null && key.equals(name, ignoreCase = true)) {
                     val value = headers.opt(key)
                     if (value == null) return null
-                    val text = String.valueOf(value)
+                    val text = java.lang.String.valueOf(value)
                     return if (text.isEmpty()) null else text
                 }
             }
@@ -546,10 +545,15 @@ class FoliaNativePlugin : Plugin() {
             if (headers != null) {
                 val headerNames = headers.keys()
                 while (headerNames.hasNext()) {
-                    val headerName = headerNames.next()
+                    // keys() 的迭代器把元素标成可空（JSObject 键理论上是 null），
+                    // OkHttp 的 header() 要非空 —— 空键直接跳过。
+                    val headerName = headerNames.next() ?: continue
                     val headerValue = headers.opt(headerName)
                     if (headerValue != null) {
-                        builder.header(headerName, sanitizeHeaderValue(String.valueOf(headerValue)))
+                        // 同 optHeader：`String.valueOf` 在 Kotlin 侧不指到 java.lang.String；
+                        // sanitize 可能整体清空，清空就别带这个头。
+                        val safeHeader = sanitizeHeaderValue(java.lang.String.valueOf(headerValue))
+                        if (safeHeader != null) builder.header(headerName, safeHeader)
                     }
                 }
             }
@@ -858,11 +862,14 @@ class FoliaNativePlugin : Plugin() {
             if (headers != null) {
                 val headerNames = headers.keys()
                 while (headerNames.hasNext()) {
-                    val headerName = headerNames.next()
+                    // keys() 的元素标可空，OkHttp 要非空；空键跳过。
+                    val headerName = headerNames.next() ?: continue
                     val headerValue = headers.opt(headerName)
                     if (headerValue != null) {
                         // 头的值必须是可见 ASCII，否则 OkHttp 当场抛（见 sanitizeHeaderValue 的说明）。
-                        builder.header(headerName, sanitizeHeaderValue(String.valueOf(headerValue)))
+                        // 同前：`String.valueOf` 在 Kotlin 侧不指到 java.lang.String；清空则不带。
+                        val safeHeader = sanitizeHeaderValue(java.lang.String.valueOf(headerValue))
+                        if (safeHeader != null) builder.header(headerName, safeHeader)
                     }
                 }
             }
@@ -871,7 +878,9 @@ class FoliaNativePlugin : Plugin() {
             if (headers == null || optHeader(headers, "cookie") == null) {
                 val storedCookies = CookieManager.getInstance().getCookie(url)
                 if (storedCookies != null && !storedCookies.isEmpty()) {
-                    builder.header("Cookie", sanitizeHeaderValue(storedCookies))
+                    // sanitize 可能整体清空（极端脏值），那就干脆不带这个头。
+                    val safeCookie = sanitizeHeaderValue(storedCookies)
+                    if (safeCookie != null) builder.header("Cookie", safeCookie)
                 }
             }
 
@@ -1352,8 +1361,9 @@ class FoliaNativePlugin : Plugin() {
     fun cacheAudioFromUrl(call: PluginCall) {
         val cacheKey = call.getString("cacheKey")
         val url = call.getString("url")
-        val limitBytes = if (call.getDouble("limitBytes", 0.0) == null) 0.0 else call.getDouble("limitBytes", 0.0)
-        val minDurationMs = if (call.getDouble("minDurationMs", 0.0) == null) 0.0 else call.getDouble("minDurationMs", 0.0)
+        // getDouble 标可空：先接住再落值，别在同一行里二次调用（两次可能不一致）。
+        val limitBytes = call.getDouble("limitBytes", 0.0) ?: 0.0
+        val minDurationMs = call.getDouble("minDurationMs", 0.0) ?: 0.0
         if (cacheKey == null || cacheKey.isEmpty() || url == null || url.isEmpty()) {
             call.reject("cacheKey and url are required")
             return
@@ -1501,7 +1511,8 @@ class FoliaNativePlugin : Plugin() {
                     if (uri != null) uris.add(uri)
                 }
             } else if (data.data != null) {
-                uris.add(data.data)
+                // data.data 标可空（平台类型），上面已判 null，这里断言一下。
+                uris.add(data.data!!)
             }
         }
 
@@ -1652,7 +1663,7 @@ class FoliaNativePlugin : Plugin() {
                             if (target.length() <= 0) {
                                 target.delete()
                                 val failure = JSObject()
-                                failure.put("uri", String.valueOf(uri))
+                                failure.put("uri", java.lang.String.valueOf(uri))
                                 failure.put("message", "Copied file is empty: " + displayName)
                                 failures.put(failure)
                                 return@run
@@ -1671,7 +1682,7 @@ class FoliaNativePlugin : Plugin() {
                         // 单个文件读不了不该让整批失败，但必须把原因带回去，
                         // 否则界面只会「什么都没发生」。
                         val failure = JSObject()
-                        failure.put("uri", String.valueOf(uri))
+                        failure.put("uri", java.lang.String.valueOf(uri))
                         failure.put("message", if (error.message == null) error.toString() else error.message)
                         failures.put(failure)
                     }
@@ -1687,7 +1698,8 @@ class FoliaNativePlugin : Plugin() {
                 if (activity != null) activity.runOnUiThread { sink.complete(result) }
                 else sink.complete(result)
             } catch (error: Exception) {
-                val message = if (error.message == null) error.toString() else error.message
+                // error.message 标可空；fail 的契约要非空，兜成 toString()。
+                val message = error.message ?: error.toString()
                 if (activity != null) activity.runOnUiThread { sink.fail(message, error) }
                 else sink.fail(message, error)
             }
@@ -1740,7 +1752,7 @@ class FoliaNativePlugin : Plugin() {
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idColumn)
                         val track = JSObject()
-                        track.put("id", String.valueOf(id))
+                        track.put("id", java.lang.String.valueOf(id))
                         track.put("fileName", cursor.getString(nameColumn))
                         track.put("title", cursor.getString(titleColumn))
                         track.put("artist", cursor.getString(artistColumn))
@@ -1798,8 +1810,8 @@ class FoliaNativePlugin : Plugin() {
                     "handleAllFilesAccessResult"
                 )
             } catch (secondError: Exception) {
-                call.reject("No all-files access settings page on this device: "
-                    + secondError.message, secondError)
+                call.reject("No all-files access settings page on this device: " +
+                    secondError.message, secondError)
             }
         }
     }
@@ -1865,14 +1877,14 @@ class FoliaNativePlugin : Plugin() {
      */
     @PluginMethod
     fun deleteImportedAudio(call: PluginCall) {
-        val refs = call.getArray("refs", JSArray())
+        val refs = call.getArray("refs", JSArray()) ?: JSArray()
         val deleted = JSArray()
         val failed = JSArray()
         try {
             if (localAudioServer == null) localAudioServer = LocalAudioServer(getContext())
             val directory = localAudioServer!!.importedAudioDirectory()
             for (index in 0 until refs.length()) {
-                val ref = refs.getString(index)
+                val ref = refs.getString(index) ?: continue
                 val target = resolveImportedFile(directory, ref)
                 if (target == null) {
                     failed.put(ref)
@@ -1922,7 +1934,7 @@ class FoliaNativePlugin : Plugin() {
             while (headerNames.hasNext()) {
                 val headerName = headerNames.next()
                 val headerValue = headerObject.opt(headerName)
-                if (headerValue != null) headers.put(headerName, String.valueOf(headerValue))
+                if (headerValue != null) headers.put(headerName, java.lang.String.valueOf(headerValue))
             }
         }
         val allowAnyHost = java.lang.Boolean.TRUE.equals(call.getBoolean("allowAnyHost", false))
@@ -1940,7 +1952,7 @@ class FoliaNativePlugin : Plugin() {
             val result = JSObject()
             result.put("url", url)
             result.put("proxied", false)
-            result.put("error", String.valueOf(error.message))
+            result.put("error", java.lang.String.valueOf(error.message))
             call.resolve(result)
         }
     }
@@ -2009,7 +2021,7 @@ class FoliaNativePlugin : Plugin() {
             return
         }
         val fileName = call.getString("fileName")
-        val fileSize = call.getLong("fileSize", 0L)
+        val fileSize = call.getLong("fileSize", 0L) ?: 0L
         val activity = getActivity()
         Thread(Runnable {
             val result = JSObject()
@@ -2057,7 +2069,7 @@ class FoliaNativePlugin : Plugin() {
         else
             MediaStore.Audio.Media.DISPLAY_NAME + "=?"
         val args = if (fileSize > 0)
-            arrayOf(fileName, String.valueOf(fileSize))
+            arrayOf(fileName, java.lang.String.valueOf(fileSize))
         else
             arrayOf(fileName)
         try {
@@ -2068,7 +2080,7 @@ class FoliaNativePlugin : Plugin() {
             ).use { cursor ->
                 if (cursor == null || !cursor.moveToFirst()) return null
                 val id = cursor.getLong(0)
-                return materializeAudioCopy(directory, String.valueOf(id), fileName, fileSize)
+                return materializeAudioCopy(directory, java.lang.String.valueOf(id), fileName, fileSize)
             }
         } catch (error: Exception) {
             Log.w(TAG, "media store lookup failed for " + fileName, error)

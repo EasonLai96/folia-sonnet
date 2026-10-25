@@ -253,13 +253,13 @@ class LocalAudioServer(context: Context) {
          * 带上 ACAO 之后，上层用 fetch 探一次就能读到真实的 404/502，不用再猜。
          */
         private fun writeStatus(output: OutputStream, status: Int, message: String) {
-            val response = "HTTP/1.1 $status $message\r\n"
-                + "Content-Type: text/plain\r\n"
-                + "Content-Length: 0\r\n"
-                + "Access-Control-Allow-Origin: *\r\n"
-                + "Access-Control-Allow-Headers: range, content-range, content-length\r\n"
-                + "Access-Control-Expose-Headers: range, content-range, content-length, accept-ranges\r\n"
-                + "Connection: close\r\n\r\n"
+            val response = "HTTP/1.1 $status $message\r\n" +
+                "Content-Type: text/plain\r\n" +
+                "Content-Length: 0\r\n" +
+                "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Headers: range, content-range, content-length\r\n" +
+                "Access-Control-Expose-Headers: range, content-range, content-length, accept-ranges\r\n" +
+                "Connection: close\r\n\r\n"
             output.write(response.toByteArray(StandardCharsets.US_ASCII))
             output.flush()
         }
@@ -449,13 +449,13 @@ class LocalAudioServer(context: Context) {
                          * 答一个 204 并放行 Range，探测和播放两条路都才走得通。
                          */
                         if ("OPTIONS" == requestParts[0]) {
-                            val response = "HTTP/1.1 204 No Content\r\n"
-                                + "Access-Control-Allow-Origin: *\r\n"
-                                + "Access-Control-Allow-Methods: GET, HEAD, PUT, DELETE, OPTIONS\r\n"
-                                + "Access-Control-Allow-Headers: range, content-range, content-length, content-type\r\n"
-                                + "Access-Control-Expose-Headers: range, content-range, content-length, accept-ranges\r\n"
-                                + "Access-Control-Max-Age: 86400\r\n"
-                                + "Content-Length: 0\r\nConnection: close\r\n\r\n"
+                            val response = "HTTP/1.1 204 No Content\r\n" +
+                                "Access-Control-Allow-Origin: *\r\n" +
+                                "Access-Control-Allow-Methods: GET, HEAD, PUT, DELETE, OPTIONS\r\n" +
+                                "Access-Control-Allow-Headers: range, content-range, content-length, content-type\r\n" +
+                                "Access-Control-Expose-Headers: range, content-range, content-length, accept-ranges\r\n" +
+                                "Access-Control-Max-Age: 86400\r\n" +
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n"
                             output.write(response.toByteArray(StandardCharsets.US_ASCII))
                             output.flush()
                             return
@@ -664,8 +664,8 @@ class LocalAudioServer(context: Context) {
             }
             val partial = upstream.code == 206 || contentRange != null
 
-            Log.i(TAG, "remote " + target + " -> " + upstream.code
-                + " type=" + contentType + " size=" + size + " range=" + (if (contentRange == null) "-" else contentRange))
+            Log.i(TAG, "remote " + target + " -> " + upstream.code +
+                " type=" + contentType + " size=" + size + " range=" + (if (contentRange == null) "-" else contentRange))
 
             val response = StringBuilder()
             response.append(if (partial) "HTTP/1.1 206 Partial Content\r\n" else "HTTP/1.1 200 OK\r\n")
@@ -814,11 +814,11 @@ class LocalAudioServer(context: Context) {
         var written: Long = 0
         BufferedOutputStream(FileOutputStream(temp)).use { fileOut ->
             val buffer = ByteArray(64 * 1024)
-            var read: Int
-            while (written < declared
-                && input.read(buffer, 0, Math.min(buffer.size.toLong(), declared - written).toInt())
-                    .also { read = it } != -1
-            ) {
+            // Kotlin 2.2 起 while 条件里用 `.also {}` 给外层 var 赋值会被判
+            // 「Variable must be initialized」，改成显式循环体内赋值。
+            while (written < declared) {
+                val read = input.read(buffer, 0, Math.min(buffer.size.toLong(), declared - written).toInt())
+                if (read == -1) break
                 fileOut.write(buffer, 0, read)
                 written += read
             }
@@ -899,8 +899,8 @@ class LocalAudioServer(context: Context) {
             val durationUs = probeMediaDuration(part)
             if (minDurationMs > 0L && durationUs > 0L && durationUs < minDurationMs * 500L) {
                 // 试听片段：不存，也别让调用方把它当成整首歌的副本。
-                Log.i(TAG, "media cache refused a clip (" + (durationUs / 1000) + "ms of "
-                        + minDurationMs + "ms): " + cacheKey)
+                Log.i(TAG, "media cache refused a clip (" + (durationUs / 1000) + "ms of " +
+                        minDurationMs + "ms): " + cacheKey)
                 part.delete()
                 return 0L
             }
@@ -1033,10 +1033,10 @@ class LocalAudioServer(context: Context) {
         }
 
         val contentLength = if (end >= start) end - start + 1 else -1
-        Log.i(TAG, requestParts[0] + " " + requestParts[1]
-            + " range=" + (if (range == null) "-" else range)
-            + " size=" + size + " partial=" + partial
-            + (if (partial) " bytes=" + start + "-" + end else ""))
+        Log.i(TAG, requestParts[0] + " " + requestParts[1] +
+            " range=" + (if (range == null) "-" else range) +
+            " size=" + size + " partial=" + partial +
+            (if (partial) " bytes=" + start + "-" + end else ""))
         val response = StringBuilder()
         response.append(if (partial) "HTTP/1.1 206 Partial Content\r\n" else "HTTP/1.1 200 OK\r\n")
         response.append("Content-Type: ").append(mime).append("\r\n")

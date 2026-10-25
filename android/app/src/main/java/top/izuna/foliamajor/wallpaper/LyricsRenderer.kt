@@ -390,8 +390,12 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
             if (smaller % 2 == 0) smaller--
             if (smaller < 1) smaller = 1
             val larger = smaller + 2
-            val mIdeal = (12 * sigma * sigma - n * smaller * smaller - 4 * n * smaller - 3 * n)
-                    / (-4 * smaller - 4)
+            /*
+             * 除号必须留在上一行行尾：Kotlin 2.3 会把握手行首的斜杠读成注释开头，
+             * 于是后面整段都被当成注释吞掉，报的是语法错误而不是运算符问题。
+             */
+            val mIdeal = (12 * sigma * sigma - n * smaller * smaller - 4 * n * smaller - 3 * n) /
+                    (-4 * smaller - 4)
             val m = Math.round(mIdeal)
             val sizes = IntArray(n)
             for (i in 0 until n) {
@@ -515,123 +519,123 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
         // ---- 着色器 ----
 
         private const val BACKGROUND_VERTEX =
-                "attribute vec2 aPosition;\n"
-                + "attribute vec2 aUv;\n"
-                + "uniform vec4 uRect;\n"
-                + "varying vec2 vUv;\n"
-                + "void main() {\n"
-                + "  vUv = aUv;\n"
-                + "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n"
-                + "  gl_Position = vec4(ndc, 0.0, 1.0);\n"
-                + "}\n"
+                "attribute vec2 aPosition;\n" +
+                "attribute vec2 aUv;\n" +
+                "uniform vec4 uRect;\n" +
+                "varying vec2 vUv;\n" +
+                "void main() {\n" +
+                "  vUv = aUv;\n" +
+                "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n" +
+                "  gl_Position = vec4(ndc, 0.0, 1.0);\n" +
+                "}\n"
 
         private const val BACKGROUND_FRAGMENT =
-                "precision mediump float;\n"
-                + "varying vec2 vUv;\n"
-                + "uniform float uTime;\n"
-                + "uniform float uAspect;\n"
-                + "uniform float uOffsetX;\n"
-                + "uniform vec3 uAccent;\n"
-                + "uniform vec3 uBase;\n"
-                + "uniform float uMotion;\n"
-                + "uniform float uBlob;\n"
-                + "uniform float uDust;\n"
-                + "uniform float uGlow;\n"
-                + "uniform float uPpGrain;\n"
-                + "uniform float uPpContrast;\n"
-                + "uniform float uPpVignette;\n"
-                + "void main() {\n"
-                + "  vec2 p = vec2(vUv.x * uAspect, vUv.y);\n"
-                + "  float t = uTime * 0.06 * uMotion;\n"
-                + "  vec2 c1 = vec2((0.30 + 0.12 * sin(t * 1.1) + uOffsetX * 0.12) * uAspect,"
-                + " 0.26 + 0.10 * cos(t * 0.9));\n"
-                + "  vec2 c2 = vec2((0.72 + 0.10 * cos(t * 0.8) + uOffsetX * 0.12) * uAspect,"
-                + " 0.72 + 0.12 * sin(t * 1.3));\n"
-                + "  float g1 = smoothstep(0.95 * uBlob, 0.0, distance(p, c1));\n"
-                + "  float g2 = smoothstep(0.95 * uBlob, 0.0, distance(p, c2));\n"
-                + "  vec3 col = uBase + uAccent * (g1 * 0.42 + g2 * 0.28) * uGlow;\n"
+                "precision mediump float;\n" +
+                "varying vec2 vUv;\n" +
+                "uniform float uTime;\n" +
+                "uniform float uAspect;\n" +
+                "uniform float uOffsetX;\n" +
+                "uniform vec3 uAccent;\n" +
+                "uniform vec3 uBase;\n" +
+                "uniform float uMotion;\n" +
+                "uniform float uBlob;\n" +
+                "uniform float uDust;\n" +
+                "uniform float uGlow;\n" +
+                "uniform float uPpGrain;\n" +
+                "uniform float uPpContrast;\n" +
+                "uniform float uPpVignette;\n" +
+                "void main() {\n" +
+                "  vec2 p = vec2(vUv.x * uAspect, vUv.y);\n" +
+                "  float t = uTime * 0.06 * uMotion;\n" +
+                "  vec2 c1 = vec2((0.30 + 0.12 * sin(t * 1.1) + uOffsetX * 0.12) * uAspect," +
+                " 0.26 + 0.10 * cos(t * 0.9));\n" +
+                "  vec2 c2 = vec2((0.72 + 0.10 * cos(t * 0.8) + uOffsetX * 0.12) * uAspect," +
+                " 0.72 + 0.12 * sin(t * 1.3));\n" +
+                "  float g1 = smoothstep(0.95 * uBlob, 0.0, distance(p, c1));\n" +
+                "  float g2 = smoothstep(0.95 * uBlob, 0.0, distance(p, c2));\n" +
+                "  vec3 col = uBase + uAccent * (g1 * 0.42 + g2 * 0.28) * uGlow;\n" +
                 // 缓慢上浮的细颗粒，给静止的画面一点呼吸感。
-                + "  float dust = 0.0;\n"
-                + "  for (int i = 0; i < 8; i++) {\n"
-                + "    float fi = float(i);\n"
-                + "    float speed = (0.020 + 0.008 * fi) * uMotion;\n"
-                + "    float x = fract(0.137 * fi + 0.05 * sin(uTime * 0.35 + fi));\n"
-                + "    float y = fract(0.913 - mod(uTime * speed + 0.171 * fi, 1.0));\n"
-                + "    float r = 0.004 + 0.006 * fract(fi * 0.371);\n"
-                + "    dust += smoothstep(r, 0.0, distance(p, vec2(x * uAspect, y)));\n"
-                + "  }\n"
-                + "  col += vec3(0.55, 0.58, 0.68) * dust * 0.16 * uDust;\n"
-                + "  float vignette = smoothstep(1.25, 0.30, distance(vUv, vec2(0.5)));\n"
-                + "  float vig = mix(0.52, 1.0, vignette);\n"
+                "  float dust = 0.0;\n" +
+                "  for (int i = 0; i < 8; i++) {\n" +
+                "    float fi = float(i);\n" +
+                "    float speed = (0.020 + 0.008 * fi) * uMotion;\n" +
+                "    float x = fract(0.137 * fi + 0.05 * sin(uTime * 0.35 + fi));\n" +
+                "    float y = fract(0.913 - mod(uTime * speed + 0.171 * fi, 1.0));\n" +
+                "    float r = 0.004 + 0.006 * fract(fi * 0.371);\n" +
+                "    dust += smoothstep(r, 0.0, distance(p, vec2(x * uAspect, y)));\n" +
+                "  }\n" +
+                "  col += vec3(0.55, 0.58, 0.68) * dust * 0.16 * uDust;\n" +
+                "  float vignette = smoothstep(1.25, 0.30, distance(vUv, vec2(0.5)));\n" +
+                "  float vig = mix(0.52, 1.0, vignette);\n" +
                 // postProcessVignette 超过基准档(0.85)的部分继续压暗：二次曲线比线性更像真镜头。
-                + "  vig *= mix(1.0, vig, clamp((uPpVignette - 0.85) / 1.15, 0.0, 1.0));\n"
+                "  vig *= mix(1.0, vig, clamp((uPpVignette - 0.85) / 1.15, 0.0, 1.0));\n" +
                 // 传 -1 表示应用侧关掉了暗角：整条压暗都不做，边缘不再收黑。
-                + "  vig = mix(vig, 1.0, step(uPpVignette, -0.5));\n"
-                + "  col *= vig;\n"
+                "  vig = mix(vig, 1.0, step(uPpVignette, -0.5));\n" +
+                "  col *= vig;\n" +
                 // 胶片颗粒：一层与时间相关的白噪声。这是实验台里 postProcessGrain 的原生等价物。
-                + "  if (uPpGrain > 0.001) {\n"
-                + "    float grain = fract(sin(dot(p * (uTime + 1.0), vec2(12.9898, 78.233))) * 43758.5453);\n"
-                + "    col += (grain - 0.5) * uPpGrain * 0.28;\n"
-                + "  }\n"
+                "  if (uPpGrain > 0.001) {\n" +
+                "    float grain = fract(sin(dot(p * (uTime + 1.0), vec2(12.9898, 78.233))) * 43758.5453);\n" +
+                "    col += (grain - 0.5) * uPpGrain * 0.28;\n" +
+                "  }\n" +
                 // 对比度：绕中灰拉伸。postProcessContrast 反过来("-1")也能用，只是会压平。
-                + "  col = clamp((col - 0.5) * (1.0 + uPpContrast) + 0.5, 0.0, 1.0);\n"
-                + "  gl_FragColor = vec4(col, 1.0);\n"
-                + "}\n"
+                "  col = clamp((col - 0.5) * (1.0 + uPpContrast) + 0.5, 0.0, 1.0);\n" +
+                "  gl_FragColor = vec4(col, 1.0);\n" +
+                "}\n"
 
         private const val QUAD_VERTEX =
-                "attribute vec2 aPosition;\n"
-                + "attribute vec2 aUv;\n"
-                + "uniform vec4 uRect;\n"
+                "attribute vec2 aPosition;\n" +
+                "attribute vec2 aUv;\n" +
+                "uniform vec4 uRect;\n" +
                 // 只采样纹理里的一小块（逐字上浮按字切 UV）。整行绘制时传 (0,0,1,1)。
-                + "uniform vec4 uUvRect;\n"
-                + "varying vec2 vUv;\n"
-                + "void main() {\n"
+                "uniform vec4 uUvRect;\n" +
+                "varying vec2 vUv;\n" +
+                "void main() {\n" +
                 // 位图第 0 行在顶部，纹理坐标 v=0 在底部，所以要翻过来。
-                + "  vUv = vec2(uUvRect.x + aUv.x * uUvRect.z,\n"
-                + "             1.0 - (uUvRect.y + aUv.y * uUvRect.w));\n"
-                + "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n"
-                + "  gl_Position = vec4(ndc, 0.0, 1.0);\n"
-                + "}\n"
+                "  vUv = vec2(uUvRect.x + aUv.x * uUvRect.z,\n" +
+                "             1.0 - (uUvRect.y + aUv.y * uUvRect.w));\n" +
+                "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n" +
+                "  gl_Position = vec4(ndc, 0.0, 1.0);\n" +
+                "}\n"
 
         private const val QUAD_FRAGMENT =
-                "precision mediump float;\n"
-                + "varying vec2 vUv;\n"
-                + "uniform sampler2D uTexture;\n"
-                + "uniform vec3 uColor;\n"
-                + "uniform vec3 uActive;\n"
-                + "uniform vec3 uActive2;\n"
-                + "uniform vec3 uGlow;\n"
-                + "uniform float uAlpha;\n"
-                + "uniform float uProgress;\n"
-                + "uniform float uWholeLine;\n"
-                + "uniform float uUseTexColor;\n"
-                + "void main() {\n"
-                + "  vec4 tex = texture2D(uTexture, vUv);\n"
-                + "  float a = tex.a * uAlpha;\n"
-                + "  vec3 rgb = mix(uColor, tex.rgb, uUseTexColor);\n"
-                + "  if (uProgress >= 0.0) {\n"
+                "precision mediump float;\n" +
+                "varying vec2 vUv;\n" +
+                "uniform sampler2D uTexture;\n" +
+                "uniform vec3 uColor;\n" +
+                "uniform vec3 uActive;\n" +
+                "uniform vec3 uActive2;\n" +
+                "uniform vec3 uGlow;\n" +
+                "uniform float uAlpha;\n" +
+                "uniform float uProgress;\n" +
+                "uniform float uWholeLine;\n" +
+                "uniform float uUseTexColor;\n" +
+                "void main() {\n" +
+                "  vec4 tex = texture2D(uTexture, vUv);\n" +
+                "  float a = tex.a * uAlpha;\n" +
+                "  vec3 rgb = mix(uColor, tex.rgb, uUseTexColor);\n" +
+                "  if (uProgress >= 0.0) {\n" +
                 // 整行模式：整行铺满渐变，进度只把亮度从「压暗」推到「满色」。
                 // 没有横向擦除，所以不存在「一个字一个字亮起来 / 浮起来」的观感。
-                + "    if (uWholeLine > 0.5) {\n"
-                + "      vec3 g2 = mix(uActive, uActive2, clamp(vUv.x, 0.0, 1.0));\n"
-                + "      vec3 d2 = mix(uColor, g2, 0.22);\n"
-                + "      rgb = mix(d2, g2, clamp(uProgress, 0.0, 1.0));\n"
-                + "    } else {\n"
-                + "    float edge = smoothstep(uProgress - 0.010, uProgress + 0.010, vUv.x);\n"
+                "    if (uWholeLine > 0.5) {\n" +
+                "      vec3 g2 = mix(uActive, uActive2, clamp(vUv.x, 0.0, 1.0));\n" +
+                "      vec3 d2 = mix(uColor, g2, 0.22);\n" +
+                "      rgb = mix(d2, g2, clamp(uProgress, 0.0, 1.0));\n" +
+                "    } else {\n" +
+                "    float edge = smoothstep(uProgress - 0.010, uProgress + 0.010, vUv.x);\n" +
                 // 渐变铺满**整行**：沿行方向在 uActive → uActive2 之间插值，两端色取自当前主题。
                 // 唱过的那一段用满饱和的渐变，没唱到的用同一条渐变压暗 ——
                 // 这是状态栏歌词那类插件的通行做法：整行先有颜色，进度再把亮度推上去，
                 // 而不是「白字 + 一小块彩色高亮」。
-                + "    vec3 grad = mix(uActive, uActive2, clamp(vUv.x, 0.0, 1.0));\n"
-                + "    vec3 dim = mix(uColor, grad, 0.20);\n"
-                + "    rgb = mix(grad, dim, edge);\n"
-                + "    float glow = exp(-pow((vUv.x - uProgress) * 26.0, 2.0));\n"
-                + "    rgb += uGlow * glow * 0.95;\n"
-                + "    }\n"
-                + "  }\n"
+                "    vec3 grad = mix(uActive, uActive2, clamp(vUv.x, 0.0, 1.0));\n" +
+                "    vec3 dim = mix(uColor, grad, 0.20);\n" +
+                "    rgb = mix(grad, dim, edge);\n" +
+                "    float glow = exp(-pow((vUv.x - uProgress) * 26.0, 2.0));\n" +
+                "    rgb += uGlow * glow * 0.95;\n" +
+                "    }\n" +
+                "  }\n" +
                 // 位图是预乘 alpha 的，这里按预乘输出，配合 blendFunc(ONE, 1-SRC_ALPHA)。
-                + "  gl_FragColor = vec4(rgb * a, a);\n"
-                + "}\n"
+                "  gl_FragColor = vec4(rgb * a, a);\n" +
+                "}\n"
 
         /*
          * 视频那一套：顶点照旧，采样换成了 samplerExternalOES。
@@ -650,35 +654,35 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
          * 量都一样，不需要为它再做方向调整。
          */
         private const val VIDEO_VERTEX =
-                "attribute vec2 aPosition;\n"
-                + "attribute vec2 aUv;\n"
-                + "uniform vec4 uRect;\n"
-                + "uniform vec4 uUvRect;\n"
-                + "uniform mat4 uTexMatrix;\n"
-                + "varying vec2 vUv;\n"
-                + "void main() {\n"
-                + "  vec2 uv = vec2(uUvRect.x + aUv.x * uUvRect.z,\n"
-                + "                 uUvRect.y + aUv.y * uUvRect.w);\n"
-                + "  vUv = (uTexMatrix * vec4(uv, 0.0, 1.0)).xy;\n"
-                + "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n"
-                + "  gl_Position = vec4(ndc, 0.0, 1.0);\n"
-                + "}\n"
+                "attribute vec2 aPosition;\n" +
+                "attribute vec2 aUv;\n" +
+                "uniform vec4 uRect;\n" +
+                "uniform vec4 uUvRect;\n" +
+                "uniform mat4 uTexMatrix;\n" +
+                "varying vec2 vUv;\n" +
+                "void main() {\n" +
+                "  vec2 uv = vec2(uUvRect.x + aUv.x * uUvRect.z,\n" +
+                "                 uUvRect.y + aUv.y * uUvRect.w);\n" +
+                "  vUv = (uTexMatrix * vec4(uv, 0.0, 1.0)).xy;\n" +
+                "  vec2 ndc = uRect.xy + aPosition * uRect.zw;\n" +
+                "  gl_Position = vec4(ndc, 0.0, 1.0);\n" +
+                "}\n"
 
         /**
          * 注意 `#extension` 必须是整个片元着色器的第一行：写在 precision 或任何语句之后，
          * 有的驱动会直接编译失败（表现为视频模式一片黑，日志里只有一句 compile failed）。
          */
         private const val VIDEO_FRAGMENT =
-                "#extension GL_OES_EGL_image_external : require\n"
-                + "precision mediump float;\n"
-                + "uniform samplerExternalOES uTexture;\n"
-                + "uniform float uDim;\n"
-                + "varying vec2 vUv;\n"
-                + "void main() {\n"
-                + "  vec3 rgb = texture2D(uTexture, vUv).rgb;\n"
+                "#extension GL_OES_EGL_image_external : require\n" +
+                "precision mediump float;\n" +
+                "uniform samplerExternalOES uTexture;\n" +
+                "uniform float uDim;\n" +
+                "varying vec2 vUv;\n" +
+                "void main() {\n" +
+                "  vec3 rgb = texture2D(uTexture, vUv).rgb;\n" +
                 // 视频是不透明的整屏画面，不需要参与混合。
-                + "  gl_FragColor = vec4(rgb * (1.0 - uDim), 1.0);\n"
-                + "}\n"
+                "  gl_FragColor = vec4(rgb * (1.0 - uDim), 1.0);\n" +
+                "}\n"
     }
 
     private var surfaceWidth = 1
@@ -1141,7 +1145,10 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
      * 所以判据收紧成「小窗在显示**并且**它不是贴在安全区那一条上」。
      */
     private fun nativeLyricsShadowedByFloating(): Boolean {
-        val overlay = FloatingLyricsOverlay.shared(context)
+        // context 标可空（applicationContext 理论上不返回 null，但类型上可空）；
+        // 没拿到就当「没有叠层」，走原生绘制。
+        val ctx = context ?: return false
+        val overlay = FloatingLyricsOverlay.shared(ctx)
         return overlay.isShowing() && !overlay.isOverSafeArea()
     }
 
@@ -1754,8 +1761,9 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
                 scale *= style.currentScale
                 if (typographyMotion > 0.001f) {
                     scale *= 1f + 0.010f * Math.sin((elapsedSeconds * 1.7f).toDouble()).toFloat() * typographyMotion
-                    bob = Math.sin((elapsedSeconds * 1.15f).toDouble()).toFloat()
-                            * lineStep * 0.012f * typographyMotion
+                    // `*` 必须留在上一行行尾（Kotlin 2.3 把握手行首的 `*` 读成新语句）。
+                    bob = Math.sin((elapsedSeconds * 1.15f).toDouble()).toFloat() *
+                            lineStep * 0.012f * typographyMotion
                 }
             }
             var width = texture.width * scale * edgeScale
@@ -1802,8 +1810,8 @@ class LyricsRenderer(context: Context?) : GLSurfaceView.Renderer {
             }
             // 跟唱上浮：整行一起抬多少（逐字上浮时 progressLift = 0，动的是每个字）。
             val lift = if (isCurrent)
-                -lineStep * style.progressLift * rowProgress
-                        + lineStep * LINE_ENTER_RISE * (1f - enter)
+                -lineStep * style.progressLift * rowProgress +
+                        lineStep * LINE_ENTER_RISE * (1f - enter)
             else 0f
             /*
              * **浮起状态要跨行连续**：唱过的行整行保持浮起（= 行末逐字浮完的那个位移），

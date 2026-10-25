@@ -102,11 +102,11 @@ class LockScreenMusicActivity : Activity() {
          * NOT_FOCUSABLE 保留：这只是展示层，不该抢走输入法 / 按键焦点。
          */
         window.addFlags(
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        or WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_FULLSCREEN)
         setContentView(View(this))
         handWindowTokenToOverlay()
         /*
@@ -230,7 +230,7 @@ class LockScreenMusicActivity : Activity() {
      */
     private fun toggleChrome() {
         val panel = controlPanel ?: return
-        panel.setChromeHidden(!panel.isChromeHidden, true)
+        panel.setChromeHidden(!panel.isChromeHidden(), true)
     }
 
     /** 向上、够远、而且不是横着扫的 —— 才认它是"退出"。 */

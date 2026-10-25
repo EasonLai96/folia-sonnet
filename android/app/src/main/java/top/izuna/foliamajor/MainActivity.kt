@@ -38,8 +38,6 @@ import com.capacitorjs.plugins.filesystem.FilesystemPlugin
 import com.capacitorjs.plugins.splashscreen.SplashScreenPlugin
 import com.capacitorjs.plugins.statusbar.StatusBarPlugin
 
-import java.util.ArrayList
-import java.util.List
 import java.util.Locale
 
 /**
@@ -437,7 +435,7 @@ class MainActivity : BridgeActivity() {
         FoliaNativePlugin.emitAppBackground(true)
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // 应用已经在前台（singleTask）时又选中了一个音频文件：只会走 onNewIntent，
         // 不接的话第二次分享进来什么都不会发生。
@@ -464,7 +462,7 @@ class MainActivity : BridgeActivity() {
     /**
      * 认 uris：data、ClipData、ACTION_SEND(_MULTIPLE) 的 EXTRA_STREAM 三种形态都可能出现。
      *
-     * mime 是 application/* 一类的值时，用文件名后缀兜底再认一次；后缀也不认识
+     * mime 是 application/ 一类的值时，用文件名后缀兜底再认一次；后缀也不认识
      * （比如用户分享了一个 pdf）就直接丢掉 —— 否则 App 会出现在各类文件的分享列表里，
      * 然后把每一个 pdf 都「导」进本地音乐。
      */
@@ -492,9 +490,13 @@ class MainActivity : BridgeActivity() {
                 else
                     intent.getParcelableExtra(Intent.EXTRA_STREAM)
                 if (stream != null) streams.add(stream)
-            } else if (intent.getParcelableArrayListExtra<Parcelable>(Intent.EXTRA_STREAM) != null) {
-                for (parcelable in intent.getParcelableArrayListExtra<Parcelable>(Intent.EXTRA_STREAM)!!) {
-                    if (parcelable is Uri) streams.add(parcelable)
+            } else {
+                // getParcelableArrayListExtra 的元素标平台类型；按 Uri 泛型取，元素不是 Uri 就跳过。
+                val extras = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                if (extras != null) {
+                    for (parcelable in extras) {
+                        if (parcelable is Uri) streams.add(parcelable)
+                    }
                 }
             }
             for (stream in streams) addCandidateUri(uris, stream, intent)
