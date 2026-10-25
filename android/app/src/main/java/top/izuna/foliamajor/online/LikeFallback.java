@@ -17,7 +17,8 @@ import java.util.Map;
  *
  * 登录态不另存一份：WebView 侧的 chrome.cookies 已经接在 Android CookieManager 上
  * （见 src/services/nativeAndroidBridge.ts 的 installCookieShim），这里直接读同一个罐子。
- * 支持的平台只有 netease 与 QQ；kugou / bodian / feiniu / qishui 没有原生通道，
+ * 支持的平台：netease、QQ（HTTP 直连）、汽水（签名宿主的协议层）、飞牛（凭据推送后的
+ * 纯 HTTP）。kugou / bodian 的收藏要过签名与「我喜欢」歌单换发那套，太重，没有原生通道 ——
  * 返回 false 让调用方保持原状，等 JS 醒来再由 Web 层那套 omni.likeSong 处理。
  */
 public final class LikeFallback {
@@ -45,11 +46,35 @@ public final class LikeFallback {
                     // 与 JS 侧合并出来的 Cookie 头等价。
                     return QqLikeClient.setLiked(cookieFor("https://u.y.qq.com/"),
                             songId, liked);
+                case "qishui":
+                    // 与 App 内同一条协议层（like_song 这个名字是 fork 渲染层在用的，
+                    // Android 协议页里有别名）。签名宿主没了（App 划掉）就写不成，返回 false。
+                    return qishuiSetLiked(songId, liked);
+                case "feiniu":
+                    return MusicGateway.feiniuSetLiked(songId, liked);
                 default:
                     return false;
             }
         } catch (Throwable error) {
             Log.w(TAG, "native like fallback failed", error);
+            return false;
+        }
+    }
+
+    /** 汽水红心：过签名宿主的协议层（like_song）。 */
+    private static boolean qishuiSetLiked(String songId, boolean liked) {
+        try {
+            JSONObject params = new JSONObject();
+            params.put("id", songId);
+            params.put("liked", liked);
+            String envelope = top.izuna.foliamajor.QishuiGatewayBridge.requestSync(
+                    "like_song", params.toString(), 12_000L);
+            if (envelope == null || envelope.isEmpty()) {
+                return false;
+            }
+            return new JSONObject(envelope).optBoolean("ok", false);
+        } catch (Throwable error) {
+            Log.w(TAG, "qishui like fallback failed", error);
             return false;
         }
     }

@@ -130,6 +130,18 @@ public final class FoliaNativePlayer {
     /** 装上地址并缓冲。startPositionMs 小于 0 表示从头播。 */
     public void prepare(String url, long startPositionMs) {
         lastUrl = url;
+        /*
+         * ⭐ 位置与时长在**调用线程上**立刻归零，不等播放器线程。
+         *
+         * runOnPlayer 是异步 post：原生兜底切歌（skipViaMirror → prepareFromSystem）
+         * 之后服务马上就在主线程写 MediaSession 状态，那一问走的是
+         * currentPositionMs() —— 这时 prepare 还排在播放器线程的队列里，
+         * 读到的是**上一首**的位置。通知栏那条进度条于是从旧歌的位置接着走
+         * （「下一首切换播放进度是错误的」），而状态只在边界重写，没人再来纠正它。
+         * 两个字段都是 volatile，提前写安全；真正的装源照旧在播放器线程做。
+         */
+        cachedPositionMs = startPositionMs > 0 ? startPositionMs : 0L;
+        cachedDurationMs = 0L;
         runOnPlayer(() -> {
             ExoPlayer current = ensurePlayer();
             // 有些源要附带请求头（飞牛的音频流认 Cookie: music-token）：

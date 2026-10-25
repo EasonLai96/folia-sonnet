@@ -251,19 +251,72 @@ public class FoliaPlaybackService extends android.app.Service {
      */
     private static final long WALLPAPER_HEARTBEAT_TICK_MS = 2000L;
 
+    /**
+     * 心跳断了多久之后把播放控制通知收掉。
+     *
+     * 壁纸那边的超时是 8 秒（last tap 之后）—— 播放管线死了，歌词与进度条先收，
+     * 通知栏那条带着播放/暂停/切歌按钮的控制通知**再等 2 秒也一起注销**
+     * （用户指令：心跳中断后应该注销播放控制通知）。那些按钮点了全是没人接的死键，
+     * 挂着只会让人以为还在放。
+     */
+    private static final long HEARTBEAT_WITHDRAW_MS = 10_000L;
+
+    /** 最近一次敲下心跳的时刻（elapsedRealtime）；0 = 服务起来后还没活过 —— 那不收。 */
+    private long lastHeartbeatAtMs = 0L;
+
     private final Runnable heartbeatTick = new Runnable() {
         @Override
         public void run() {
             if (!running) {
                 return;
             }
-            if (FoliaPlaybackPlugin.isBridgeAlive()
-                    || top.izuna.foliamajor.player.FoliaNativePlayerPlugin.isNativePlaying()) {
+            boolean alive = FoliaPlaybackPlugin.isBridgeAlive()
+                    || top.izuna.foliamajor.player.FoliaNativePlayerPlugin.isNativePlaying();
+            if (alive) {
                 top.izuna.foliamajor.wallpaper.WallpaperLyricsState.heartbeat();
+                lastHeartbeatAtMs = android.os.SystemClock.elapsedRealtime();
+            } else if (lastHeartbeatAtMs > 0L && !playConfirmPending
+                    && android.os.SystemClock.elapsedRealtime() - lastHeartbeatAtMs > HEARTBEAT_WITHDRAW_MS) {
+                // 只在「曾经活过」之后才收：服务刚起、桥还没连上时心跳本来就还没敲过。
+                // playConfirmPending 挡着的是「用户刚按下播放、正在等回话」那一拍 ——
+                // 下一拍原生真起来了心跳自己续上，不该在宽限里把通知撕了。
+                withdrawMediaNotification();
             }
             mainHandler.postDelayed(this, WALLPAPER_HEARTBEAT_TICK_MS);
         }
     };
+
+    /**
+     * 心跳断了：注销播放控制通知并退出前台。
+     *
+     * 与 onStop 的收法一致（stopForegroundCompat + 撤 session），另加一次
+     * notificationManager.cancel —— publishNotification 那条路是 notify 贴的，
+     * stopForeground(REMOVE) 只收 startForeground 关联的那张。
+     *
+     * 复活路径是通的：哪天播放又活了（原生兜底切歌 / JS 醒来推状态），
+     * promoteToForeground() 会重新前台化并把 session 拉回来，通知跟着回来。
+     */
+    private void withdrawMediaNotification() {
+        Log.i(TAG, "playback heartbeat is gone; withdrawing the media notification");
+        if (mediaSession != null) {
+            try {
+                mediaSession.setActive(false);
+            } catch (Throwable ignored) {
+            }
+        }
+        foregrounded = false;
+        cachedNotification = null;
+        try {
+            stopForegroundCompat();
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
 
     @Override
     public void onCreate() {
@@ -968,6 +1021,14 @@ public class FoliaPlaybackService extends android.app.Service {
         } catch (Throwable error) {
             Log.e(TAG, "startForeground failed; keeping the service alive without it", error);
             return;
+        }
+        // 心跳中断时 session 被撤过（withdrawMediaNotification）：重新拉起来，
+        // 否则 MediaStyle 通知挂在一只失活的 session 上，按钮全是死键。
+        if (mediaSession != null && !mediaSession.isActive()) {
+            try {
+                mediaSession.setActive(true);
+            } catch (Throwable ignored) {
+            }
         }
         // 前台化已经兑现，这里再抛异常也不会被系统杀掉，只是通知暂时不完整。
         try {

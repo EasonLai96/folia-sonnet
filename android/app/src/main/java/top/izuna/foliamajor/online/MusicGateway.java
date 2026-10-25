@@ -329,6 +329,42 @@ public final class MusicGateway {
     }
 
     /**
+     * 飞牛红心的原生兜底：POST favorite-track/create|delete，
+     * body 是 {"trackGUID": guid}（照 Web 层 feiniuMutations.likeSong）。
+     */
+    public static boolean feiniuSetLiked(String guid, boolean liked) {
+        FeiniuCredentials creds = feiniuCreds;
+        String id = guid == null ? "" : guid.trim();
+        if (creds == null || id.isEmpty()) {
+            return false;
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(creds.serverUrl + "/music/api/v1/"
+                    + (liked ? "favorite-track/create" : "favorite-track/delete")).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(10000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Cookie", feiniuCookieValue(creds));
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "application/json");
+            byte[] body = ("{\"trackGUID\":\"" + id.replace("\"", "") + "\"}")
+                    .getBytes(StandardCharsets.UTF_8);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body);
+            }
+            int status = connection.getResponseCode();
+            return status >= 200 && status < 300;
+        } catch (Exception error) {
+            Log.w(TAG, "feiniu like failed", error);
+            return false;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /**
      * 取流 / 缓存下载时要附带的请求头：目前只有飞牛要带会话 Cookie
      * （它的音频流认 music-token，不认就不给字节）。其余平台回空表。
      */
