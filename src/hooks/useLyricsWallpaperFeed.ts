@@ -537,6 +537,17 @@ export const useLyricsWallpaperFeed = ({
     React.useEffect(() => {
         if (!active) return;
         const lines = lyrics?.lines ?? [];
+        /*
+         * 手上没有这首歌的歌词时**不要推空轴**。
+         *
+         * 原生兜底切歌（通知栏 / WebView 冻结期间的自动下一首）会自己向平台拉歌词、
+         * 就地发布时间轴（publishNativeTrack）。Web 这边认领后若歌词还没拉回来
+         * （在线歌词一趟网络往返，慢平台好几秒），照推的话带出去的是空表 ——
+         * 原生刚发对的那份就被清掉了，用户看到的就是「有概率切歌后壁纸没歌词」。
+         * 空着不推：原生那边的保持原状语义（lines=null 不动时间轴）继续生效，
+         * 等歌词真的到了（lines 变了）这一 effect 自然会再跑一次补上。
+         */
+        if (lines.length === 0 && (title ?? '').length > 0) return;
         const send = () => {
             void publishLyricsWallpaper({
                 title: title ?? '',

@@ -62,7 +62,7 @@ export const useAppPlaybackBridges = (model: Input) => {
         isPlayerCapStageActive, likedSongIds, localSongs, lyrics, nativeActive, nativeFailedKeysRef, nativeTakesRef,
         playQueue,
         navigateBackFromPlayer, navigateToPlayer, pendingResumeTimeRef, playerChromeVisibilityMode, playSong,
-        recoverOnlinePlaybackSource, setLyricsStable, setPlayerChromeVisibilityModeTo, setPlayerState, shouldAutoPlay,
+        recoverOnlinePlaybackSource, restoreCachedThemeForSong, setLyricsStable, setPlayerChromeVisibilityModeTo, setPlayerState, shouldAutoPlay,
         shouldRefreshCurrentOnlineAudioSource, skipAfterPlaybackFailure, stageActiveEntryKind, stageLyricsClockRef,
         stageLyricsSession, stageStatus, starredNavidromeSongIds, syncNowPlayingClock, syncOutputGain,
         syncStageLyricsClock, t, theme, themeSettling
@@ -279,6 +279,18 @@ export const useAppPlaybackBridges = (model: Input) => {
                     } catch {
                         // 拉不到（本地 / Navidrome / 平台不认）就保持空：壁纸空窗，
                         // 原生兜底那条 publishNativeTrack 已经先发对了的场合不受影响。
+                    }
+                    /*
+                     * 主题跟着认领走：restoreCachedThemeForSong 在 playSong 那条链里，
+                     * 这里绕过了 playSong，不补这一步的话本机改过的那版 / 云缓存的主题
+                     * 就一次都不翻 —— 高亮色与动画样式停在上一个主题上（用户报的
+                     * 「拿不到 AI 主题高亮色、动画样式」）。随机动画与 AI 导演各自盯着
+                     * currentSong / lyrics，主题落定后它们自己的 effect 会接上。
+                     */
+                    try {
+                        await restoreCachedThemeForSong(song);
+                    } catch {
+                        // 主题加载失败不影响播放：保持当前主题即可。
                     }
                 })();
                 return true;
