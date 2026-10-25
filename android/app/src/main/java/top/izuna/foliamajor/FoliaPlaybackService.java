@@ -276,10 +276,16 @@ public class FoliaPlaybackService extends android.app.Service {
                 top.izuna.foliamajor.wallpaper.WallpaperLyricsState.heartbeat();
                 lastHeartbeatAtMs = android.os.SystemClock.elapsedRealtime();
             } else if (lastHeartbeatAtMs > 0L && !playConfirmPending
+                    && !top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()
                     && android.os.SystemClock.elapsedRealtime() - lastHeartbeatAtMs > HEARTBEAT_WITHDRAW_MS) {
                 // 只在「曾经活过」之后才收：服务刚起、桥还没连上时心跳本来就还没敲过。
-                // playConfirmPending 挡着的是「用户刚按下播放、正在等回话」那一拍 ——
-                // 下一拍原生真起来了心跳自己续上，不该在宽限里把通知撕了。
+                // playConfirmPending 挡着的是「用户刚按下播放、正在等回话」那一拍。
+                //
+                // ⭐ 但**原生手上还有歌时（暂停了 / 放完了）不收** —— 心跳只把
+                // 「真的没声音了」当作断，可那颗播放键还把歌拉得起来。上一版就栽在这：
+                // 用户暂停之后 10 秒通知整个没了，想再播只能重新打开 App
+                // （用户原话「暂停后无法播放」）。真正该收的是「桥死了、原生手上
+                // 什么都没有」—— 那时每个键都是死键。
                 withdrawMediaNotification();
             }
             mainHandler.postDelayed(this, WALLPAPER_HEARTBEAT_TICK_MS);
@@ -686,10 +692,34 @@ public class FoliaPlaybackService extends android.app.Service {
                 sendCommand("like");
                 scheduleLikeFallback();
                 break;
-            default:
-                // play / pause / stop / seek 没有原生兜底可做，原路转给 JS。
+            case "seek":
                 long positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L);
+                /*
+                 * 拖通知栏进度条。WebView 冻结时 JS 收不到这条广播 —— 拖了就是
+                 * 白拖（「进度条无法使用」）。桥已经没了、原生手上真有歌时直接在
+                 * 原生侧跳；桥活着时照旧交 JS（哪怕原生在播，engine.seek 也会回到
+                 * 原生播放器，两头各跳各的反而打架）。
+                 */
+                if (!FoliaPlaybackPlugin.isBridgeAlive()
+                        && top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+                    top.izuna.foliamajor.player.FoliaNativePlayerPlugin.seekFromSystem(positionMs);
+                    cachedPositionMs = Math.max(0L, positionMs);
+                    boolean playing = cachedState == PlaybackStateCompat.STATE_PLAYING;
+                    top.izuna.foliamajor.wallpaper.WallpaperLyricsState.setSeekAnchor(
+                            Math.max(0L, positionMs), playing);
+                    top.izuna.foliamajor.wallpaper.FloatingLyricsOverlay
+                            .shared(this).invalidateOverlay();
+                    publishSnapshot();
+                    applyPlaybackState();
+                    publishNotification();
+                    break;
+                }
                 FoliaPlaybackPlugin.dispatchCommandFromReceiver(command, positionMs, null);
+                break;
+            default:
+                // play / pause / stop 没有原生兜底可做，原路转给 JS。
+                FoliaPlaybackPlugin.dispatchCommandFromReceiver(command,
+                        intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L), null);
                 break;
         }
     }
@@ -729,15 +759,29 @@ public class FoliaPlaybackService extends android.app.Service {
         }, LIKE_FALLBACK_MS);
     }
 
-    /** 原生补写红心：成功后就地换心（通知、MediaSession、锁屏快照一起刷）。 */
+    /**
+     * 原生补写红心：**先亮心、再写服务器**，失败才翻回去。
+     *
+     * 写入是一趟网络（几秒级），通知栏不先变样子用户只能当是卡了 ——
+     * 用户原话：「红心点击需要马上点亮，不是过一会自己亮」。写成功把结果
+     * 记进 {@link LikeOverrideStore}（切歌之后红心以它为准：镜像里的 liked
+     * 是 JS 账号缓存的旧快照，服务器的「我喜欢」歌单也不保证马上刷新）。
+     */
     private void toggleLikeNatively() {
         if (likeFallbackInFlight) return;
         if (!cachedCanLike) return;
         final String providerId = cachedProviderId;
         final String songId = cachedServerSongId;
+        final String songKey = cachedSongKey;
         final boolean wanted = !cachedLiked;
         if (providerId.isEmpty() || songId.isEmpty()) return;
         likeFallbackInFlight = true;
+        // 先就地亮心（主线程上这些字段本来就是它自己写的）。请求失败翻回去；
+        // 期间用户切了歌就以新歌的状态为准，不再翻。
+        cachedLiked = wanted;
+        publishSnapshot();
+        applyPlaybackState();
+        publishNotification();
         // 网络与 CookieManager 都不能上主线程：桥的线程规则（memory 15）在这里同样适用。
         new Thread(() -> {
             boolean ok = false;
@@ -746,17 +790,22 @@ public class FoliaPlaybackService extends android.app.Service {
             } finally {
                 likeFallbackInFlight = false;
             }
-            if (!ok) return;
+            if (!ok) {
+                mainHandler.post(() -> {
+                    if (!providerId.equals(cachedProviderId) || !songId.equals(cachedServerSongId)) {
+                        return;
+                    }
+                    cachedLiked = !wanted;
+                    publishSnapshot();
+                    applyPlaybackState();
+                    publishNotification();
+                });
+                return;
+            }
             // 记账：JS 醒来推旧状态时，updateMetadata 按这张表以原生写入为准；
-            // App 启动时 JS 也会取走这份记录对齐自己的账号缓存。
+            // 原生兜底切歌也读它（nativePlayMirrorEntry），切歌不打回原形。
             top.izuna.foliamajor.online.LikeOverrideStore.record(
-                    this, cachedSongKey, providerId, songId, wanted);
-            // JS 醒来后推来的 liked 仍以它为准（它才是账号态的唯一写手）；
-            // 这里先让通知栏别停在旧状态上。
-            cachedLiked = wanted;
-            publishSnapshot();
-            applyPlaybackState();
-            publishNotification();
+                    this, songKey, providerId, songId, wanted);
         }, "folia-like-fallback").start();
     }
 
@@ -824,11 +873,13 @@ public class FoliaPlaybackService extends android.app.Service {
     }
 
     /**
-     * 悄悄把相邻两首的地址要回来。当前这首起播时下一首多半还没人要过 —— 等用户
-     * 按下「下一首」再要就是一趟看得见的等待；这时预取就是「秒切」和「转圈」的区别。
+     * 悄悄把相邻几首的地址要回来 —— **两个方向都要**：上一首同样要秒切，
+     * 不能只备着往前走的那头（用户原话「上一首下一首提前加载」）。
+     * 当前这首起播时邻居多半还没人要过 —— 等用户按下再要就是一趟看得见的等待；
+     * 预取就是「秒切」和「转圈」的区别。
      */
     private void preloadMirrorNeighbors(org.json.JSONArray array, int target, int direction) {
-        int[] steps = {direction, direction * 2};
+        int[] steps = {direction, -direction, direction * 2, -(direction * 2)};
         for (int step : steps) {
             int idx = target + step;
             if (idx < 0 || idx >= array.length()) continue;
@@ -891,6 +942,33 @@ public class FoliaPlaybackService extends android.app.Service {
         if (!entrySongId.isEmpty()) cachedServerSongId = entrySongId;
         if (entry.has("liked")) cachedLiked = entry.optBoolean("liked", false);
         if (entry.has("canLike")) cachedCanLike = entry.optBoolean("canLike", false);
+        // 原生补写过的红心以记录为准：镜像里的 liked 是 JS 推全量那一刻的快照，
+        // 冻结期间点过的心它不知道（用户原话「点了需要缓存，因为歌单不一定马上刷新」）。
+        Boolean overridden = top.izuna.foliamajor.online.LikeOverrideStore.likedOf(this, songKey);
+        if (overridden != null) cachedLiked = overridden;
+        // 「我喜欢」名单里的真状态（网易有原生通道）：镜像快照可能旧了 —— 比如用户
+        // 在网易自己的 App 里点过心。后台对一遍，不同就就地换心；补写记录比名单
+        // 新鲜（服务端不保证马上刷新），有记录时以记录为准。
+        if (songChanged && "netease".equals(cachedProviderId) && !cachedServerSongId.isEmpty()) {
+            final String likedProviderId = cachedProviderId;
+            final String likedSongId = cachedServerSongId;
+            new Thread(() -> {
+                Boolean truth = top.izuna.foliamajor.online.MusicGateway.neteaseIsLiked(likedSongId);
+                if (truth == null) return;
+                mainHandler.post(() -> {
+                    if (!likedProviderId.equals(cachedProviderId)
+                            || !likedSongId.equals(cachedServerSongId)) return;
+                    Boolean record = top.izuna.foliamajor.online.LikeOverrideStore.likedOf(this, songKey);
+                    if (record != null) return;
+                    if (truth.booleanValue() != cachedLiked) {
+                        cachedLiked = truth;
+                        publishSnapshot();
+                        applyPlaybackState();
+                        publishNotification();
+                    }
+                });
+            }, "folia-liked-refresh").start();
+        }
         long entryDuration = entry.optLong("durationMs", 0L);
         if (entryDuration > 0L) cachedDurationMs = entryDuration;
         cachedState = PlaybackStateCompat.STATE_PLAYING;
@@ -1486,6 +1564,26 @@ public class FoliaPlaybackService extends android.app.Service {
         intent.putExtra(EXTRA_COMMAND_POSITION, positionMs);
         intent.putExtra(EXTRA_FROM_BUTTONS, true);
         context.sendBroadcast(intent);
+    }
+
+    /**
+     * 播放器播完了、桥已经没了（WebView 冻结 / 已销毁）时叫下一首：
+     * 转成一条 next 指令进服务，走镜像换源那套兜底（预取命中就是秒切）。
+     * 桥还活着时播放器插件根本不会调这里 —— 自动切归 JS 的播放管线，
+     * 别两头各切各的（双倍跳歌）。
+     */
+    public static void requestNativeAutoNext(Context context) {
+        if (context == null || !isRunning()) {
+            return;
+        }
+        Intent intent = new Intent(context, FoliaPlaybackService.class);
+        intent.setAction(ACTION_MEDIA_COMMAND);
+        intent.putExtra(EXTRA_COMMAND, "next");
+        try {
+            context.startService(intent);
+        } catch (Throwable ignored) {
+            // 服务起不来就没有兜底；这条本来也只在兜底场景里发生。
+        }
     }
 
     private Bitmap decodeArtwork(String base64) {

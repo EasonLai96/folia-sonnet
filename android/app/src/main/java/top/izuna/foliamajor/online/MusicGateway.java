@@ -364,6 +364,87 @@ public final class MusicGateway {
         }
     }
 
+    // ==================== 网易「我喜欢」名单（切换后红心状态的真源） ====================
+
+    private static volatile long neteaseUid = 0L;
+    private static volatile java.util.Set<Long> neteaseLikedIds = null;
+    private static volatile long neteaseLikedReadAtMs = 0L;
+    /** 名单缓存多久。刚点过的心以 LikeOverrideStore 为准（服务端名单不保证马上刷新）。 */
+    private static final long NETEASE_LIKED_TTL_MS = 10 * 60_000L;
+
+    /** Web 层登录后把网易 uid 推过来（FoliaNative.setGatewayCredentials）；登出推空。 */
+    public static void setNeteaseUid(String uid) {
+        long parsed = parseSongId(uid);
+        if (parsed <= 0) {
+            neteaseUid = 0L;
+            neteaseLikedIds = null;
+            return;
+        }
+        if (parsed != neteaseUid) {
+            // 换了账号：旧名单作废，下一问重新拉。
+            neteaseLikedIds = null;
+        }
+        neteaseUid = parsed;
+    }
+
+    /**
+     * 这首歌在不在网易「我喜欢」里；名单拿不到回 null（调用方保持原状）。
+     *
+     * 名单一发就是全部（一次请求、几万 id 也就几百 KB），10 分钟缓存 —— 每次切歌
+     * 都拉一遍太重。叫用要在后台线程（里面是 weapi 网络）。
+     */
+    public static Boolean neteaseIsLiked(String songId) {
+        if (neteaseUid <= 0) {
+            return null;
+        }
+        long now = android.os.SystemClock.elapsedRealtime();
+        java.util.Set<Long> cached = neteaseLikedIds;
+        if (cached == null || now - neteaseLikedReadAtMs > NETEASE_LIKED_TTL_MS) {
+            synchronized (MusicGateway.class) {
+                cached = neteaseLikedIds;
+                now = android.os.SystemClock.elapsedRealtime();
+                if (cached == null || now - neteaseLikedReadAtMs > NETEASE_LIKED_TTL_MS) {
+                    java.util.Set<Long> fresh = fetchNeteaseLikedList();
+                    if (fresh != null) {
+                        neteaseLikedIds = fresh;
+                        neteaseLikedReadAtMs = now;
+                        cached = fresh;
+                    }
+                    // 拉失败就继续用旧的（可能为 null）：null = 不知道，调用方不动那颗心。
+                }
+            }
+        }
+        if (cached == null) {
+            return null;
+        }
+        long id = parseSongId(songId);
+        return id > 0 ? cached.contains(id) : null;
+    }
+
+    private static java.util.Set<Long> fetchNeteaseLikedList() {
+        try {
+            String cookie = cookieFor("https://music.163.com/");
+            JSONObject body = weapiPost("/api/song/like/get",
+                    new JSONObject().put("uid", neteaseUid).put("csrf_token", csrfOf(cookie)), cookie);
+            JSONArray ids = body.optJSONArray("ids");
+            if (ids == null) {
+                return null;
+            }
+            java.util.Set<Long> out = new java.util.HashSet<>();
+            for (int i = 0; i < ids.length(); i++) {
+                long value = ids.optLong(i, -1L);
+                if (value > 0) {
+                    out.add(value);
+                }
+            }
+            Log.i(TAG, "netease liked list refreshed (" + out.size() + " songs)");
+            return out;
+        } catch (Exception error) {
+            Log.w(TAG, "netease liked list fetch failed", error);
+            return null;
+        }
+    }
+
     /**
      * 取流 / 缓存下载时要附带的请求头：目前只有飞牛要带会话 Cookie
      * （它的音频流认 music-token，不认就不给字节）。其余平台回空表。

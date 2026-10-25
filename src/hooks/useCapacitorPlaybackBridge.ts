@@ -7,6 +7,7 @@ import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { nativePlaybackEngine } from '../services/playbackEngine/nativePlaybackEngine';
 import { applyNativeLikeOverrides, type NativeLikeOverrideInput } from '../services/onlineMusic/omni';
 import { syncFeiniuGatewayCredentials } from '../services/onlineMusic/feiniuTransport';
+import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
 
 // 当前文件：把播放状态与元数据送到原生前台服务，换取通知栏媒体控制与后台网络保活。
 //
@@ -311,6 +312,27 @@ export const useCapacitorPlaybackBridge = ({
       serverSongId: likeIdentity.serverSongId || null,
     });
   }, [enabled, currentSong, cachedCoverUrl, isLiked, canLike]);
+
+  // 网易 uid 推给原生：原生兜底切歌后要拉「我喜欢」名单对红心（uid 只在 Web 层的
+  // 账号缓存里，cookie 里没有）。登录 / 登出（账号 store 变化）都会跟着推一遍。
+  React.useEffect(() => {
+    if (!enabled) return;
+    const push = () => {
+      if (typeof window === 'undefined') return;
+      const plugin = (window as any).Capacitor?.Plugins?.FoliaNative;
+      if (!plugin?.setGatewayCredentials) return;
+      const account = useOnlineProviderAccountStore.getState().accounts['netease'];
+      const uid = account?.user?.id;
+      void plugin
+        .setGatewayCredentials({ provider: 'netease', userId: uid == null ? '' : String(uid) })
+        .catch(() => undefined);
+    };
+    push();
+    const unsubscribe = useOnlineProviderAccountStore.subscribe(push);
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [enabled]);
 
   // 队列快照：WebView 冻结后通知栏切歌的唯一依据。
   //

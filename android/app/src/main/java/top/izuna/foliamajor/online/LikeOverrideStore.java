@@ -88,6 +88,28 @@ public final class LikeOverrideStore {
         }
     }
 
+    /**
+     * 这首歌有没有原生补写过（有回 true/false，没有回 null）。
+     *
+     * 原生兜底切歌时用：镜像条目里的 liked 是 JS 推全量那一刻的账号缓存快照，
+     * 冻结期间点过的心它不知道 —— 不叠这一层，一切歌心就被打回原形
+     * （用户原话：「点了需要缓存，因为歌单不一定马上刷新」）。
+     */
+    public static Boolean likedOf(Context context, String songKey) {
+        if (context == null || songKey == null || songKey.isEmpty()) {
+            return null;
+        }
+        try {
+            JSONObject entry = read(context).optJSONObject(songKey);
+            if (entry == null || !entry.has("liked")) {
+                return null;
+            }
+            return entry.optBoolean("liked", false);
+        } catch (Throwable error) {
+            return null;
+        }
+    }
+
     /** 取走全部记录并清空（App 启动时 JS 的认领入口）。 */
     public static JSONObject consume(Context context) {
         JSONObject overrides = read(context);

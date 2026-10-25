@@ -1851,6 +1851,10 @@ public class FoliaNativePlugin extends Plugin {
             String token = call.getString("token", "");
             boolean relayMode = Boolean.TRUE.equals(call.getBoolean("relayMode", false));
             top.izuna.foliamajor.online.MusicGateway.setFeiniuCredentials(serverUrl, token, relayMode);
+        } else if ("netease".equals(provider)) {
+            // 网易的「我喜欢」名单要 uid 才拉得动（weapi /song/like/get），
+            // uid 只在 Web 层的账号缓存里 —— 登录 / 登出时推一份。
+            top.izuna.foliamajor.online.MusicGateway.setNeteaseUid(call.getString("userId", ""));
         }
         call.resolve();
     }

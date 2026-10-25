@@ -157,6 +157,26 @@ public class FoliaNativePlayerPlugin extends Plugin {
                 payload.put("type", type);
                 payload.put("positionMs", (double) positionMs);
                 payload.put("durationMs", (double) durationMs);
+                /*
+                 * ⭐ **播完了自动下一首（桥已死的那条路）。**
+                 *
+                 * 「ended」这个状态边界过桥给 JS 的播放管线，自动切歌一直归它管；
+                 * 但 WebView 冻结 / 已销毁时这一下没人接 —— 一首放完就停在那儿
+                 * （用户报的「播放完毕之后不会自动下一首」）。桥不在时把这一下
+                 * 转成一条 next 指令进服务，走镜像换源那套兜底（预取好了就是秒切）；
+                 * 桥还在时绝不多手 —— JS 自己会切，两头各切各的就是双倍跳歌。
+                 */
+                if ("ended".equals(type)
+                        && !top.izuna.foliamajor.FoliaPlaybackPlugin.isBridgeAlive()) {
+                    MAIN.post(() -> {
+                        android.content.Context context =
+                                instance != null ? instance.getContext() : null;
+                        if (context != null) {
+                            top.izuna.foliamajor.FoliaPlaybackService
+                                    .requestNativeAutoNext(context);
+                        }
+                    });
+                }
                 if (message != null) {
                     payload.put("message", message);
                 }
@@ -177,6 +197,16 @@ public class FoliaNativePlayerPlugin extends Plugin {
         }
         instance = null;
         super.handleOnDestroy();
+    }
+
+    /**
+     * WebView 冻结时通知栏拖进度条：桥收不到 seek 那条广播，只能直接在原生侧跳。
+     * 只有原生手上真有歌时才动手；其余情况由服务照旧转给 JS。
+     */
+    public static void seekFromSystem(long positionMs) {
+        FoliaNativePlayerPlugin current = instance;
+        if (current == null || current.player == null || !current.player.hasMedia()) return;
+        current.player.seek(Math.max(0L, positionMs));
     }
 
     /**

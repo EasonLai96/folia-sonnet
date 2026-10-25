@@ -60,7 +60,7 @@ public class FoliaPlaybackPlugin extends Plugin {
      * 实例没了，WebView 就没了，JS 那边不可能再有声音。播放服务的心跳巡检靠它区分
      * 「后台还在放」与「划掉之后的僵尸进程」（见 FoliaPlaybackService.heartbeatTick）。
      */
-    static boolean isBridgeAlive() {
+    public static boolean isBridgeAlive() {
         return instance != null;
     }
 
