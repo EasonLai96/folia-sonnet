@@ -158,8 +158,8 @@ describe('旧版「其他兼容接口」凭据的迁移', () => {
         expect(bag.raw()).toBe(before);
     });
 
-    // 已升级的安装可能同时留着旧 openai* 字段和明确写过的官方 openai 条目。这里按「明确写过官方 openai
-    // 就不动 provider」处理（与 RC7 同一规则）；被旧逻辑复制出来的 apiKeys.openai 要不要清，留给维护者决定。
+    // 已升级的安装可能同时留着旧 openai* 字段与官方 openai 条目；本例使用不同的官方 Key，保留该选择。
+    // 与旧兼容 Key 相同的未确认副本会暂停使用，完整写回/确认回归见 aiSettingsPersistedMigration.test.ts。
     it('新形状明确写过官方 openai 时保留该选择', () => {
         installStorage(legacyShape({ apiKeys: { openai: 'sk-synthetic-official-0004' } }));
         const settings = readAiSettings();
