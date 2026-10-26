@@ -116,10 +116,16 @@ export const requestAiViaNative = async (
  * 返回一个与 fetch 同形的函数：安卓上走原生桥，其他平台回落到全局 fetch。
  * 只覆盖 AI 需要的用法（JSON 文本请求体），不做流式读取。
  *
- * 页面**在后台**时改走 `aiRequest`（整趟由原生做完）。两条路都过 OkHttp，区别是谁在
- * 推进：`createNativeFetch` 的发起与回调都在网页里，后台 JS 被挂起之后请求出得去、
- * 结果回不来 —— 「后台切歌，AI 主题一次都没生成」。`aiRequest` 不依赖 JS 在跑。
- * 前台仍然走老路：它对流式、header 细节的覆盖更全，而前台没有挂起这回事。
+ * ⭐ 有 `aiRequest`（原生替发）时**一律走原生**，不再分前后台。
+ *
+ * 以前只在前台不可见时才切过去 —— 判据是 `document.visibilityState`。但「页面可见」
+ * 不等于「JS 活得好好的」：WebView 冻结 / 节流期间请求可能卡在发起那一行，或者 OkHttp
+ * 回来了却没有人接着跑后半段。AI 云缓存那几条（候选解析 / 按键直取 / 上传）全都从
+ * 这里出，冻住时表现就是「云缓存拉取没走原生」—— 主题高亮色拉不回来。
+ * `aiRequest` 整趟由 OkHttp 在自己的线程池里做完，不依赖 JS 在跑；前台跑它的代价
+ * 只是少了一些 header 细节覆盖，而 AI 这几条全是简单 JSON，用不到。
+ *
+ * 原生那条路不通（老版本没这个方法 / 桥出错）：回落 OkHttp 通用转发那条，别把请求丢掉。
  */
 export const createAiFetch = (): typeof fetch => {
     const base = createNativeFetch(AI_REQUEST_TIMEOUT_MS);
@@ -127,10 +133,6 @@ export const createAiFetch = (): typeof fetch => {
     if (!plugin?.aiRequest) return base;
 
     return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        const pageStyle = typeof document !== 'undefined' ? document.visibilityState : 'visible';
-        if (pageStyle === 'visible') {
-            return base(input, init);
-        }
         const request = typeof Request !== 'undefined' && input instanceof Request ? input : null;
         const url = request?.url ?? String(input);
         const headers = new Headers(request?.headers || init?.headers || {});
@@ -146,7 +148,6 @@ export const createAiFetch = (): typeof fetch => {
             headers: headerObject,
             body: bodyText,
         });
-        // 原生那条路不通（老版本 / 出错）：前台那条兜着，别把这次请求丢掉。
         if (!result) return base(input, init);
         return new Response(result.body, {
             status: result.status,

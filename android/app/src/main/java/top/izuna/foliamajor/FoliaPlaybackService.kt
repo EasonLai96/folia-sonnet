@@ -1459,7 +1459,11 @@ class FoliaPlaybackService : android.app.Service() {
             @JvmField val liked: Boolean,
             /** 「喜欢」这个动作现在能不能用（平台不支持时为 false）。 */
             @JvmField val canLike: Boolean
-    )
+    ) {
+        /** 只换位置、其余字段原样带过去（snapshot() 读侧现算位置时用）。 */
+        fun copy(positionMs: Long): MediaSnapshot = MediaSnapshot(
+                title, artist, album, artwork, durationMs, positionMs, playing, liked, canLike)
+    }
 
     private fun publishSnapshot() {
         lastSnapshot = MediaSnapshot(cachedTitle, cachedArtist, cachedAlbum,
@@ -1783,7 +1787,33 @@ class FoliaPlaybackService : android.app.Service() {
         /** 最近一次的媒体信息。服务没起来过就是 null（那时锁屏页也不会显示）。 */
         @JvmStatic
         fun snapshot(): MediaSnapshot? {
-            return lastSnapshot
+            val fixed = lastSnapshot ?: return null
+            /*
+             * 位置**现算**，不交快照里定格的那份。
+             *
+             * 快照只在 publishSnapshot() 那一刻写：Web 播放（<audio>）时 JS 每秒推一次
+             * 状态，每秒都刷新，锁屏每秒拉一次正好是动的；原生播放时 Web 刻意不再推
+             * 位置（省每秒一次的 IPC，见 useCapacitorPlaybackBridge），快照里的 positionMs
+             * 就定格在最后一次状态边界上 —— 锁屏那条进度条每秒读到的都是同一个旧值
+             * （用户报的「锁屏的进度条不动了」）。播放器才是真源：原生在放时直接问它。
+             * 纯拉模式的读侧顺手补一笔，不动快照本身（它仍由状态边界刷新）。
+             */
+            return fixed.copy(positionMs = resolvePlaybackPositionMs(fixed.positionMs))
+        }
+
+        /**
+         * 锁屏 / 通知栏该显示的位置：原生在放就问播放器，否则用定格值。
+         * 与 {@link #resolvePlaybackPositionMs()} 同一个判据，只是多收一个回退值 ——
+         * 那个版本读实例字段，这个从快照来（读侧没有实例上下文）。
+         */
+        private fun resolvePlaybackPositionMs(fallbackMs: Long): Long {
+            if (top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+                val nativePosition = top.izuna.foliamajor.player.FoliaNativePlayerPlugin.currentPositionMs()
+                if (nativePosition >= 0L) {
+                    return nativePosition
+                }
+            }
+            return fallbackMs
         }
 
         private fun downloadBitmap(url: String): Bitmap? {
