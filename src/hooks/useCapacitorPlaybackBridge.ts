@@ -319,6 +319,13 @@ export const useCapacitorPlaybackBridge = ({
           // 拉黑（本次会话内不再分流给它）并回退 Web 全流程自己放，不卡住不重试。
           if (songKey) callbacksRef.current.onNativePlayFailed?.(songKey);
           break;
+        case 'repeatRestart':
+          // 单曲循环重播（原生在放时 ExoPlayer 无缝回绕，不发 ended）。**故意没有
+          // 动作**：进度基准的复位在原生自己那条事件链上（引擎 onPositionDiscontinuity
+          // 发 seeked，插件复位 lastDeliveredMs），Web 的 rAF 时钟读原生位置自然跟上。
+          // 这里写出来是让后人知道这条命令收到了、并且**什么都不该做**——
+          // 在这里再 set currentTime 反而会与原生时钟打架。
+          break;
       }
     }).then((off) => {
       if (cancelled) off();
