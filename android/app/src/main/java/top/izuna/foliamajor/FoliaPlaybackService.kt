@@ -1454,6 +1454,15 @@ class FoliaPlaybackService : android.app.Service() {
             @JvmField val artwork: Bitmap?,
             @JvmField val durationMs: Long,
             @JvmField val positionMs: Long,
+            /**
+             * `positionMs` 是**哪一刻**的值（SystemClock.elapsedRealtime()）。
+             *
+             * 带上它，读快照的一方才能自己往前外推：这一份是推送时写的，而推送会随着
+             * WebView 被 Chromium 节流而长时间不来（锁屏 / 息屏那一会儿能拖到几十秒）。
+             * 没有这个时刻，读到的就永远是「几十秒前的位置」，进度条看着就是不动。
+             * 系统通知栏那条不缺这一步 —— PlaybackState 自带 updateTime，由 SystemUI 外推。
+             */
+            @JvmField val positionTakenAtElapsedMs: Long,
             @JvmField val playing: Boolean,
             /** 当前这首歌是不是「已喜欢」。 */
             @JvmField val liked: Boolean,
@@ -1462,12 +1471,14 @@ class FoliaPlaybackService : android.app.Service() {
     ) {
         /** 只换位置、其余字段原样带过去（snapshot() 读侧现算位置时用）。 */
         fun copy(positionMs: Long): MediaSnapshot = MediaSnapshot(
-                title, artist, album, artwork, durationMs, positionMs, playing, liked, canLike)
+                title, artist, album, artwork, durationMs, positionMs,
+                positionTakenAtElapsedMs, playing, liked, canLike)
     }
 
     private fun publishSnapshot() {
         lastSnapshot = MediaSnapshot(cachedTitle, cachedArtist, cachedAlbum,
-                cachedArtwork, cachedDurationMs, resolvePlaybackPositionMs(), cachedPlaying,
+                cachedArtwork, cachedDurationMs, resolvePlaybackPositionMs(),
+                android.os.SystemClock.elapsedRealtime(), cachedPlaying,
                 cachedLiked, cachedCanLike)
     }
 
@@ -1829,22 +1840,37 @@ class FoliaPlaybackService : android.app.Service() {
              * （用户报的「锁屏的进度条不动了」）。播放器才是真源：原生在放时直接问它。
              * 纯拉模式的读侧顺手补一笔，不动快照本身（它仍由状态边界刷新）。
              */
-            return fixed.copy(positionMs = resolvePlaybackPositionMs(fixed.positionMs))
+            return fixed.copy(positionMs = resolvePlaybackPositionMs(fixed))
         }
 
         /**
-         * 锁屏 / 通知栏该显示的位置：原生在放就问播放器，否则用定格值。
-         * 与 {@link #resolvePlaybackPositionMs()} 同一个判据，只是多收一个回退值 ——
-         * 那个版本读实例字段，这个从快照来（读侧没有实例上下文）。
+         * 锁屏 / 通知栏该显示的位置：原生在放就问播放器，否则按快照外推。
+         * 与 {@link #resolvePlaybackPositionMs()} 同一个判据，只是读侧没有实例上下文。
+         *
+         * 外推这一笔是给 Web 播放兜底的：`<audio>` 播到哪只有 Web 知道，快照是它推上来的
+         * 那一刻的值，而锁屏 / 息屏时 WebView 的定时器被 Chromium 节流（1 秒变 1 分钟），
+         * 那一推可能几十秒才来一次 —— 不往前走，进度条就停在原地。
+         * 系统通知栏那条一直没这个问题：PlaybackState 自带 updateTime，由 SystemUI 外推。
          */
-        private fun resolvePlaybackPositionMs(fallbackMs: Long): Long {
+        private fun resolvePlaybackPositionMs(info: MediaSnapshot): Long {
             if (top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
                 val nativePosition = top.izuna.foliamajor.player.FoliaNativePlayerPlugin.currentPositionMs()
                 if (nativePosition >= 0L) {
                     return nativePosition
                 }
             }
-            return fallbackMs
+            val base = Math.max(0L, info.positionMs)
+            // 暂停时不外推：手指停在那就该停在那就。
+            if (!info.playing) return base
+            val taken = info.positionTakenAtElapsedMs
+            // 0 是旧快照（没有这个字段）的默认值，别把开机以来的时间全加上去。
+            if (taken <= 0L) return base
+            val elapsed = android.os.SystemClock.elapsedRealtime() - taken
+            if (elapsed <= 0L) return base
+            val advanced = base + elapsed
+            // 外推不能溢出时长：缓冲 / 卡顿那一会儿它会跑在真实位置前面，夹住即可，
+            // 下一推来了自然会被拉回真值。
+            return if (info.durationMs > 0L) Math.min(advanced, info.durationMs) else advanced
         }
 
         private fun downloadBitmap(url: String): Bitmap? {
