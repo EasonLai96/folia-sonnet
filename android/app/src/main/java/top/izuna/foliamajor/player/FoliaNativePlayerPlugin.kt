@@ -86,7 +86,21 @@ class FoliaNativePlayerPlugin : Plugin() {
         fun resumeFromSystem() {
             val current = instance
             val player = current?.player
-            if (current == null || player == null || !player.hasMedia()) return
+            if (current == null || player == null) return
+            if (player.hasMedia()) {
+                player.play()
+                return
+            }
+            /*
+             * 手上有壳、没歌（当前这首走 <audio>，本地缓存的 blob 地址原生吃不下）：
+             * 空手回去等于把这一下交还给被冻结的 JS —— 锁屏按播放就是死的，而下一首
+             * 却是活的（镜像兜底只要求 hasPlayer）。按镜像当前条目在原生重新装源接管：
+             * 与切歌兜底同一条路，位置从缓存读（cachedPositionMs 由 <audio> 那首的最新
+             * 一次状态边界留下，误差一拍以内）。
+             */
+            val url = top.izuna.foliamajor.FoliaPlaybackService.mirrorCurrentUrl()
+            if (url.isNullOrEmpty()) return
+            player.prepare(url, currentPositionMs())
             player.play()
         }
 

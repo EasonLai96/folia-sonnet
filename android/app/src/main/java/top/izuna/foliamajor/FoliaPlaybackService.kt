@@ -96,7 +96,7 @@ class FoliaPlaybackService : android.app.Service() {
      * 预取的意义：下一首的地址在当前这首开始放时就悄悄要好了，用户按下「下一首」
      * 那一刻是现成的 —— 不然每次兜底切歌都要等一趟网络（用户报的「上下一首非常慢」）。
      */
-    private val resolvedUrlCache: java.util.concurrent.ConcurrentHashMap<String, String> =
+    val resolvedUrlCache: java.util.concurrent.ConcurrentHashMap<String, String> =
             java.util.concurrent.ConcurrentHashMap()
     /** 最近一次交给系统的通知：promoteToForeground() 重复贴的就是它，省掉重建的开销。 */
     private var cachedNotification: Notification? = null
@@ -1706,6 +1706,37 @@ class FoliaPlaybackService : android.app.Service() {
 
         /** JS 没回话等多久就原生补写红心。要长于 JS 正常处理一次收藏的耗时（写 + 复查），免得慢一点就双写。 */
         private const val LIKE_FALLBACK_MS = 5_000L
+
+        /**
+         * 镜像队列里**当前**这一首的地址（预取缓存优先，其次条目自带）。
+         *
+         * 暂停后恢复播放的原生兜底用（见 FoliaNativePlayerPlugin.resumeFromSystem）：
+         * 当前这首走 <audio> 时原生手上没歌，光 play() 是空操作 —— 得有地址才能
+         * 在原生重新装源接管。预取没命中就返回 null（那一趟网络等不起，恢复播放
+         * 的判据必须瞬时），调用方照旧走 JS 那条路。
+         */
+        @JvmStatic
+        fun mirrorCurrentUrl(): String? {
+            val service = snapshotSource ?: return null
+            synchronized(service) {
+                val json = mirroredQueueJson ?: return null
+                val index = mirroredIndex
+                if (index < 0) return null
+                return try {
+                    val array = org.json.JSONArray(json)
+                    if (index >= array.length()) return null
+                    val entry = array.getJSONObject(index)
+                    val songKey = entry.optString("songKey", "")
+                    var url = if (songKey.isEmpty()) null else service.resolvedUrlCache[songKey]
+                    if (url == null || url.isEmpty()) {
+                        url = entry.optString("url", "")
+                    }
+                    if (url == null || url.isEmpty()) null else url
+                } catch (ignored: org.json.JSONException) {
+                    null
+                }
+            }
+        }
 
         // ===== 通知栏镜像队列 =====
         // JS 活着时把「当前 ±10 首、带已解析地址」的队列窗口推过来；WebView 冻结后
