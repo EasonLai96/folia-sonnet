@@ -741,8 +741,12 @@ class FloatingLyricsOverlay private constructor(context: Context) {
     }
 
     private fun detach() {
-        // 淡出链路收尾：窗口都没了，步进回调不许再跑。
-        cancelFadeOut()
+        // 淡出 / 淡入链路收尾：窗口都没了，两条步进回调都不许再跑。
+        // 这里不能用 cancelFadeOut() —— 它现在会「起淡入」，而这一刻正要摘窗，方向反了。
+        fadingOut = false
+        fadingIn = false
+        handler.removeCallbacks(fadeStep)
+        handler.removeCallbacks(fadeInStep)
         detachLockChip()
         val v = view
         if (!added || v == null) return
@@ -759,10 +763,12 @@ class FloatingLyricsOverlay private constructor(context: Context) {
     }
 
     // ------------------------------------------------------------------
-    // 淡出：摘窗之前把窗口 alpha 走到 0，别突然消失
+    // 淡出 / 淡入：摘窗之前把窗口 alpha 走到 0，别突然消失；
+    // 淡出半路又该显示了，也从当前 alpha 平滑走回 1，别突然出现。
     // ------------------------------------------------------------------
 
     private var fadingOut = false
+    private var fadingIn = false
     private var fadeFromAlpha = 1f
     private var fadeStartMs = 0L
 
@@ -787,6 +793,37 @@ class FloatingLyricsOverlay private constructor(context: Context) {
         }
     }
 
+    /**
+     * 淡出半路回来的那一趟。
+     *
+     * 方向与 fadeStep 相反：从 fadeFromAlpha 走回 1。时长按「还剩多少没走完」折算，
+     * 所以在 0.3 处回来只用 320×(1-0.3)≈224ms，不会因为中途回来反而拖得更久。
+     */
+    private val fadeInStep: Runnable = object : Runnable {
+        override fun run() {
+            val p = params
+            val v = view
+            if (!fadingIn || !added || p == null || v == null) return
+            val span = FADE_OUT_MS * (1f - fadeFromAlpha).coerceAtLeast(0.01f)
+            val t = (SystemClock.elapsedRealtime() - fadeStartMs) / span
+            if (t >= 1f) {
+                fadingIn = false
+                p.alpha = 1f
+                try {
+                    windowManager.updateViewLayout(v, p)
+                } catch (ignored: Throwable) {
+                }
+                return
+            }
+            p.alpha = fadeFromAlpha + (1f - fadeFromAlpha) * t
+            try {
+                windowManager.updateViewLayout(v, p)
+            } catch (ignored: Throwable) {
+            }
+            handler.postDelayed(this, 16L)
+        }
+    }
+
     /** 该收了：从当前 alpha 起步，320ms 淡到 0 再真正摘窗。 */
     private fun startFadeOut() {
         val p = params
@@ -796,26 +833,38 @@ class FloatingLyricsOverlay private constructor(context: Context) {
             return
         }
         if (fadingOut) return
+        // 正在淡入时被叫回来收：从它走到的那一半继续淡出，不要跳回 1 再走。
+        if (fadingIn) {
+            fadingIn = false
+            handler.removeCallbacks(fadeInStep)
+        }
         fadingOut = true
         fadeFromAlpha = p.alpha
         fadeStartMs = SystemClock.elapsedRealtime()
         handler.post(fadeStep)
     }
 
-    /** 淡出半路又该显示了（恢复播放 / 心跳回来了）：alpha 立刻回 1，摘窗取消。 */
+    /**
+     * 淡出半路又该显示了（恢复播放 / 心跳回来了）：摘窗取消，alpha 平滑走回 1。
+     *
+     * 以前这里直接把 alpha 写成 1f —— 用户在 320ms 之内按了恢复播放，窗口会从任意
+     * 中间值（比如 0.3）**一跳**回到 1。本文件上面那条注释自己点名要避免「突然消失」，
+     * 这是同一个毛病的反方向。壁纸那一层（WallpaperOverlay.stepFade）做对了，这条跟上。
+     *
+     * 没在淡出就直接回 1：没有起点可插值，也没人看得见这一跳。
+     */
     private fun cancelFadeOut() {
         if (!fadingOut) return
         fadingOut = false
         handler.removeCallbacks(fadeStep)
         val p = params
         val v = view
-        if (added && p != null && v != null && p.alpha != 1f) {
-            p.alpha = 1f
-            try {
-                windowManager.updateViewLayout(v, p)
-            } catch (ignored: Throwable) {
-            }
-        }
+        if (!added || p == null || v == null) return
+        if (p.alpha >= 1f) return
+        fadingIn = true
+        fadeFromAlpha = p.alpha
+        fadeStartMs = SystemClock.elapsedRealtime()
+        handler.post(fadeInStep)
     }
 
     // ------------------------------------------------------------------
