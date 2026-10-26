@@ -11,13 +11,15 @@
 // background's settings that are no tuning object come whole from its settings.ts.
 
 import { create } from 'zustand';
-import { getVisualizerModeLabel } from '../components/visualizer/registry';
 import type { StoredTuning, VisualizerTuningSettings } from '../components/visualizer/tuningDefinition';
 import { getBackgroundSettingsSlices, getStoredVisualizerTunings } from '../components/visualizer/tuningRegistry';
 import { type RenderPixelRatio, type SmartBeatSettings, type VisualizerBackgroundMode, type VisualizerFrameRate, type VisualizerMode } from '../types';
 import { VISUALIZER_FRAME_RATE_STORAGE_KEY, setGlobalVisualizerFrameRate } from '../utils/frameRateLimiter';
 import { RENDER_PIXEL_RATIO_STORAGE_KEY, readStoredRenderPixelRatio, setGlobalRenderPixelRatio } from '../utils/renderPixelRatio';
 import { GLOW_BLUR_QUANTIZE_STORAGE_KEY, readStoredGlowBlurQuantize, setGlowBlurQuantized } from '../utils/glowBlurQuantize';
+// 显示名住在各模式的 entry.tsx（components），由 utils/visualizerModeLabel 持有、registry 注册解析器：
+// store 是低层，不能 import components/visualizer/registry。
+import { getVisualizerModeLabel } from '../utils/visualizerModeLabel';
 import i18n from '../i18n/config';
 import { setStatusMessage } from './useStatusMessageStore';
 import { SMART_BEAT_STORAGE_KEY, type SmartBeatPatch, VISUALIZER_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_AVOID_WIDTH_STORAGE_KEY, WALLPAPER_FLOATING_FILL_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_MODE_STORAGE_KEY, WALLPAPER_FLOATING_FONT_SIZE_STORAGE_KEY, WALLPAPER_FLOATING_OFFSET_X_STORAGE_KEY, WALLPAPER_FLOATING_OPACITY_STORAGE_KEY, WALLPAPER_FLOATING_OVER_SAFE_AREA_STORAGE_KEY, WALLPAPER_FLOATING_WIDTH_STORAGE_KEY, WALLPAPER_LYRICS_FONT_MODE_STORAGE_KEY, WALLPAPER_OVERLAY_ALL_APPS_STORAGE_KEY, WALLPAPER_OVERLAY_ENABLED_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_AFTER_LYRICS_END_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_COVER_ART_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_LYRICS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_NATIVE_PROGRESS_STORAGE_KEY, WALLPAPER_OVERLAY_HIDE_WHEN_PAUSED_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_ONLY_STORAGE_KEY, WALLPAPER_OVERLAY_LOCK_SCREEN_STORAGE_KEY, WALLPAPER_OVERLAY_OPACITY_STORAGE_KEY, WALLPAPER_OVERLAY_SKIP_INSTRUMENTAL_STORAGE_KEY, readStoredBackgroundOpacity, readStoredSmartBeatSettings, resolveSmartBeatSettings, readStoredTuning, readStoredVisualizerBackgroundMode, readStoredVisualizerFrameRate, readStoredVisualizerMode, readStoredVisualizerOpacity, readStoredWallpaperFloatingAvoidOffsetX, readStoredWallpaperFloatingAvoidWidth, readStoredWallpaperFloatingFillSafeArea, readStoredWallpaperFloatingFontSize, readStoredWallpaperFloatingFontSizeMode, readStoredWallpaperFloatingOffsetX, readStoredWallpaperFloatingOpacity, readStoredWallpaperFloatingOverSafeArea, readStoredWallpaperFloatingWidth, readStoredWallpaperLyricsFontMode, readStoredWallpaperOverlayAllApps, readStoredWallpaperOverlayEnabled, readStoredWallpaperOverlayHideAfterLyricsEnd, readStoredWallpaperOverlayHideCoverArt, readStoredWallpaperOverlayHideNativeLyrics, readStoredWallpaperOverlayHideNativeProgress, readStoredWallpaperOverlayHideWhenPaused, readStoredWallpaperOverlayLockScreen, readStoredWallpaperOverlayLockScreenOnly, readStoredWallpaperOverlayOpacity, readStoredWallpaperOverlaySkipInstrumental, writeStoredTuning } from './visualizerSettingsPersistence';
@@ -79,6 +81,13 @@ type OwnSettingsState = {
     randomVisualizerModes: RandomVisualizerMode[];
     /** Snap animated glow blur radii to a bounded set. See components/visualizer/wordGlow.ts. */
     glowBlurQuantize: boolean;
+    /**
+     * 全局关键词着色：AI 主题的 wordColors 高亮在歌词上画不画。
+     *
+     * 一颗总闸管所有画面（莫奈 / 镜台 / 绘光 / 海报墙）—— 以前各样式面板里各有一颗，
+     * 而且海报墙看的是莫奈那颗，彼此不该有这种牵连，于是收编成全局一份。
+     */
+    keywordColoringEnabled: boolean;
     /** 把播放中的歌词推给原生歌词动态壁纸。Android 专有，其它平台恒为 false 也不影响。 */
     lyricsWallpaperFeed: boolean;
     /** 歌词壁纸的背景：'cover' 模糊封面，'color' 主题色渐变，'image' 自选图片，'video' 自选视频。 */
@@ -246,6 +255,7 @@ type OwnSettingsState = {
     handleToggleWallpaperOverlayHideAfterLyricsEnd: (enable: boolean) => void;
     handleToggleWallpaperOverlayHideCoverArt: (enable: boolean) => void;
     handleSetSmartBeat: (patch: SmartBeatPatch) => void;
+    handleSetKeywordColoringEnabled: (enable: boolean) => void;
 };
 
 export type VisualizerSettingsState = OwnSettingsState & VisualizerTuningSettings;
@@ -310,6 +320,7 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
     randomVisualizerModePerSong: getStoredBoolean('random_visualizer_mode_per_song', false),
     randomVisualizerModes: readStoredRandomVisualizerModes(),
     glowBlurQuantize: readStoredGlowBlurQuantize(),
+    keywordColoringEnabled: getStoredBoolean('keyword_coloring_enabled', true),
     lyricsWallpaperFeed: getStoredBoolean(LYRICS_WALLPAPER_FEED_STORAGE_KEY, true),
     lyricsWallpaperBackground: resolveWallpaperBackground(
         getStoredString(LYRICS_WALLPAPER_BACKGROUND_STORAGE_KEY, 'cover')),
@@ -348,6 +359,10 @@ export const useVisualizerSettingsStore = create<VisualizerSettingsState>((set, 
         const next = resolveSmartBeatSettings(patch, get().smartBeat);
         if (typeof window !== 'undefined') localStorage.setItem(SMART_BEAT_STORAGE_KEY, JSON.stringify(next));
         set({ smartBeat: next });
+    },
+    handleSetKeywordColoringEnabled: (enable) => {
+        setStoredBoolean('keyword_coloring_enabled', enable);
+        set({ keywordColoringEnabled: enable });
     },
     handleToggleDisableVisualizerVignette: (disable) => {
         setStoredBoolean('disable_visualizer_vignette', disable);

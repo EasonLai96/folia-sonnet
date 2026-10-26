@@ -135,6 +135,10 @@ jobs:
       - name: Build web bundle
         run: npm run build
 
+      # 密钥进前端包只有打包之后才看得见（VITE_ 变量被内联、依赖里的字符串被带进来），所以接在 build 后面。
+      - name: Scan web bundle for secrets
+        run: node ci/checkSecrets.ts --dist dist
+
   version-policy:
     name: Version policy
     if: github.event_name == 'push' || github.event.pull_request.draft == false
@@ -153,6 +157,25 @@ jobs:
       # 不需要 npm ci：只读仓库里的 package.json、.nvmrc、workflow 文件。
       - name: Check version policy
         run: npm run check:versions
+
+  secret-guard:
+    name: Secret guard
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # 不需要 npm ci：只读 .env.example 与源码，Node 24 直接跑 ci/checkSecrets.ts。
+      - name: Scan sources for secrets
+        run: node ci/checkSecrets.ts
 
   ui-gates:
     name: UI gates

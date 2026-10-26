@@ -197,6 +197,19 @@ class NativePlaybackEngine {
         this.repeatMode = repeatMode;
     }
 
+    /**
+     * 立刻改循环模式：对已经在播的播放器直接下发，不重新装地址。
+     *
+     * `setRepeatMode` 只在下次 prepare 才生效，正在播的这首会丢循环 —— ExoPlayer
+     * 还是 OFF，歌放完停在末尾，进度条不动；Web 那条路的 `<audio>.loop` 是元素属性，
+     * React 一渲染就生效，原生这里得补上同一个时效性。播放器还没建时退化为只记录。
+     */
+    setRepeatModeNow(repeatMode: number): void {
+        this.repeatMode = repeatMode;
+        if (!this.hasSource) return;
+        void nativePlayer.setRepeatMode(repeatMode).catch(() => undefined);
+    }
+
     subscribe(listener: (event: NativePlaybackEvent) => void): () => void {
         this.listeners.add(listener);
         this.ensureSubscription();

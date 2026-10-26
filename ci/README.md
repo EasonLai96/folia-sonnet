@@ -6,7 +6,9 @@
 
 - `checkVersionPolicy.ts`：版本约束检查，`npm run check:versions`。CI 的 `version-policy` job 和 `test/unit/versionPolicy.test.ts` 跑的是同一份实现。
   查的是：平台依赖钉死且与 `deploy/docker/<平台>-api/package.json` 同版本；`.nvmrc`、`engines.node` 与各 workflow 的 `node-version` 一致；版本号满足 `android/app/build.gradle` 的 versionCode 推导；锁文件版本和 `package.json` 同步。
+- `contracts/extract.ts`：把三份隐式契约抽成 `docs/contracts/manifest/` 下的 manifest —— `electron/preload.cjs` 的 contextBridge 暴露面、`sync-server/src/app.ts` 挂载的路由、`src/services/onlineMusic/providerRegistry.ts` 注册的 omni provider。`node ci/contracts/extract.ts` 校验 manifest 与当前实现一致，`--update` 重写；`test/unit/contracts/contractsDrift.test.ts` 跑同一份实现，实现改了而 manifest 没跟上时 CI 红。
 - `uiPolicy.ts`：两条重构门禁。`npm run check:ui` 禁止在 `src/components/ui/` 与设置页 kit 之外手写 `<button>/<input>/<select>/<textarea>`；`npm run check:size` 禁止文件超过 800 行。基线 `uiControlBaseline.json`、`fileSizeBaseline.json` 只许变小，收紧时跑 `node ci/uiPolicy.ts all --update`。
+- `checkSecrets.ts`：密钥泄漏门禁。`node ci/checkSecrets.ts` 扫 `.env.example` 与 `src/`、`electron/`、`shared/`、`api/`：名字里带 KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/AUTH 的 `VITE_` 变量（Vite 会把值内联进前端包），以及 `sk-`、`AIza`、`ghp_`、`github_pat_`、`xox[baprs]-`、`Bearer` 这类明文密钥形态；`node ci/checkSecrets.ts --dist dist` 在打包之后扫产物（CI 的 `build-web` 跑这条），查上面的形态和产物里出现的密钥环境变量值。假值走 `secretsAllowlist.json`，每条必须写理由。检查项清单与规则见 `docs/contracts/secrets-guard.md`。
 
 ## 为什么入口还在 .github/workflows
 
@@ -23,17 +25,19 @@ GitHub 只运行 `.github/workflows/*.yml`，子目录不读。所以那里只�
 git switch -c fix/登录超时 origin/dev                  # 1. 从 dev 切一个分支，别再往 main/dev 上写
 # ...改代码...
 git add -A && git commit -m "fix: 登录超时后不再卡住"    # 2. 提交
-npm run pr -- "fix: 登录超时后不再卡住"                  # 3. 本地门禁 → 推分支 → 建 PR（一条命令）
+npm run pr -- "fix: 登录超时后不再卡住" --issue 42       # 3. 本地门禁 → 推分支 → 建 PR（一条命令）
 # 4. 盯 CI：有 gh 用 gh pr checks <PR号> --watch，没有就开 PR 页面的 Checks 标签
 ```
 
 `npm run pr` 会做这些事，做不了就当场说清楚原因：
 
 - 拒绝在 `main` / `dev` 上直接提 PR；
+- `fix/*` 分支要求 `--issue <编号>`：先 `gh issue create` 提 issue，正文会自动写一行 `Closes #编号`（新功能 / 文档不强制，有相关任务自己在正文补 `Refs #编号`）；
 - 拒绝还有没提交的改动；
 - 先跑 `npm run ci:local`（加 `--skip-ci` 可跳过，但 CI 照样拦你）；
 - `git push -u origin` 当前分支（HTTPS 或 SSH 都行，用你 git 自己的凭据）；
-- 有可用的 `gh` 就 `gh pr create --base dev`；没有就打印一个 **compare 链接**，浏览器打开点 Create pull request；
+- **fork 场景**：配了 `upstream` remote 且与 `origin` 不同时，PR 建到 upstream，head 写 `<fork 的 owner>:<分支>`；`--repo owner/repo` 可以手动指定目标仓库。没有 gh 时打印的 compare 链接同样指向目标仓库；
+- 有可用的 `gh` 就 `gh pr create --repo <目标仓库> --base dev`（fork 时加 `--head owner:分支`）；没有就打印一个 **compare 链接**，浏览器打开点 Create pull request；
 - 最后打印「盯 CI」和「要 review」的下一步。
 
 **`gh` 是可选的**，不是硬依赖：

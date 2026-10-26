@@ -74,6 +74,14 @@ export const useNativePlaybackRuntime = ({
         void nativePlaybackEngine.stop().catch(() => undefined);
     }, [audioSrc, enabled]);
 
+    // 单曲循环随时能按，不能等下一次装地址才生效（那首歌的循环会丢：ExoPlayer 还是
+    // OFF，歌放完停在末尾，进度条不动；Web 那条路的 <audio>.loop 是元素属性，React
+    // 一渲染就生效，原生这里得显式补一趟）。已经在播的不重新装地址 —— 那会从头再来。
+    useEffect(() => {
+        if (!enabled || !audioSrc || !nativePlaybackEngine.supports(audioSrc)) return;
+        nativePlaybackEngine.setRepeatModeNow(repeatOne ? 1 : 0);
+    }, [audioSrc, enabled, repeatOne]);
+
     // 自动播放。`shouldAutoPlayRef` 由 playSong 置位，Web 那条路（元素有 src 才走）在
     // 原生模式下会因为 src 对不上而自然跳过，所以这里是唯一的消费点。
     useEffect(() => {

@@ -34,26 +34,35 @@ export interface PlayerSwipeGestureBinding {
 
 export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwipeGestureOptions): PlayerSwipeGestureBinding {
     const startRef = useRef<PlayerSwipePoint | null>(null);
+    // 这次手势属于哪根手指。安卓上多指同时触屏很常见（扶着手机的手、搭在屏幕边上的
+    // 手指），簿记不分指针的话：第二根手指一落就抢走起点、抹掉 triggeredRef，两根手指
+    // 的移动又都拿来跟同一个起点比 —— 静止手指的抖动会乱切歌，同一次触碰还会连切。
+    const pointerIdRef = useRef<number | null>(null);
     const triggeredRef = useRef(false);
     // 这个标记要活过 pointerup —— click 是在它之后才到的，所以收尾时不能清它。
     const suppressClickRef = useRef(false);
 
     const finish = useCallback(() => {
         startRef.current = null;
+        pointerIdRef.current = null;
         triggeredRef.current = false;
     }, []);
 
     const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
         // 上一次手势的 click 已经派发完了（click 总在 pointerup 之后），这里可以安全重置。
+        // 已经有手指在跟就不再接新的：换起点会把原手势的几何整个打乱；也不能顺手重置
+        // suppressClickRef，那会把刚触发那下滑的 click 放出来。
+        if (startRef.current !== null) return;
         suppressClickRef.current = false;
         if (!enabled) return;
         startRef.current = { x: event.clientX, y: event.clientY };
+        pointerIdRef.current = event.pointerId;
         triggeredRef.current = false;
     }, [enabled]);
 
     const onPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
         const start = startRef.current;
-        if (!enabled || !start || triggeredRef.current) return;
+        if (!enabled || !start || triggeredRef.current || event.pointerId !== pointerIdRef.current) return;
         const direction = resolvePlayerSwipe(start, { x: event.clientX, y: event.clientY });
         if (!direction) return;
         // 一次手势只切一首：手指继续往同一边划不该连切。
@@ -63,8 +72,15 @@ export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwip
         else onPrev();
     }, [enabled, onNext, onPrev]);
 
-    const onPointerUp = useCallback(() => finish(), [finish]);
-    const onPointerCancel = useCallback(() => finish(), [finish]);
+    const onPointerUp = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        // 别的手指抬起不算收尾 —— 不然它一松手，还在滑的那根手指就断了。
+        if (event.pointerId !== pointerIdRef.current) return;
+        finish();
+    }, [finish]);
+    const onPointerCancel = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        if (event.pointerId !== pointerIdRef.current) return;
+        finish();
+    }, [finish]);
 
     const consumeSuppressedClick = useCallback(() => {
         if (!suppressClickRef.current) return false;
