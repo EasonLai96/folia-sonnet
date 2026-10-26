@@ -17,6 +17,7 @@ import { currentTime } from '../../../stores/motionSignals';
 import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { selectAudioSettingsSnapshot, useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
+import { writeNativeLoopMode } from '../../../services/nativeQueueBridge';
 import { useAutomixSettingsStore } from '../../../stores/useAutomixSettingsStore';
 import { selectDesktopSettingsSnapshot, useDesktopSettingsStore } from '../../../stores/useDesktopSettingsStore';
 import { useLibraryStore } from '../../../stores/useLibraryStore';
@@ -181,6 +182,17 @@ export const useAppFoundation = () => {
 
     // 「进入可视化自动横屏」：Web 只上报「在不在播放页」，转不转由原生按设置判。
     useAndroidPlaybackOrientation();
+
+    // 循环模式的启动同步：Web 这边从 localStorage 恢复了模式，但原生设置里还没有 ——
+    // 不发一次的话，放完往哪走（原生的队列状态机）会一直按默认顺序，直到用户再动一次
+    // 循环开关。放这里只做一次，后续变化由 handleSetLoopMode 自己下发。
+    useEffect(() => {
+        const mode = useAudioSettingsStore.getState().loopMode;
+        void writeNativeLoopMode(
+            mode === 'shuffle' ? 'all' : mode,
+            mode === 'shuffle',
+        );
+    }, []);
 
     // 歌词由原生拉、原生推：这里只按 songKey 认领并渲染。
     // 自己拉会挂在 currentSong 的 effect 上，而原生派发的点歌绕过它 ——

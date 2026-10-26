@@ -21,6 +21,7 @@ import {
     type AudioEqualizerModCurve,
 } from '../utils/audioEqualizerModCurve';
 import { getStoredBoolean, getStoredString, removeStoredKey, setStoredBoolean, setStoredString } from './storagePrimitives';
+import { writeNativeLoopMode } from '../services/nativeQueueBridge';
 import { setStatusMessage } from './useStatusMessageStore';
 import { setAudioFocusPolicy } from '../platform/foliaNative';
 import i18n from '../i18n/config';
@@ -570,6 +571,18 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
             localStorage.setItem('player_loop_mode', mode);
         }
         set({ loopMode: mode });
+        /*
+         * 下发原生。**放完往哪走是原生按这个决定的**（NativePlayQueue 的 loopMode/shuffle），
+         * 不下发的话原生永远按默认的「顺序」行事 —— 用户在界面里切成列表循环/单曲循环/
+         * 随机，后台放完一首就停，切回来才发现没接着放。
+         *
+         * 随机在 Web 这边是一个独立的模式值（'shuffle'），在原生那边是「列表循环 + 随机
+         * 标志」两个东西 —— 换算在这里做一次，别让原生猜 Web 的枚举。
+         */
+        void writeNativeLoopMode(
+            mode === 'shuffle' ? 'all' : mode,
+            mode === 'shuffle' ? true : false,
+        );
         const loopModeKey = mode === 'off'
             ? 'loopOff'
             : mode === 'one'
