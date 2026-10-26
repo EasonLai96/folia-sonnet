@@ -39,6 +39,8 @@ import { useRef, useCallback } from 'react';
 import type { SongResult } from '../../../types';
 import { usePlaybackStore } from '../../../stores/usePlaybackStore';
 import { useSongThemeFollow } from '../../../hooks/useSongThemeFollow';
+import { readNativeQueueState } from '../../../services/nativeQueueBridge';
+import { songFromMirrorEntry } from '../../../utils/queueMirrorEntry';
 
 // src/components/app/appWiring/useAppPlaybackBridges.ts
 // 播放与系统之间的桥：音频分析、转码兜底、transport、系统媒体会话、通知栏、歌词推送。
@@ -238,6 +240,23 @@ export const useAppPlaybackBridges = (model: Input) => {
         // 没人收，失败的歌每按一次都再撞一次原生。这里按原语义接回来。
         onSyncToSong: (songKey, positionMs) => {
             const state = usePlaybackStore.getState();
+            /*
+             * 队列也要对齐：WebView 冻结期间原生可能自动跳过了放不了的歌、随机挑了
+             * 格、通知栏切了歌 —— 它的 playQueue 换过下标甚至内容。只认领 currentSong
+             * 不认领队列的话，用户回来看到的还是旧队列：点「下一首」会跳回冻结前的
+             * 位置，列表顺序也是错的。拉一次整份状态，队列与下标一起摆正。
+             */
+            void (async () => {
+                const native = await readNativeQueueState();
+                if (!native || native.revision === 0) return;
+                const shown = usePlaybackStore.getState().playQueue;
+                const nativeKeys = native.entries.map(entry => entry.songKey).join('|');
+                const shownKeys = shown.map(item => getPlaybackSongKey(item)).join('|');
+                if (nativeKeys === shownKeys) return;
+                usePlaybackStore.getState().setPlayQueue(
+                    native.entries.map(entry => songFromMirrorEntry(entry)),
+                );
+            })();
             const shown = state.currentSong;
             if (shown && getPlaybackSongKey(shown) === songKey) {
                 // key 相等也要补齐：乐观 setCurrentSong 之后的 syncTo、以及 WebView
