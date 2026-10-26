@@ -2018,6 +2018,8 @@ export default {
     "orientationLandscape": "Saat ini: lanskap",
     "forceLandscape": "Paksa lanskap",
     "forceLandscapeDesc": "Aktif mengunci aplikasi ke lanskap (dua arah); nonaktif mengembalikan rotasi ke sistem.",
+    "autoLandscapeForVisualizer": "Lanskap saat masuk visualizer",
+    "autoLandscapeForVisualizerDesc": "Aktif membuat layar lanskap begitu pemutar dibuka, ke arah mana pun ponsel dipegang; keluar dari pemutar mengembalikan orientasi semula. Tidak bergantung pada Kunci lanskap — keduanya boleh aktif.",
     "cacheDetails": "Detail Cache",
     "settingsGroupInterface": "Antarmuka",
     "settingsGroupMusic": "Musik",

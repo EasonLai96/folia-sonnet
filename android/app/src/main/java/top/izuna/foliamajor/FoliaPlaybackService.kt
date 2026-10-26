@@ -19,6 +19,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 
 import top.izuna.foliamajor.coloros.ColorOsLyricBridge
+import top.izuna.foliamajor.player.NativeLoopMode
+import top.izuna.foliamajor.player.NativePlayQueue
+import top.izuna.foliamajor.player.NativeQueueEntry
 
 /**
  * 后台播放的前台服务。
@@ -224,9 +227,31 @@ class FoliaPlaybackService : android.app.Service() {
         // MediaSession 建好之后再重贴一次通知，好让它带上 MediaStyle 的 token。
         promoteToForeground()
         ensureMediaSession()
+        // 循环模式与随机：从原生设置里读回来。设置是**应用级**的事实，不该由前台每次
+        // 被唤醒时补一句 —— 服务可能在 WebView 完全不在场的情况下重启（进程被回收、
+        // 加回来继续播），那时没有机会问前台。
+        applyLoopModeFromSettings()
         publishNotification()
         // 壁纸心跳巡检开表（onDestroy 里撤）。服务在，巡检就在；它自己判断该不该敲。
         mainHandler.postDelayed(heartbeatTick, WALLPAPER_HEARTBEAT_TICK_MS)
+    }
+
+    /**
+     * 把设置的循环模式与随机开关读进队列状态机。
+     *
+     * 读的是 [top.izuna.foliamajor.settings.FoliaSettingsStore]，**不是前台下发的内存值**：
+     * 服务可能在没有 WebView 的情况下重启（进程被回收后又加回来继续播），这时没有机会
+     * 问前台，而「放完往哪走」必须有依据。
+     */
+    private fun applyLoopModeFromSettings() {
+        try {
+            val settings = top.izuna.foliamajor.settings.FoliaSettingsStore.get(this)
+            val snapshot = settings.snapshot()
+            playQueue.setLoopMode(NativeLoopMode.fromWire(snapshot.optString("loopMode", "off")))
+            playQueue.setShuffle(snapshot.optBoolean("shuffle", false))
+        } catch (error: Throwable) {
+            Log.w(TAG, "循环模式读取失败，按顺序播放处理", error)
+        }
     }
 
     /**
@@ -557,6 +582,85 @@ class FoliaPlaybackService : android.app.Service() {
         return true
     }
 
+    /**
+     * 一首放完了，**原生自己决定接下来怎么办**。
+     *
+     * 这是整条链路真正归原生的那一步：不再是「先问 JS、等它 2.5 秒、它没回话我再兜底」，
+     * 而是立刻按队列状态往前走。前台被系统冻结、被销毁、WebView 重载都不影响 ——
+     * 它甚至不需要在场。
+     *
+     * 三种情形：
+     *   · 单曲循环 → 同一首从头再来（seek 0，**不换源**，避免重新解密 / 缓冲的停顿）；
+     *   · 还有下一首 → 换源继续（地址没预取到就向平台要，见 resolveMirrorEntryAsync）；
+     *   · 顺序播放走到头 → 停在那儿，不假装还有歌。
+     *
+     * 仍然会广播一条 "next" 给 JS：JS 活着时收到它可以把界面上的当前曲目跟上，但
+     * **它不再决定播什么**，收到只是渲染。JS 不在场也没有损失。
+     */
+    fun onTrackFinished() {
+        if (!nativePlaybackActive()) {
+            // 当前这首走的是 <audio>（Web 全流程），队列在 JS 那边，原生没有立场替它决定。
+            // 这一档只在「原生从没接管过播放」时发生。
+            sendCommand("next")
+            scheduleSkipFallback(+1)
+            return
+        }
+        val current = playQueue.current()
+        val mode = playQueue.loopMode
+        // 单曲循环：位置归零重播。走 seek 而不是换源 —— 换源会重新解密、重新缓冲，
+        // 听感上是「每放完一次就卡一下」，而单曲循环本该是无缝的。
+        if (mode == NativeLoopMode.ONE && current != null) {
+            seekToStartForRepeat()
+            return
+        }
+        val next = playQueue.onFinished()
+        if (next == null) {
+            // 顺序播放走到头：停住，通知栏状态跟着变成「已暂停在末尾」。
+            sendCommand("ended")
+            publishSnapshot()
+            publishNotification()
+            return
+        }
+        playQueue.bumpRevision()
+        playQueueEntry(next)
+        // JS 在场就让它把界面跟上；不在场无所谓。
+        sendCommand("next")
+    }
+
+    /**
+     * 单曲循环重播：位置归零，**并让引擎的进度基准一起复位**。
+     *
+     * 只调 seek 不够 —— Web 侧引擎有一条只进不退的夹子（lastDeliveredMs，只在
+     * playing/seeked 上复位），而 ExoPlayer 的单曲循环是**无缝**的：既不回调
+     * onPositionDiscontinuity 也不发 STATE_ENDED，位置直接从末尾跳回 0。播放器这边
+     * 报一次 seeked，那条夹子才会跟着复位，进度条才不会冻在末尾。
+     */
+    private fun seekToStartForRepeat() {
+        try {
+            top.izuna.foliamajor.player.FoliaNativePlayerPlugin.seekFromSystem(0L)
+            sendCommand("repeatRestart")
+            publishSnapshot()
+        } catch (error: Throwable) {
+            Log.w(TAG, "单曲循环重播失败", error)
+        }
+    }
+
+    /** 把队列里的一首交给原生播放器换源（地址缺了就走平台解析，见 resolveMirrorEntryAsync）。 */
+    private fun playQueueEntry(entry: NativeQueueEntry) {
+        val json = entry.toJson()
+        var url = entry.url
+        if (url.isEmpty()) {
+            url = resolvedUrlCache[entry.songKey] ?: ""
+        }
+        if (url.isNotEmpty()) {
+            nativePlayMirrorEntry(json, url)
+            return
+        }
+        resolveMirrorEntryAsync(
+            org.json.JSONArray().put(json), json, 0, 0, +1
+        )
+    }
+
     /** App 内点歌 / 切歌走原生（两轨合一）的入口：见 FoliaPlaybackPlugin.playFromQueue。 */
     fun playFromQueue(songKey: String?, queueJson: String?, index: Int): Boolean {
         if (songKey == null || songKey.isEmpty()) {
@@ -666,6 +770,10 @@ class FoliaPlaybackService : android.app.Service() {
         when (command) {
             "next" -> handleTransportSkip(+1)
             "previous" -> handleTransportSkip(-1)
+            // 一首唱完了：原生按队列自己往前走（单曲循环 / 下一首 / 到头停住）。
+            // 不经过 handleTransportSkip —— 手按下一首与放完自动前进的语义不同：
+            // 手按时单曲循环也该真的换歌，放完时单曲循环该重播同一首。
+            "finished" -> onTrackFinished()
             "like" -> handleTransportLike()
             "seek" -> {
                 val positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L)
@@ -1068,6 +1176,12 @@ class FoliaPlaybackService : android.app.Service() {
                 top.izuna.foliamajor.wallpaper.WallpaperLyricsState.publishNativeTrack(
                         title, artist, artworkUrl, durationMs,
                         lines.toTypedArray())
+                // 同一份歌词也要给播放页：以前只喂了桌面歌词，播放页靠 JS 自己再拉一次，
+                // 而那次拉取挂在 currentSong 的 React effect 上 —— 原生派发的点歌绕过了
+                // 它，于是「歌词停在上一个歌单那首，要等下一首才翻」。
+                //
+                // 现在原生拉到什么就推什么，前台只按 songKey 认领并渲染，不自己判断该不该拉。
+                FoliaPlaybackPlugin.dispatchLyrics(songKey, lyric.mainLrc, lyric.transLrc)
             }
         }, "folia-native-lyric").start()
     }
@@ -1715,6 +1829,54 @@ class FoliaPlaybackService : android.app.Service() {
             return out
         }
 
+        /**
+         * 播放队列 + 播放状态合成一份快照。**前台渲染只读这一份。**
+         *
+         * 与 [snapshotJson] 的区别：那一份是给 JS「对齐」用的（它知道自己少了什么，
+         * 拿着去补），这一份是给 JS「整体重画」用的 —— 队列、下标、循环模式、随机、
+         * 位置、时长、播放状态全在一起，前台不需要再回头去问设置或者猜。
+         *
+         * `revision` 变了就代表队列内容或下标动过，前台据此决定要不要重排列表。
+         */
+        @JvmStatic
+        fun queueStateJson(): org.json.JSONObject {
+            val service = snapshotSource
+            val out = org.json.JSONObject()
+            if (service == null) {
+                out.put("hasSong", false)
+                out.put("revision", 0)
+                out.put("index", -1)
+                out.put("size", 0)
+                out.put("entries", org.json.JSONArray())
+                out.put("loopMode", NativeLoopMode.OFF.wire)
+                out.put("shuffle", false)
+                return out
+            }
+            synchronized(service) {
+                val queue = playQueue.snapshot()
+                out.put("entries", queue.optJSONArray("entries") ?: org.json.JSONArray())
+                out.put("index", queue.optInt("index", -1))
+                out.put("size", queue.optInt("size", 0))
+                out.put("loopMode", queue.optString("loopMode", NativeLoopMode.OFF.wire))
+                out.put("shuffle", queue.optBoolean("shuffle", false))
+                out.put("revision", queue.optLong("revision", 0L))
+                out.put("hasSong", service.cachedSongKey?.isNotEmpty() == true)
+                out.put("songKey", service.cachedSongKey ?: "")
+                out.put("title", service.cachedTitle)
+                out.put("artist", service.cachedArtist)
+                out.put("album", service.cachedAlbum)
+                out.put("durationMs", service.cachedDurationMs)
+                out.put("positionMs", service.resolvePlaybackPositionMs())
+                out.put("playing", service.cachedState == PlaybackStateCompat.STATE_PLAYING)
+                out.put("liked", service.cachedLiked)
+                out.put("canLike", service.cachedCanLike)
+                out.put("providerId", service.cachedProviderId)
+                out.put("serverSongId", service.cachedServerSongId)
+                out.put("artworkUrl", service.pendingArtworkUrl ?: "")
+            }
+            return out
+        }
+
         /** JS 没回话等多久就原生补写红心。要长于 JS 正常处理一次收藏的耗时（写 + 复查），免得慢一点就双写。 */
         private const val LIKE_FALLBACK_MS = 5_000L
 
@@ -1758,6 +1920,50 @@ class FoliaPlaybackService : android.app.Service() {
         private var mirroredIndex = -1
         /** JS 没回话等多久就自己动手。预取命中的下一首 2.5s 内足够换好源。 */
         private const val SKIP_FALLBACK_MS = 2_500L
+
+        /**
+         * 播放链路的真相：队列、下标、循环模式、随机。
+         *
+         * 这份状态**不再等 JS 发话**。放完一首时由它决定往哪走（见 onTrackFinished），
+         * 单曲循环重播当前这首、列表循环绕回队首、顺序播放走到头才停。之前所有这些判断
+         * 都在 WebView 里，进程一冻结 JS 不跑，播放就断在半路 —— 用户报的「前台冻结时
+         * 暂停后无法继续」「放完不自动下一首」「单曲循环停在末尾」都是这一个根因。
+         *
+         * 前台仍然可以推队列（换歌单、插歌、删歌），但那是**下发意图**，推完就不管了。
+         */
+        val playQueue = NativePlayQueue()
+
+        /**
+         * 前台改了循环模式：落进设置，再让队列跟上。返回落盘后的整份设置给前台确认。
+         *
+         * 写成静态是因为**服务不一定在跑**：用户在设置里改循环模式时可能还没开始播放，
+         * 此时没有实例可调，但设置必须落下去 —— 否则「先设单曲循环、再点播放」这条
+         * 最常见的路径就是空的（那正是用户报的 B 场景）。
+         */
+        @JvmStatic
+        fun updateLoopMode(context: Context?, mode: String?, shuffle: Boolean?): org.json.JSONObject? {
+            if (context == null) return null
+            return try {
+                val settings = top.izuna.foliamajor.settings.FoliaSettingsStore.get(context)
+                val values = mutableMapOf<String, Any?>()
+                if (mode != null) values["loopMode"] = NativeLoopMode.fromWire(mode).wire
+                if (shuffle != null) values["shuffle"] = shuffle
+                val snapshot = settings.putAll(values)
+                // 服务在跑就立刻让队列跟上；不在跑也没关系 —— 它启动时会自己读一次
+                // （见 applyLoopModeFromSettings）。
+                snapshotSource?.let { service ->
+                    synchronized(service) {
+                        playQueue.setLoopMode(NativeLoopMode.fromWire(snapshot.optString("loopMode", "off")))
+                        playQueue.setShuffle(snapshot.optBoolean("shuffle", false))
+                        service.publishSnapshot()
+                    }
+                }
+                snapshot
+            } catch (error: Throwable) {
+                Log.w(TAG, "循环模式写入失败", error)
+                null
+            }
+        }
 
         /**
          * 已经调用过 startForeground 了；见 promoteToForeground()。
@@ -1991,6 +2197,28 @@ class FoliaPlaybackService : android.app.Service() {
                 context.startService(intent)
             } catch (ignored: Throwable) {
                 // 服务起不来就没有兜底；这条本来也只在兜底场景里发生。
+            }
+        }
+
+        /**
+         * 一首放完了，把这件事交给服务，由它按原生队列的循环模式决定接下来播什么。
+         *
+         * 与 [requestNativeAutoNext] 的区别是**不等 JS**：那条走的是「命令 + 兜底计时器」，
+         * 要等 2.5 秒确认 JS 没接才动手；这条进去就直接推进队列。前台在场时同样会收到
+         * 一条广播用来更新界面，但它不再参与「播什么」的决定。
+         */
+        @JvmStatic
+        fun requestNativeTrackFinished(context: Context?) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "finished")
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "曲目播完的通知没送到服务", ignored as? Throwable)
             }
         }
 

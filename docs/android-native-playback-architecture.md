@@ -1,0 +1,113 @@
+# 原生主导架构
+
+> 目标：**播放链路的真相在原生，WebView 只负责同步状态、渲染界面、处理交互。**
+>
+> 这不是一次重构，是换主人。下面写清换完之后谁负责什么、以及为什么。
+
+## 为什么必须换
+
+现在 WebView 持有播放链路的真相：队列、当前曲目、循环模式、播放状态。原生只是被前台
+驱动的一个执行器，靠 `mirroredQueueJson` 和前台下发的命令干活。
+
+后果在真机上一条条暴露，但其实是同一个根因：
+
+| 现象 | 同一根因下的解释 |
+|---|---|
+| 前台被冻结时暂停后无法继续播放 | 播放状态机在 JS 里，进程冻结后 JS 不跑，没人接住恢复 |
+| 单曲循环放完停在末尾 | 回绕时不换源、不重置位置，而位置基准也由前台那条链路维护 |
+| 切歌单后音源、歌词、主题都不换 | 这些派生行为挂在 `currentSong` 的 React effect 上，同一个源头 |
+| 自动横屏没生效 | 判定依赖前台 store 的三项设置，任何一项不满足就静默返回 null |
+
+逐条打补丁修不完 —— 每次修完，换个入口换个时序又会冒出来。#85/#86/#87 三个修复真机
+全部无效，就是这个判断的证据。
+
+## 新的职责划分
+
+### 原生（Kotlin）—— 唯一真相
+
+| 域 | 内容 | 位置 |
+|---|---|---|
+| 设置 | 全部设置项，一份 JSON 落盘 | `settings/FoliaSettingsStore.kt` |
+| 播放队列 | 队列、下标、循环模式、随机、切歌、放完往哪走 | `player/NativePlayQueue.kt` |
+| 音频地址 | 向平台要地址、失败重试、预取邻居 | `online/MusicGateway.kt`（已具备） |
+| 歌词 | 拉取、缓存、随曲目变化下发 | 新增 `player/NativeLyricFetcher.kt` |
+| 凭据 | 平台登录态，经 `CookieManager` 落盘 | `FoliaNativePlugin.storeResponseCookies`（已具备） |
+| 主题参数 | AI 主题的输入（当前曲目的音频特征、配色种子） | 新增 `player/NativeThemeSeed.kt` |
+| 播放状态 | 播放/暂停/缓冲/错误，自己维持 | `FoliaPlaybackService.kt` |
+
+### WebView（JS）—— 只做三件事
+
+1. **同步状态**：启动时拉一次设置与播放快照，之后订阅原生的推送。
+2. **渲染界面**：按拿到的快照画播放页、队列、歌词、主题。
+3. **处理交互**：把用户动作翻成一个意图下发（播放这个队列、切这首、设成单曲循环）。
+
+JS 里**不保留业务逻辑**：不做「上一首是什么」的推断、不做循环模式的判断、不做失败后的
+重试决策、不决定歌词什么时候该重新拉。这些都是原生的事。
+
+## 契约
+
+字段名与 Web 侧现有存储键保持一致，避免两边各有一份默认值。
+
+### 设置
+
+```ts
+// 原生 → 前台：启动时、以及任何一次改动之后
+type SettingsSnapshot = { [key: string]: unknown }
+
+// 前台 → 原生
+setSettings({ values: Record<string, unknown> })   // 整份或部分，合并写入
+getSettings() -> SettingsSnapshot
+```
+
+### 播放
+
+```ts
+// 前台 → 原生（意图）
+playQueue({ entries, index })        // 换队列并开始播：整份替换，不在旧队列上修补
+setLoopMode({ mode, shuffle })       // 循环模式归原生，前台只下发
+skip({ direction })                   // ±1
+seek({ positionSec })
+pause() / resume()
+
+// 原生 → 前台（状态推送，事件名 foliaPlaybackState）
+type PlaybackState = {
+  entries: QueueEntry[]
+  index: number
+  loopMode: 'off' | 'all' | 'one'
+  shuffle: boolean
+  revision: number      // 变了就是新快照，前台整体重画
+  status: 'playing' | 'paused' | 'buffering' | 'error' | 'idle'
+  positionSec: number
+  durationSec: number
+  songKey: string
+}
+```
+
+`revision` 是关键：前台不用逐字段比，拿到就整体重画。逐字段做增量推断正是
+「歌词/主题跟不上」的来源。
+
+### 歌词
+
+```ts
+// 原生 → 前台：曲目变了就推一次，前台不用自己判断该不该重新拉
+type LyricPayload = { songKey: string; lrc: string | null; translated: string | null }
+```
+
+## 迁移顺序
+
+一次做完不可验证，按依赖从上到下推：
+
+1. **设置存储**（`FoliaSettingsStore`）—— 一切的基础，已建
+2. **队列状态机**（`NativePlayQueue`）—— 不碰播放器，可单测，已建
+3. **播放服务接入队列状态机** —— 自动下一首、循环、随机改由原生决定
+4. **歌词拉取下沉** —— 曲目变化即推
+5. **主题种子下沉** —— 前台只按信封渲染
+6. **Web 侧瘦身** —— 删掉推断逻辑，改成意图 + 订阅
+7. **自动横屏** —— 改由原生按设置自己决定，不再问前台
+
+## 不做什么
+
+- 不重写 ExoPlayer 的封装（`FoliaNativePlayer` 的播放能力够用，问题在它上面那层「谁决定
+  下一首」）。
+- 不改桌面端（Electron）的链路：那边主进程本来就是独立进程，问题只在安卓的 WebView 形态。
+- 不动已发布的存储键名。

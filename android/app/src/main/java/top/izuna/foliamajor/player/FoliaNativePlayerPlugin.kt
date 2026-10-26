@@ -291,25 +291,23 @@ class FoliaNativePlayerPlugin : Plugin() {
                  */
                 if ("ended" == type) {
                     /*
-                     * 播完了 = 这首真的走完了，**两条路都要接住**。
+                     * 播完了 = 这首真的走完了。**原生立即决定接下来播什么**，不再等 JS。
                      *
-                     * 老判据是「桥死了才兜底」—— 但桥活着不等于 JS 在跑：退到后台之后
-                     * 插件实例还在（`isBridgeAlive()` 为真），WebView 的 JS 却被系统挂起，
-                     * `onEnded` 那条回调根本不会执行。于是「后台放完一首就不动了」。
-                     * 这也是用户报的「原生的放完了不会自动下一首」。
+                     * 老做法是「先按 JS 那条路发一次 next，再挂一个 2.5 秒的原生兜底」：
+                     * 桥活着不等于 JS 在跑 —— 退到后台之后插件实例还在（isBridgeAlive()
+                     * 为真），WebView 的 JS 却被系统挂起，onEnded 那条回调根本不会执行。
+                     * 于是「后台放完一首就不动了」，用户报的正是这句。
                      *
-                     * 所以改成「先按 JS 那条路发一次 next，再挂一个原生兜底」：
-                     *   · JS 活着 → 它自己切歌，并推出新 metadata（服务那边看得到）；
-                     *   · JS 被挂起 → 到点由镜像在原生换源（skipViaMirror，队尾会回绕）。
-                     * 兜底是**幂等**的：JS 若已经切过去，镜像游标与当前歌对不上就不动手
-                     * （见 scheduleSkipFallback 判据），不会双倍跳歌。
+                     * 现在反过来：FoliaPlaybackService.onTrackFinished 按原生队列的循环模式
+                     * 立刻决定（单曲循环重播 / 换下一首 / 顺序播放走到头才停），它自己不叫醒
+                     * 前台。前台在场时会收到一条 "next" 用来把界面跟上，不在场也没有损失。
                      */
                     MAIN.post {
                         val context = instance?.getContext()
                         if (context != null
                             && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
                             top.izuna.foliamajor.FoliaPlaybackService
-                                    .requestNativeAutoNext(context)
+                                    .requestNativeTrackFinished(context)
                         }
                     }
                 }

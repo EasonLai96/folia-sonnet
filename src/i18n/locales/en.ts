@@ -2018,6 +2018,8 @@ export default {
     "orientationLandscape": "Current: landscape fit",
     "forceLandscape": "Force landscape",
     "forceLandscapeDesc": "On locks the app to landscape (either way round); off hands rotation back to the system.",
+    "autoLandscapeForVisualizer": "Landscape on entering the visualizer",
+    "autoLandscapeForVisualizerDesc": "On turns the screen landscape as soon as you open the player, whichever way the phone is held; leaving the player restores the original orientation. Independent of Force landscape — both can be on.",
     "cacheDetails": "Cache Details",
     "settingsGroupInterface": "Interface",
     "settingsGroupMusic": "Music",

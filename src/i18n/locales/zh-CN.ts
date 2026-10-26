@@ -2019,6 +2019,8 @@ export default {
     "orientationLandscape": "当前：横屏兼容",
     "forceLandscape": "强制横屏",
     "forceLandscapeDesc": "打开后把界面锁成横屏（左右横放都能跟着转），关掉则交回系统自己转。",
+    "autoLandscapeForVisualizer": "进入可视化自动横屏",
+    "autoLandscapeForVisualizerDesc": "打开后进播放页直接横屏，不管手机现在是横着还是竖着；离开播放页转回原方向。与「强制横屏」互不影响，两个都开也正常。",
     "cacheDetails": "缓存详情",
     "settingsGroupInterface": "界面",
     "settingsGroupMusic": "音乐",

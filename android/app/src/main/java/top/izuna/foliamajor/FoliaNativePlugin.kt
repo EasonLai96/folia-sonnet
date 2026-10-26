@@ -2426,10 +2426,79 @@ class FoliaNativePlugin : Plugin() {
         if (activity != null) {
             activity.runOnUiThread { PhoneLayoutOrientation.apply(activity) }
         }
+        // 方向也是设置的一部分：落进原生设置，下次冷启动由原生自己按它摆好，
+        // 不必等 WebView 起来再说一遍。
+        top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            .putAll(mapOf("phoneFitOrientation" to orientation, "forceLandscape" to enabled))
         val result = JSObject()
         result.put("enabled", enabled)
         result.put("orientation", PhoneLayoutOrientation.getOrientation(getContext()))
         call.resolve(result)
+    }
+
+    /**
+     * 「我现在在播放页」—— Web 每次切页上报一次，原生据此决定要不要按
+     * 「进入可视化自动横屏」把屏幕转过去。
+     *
+     * 之所以由 Web 只说「在哪一页」、而不是自己判断该不该转：判断要用设置，而设置在
+     * 原生；两处各判一次，就会出现「Web 觉得该转、原生觉得不该」的静默分歧。
+     */
+    @PluginMethod
+    fun setPlayerVisible(call: PluginCall) {
+        val visible = java.lang.Boolean.TRUE.equals(call.getBoolean("visible", false))
+        PhoneLayoutOrientation.setPlayerVisible(visible)
+        val activity = getActivity()
+        if (activity != null) {
+            activity.runOnUiThread { PhoneLayoutOrientation.apply(activity) }
+        }
+        val result = JSObject()
+        result.put("visible", visible)
+        result.put("orientation", if (PhoneLayoutOrientation.resolve(getContext())
+                == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+            "landscape" else "portrait")
+        call.resolve(result)
+    }
+
+    /**
+     * 启动时拉一次设置。**WebView 里不再有设置真相**，它起来第一件事就是拿这份把界面填满。
+     * 一次性整份返回而不是逐项问：逐项读会让「界面显示一半」成为可能的状态，而设置之间
+     * 是有关系的（循环模式与随机、方向与强制横屏），半新半旧最容易出现「明明开了却没效果」。
+     */
+    @PluginMethod
+    fun getSettings(call: PluginCall) {
+        try {
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            call.resolve(JSObject.fromJSONObject(store.snapshot()))
+        } catch (error: Exception) {
+            call.reject("读取设置失败", error)
+        }
+    }
+
+    /**
+     * 写设置：整份或部分，合并写入，返回合并后的整份快照。
+     *
+     * 同步落盘（见 FoliaSettingsStore.putAll）：设置改完紧接着就有播放动作按它走，
+     * 异步写在进程被杀时会丢，而丢的正好是「用户刚改的那一项」。
+     */
+    @PluginMethod
+    fun setSettings(call: PluginCall) {
+        try {
+            val values = call.getObject("values")
+            if (values == null) {
+                call.reject("缺少 values")
+                return
+            }
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            val merged = java.util.HashMap<String, Any?>()
+            values.keys().forEach { key ->
+                // opt 而不是 get：JS 传 null 表示「删掉这一项」，交给 store 处理。
+                merged[key] = values.opt(key)
+            }
+            val snapshot = store.putAll(merged)
+            call.resolve(JSObject.fromJSONObject(snapshot))
+        } catch (error: Exception) {
+            call.reject("写入设置失败", error)
+        }
     }
 
     /*

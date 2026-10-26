@@ -43,6 +43,8 @@ class FoliaPlaybackPlugin : Plugin() {
          * 事件名必须与 Web 层 FoliaPlayback.addListener 订阅的保持一致。
          */
         private const val EVENT_COMMAND = "foliaPlaybackCommand"
+        /** 原生拉到的歌词：`{ songKey, lrc, translated }`。 */
+        private const val EVENT_LYRICS = "foliaPlaybackLyrics"
 
         /**
          * 通知栏/耳机按键在后台触发时，Activity 可能已经不在了，
@@ -75,6 +77,26 @@ class FoliaPlaybackPlugin : Plugin() {
             if (current != null) {
                 current.dispatchCommand(command, positionMs, songKey)
             }
+        }
+
+        /**
+         * 把原生拉到的歌词推给播放页。
+         *
+         * 为什么由原生推：歌词原本是 JS 自己按 `currentSong` 的 React effect 去拉的，而
+         * 原生派发的点歌绕过了那个 effect —— 于是「切了歌单，歌词还停在上一个歌单那首」。
+         * 现在原生拉到什么就推什么，前台只按 `songKey` 认领，不判断该不该拉。
+         *
+         * 前台不在场（WebView 冻结 / 销毁）时 notifyListeners 无事发生，这没关系：
+         * 桌面歌词走 WallpaperLyricsState，不依赖 WebView。
+         */
+        @JvmStatic
+        fun dispatchLyrics(songKey: String, lrc: String?, translated: String?) {
+            val current = instance ?: return
+            current.notifyListeners(EVENT_LYRICS, JSObject().apply {
+                put("songKey", songKey)
+                put("lrc", lrc ?: "")
+                put("translated", translated ?: "")
+            })
         }
 
         /**
@@ -256,6 +278,46 @@ class FoliaPlaybackPlugin : Plugin() {
         if (index != null) intent.putExtra(FoliaPlaybackService.EXTRA_QUEUE_MIRROR_INDEX, index)
         startServiceCompat(activity, intent)
         call.resolve()
+    }
+
+    /**
+     * 循环模式与随机：**下发意图，不下发结果**。
+     *
+     * 写进原生设置后立刻生效，之后「放完往哪走」由原生自己按它决定（见
+     * FoliaPlaybackService.onTrackFinished）。前台不必在场、也不必参与判断 ——
+     * 它只需要在改完之后把界面按返回的快照重画。
+     */
+    @PluginMethod
+    fun setLoopMode(call: PluginCall) {
+        try {
+            val result = FoliaPlaybackService.updateLoopMode(
+                getContext(),
+                call.getString("mode"),
+                if (call.hasOption("shuffle")) call.getBoolean("shuffle") else null,
+            )
+            if (result == null) {
+                call.reject("循环模式没有写进设置")
+                return
+            }
+            call.resolve(JSObject.fromJSONObject(result))
+        } catch (error: Throwable) {
+            call.reject("循环模式下发失败", error as? Exception)
+        }
+    }
+
+    /**
+     * 播放快照。**前台渲染的唯一来源**：整份拿到就整体重画，不做「上一首是什么」的推断。
+     *
+     * 里面同时带队列（原生持有）与播放状态（位置、时长、是否在播），所以前台不必分别
+     * 去问两处、再自己对时。
+     */
+    @PluginMethod
+    fun getQueueState(call: PluginCall) {
+        try {
+            call.resolve(JSObject.fromJSONObject(FoliaPlaybackService.queueStateJson()))
+        } catch (error: Throwable) {
+            call.reject("读取播放队列失败", error as? Exception)
+        }
     }
 
     /**

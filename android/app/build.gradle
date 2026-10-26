@@ -111,6 +111,10 @@ dependencies {
     // ⚠️ 版本改动要看 media3 的 release notes：1.x 之间 API 有移动。
     implementation "androidx.media3:media3-exoplayer:1.11.1"
     implementation project(':capacitor-android')
+    // JVM 单测里 android.jar 的 org.json 是空壳（一调用就 "not mocked"），而设置与队列
+    // 这两层的数据载体就是 JSONObject —— 它们恰恰最该被单测钉住（合并语义、队列推进）。
+    // 给测试类路径放一份真实实现即可，不进包。
+    testImplementation "org.json:json:20240303"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

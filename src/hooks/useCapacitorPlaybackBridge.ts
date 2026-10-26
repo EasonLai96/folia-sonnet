@@ -121,6 +121,17 @@ interface FoliaPlaybackPlugin {
     eventName: 'foliaPlaybackCommand',
     listener: (payload: { command: string; positionMs?: number; songKey?: string }) => void,
   ): Promise<() => void>;
+  /**
+   * 原生拉到的歌词。**歌词的拉取归原生**：它知道当前该是哪首（队列在它手里），
+   * 拉到就推过来，播放页只按 songKey 认领并渲染。
+   *
+   * 以前歌词是 JS 自己按 currentSong 的 effect 拉的，而原生派发的点歌绕过那个 effect，
+   * 于是「切了歌单，歌词还停在上一个歌单那首」。
+   */
+  addListener(
+    eventName: 'foliaPlaybackLyrics',
+    listener: (payload: { songKey: string; lrc?: string; translated?: string }) => void,
+  ): Promise<() => void>;
 }
 
 const FoliaPlayback = registerPlugin<FoliaPlaybackPlugin>('FoliaPlayback');

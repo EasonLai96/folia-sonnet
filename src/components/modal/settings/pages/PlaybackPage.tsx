@@ -16,6 +16,7 @@ import { isNativePlayerAvailable } from '../../../../services/playbackEngine/nat
 import { runsOnWindows } from '../../../../utils/platform';
 import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
+import AndroidAutoLandscapeSetting from '../AndroidAutoLandscapeSetting';
 import { useSettingsPage } from './settingsPageContext';
 import { TextField } from '@/components/ui';
 
@@ -73,6 +74,15 @@ const O = {
     autoSkipUnplayable: option(BEHAVIOR, 'autoSkipUnplayable', 'options.autoSkipUnplayable'),
     preventSleep: option(BEHAVIOR, 'preventDisplaySleepDuringPlayback', 'options.preventDisplaySleepDuringPlayback', { electronOnly: true }),
     voiceInputPause: option(BEHAVIOR, 'voiceInputPause', 'options.voiceInputPause', { electronOnly: true, available: () => runsOnWindows() }),
+    /*
+     * 「进入可视化自动横屏」：只在播放页生效、离开就还回去，属于「播放时怎么表现」，
+     * 所以放在播放行为组里，不在外观。判定在原生（PhoneLayoutOrientation.resolve），
+     * 这里只是一行开关。
+     */
+    autoLandscapeForVisualizer: option(BEHAVIOR, 'autoLandscapeForVisualizer', 'options.autoLandscapeForVisualizer', {
+        noteKey: 'options.autoLandscapeForVisualizerDesc',
+        available: isCapacitorAndroid,
+    }),
     modelBeatThis: option(MODELS, 'analysisModelBeatThis', 'options.analysisModelBeatThis', { noteKey: 'options.analysisModelBeatThisDesc', available: () => ANALYSIS_MODELS_ENABLED }),
     modelHtdemucs: option(MODELS, 'analysisModelHtdemucs', 'options.analysisModelHtdemucs', { noteKey: 'options.analysisModelHtdemucsDesc', available: () => ANALYSIS_MODELS_ENABLED }),
 };
@@ -355,6 +365,8 @@ const PlaybackPage: React.FC = () => {
                         <Toggle checked={voiceInputPause.enabled} onChange={voiceInputPause.onToggle} />
                     </Row>
                 )}
+                {/* 组件内部自己判端：非安卓返回 null。 */}
+                <AndroidAutoLandscapeSetting def={O.autoLandscapeForVisualizer} />
             </Group>
 
             {/* The whole group answers to ANALYSIS_MODELS_ENABLED, same as the rows inside it say:

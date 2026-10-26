@@ -38,6 +38,9 @@ import { useBackgroundLyricHoldStore } from '../backgroundThrottling/backgroundL
 import { useBackgroundLyricHold } from '../backgroundThrottling/useBackgroundLyricHold';
 import { usePlaybackRuntimeRefs } from '../playback/usePlaybackRuntimeRefs';
 import { useProviderNotices } from '../useProviderNotices';
+import { useAndroidPlaybackOrientation } from '../../../hooks/useAndroidPlaybackOrientation';
+import { useNativeLyricsSubscription } from '../../../hooks/useNativeLyricsSubscription';
+import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
@@ -175,6 +178,14 @@ export const useAppFoundation = () => {
     const updatePrompt = useStartupUpdatePrompt();
 
     useEffect(() => initializeSyncCoordinator(), []);
+
+    // 「进入可视化自动横屏」：Web 只上报「在不在播放页」，转不转由原生按设置判。
+    useAndroidPlaybackOrientation();
+
+    // 歌词由原生拉、原生推：这里只按 songKey 认领并渲染。
+    // 自己拉会挂在 currentSong 的 effect 上，而原生派发的点歌绕过它 ——
+    // 「切了歌单歌词不换」就是这么来的。
+    useNativeLyricsSubscription(currentSong ? getPlaybackSongKey(currentSong) : null);
 
     const loadNavidromeFavorites = useCallback(async () => {
         if (!navidromeEnabled) {
