@@ -950,22 +950,38 @@ class FoliaPlaybackService : android.app.Service() {
             val count = array.length()
             if (count == 0) return false
             /*
-             * 走到头**回绕**，而不是停下。
+             * 「下一首落在哪一格」由**队列状态机**决定，不再手写 index ± 1。
              *
-             * 以前这里越界就 return false，交给 JS 全流程 —— 而这一步多半发生在 WebView
-             * 被挂起的时候（正是这条兜底存在的场合），于是最后一首放完就彻底没声音了
-             * （用户报的「原生的放完了不会自动下一首」）。回绕与 Web 层的队列语义一致：
-             * 列表循环绕回第一首，单曲循环/顺序播放由 JS 那条路优先处理（它先认领就没
-             * 走到这里）。随机播放更该回绕 —— 见下面那段「随机」处理。
+             * 以前这里自己算 `index + direction` 再回绕 —— 状态机里的随机播放
+             * （shuffle 时挑一格 ≠ 当前，见 NativePlayQueue.pickNext）就永远轮不到：
+             * 通知栏/锁屏在随机模式下「下一首」还是按顺序走下一格，跟 App 里的行为
+             * 对不上。现在统一问状态机，顺序回绕、单曲循环换歌、随机挑格都是它一份逻辑。
              */
-            val target = index + direction
-            val wrapped = when {
-                target < 0 -> count - 1
-                target >= count -> 0
-                else -> target
-            }
+            val queue = playQueue.snapshot()
+            if (queue.length() == 0) return false
+            /*
+             * 顺序播放越界（队尾按下一首 / 队首按上一首）**不在这切**：该停就停，那是
+             * JS 全流程的语义（它还会收尾播放状态）。onSkip 对这种边界返回的是当前首
+             * （「原地不动」），直接放会变成「按下一首又重播这首」。
+             */
+            val loopMode = queue.optString("loopMode", "off")
+            val idx = queue.optInt("index", index)
+            val offBoundary = loopMode == "off"
+                    && ((direction > 0 && idx + 1 >= count) || (direction < 0 && idx - 1 < 0))
+            if (offBoundary && !queue.optBoolean("shuffle", false)) return false
+            val picked = playQueue.onSkip(direction) ?: return false
+            val wrapped = queue.optInt("index", index)
+            if (wrapped < 0 || wrapped >= count) return false
             val entry = array.getJSONObject(wrapped)
-            val songKey = entry.optString("songKey", "")
+            val pickedKey = picked.songKey
+            val entryKey = entry.optString("songKey", "")
+            if (entryKey != pickedKey) {
+                // 状态机里的队列和镜像 JSON 脱节了（理论不该发生，两份来自同一次推送）：
+                // 宁可不动，也别切到错误的那首。
+                Log.w(TAG, "队列状态机与镜像脱节：状态机选了 $pickedKey，镜像该格是 $entryKey")
+                return false
+            }
+            val songKey = entryKey
             var url = if (songKey.isEmpty()) null else resolvedUrlCache.get(songKey)
             if (url == null || url.isEmpty()) {
                 url = entry.optString("url", "")
