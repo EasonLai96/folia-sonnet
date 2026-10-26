@@ -1008,15 +1008,21 @@ class FoliaPlaybackService : android.app.Service() {
         }
         val songKey = entry.optString("songKey", "")
         Thread({
-            val url = top.izuna.foliamajor.online.MusicGateway.resolvePlayUrl(
-                    providerId, songId, mid, hash, albumAudioId)
+            val url = resolveWithRetry(providerId, songId, mid, hash, albumAudioId)
             if (url == null || url.isEmpty()) {
-                // App 内点歌走原生（两轨合一）时的失败回执：JS 收到后把这首歌
-                // 标进本会话的黑名单并回退到 Web 全流程，别让界面停在转圈。
-                // 通知栏兜底切歌的失败本来就没有 JS 可回退，多发的这条它自己不认。
+                /*
+                 * 重试也拿不到地址。**原生自己决定接下来怎么办**，不再只是给 JS 发一条回执：
+                 * 前台被冻结时那条回执没人收，播放就永远停在这一首上没声音。
+                 *
+                 * 按「自动跳过无法播放的歌曲」这个设置走（读原生设置，不问前台）：
+                 *   · 开着 → 跳到下一首继续（用户开它就是为了这个）；
+                 *   · 关着 → 停下并保留这首，让人自己决定。
+                 * 两者都照旧发一条回执给前台：它在场时可以把界面标记出来。
+                 */
                 if (!songKey.isEmpty()) {
                     mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
                 }
+                mainHandler.post { onEntryUnplayable(songKey) }
                 return@Thread
             }
             if (!songKey.isEmpty()) {
@@ -1029,6 +1035,65 @@ class FoliaPlaybackService : android.app.Service() {
                 preloadMirrorNeighbors(array, target, direction)
             }
         }, "folia-resolve-url").start()
+    }
+
+    /**
+     * 向平台要地址，失败就再试几次。
+     *
+     * 平台接口偶发超时、限流、返回空 key 都是常态；一次失败就放弃会让「连按几首下一首
+     * 就切不动」。退避是 400ms / 1200ms —— 够跨过一眼限流，又不至于让人等太久。
+     * 重试放在原生，是因为前台被冻结时没有别人能替它重试。
+     */
+    private fun resolveWithRetry(providerId: String, songId: String, mid: String,
+                                 hash: String, albumAudioId: String): String? {
+        val delays = longArrayOf(0L, 400L, 1200L)
+        for ((attempt, delay) in delays.withIndex()) {
+            if (delay > 0) {
+                try {
+                    Thread.sleep(delay)
+                } catch (ignored: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
+                }
+            }
+            val url = try {
+                top.izuna.foliamajor.online.MusicGateway.resolvePlayUrl(
+                        providerId, songId, mid, hash, albumAudioId)
+            } catch (error: Throwable) {
+                Log.w(TAG, "解析地址失败（第 ${attempt + 1} 次）", error)
+                null
+            }
+            if (url != null && url.isNotEmpty()) return url
+        }
+        return null
+    }
+
+    /**
+     * 某一首确实放不了（重试过也不行）。按「自动跳过无法播放的歌曲」决定：跳过还是停下。
+     *
+     * 跳过的次数有上限（连续 [MAX_CONSECUTIVE_SKIPS] 首都放不了就停），否则遇到整个歌单
+     * 都无版权的情况会一路狂奔把队列扫空，用户只看到「自己一直在跳歌」。
+     */
+    private fun onEntryUnplayable(songKey: String) {
+        val skip = try {
+            top.izuna.foliamajor.settings.FoliaSettingsStore.get(this)
+                    .getBoolean("autoSkipUnplayable", true)
+        } catch (error: Throwable) {
+            Log.w(TAG, "读取自动跳过设置失败，按跳过处理", error)
+            true
+        }
+        val decision = top.izuna.foliamajor.player.decideOnUnplayable(
+                skip, consecutiveSkips, MAX_CONSECUTIVE_SKIPS)
+        if (decision == top.izuna.foliamajor.player.UnplayableDecision.STOP) {
+            if (skip) Log.w(TAG, "连续 $consecutiveSkips 首都放不了，停下")
+            consecutiveSkips = 0
+            publishSnapshot()
+            publishNotification()
+            return
+        }
+        consecutiveSkips += 1
+        Log.w(TAG, "跳过放不了的 $songKey（连续第 $consecutiveSkips 首）")
+        onTrackFinished()
     }
 
     /**
@@ -1071,6 +1136,8 @@ class FoliaPlaybackService : android.app.Service() {
 
     /** 用镜像条目直接接管播放：换源、起播、通知与壁纸锚点全部就地更新。 */
     private fun nativePlayMirrorEntry(entry: org.json.JSONObject, url: String) {
+        // 起播成功就把「连续放不了」清掉：那是给自动跳过兜的上限，不该跨歌累计。
+        consecutiveSkips = 0
         top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url)
         top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
         val songKey = entry.optString("songKey", "")
@@ -1965,6 +2032,13 @@ class FoliaPlaybackService : android.app.Service() {
          * 前台仍然可以推队列（换歌单、插歌、删歌），但那是**下发意图**，推完就不管了。
          */
         val playQueue = NativePlayQueue()
+
+        /**
+         * 连续多少首都放不了。用来给「自动跳过」兜上限：遇到整个歌单都无版权时不至于
+         * 一路狂奔把队列扫空。任何一首成功起播都会清回 0。
+         */
+        private var consecutiveSkips = 0
+        private const val MAX_CONSECUTIVE_SKIPS = 5
 
         /**
          * 前台改了循环模式：落进设置，再让队列跟上。返回落盘后的整份设置给前台确认。

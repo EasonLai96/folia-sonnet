@@ -102,11 +102,39 @@ enum class NativeLoopMode(val wire: String) {
 }
 
 /**
+ * 一首歌确实放不了（地址重试过也拿不到）时该怎么做。
+ *
+ * 抽成纯函数是因为这个决定有两条边界容易写错：设置关掉时不该自作主张跳过，
+ * 而设置开着时也不能无限跳 —— 整个歌单都无版权的情况会一路把队列扫空，
+ * 用户只看到「自己一直在跳歌」。
+ */
+enum class UnplayableDecision {
+    /** 跳到下一首继续。 */
+    SKIP_NEXT,
+
+    /** 停下，保留当前这首，让人自己决定。 */
+    STOP,
+}
+
+/**
+ * @param autoSkip 设置里的「自动跳过无法播放的歌曲」
+ * @param consecutiveSkips 已经连续跳过多少首了（任何一首成功起播都会清零）
+ */
+fun decideOnUnplayable(
+    autoSkip: Boolean,
+    consecutiveSkips: Int,
+    maxConsecutiveSkips: Int = 5,
+): UnplayableDecision = when {
+    !autoSkip -> UnplayableDecision.STOP
+    consecutiveSkips >= maxConsecutiveSkips -> UnplayableDecision.STOP
+    else -> UnplayableDecision.SKIP_NEXT
+}
+
+/**
  * 队列状态机。**不碰 ExoPlayer、不碰线程**：它只回答「下一首是哪首」「该不该停」，
  * 由 FoliaPlaybackService 在它给出的答案上做真正的换源。这样它可以脱离播放器单测。
  */
-class NativePlayQueue {
-    private val entries = mutableListOf<NativeQueueEntry>()
+class NativePlayQueue {    private val entries = mutableListOf<NativeQueueEntry>()
     private var index = -1
 
     var loopMode: NativeLoopMode = NativeLoopMode.OFF

@@ -38,6 +38,7 @@ import { useTransportCommandRefs } from '../playback/bridges/useTransportCommand
 import { useRef, useCallback } from 'react';
 import type { SongResult } from '../../../types';
 import { usePlaybackStore } from '../../../stores/usePlaybackStore';
+import { useSongThemeFollow } from '../../../hooks/useSongThemeFollow';
 
 // src/components/app/appWiring/useAppPlaybackBridges.ts
 // 播放与系统之间的桥：音频分析、转码兜底、transport、系统媒体会话、通知栏、歌词推送。
@@ -67,6 +68,18 @@ export const useAppPlaybackBridges = (model: Input) => {
         stageLyricsSession, stageStatus, starredNavidromeSongIds, syncNowPlayingClock, syncOutputGain,
         syncStageLyricsClock, t, theme, themeSettling
     } = model;
+    /*
+     * 当前曲目一变就恢复它该有的主题。判据只有一个：songKey。
+     *
+     * 原来主题恢复只挂在三条路上（playSong 的 Web 全流程、原生 syncTo 的认领、会话恢复），
+     * 而原生派发的点歌三条都绕过了 —— 于是「切了歌单，主题还停在上一个歌单那首」。
+     * 现在不管谁发起、走哪条链路，当前曲目换了就跟着换。
+     */
+    useSongThemeFollow({
+        currentSong: displaySong ?? currentSong ?? null,
+        // displaySong 可能带 automix 的过渡信息，恢复主题要的是这首歌本身。
+        restoreCachedThemeForSong: restoreCachedThemeForSong as (song: SongResult) => Promise<unknown>,
+    });
     const { setupAudioAnalyzer, cacheSongAssets, cacheSongAssetsFor, adoptActiveDeckSource } = usePlaybackAudioBridge({
         audioRef,
         localSongs,
