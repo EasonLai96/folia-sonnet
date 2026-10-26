@@ -38,33 +38,62 @@ data class NativeQueueEntry(
     fun toJson(): JSONObject = JSONObject().apply {
         put("songKey", songKey)
         put("providerId", providerId)
+        // 两套字段名都写：服务里读镜像的几处（resolveMirrorEntryAsync、
+        // fetchLyricForNativePlayback）用的还是 serverSongId / providerMid 这一族，
+        // 少一套那边就拿到空 —— 与 fromJson 的兼容同理，状态机的条目要能原样
+        // 回到服务的旧读取点。
         put("songId", songId)
+        put("serverSongId", songId)
         put("mid", mid)
+        put("providerMid", mid)
         put("hash", hash)
+        put("providerHash", hash)
         put("albumAudioId", albumAudioId)
+        put("providerAlbumAudioId", albumAudioId)
         put("url", url)
         put("title", title)
         put("artist", artist)
         put("album", album)
         put("coverUrl", coverUrl)
+        put("artworkUrl", coverUrl)
         put("durationSec", durationSec)
+        put("durationMs", Math.round(durationSec * 1000))
     }
 
     companion object {
+        /*
+         * 字段名要兼容两套：Web 推的镜像 JSON（buildQueueMirrorEntry）用
+         * serverSongId / providerMid / providerHash / providerAlbumAudioId /
+         * durationMs / artworkUrl，而状态机自己的 toJson 用 songId / mid / hash /
+         * albumAudioId / durationSec / coverUrl。只认一套的话，从 playFromQueue 或
+         * 镜像推送喂进来的条目身份全是空 —— 放完一首后 playQueueEntry 把它交给
+         * resolveMirrorEntryAsync，那边读 serverSongId 拿到空，直接 return：
+         * 自动下一首无声卡死，而且是只在「没走过 Web 全流程」的场合才犯。
+         */
         fun fromJson(o: JSONObject): NativeQueueEntry = NativeQueueEntry(
             songKey = o.optString("songKey", ""),
             providerId = o.optString("providerId", ""),
-            songId = o.optString("songId", ""),
-            mid = o.optString("mid", ""),
-            hash = o.optString("hash", ""),
-            albumAudioId = o.optString("albumAudioId", ""),
-            url = o.optString("url", ""),
+            songId = firstNonEmpty(o, "songId", "serverSongId"),
+            mid = firstNonEmpty(o, "mid", "providerMid"),
+            hash = firstNonEmpty(o, "hash", "providerHash"),
+            albumAudioId = firstNonEmpty(o, "albumAudioId", "providerAlbumAudioId"),
+            url = firstNonEmpty(o, "url", "resolvedUrl"),
             title = o.optString("title", ""),
             artist = o.optString("artist", ""),
             album = o.optString("album", ""),
-            coverUrl = o.optString("coverUrl", ""),
-            durationSec = o.optDouble("durationSec", 0.0),
+            coverUrl = firstNonEmpty(o, "coverUrl", "artworkUrl"),
+            durationSec = if (o.has("durationSec")) o.optDouble("durationSec", 0.0)
+            else o.optLong("durationMs", 0L) / 1000.0,
         )
+
+        /** 第一个非空字段：两套字段名里谁有值用谁。 */
+        private fun firstNonEmpty(o: JSONObject, vararg names: String): String {
+            for (name in names) {
+                val value = o.optString(name, "")
+                if (value.isNotEmpty()) return value
+            }
+            return ""
+        }
 
         fun fromArray(json: String?): List<NativeQueueEntry> {
             if (json.isNullOrEmpty()) return emptyList()

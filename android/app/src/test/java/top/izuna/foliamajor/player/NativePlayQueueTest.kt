@@ -136,4 +136,56 @@ class NativePlayQueueTest {
         q.syncEntries(listOf(entry("a")))
         assertEquals("a", q.current()?.songKey)
     }
+
+    // ---- 字段名兼容（两套命名并存，见 fromJson 的注释） ----
+
+    /** Web 推的镜像条目（buildQueueMirrorEntry 的字段名）。 */
+    private fun webMirrorJson(key: String): String = """
+        {"songKey":"$key","providerId":"qq","serverSongId":"123","providerMid":"mid$key",
+         "providerHash":"","providerAlbumAudioId":"","title":"歌 $key","artist":"歌手",
+         "album":"专辑","artworkUrl":"https://e.test/$key.jpg","durationMs":210000,
+         "liked":false,"canLike":true}
+    """.trimIndent()
+
+    @Test
+    fun `Web 镜像字段名解析出完整身份`() {
+        val q = NativePlayQueue().apply {
+            replace(listOf(
+                NativeQueueEntry.fromJson(org.json.JSONObject(webMirrorJson("a"))),
+                NativeQueueEntry.fromJson(org.json.JSONObject(webMirrorJson("b"))),
+            ), 0)
+        }
+        val a = q.all()[0]
+        assertEquals("123", a.songId)
+        assertEquals("mida", a.mid)
+        assertEquals("歌 a", a.title)
+        assertEquals("https://e.test/a.jpg", a.coverUrl)
+        assertEquals(210.0, a.durationSec, 0.001)
+    }
+
+    @Test
+    fun `Web 镜像喂进来的条目 roundtrip 后两套字段名都有值`() {
+        val q = NativePlayQueue().apply {
+            replace(listOf(NativeQueueEntry.fromJson(org.json.JSONObject(webMirrorJson("a")))), 0)
+        }
+        val out = q.current()!!.toJson()
+        // 服务的旧读取点（resolveMirrorEntryAsync / fetchLyricForNativePlayback）
+        // 读的是 serverSongId / providerMid 这一族：丢了它们自动下一首解析不出地址。
+        assertEquals("123", out.optString("serverSongId"))
+        assertEquals("mida", out.optString("providerMid"))
+        assertEquals(210000L.toDouble(), out.optDouble("durationMs", 0.0), 0.001)
+    }
+
+    @Test
+    fun `状态机自己的字段名照常解析`() {
+        val json = NativeQueueEntry(
+            songKey = "a", providerId = "netease", songId = "n1", mid = "", hash = "",
+            albumAudioId = "", url = "https://e.test/a.mp3", title = "A", artist = "",
+            album = "", coverUrl = "", durationSec = 60.0,
+        ).toJson()
+        val back = NativeQueueEntry.fromJson(json)
+        assertEquals("n1", back.songId)
+        assertEquals("https://e.test/a.mp3", back.url)
+        assertEquals(60.0, back.durationSec, 0.001)
+    }
 }
