@@ -116,8 +116,9 @@ type LyricPayload = { songKey: string; lrc: string | null; translated: string | 
 - **AI 主题的生成参数**（音频特征、配色种子）：主题的**切换**已跟曲目走，但生成
   仍在 Web 侧算 —— 见上表 `NativeThemeSeed`，下一轮
 - **云缓存**（歌词缓存、封面缓存）：现在每次都重新拉，能用但不是最优
-- **随机播放的尾部重排**：仍由 Web 做（`shuffleQueue` 重排队列后推镜像）；原生
-  队列状态机已支持 `shuffle` 标志，但「点下一首时随机挑一首」在原生侧还没接管
+- ~~**随机播放的尾部重排**~~：已接管 —— `skipViaMirror` 改走队列状态机的 `onSkip`，
+  通知栏/锁屏在随机模式下按「下一首」也是原生挑格（≠ 当前）；Web 侧的 `shuffleQueue`
+  尾部重排只在 App 内点歌时仍会先跑一次，行为一致
 
 ## 不做什么
 
