@@ -214,6 +214,12 @@ class LockScreenControlPanel(private val activity: Activity) {
         }
         val density = activity.resources.displayMetrics.density
         val margin = Math.round(14f * density)
+        /*
+         * 下边距单独一个值：整块面板比原来再往上抬一截（离屏幕底 28dp = 两侧留白的
+         * 两倍）。锁屏底部那一片（指纹区 / 手势条 / 快捷入口）留给它自己，不然控件
+         * 贴着那一条，看着像被压住了。两侧仍是 margin，改宽度不用再动第二处。
+         */
+        val bottomMargin = margin * 2
         val cover = Math.round(52f * density)
         val padding = Math.round(12f * density)
         val radius = Math.round(18f * density)
@@ -433,8 +439,8 @@ class LockScreenControlPanel(private val activity: Activity) {
          * 先填内容（refresh 现在看 cardView 而不是 panel，所以能在 addView 之前调），
          * 再自己 measure 一次拿到卡片高度，据此算出跑道长度：
          *
-         *     卡片下沿离屏幕底 = margin
-         *     出屏距离 travel  = margin + 卡片高 + overshoot
+         *     卡片下沿离屏幕底 = bottomMargin
+         *     出屏距离 travel  = bottomMargin + 卡片高 + overshoot
          *
          * 于是 addView 时窗口尺寸和位置**一次给全**，之后不再改窗口。
          * 早先是在挂上之后再撑（哪怕几何上做了补偿），窗口尺寸和 params.y 分两步落，
@@ -454,7 +460,7 @@ class LockScreenControlPanel(private val activity: Activity) {
         val cardHeight = Math.max(root.measuredHeight, Math.round(48f * density))
         growExitRunway(
                 Math.round(ExitMotion.upDistance * density) + Math.round(2f * density),
-                margin + cardHeight +
+                bottomMargin + cardHeight +
                         Math.round(ExitMotion.overshoot * density) +
                         Math.round(2f * density) +
                         Math.round(24f * density))
@@ -470,12 +476,11 @@ class LockScreenControlPanel(private val activity: Activity) {
                 android.graphics.PixelFormat.TRANSLUCENT)
         params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         /*
-         * 下边距与两侧**取同一个值**：三边留白一致，面板读起来才是"居中浮在锁屏上"，
-         * 而不是往下坠了一截（原来是 26dp，比两侧的 14dp 多出 12dp）。
-         * 直接引用 margin，以后调两侧宽度时底部会跟着走，不用再改第二处。
+         * 下边距比两侧大一倍：整块面板要浮得高一点，锁屏底部那一片留给它自己。
+         * 两侧仍是 margin，改宽度不用再动第二处。
          */
-        // 卡片下沿要停在离屏幕底 margin 处；窗口底边则再往下让出整条跑道。
-        baseMarginY = margin
+        // 卡片下沿要停在离屏幕底 bottomMargin 处；窗口底边则再往下让出整条跑道。
+        baseMarginY = bottomMargin
         params.y = baseMarginY - preparedBottomRunway
         params.token = activity.window.decorView.windowToken
 
