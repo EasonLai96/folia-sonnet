@@ -633,6 +633,13 @@ class FoliaPlaybackService : android.app.Service() {
             return
         }
         playQueue.bumpRevision()
+        // 镜像下标要跟着状态机一起推进：resolveMirrorEntryAsync 的过期守卫按
+        // mirroredIndex 判「出发时那格还在不在」，不同步的话刚出发的请求就会被
+        // 判成过期 —— 解析成功也丢弃，自动下一首卡死在这。
+        mirroredQueueJson = org.json.JSONArray().apply {
+            playQueue.all().forEach { put(it.toJson()) }
+        }.toString()
+        mirroredIndex = playQueue.currentIndex()
         playQueueEntry(next)
         // JS 在场就让它把界面跟上；不在场无所谓。
         sendCommand("next")
@@ -667,9 +674,20 @@ class FoliaPlaybackService : android.app.Service() {
             nativePlayMirrorEntry(json, url)
             return
         }
-        resolveMirrorEntryAsync(
-            org.json.JSONArray().put(json), json, 0, 0, +1
-        )
+        /*
+         * 手上没有地址要向平台要。数组给**状态机的全量**而不是只这一条：下面的
+         * originIndex 守卫按「出发时那格还在不在」作废过期请求，镜像下标（mirroredIndex）
+         * 此时还指着上一首，单条数组 + target=0 会让守卫永远判「过期」—— 解析成功
+         * 也丢弃，自动下一首就卡死在这。预取邻居同样需要全量才找得到前后几首。
+         */
+        val full = org.json.JSONArray()
+        var target = -1
+        for ((i, e) in playQueue.all().withIndex()) {
+            full.put(e.toJson())
+            if (e.songKey == entry.songKey) target = i
+        }
+        if (target < 0) target = 0
+        resolveMirrorEntryAsync(full, json, target, target, +1)
     }
 
     /** App 内点歌 / 切歌走原生（两轨合一）的入口：见 FoliaPlaybackPlugin.playFromQueue。 */
