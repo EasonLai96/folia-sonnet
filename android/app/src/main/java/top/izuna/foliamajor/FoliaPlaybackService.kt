@@ -441,6 +441,17 @@ class FoliaPlaybackService : android.app.Service() {
                     ACTION_UPDATE_QUEUE_MIRROR -> {
                         mirroredQueueJson = intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON)
                         mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1)
+                        /*
+                         * 镜像变了，队列状态机也要跟上 —— 否则「插歌 / 删歌之后原生还按
+                         * 旧队列推进」。用 syncEntries 而不是 replace：镜像 effect 会因为
+                         * 各种无关的重渲染反复推同一份队列，replace 会把下标重置到队首，
+                         * 那就变成「莫名其妙跳回第一首」。能对上当前这首就保下标。
+                         */
+                        val entries = NativeQueueEntry.fromArray(mirroredQueueJson)
+                        if (entries.isNotEmpty()) {
+                            playQueue.syncEntries(entries)
+                            playQueue.bumpRevision()
+                        }
                     }
                     ACTION_UPDATE_QUEUE_INDEX -> {
                         // 队列本体不变、只是换了一首正播的：轻量更新游标。全量队列一推
@@ -665,6 +676,28 @@ class FoliaPlaybackService : android.app.Service() {
     fun playFromQueue(songKey: String?, queueJson: String?, index: Int): Boolean {
         if (songKey == null || songKey.isEmpty()) {
             return false
+        }
+        /*
+         * 队列状态机也换一份 —— **这是「切歌单后音源不换」的解药**。
+         *
+         * 以前这里只写了 mirroredQueueJson（通知栏用的那份 JSON 镜像），而原生推进队列
+         * 用的 playQueue 从来没被更新过。于是换个歌单点歌：声音确实换了（这一次是显式指定
+         * 的），但原生心里的队列还是上一个歌单 —— 下一首、循环、预取全按旧队列走，
+         * 用户看到的就是「音源没换」。
+         *
+         * 整份替换（replace）而不是增量修补，与用户说的「先清空播放队列再从头拉」一致：
+         * 旧队列的下标、已经失效的地址、上一轮的预取缓存都不该跨歌单继承。
+         */
+        if (queueJson != null && !queueJson.isEmpty()) {
+            val entries = NativeQueueEntry.fromArray(queueJson)
+            if (entries.isNotEmpty()) {
+                val target = if (index >= 0) index
+                else entries.indexOfFirst { it.songKey == songKey }
+                if (target >= 0) {
+                    playQueue.replace(entries, target)
+                    playQueue.bumpRevision()
+                }
+            }
         }
         // 调用方手里的队列是最新的（JS 刚排好、镜像 effect 可能还没跑），先落下来。
         if (queueJson != null && !queueJson.isEmpty()) {
