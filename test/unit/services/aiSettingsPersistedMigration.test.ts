@@ -130,6 +130,7 @@ describe('previously copied credentials need explicit confirmation (#54)', () =>
         contaminated({ apiKeys: { custom: ` ${KEY} `, openai: KEY } }),
         contaminated({ apiModels: { openai: 'synthetic-official-model' } }),
         contaminated({ apiBaseUrls: { openai: 'https://official-relay.example.invalid/v1' } }),
+        contaminated({ apiKeys: { openai: KEY, custom: '' } }),
         legacy({ apiKeys: { openai: KEY } }),
         legacy({ apiKeys: { openai: KEY, custom: 'synthetic-newer-custom' } }),
     ])('blocks an ambiguous unversioned official copy without guessing another destination: %j', seed => {
@@ -211,7 +212,10 @@ describe('previously copied credentials need explicit confirmation (#54)', () =>
         expect(isAiConfigured()).toBe(false);
     });
     it('keeps distinct modern official and custom keys working', () => {
-        installStorage(contaminated({ apiKeys: { openai: 'synthetic-official', custom: KEY } }));
+        installStorage(contaminated({
+            apiKeys: { openai: 'synthetic-official', custom: KEY },
+            credentialRoutingVersion: 1,
+        }));
         expect(isAiConfigured()).toBe(true);
         expect(resolveAiApiKey(readAiSettings())).toBe('synthetic-official');
     });

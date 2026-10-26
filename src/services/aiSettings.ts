@@ -177,13 +177,15 @@ const hasOfficialFields = (record: Record<string, unknown>): boolean => (
     || owns(asRecord(record.apiBaseUrls), 'openai')
 );
 
-/** 相同 Key 只能证明有歧义，不能证明用户要把请求改发到 custom；先停用官方副本，等用户重填。 */
+/** 未带确认标记的历史官方副本先停用，不能把凭据跨服务商边界发出；等用户重填确认。 */
 const hasUnconfirmedOfficialCopy = (record: Record<string, unknown>, apiKeys: AiSettings['apiKeys']): boolean => {
     if (record.credentialRoutingVersion === CREDENTIAL_ROUTING_VERSION) return false;
     const officialKey = apiKeys.openai?.trim();
     if (!officialKey) return false;
-    return officialKey === apiKeys.custom?.trim()
-        || (typeof record.openaiApiKey === 'string' && officialKey === record.openaiApiKey.trim());
+    // 旧版本曾把兼容接口 Key 同时写进 openai/custom；custom 可能已被用户清空，
+    // 因而不能只比较两个值，必须把 custom 字段本身视为未确认来源的证据。
+    if (owns(asRecord(record.apiKeys), 'custom')) return true;
+    return typeof record.openaiApiKey === 'string' && officialKey === record.openaiApiKey.trim();
 };
 
 export const readAiSettings = (): AiSettings => {
