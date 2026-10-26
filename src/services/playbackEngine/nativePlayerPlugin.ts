@@ -43,6 +43,7 @@ interface FoliaNativePlayerPlugin {
     seek(options: { positionMs: number }): Promise<void>;
     setVolume(options: { volume: number }): Promise<void>;
     setSpeed(options: { speed: number }): Promise<void>;
+    setRepeatMode(options: { repeatMode: number }): Promise<void>;
     getSnapshot(): Promise<NativePlaybackSnapshot>;
     release(): Promise<void>;
     addListener(
@@ -74,6 +75,7 @@ export const nativePlayer = {
     seek: (positionMs: number) => FoliaNativePlayer.seek({ positionMs }),
     setVolume: (volume: number) => FoliaNativePlayer.setVolume({ volume }),
     setSpeed: (speed: number) => FoliaNativePlayer.setSpeed({ speed }),
+    setRepeatMode: (repeatMode: number) => FoliaNativePlayer.setRepeatMode({ repeatMode }),
     getSnapshot: () => FoliaNativePlayer.getSnapshot(),
     release: () => FoliaNativePlayer.release(),
     addListener: (listener: (event: NativePlaybackEvent) => void) =>

@@ -423,6 +423,25 @@ class FoliaNativePlayerPlugin : Plugin() {
         call.resolve()
     }
 
+    /**
+     * 立刻改循环模式，不重新装地址。
+     *
+     * 单曲循环是随时能按的：走 prepare 的话当前这首会从头再来一遍，走「只记下来、
+     * 下次 prepare 带上」的话，正在播的这首丢了循环 —— 放完停在末尾，进度条不动，
+     * 可 Web 层还以为在循环。setSpeed 同款问题，同款解法：对已在播的播放器直接生效。
+     */
+    @PluginMethod
+    fun setRepeatMode(call: PluginCall) {
+        val current = player
+        val mode = call.getInt("repeatMode")
+        if (mode == null) {
+            call.reject("repeatMode is required.")
+            return
+        }
+        current?.setRepeatMode(mode)
+        call.resolve()
+    }
+
     @PluginMethod
     fun getSnapshot(call: PluginCall) {
         val current = player
