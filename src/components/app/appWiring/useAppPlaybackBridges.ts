@@ -465,6 +465,11 @@ export const useAppPlaybackBridges = (model: Input) => {
         repeatOne: effectiveLoopMode === 'one',
         onEnded: () => {
             cacheSongAssets();
+            // 单曲循环时 ExoPlayer 自己会从头再来，`ended` 到不了这里（REPEAT_ONE
+            // 不发 ended）。能到这里说明循环模式刚切走、或 ExoPlayer 还是 OFF（上面
+            // 那个 setRepeatModeNow 生效前的窗口）：Web 路径（AppSurface onEnded）
+            // 对 'one' 跳过 advance，这里用同一个判据，否则循环里会冒出切下一首。
+            if (effectiveLoopMode === 'one') return;
             void handleNextTrack({ allowStopOnMissing: true, shouldNavigateToPlayer: false });
         },
         onError: () => {
