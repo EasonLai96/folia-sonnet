@@ -1890,6 +1890,38 @@ class FloatingLyricsOverlay private constructor(context: Context) {
             }
 
             /*
+             * 这一句**一个时间戳都没有**（整句 LRC，或这一行根本没解析出逐词轴）：
+             * 没有逐词轴就没有「唱到哪个词」这回事 —— 走下面的逐词路径时 sungX 恒等于
+             * 第一个词的词头，`appear` 恒为 0，于是**整行从头到尾一个字都不画**。
+             *
+             * 这正是「安全区模式下没有出现动画、连字都没有」的根因：那一档只有一行、
+             * 又是贴在最顶上的一条，用户第一眼看到的就是一片空白。
+             *
+             * 这一档退回「按整句进度铺开」：字先以最低透明度出现（至少看得见这一句
+             * 是什么），再随着 progress 由暗到亮 —— 仍然有「出现」这个动作，
+             * 只是粒度从词变成整句。真·逐词的机器照旧走下面那条路。
+             */
+            val hasWordAxis = words != null && words.isNotEmpty()
+            if (!hasWordAxis) {
+                textPaint.color = color
+                textPaint.alpha = Math.round(textAlpha * 0.32f)
+                canvas.drawText(text, x, baseline, textPaint)
+                // 已经唱过的那一段用高亮色压上去：整句一行也就有了一道从左往右的扫光。
+                val sung = measured * clamp01(progress)
+                if (sung > 0f) {
+                    canvas.save()
+                    canvas.clipRect(x, clipTop, x + sung, clipBottom)
+                    textPaint.color = accentColor
+                    textPaint.alpha = textAlpha
+                    canvas.drawText(text, x, baseline, textPaint)
+                    canvas.restore()
+                }
+                drawUnderlines(canvas, text, x, baseline, fontSize, wordBounds(text),
+                        measured * clamp01(progress), alpha)
+                return
+            }
+
+            /*
              * ⭐**不再先画整行主色**：要的是「和播放页一样逐个出现」—— 唱到哪个词，
              * 哪个词才淡入；没唱到的部分不画（它的位置由底下那条下划线底与方括号标着）。
              * 先铺一遍整行的话，字从头到尾都在那儿，看着就没有「出现」这个动作。
