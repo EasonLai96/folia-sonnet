@@ -50,23 +50,37 @@ export const useSongThemeFollow = ({
     const lastKeyRef = useRef<string | null>(null);
     // 恢复是异步的，期间可能又换歌；用序号作废过期的结果。
     const callSeqRef = useRef(0);
+    /*
+     * 恢复函数**只走 ref，不进依赖数组**。
+     *
+     * useThemeController 里它是普通 async 函数、没有 useCallback：每次渲染都是新引用。
+     * 把它放进依赖就等于「每渲染必跑一次 effect」，而恢复成功会写主题状态 → 再渲染 →
+     * 再跑 …… 有当前曲目时这是一个不会停的循环，表现就是**开着歌一进 App 就黑屏**
+     * （重开也黑，因为曲目是持久化的）。
+     *
+     * 判据只有一个：songKey 变了才恢复。函数换了新引用不算变化。
+     */
+    const restoreRef = useRef(restoreCachedThemeForSong);
+    useEffect(() => {
+        restoreRef.current = restoreCachedThemeForSong;
+    }, [restoreCachedThemeForSong]);
+
+    const songKey = currentSong ? getPlaybackSongKey(currentSong) : null;
 
     useEffect(() => {
         const song = currentSong;
-        const key = song ? getPlaybackSongKey(song) : null;
-        if (!song || !key) {
+        if (!song || !songKey) {
             // 播放停了：清掉记下的那首，这样同一首再播时会重新恢复一次主题
             // （用户可能在这期间改过主题，再用缓存就不对了）。
             lastKeyRef.current = nextTrackedSongKey(null);
             return;
         }
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-        if (!shouldRestoreSongTheme(lastKeyRef.current, key)) return;
-        lastKeyRef.current = key;
+        if (!shouldRestoreSongTheme(lastKeyRef.current, songKey)) return;
+        lastKeyRef.current = songKey;
         const seq = (callSeqRef.current += 1);
         void (async () => {
             try {
-                await restoreCachedThemeForSong(song);
+                await restoreRef.current(song);
             } catch (error) {
                 // 主题加载失败不影响播放：保持当前主题即可。
                 console.warn('[songThemeFollow] 恢复主题失败', error);
@@ -77,5 +91,7 @@ export const useSongThemeFollow = ({
                 return;
             }
         })();
-    }, [currentSong, restoreCachedThemeForSong]);
+        // currentSong 的对象引用会随 store 派生变化，判据只认 songKey（见上）。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [songKey]);
 };
