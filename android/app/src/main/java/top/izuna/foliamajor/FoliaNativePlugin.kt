@@ -2501,6 +2501,72 @@ class FoliaNativePlugin : Plugin() {
         }
     }
 
+    /**
+     * AI 连接配置推给原生：凭据**只存原生**（FoliaSettingsStore）。
+     *
+     * Web 侧的 localStorage 那份照旧给设置界面用，但真正发请求的是原生 —— 与播放链路
+     * 「凭据与真相在原生」同一条纪律。设置变化与启动时各推一次。
+     */
+    @PluginMethod
+    fun setAiConfig(call: PluginCall) {
+        try {
+            val config = call.getObject("config")
+            if (config == null) {
+                call.reject("缺少 config")
+                return
+            }
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            store.put("ai.provider", config.optString("provider", "gemini"))
+            store.put("ai.geminiApiKey", config.optString("geminiApiKey", ""))
+            store.put("ai.geminiApiUrl", config.optString("geminiApiUrl", ""))
+            store.put("ai.apiKey", config.optString("apiKey", ""))
+            store.put("ai.model", config.optString("model", ""))
+            store.put("ai.baseUrl", config.optString("baseUrl", ""))
+            store.put("ai.temperature", config.optDouble("temperature", 0.7))
+            call.resolve()
+        } catch (error: Exception) {
+            call.reject("写入 AI 配置失败", error)
+        }
+    }
+
+    /**
+     * 原生跑一次 AI 补全。请求由原生发起：WebView 冻不冻结都与它无关。
+     *
+     * 返回 `{ text }`；失败 reject，错误码前缀与 Web 侧同一族
+     * （ai-not-configured / ai-http-error:N / ai-empty-response / ai-request-failed / ai-refused），
+     * 调用方照旧走封面取色兜底。
+     */
+    @PluginMethod
+    fun runAiCompletion(call: PluginCall) {
+        val system = call.getString("system") ?: ""
+        val prompt = call.getString("prompt") ?: ""
+        val maxTokens = call.getInt("maxTokens", 0) ?: 0
+        val jsonMode = call.getBoolean("json", true) != false
+        Thread({
+            try {
+                val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+                val config = top.izuna.foliamajor.ai.AiConfig(
+                    provider = store.getString("ai.provider") ?: "gemini",
+                    geminiApiKey = store.getString("ai.geminiApiKey") ?: "",
+                    geminiApiUrl = store.getString("ai.geminiApiUrl") ?: "",
+                    apiKey = store.getString("ai.apiKey") ?: "",
+                    model = store.getString("ai.model") ?: "",
+                    baseUrl = store.getString("ai.baseUrl") ?: "",
+                    temperature = store.getDouble("ai.temperature", 0.7),
+                )
+                val text = top.izuna.foliamajor.ai.AiCompletion.run(
+                        config, system, prompt, maxTokens, jsonMode)
+                val out = JSObject()
+                out.put("text", text)
+                call.resolve(out)
+            } catch (error: top.izuna.foliamajor.ai.AiCompletion.AiException) {
+                call.reject("${error.code}: ${error.message ?: ""}".trimEnd(':', ' '))
+            } catch (error: Exception) {
+                call.reject("ai-request-failed: ${error.message ?: "unknown"}")
+            }
+        }, "folia-ai-completion").start()
+    }
+
     /*
      * 「HDR 投影」的显示那一半：把亮度顶到最亮。
      *

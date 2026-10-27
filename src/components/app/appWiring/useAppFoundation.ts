@@ -18,6 +18,7 @@ import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { selectAudioSettingsSnapshot, useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
 import { writeNativeLoopMode } from '../../../services/nativeQueueBridge';
+import { useNativeAiConfigSync } from '../../../hooks/useNativeAiConfigSync';
 import { useAutomixSettingsStore } from '../../../stores/useAutomixSettingsStore';
 import { selectDesktopSettingsSnapshot, useDesktopSettingsStore } from '../../../stores/useDesktopSettingsStore';
 import { useLibraryStore } from '../../../stores/useLibraryStore';
@@ -193,6 +194,9 @@ export const useAppFoundation = () => {
             mode === 'shuffle',
         );
     }, []);
+
+    // AI 配置的启动同步与变化跟随：凭据只存原生，真正发请求的是原生。
+    useNativeAiConfigSync();
 
     // 歌词由原生拉、原生推：这里只按 songKey 认领并渲染。
     // 自己拉会挂在 currentSong 的 effect 上，而原生派发的点歌绕过它 ——

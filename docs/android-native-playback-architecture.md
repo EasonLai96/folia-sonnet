@@ -32,7 +32,7 @@
 | 音频地址 | 向平台要地址、失败重试、预取邻居 | `online/MusicGateway.kt`（已具备） |
 | 歌词 | 拉取、缓存、随曲目变化下发 | 新增 `player/NativeLyricFetcher.kt` |
 | 凭据 | 平台登录态，经 `CookieManager` 落盘 | `FoliaNativePlugin.storeResponseCookies`（已具备） |
-| 主题参数 | AI 主题的输入（当前曲目的音频特征、配色种子） | 新增 `player/NativeThemeSeed.kt` |
+| 主题参数 | AI 补全的端点解析、三协议请求、参数降级 | `ai/AiCompletion.kt` + `ai/AiEndpoints.kt` |
 | 播放状态 | 播放/暂停/缓冲/错误，自己维持 | `FoliaPlaybackService.kt` |
 
 ### WebView（JS）—— 只做三件事
@@ -111,14 +111,21 @@ type LyricPayload = { songKey: string; lrc: string | null; translated: string | 
 8. **自动横屏** —— 改由原生按设置自己决定（`PhoneLayoutOrientation.resolve`），
    前台只上报「在不在播放页」，已做
 
+9. **AI 补全下沉** —— 三套协议（OpenAI 兼容 / Anthropic / Gemini）的请求拼装、发送、
+   参数降级重试、响应解析全在原生（`ai/AiCompletion.kt`）：凭据由 Web 推给原生只存
+   原生（`FoliaNative.setAiConfig` → `FoliaSettingsStore`），补全经
+   `FoliaNative.runAiCompletion` 整条在原生跑 —— WebView 冻结不再影响生成中的请求。
+   老版本 App / 非安卓回落原路（`aiNativeFetch`，HTTP 仍走原生 OkHttp，只是发起那一刻
+   需要 JS 活着），已做
+10. **AI 云缓存** —— 拉取（`fetchAiCacheViaNative` → `aiCloudCacheGet`）与回传
+   （`createAiFetch` → `aiRequest`）的 HTTP 都在原生 OkHttp；回传时机在生成完成后、
+   由 Web 编排（它必须拿到生成结果才知道该回传什么），这部分编排留在 Web 是契约使然，
+   不是缺口，已做
+
 ## 尚未迁移
 
-- **AI 主题的生成参数**（音频特征、配色种子）：主题的**切换**已跟曲目走，但生成
-  仍在 Web 侧算 —— 见上表 `NativeThemeSeed`，下一轮
-- **云缓存**（歌词缓存、封面缓存）：现在每次都重新拉，能用但不是最优
-- ~~**随机播放的尾部重排**~~：已接管 —— `skipViaMirror` 改走队列状态机的 `onSkip`，
-  通知栏/锁屏在随机模式下按「下一首」也是原生挑格（≠ 当前）；Web 侧的 `shuffleQueue`
-  尾部重排只在 App 内点歌时仍会先跑一次，行为一致
+- **随机播放的尾部重排**（App 内点歌那一次 `shuffleQueue`）：行为与原生一致，仅路径
+  还在 Web —— 无行为差异，暂不动
 
 ## 不做什么
 
