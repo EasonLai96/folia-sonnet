@@ -72,6 +72,7 @@ import { errorMessage } from '../../../../utils/errorText';
 import { isPlaybackInterfaceHidden, notifyBackgroundPlaybackNotice } from '../../../../services/playbackRecovery/backgroundFailureNotice';
 import { FoliaPlayback } from '../../../../hooks/useCapacitorPlaybackBridge';
 import { buildQueueMirrorEntries } from '../../../../utils/queueMirrorEntry';
+import { waitForNativeArrival } from './waitForNativeArrival';
 
 // src/components/app/playback/start/usePlaybackQueueController.ts
 
@@ -543,13 +544,24 @@ export function usePlaybackQueueController({
             if (!nativeFailedKeysRef.current.has(nativeKey)) {
                 // 作废一切在途的 Web 播放 / 切歌：这一单归原生，认领走 syncTo。
                 playSongCallIdRef.current += 1;
-                startPlay();
+                // 留着这一单的「还要不要」判据：等原生真起播的时候，用户可能已经点了别的歌。
+                const stillWanted = startPlay();
                 interruptStagePlaybackForMainTransition();
                 if (options.shouldNavigateToPlayer ?? true) navigateToPlaybackView();
                 // 调用者手里的队列是最新的（镜像 effect 可能还没跑），随分派一起落进原生。
                 const mirrorQueue = queue.length > 0 ? queue : usePlaybackStore.getState().playQueue;
                 const mirrorIndex = mirrorQueue.findIndex((entry) => getPlaybackSongKey(entry) === nativeKey);
                 if (mirrorIndex >= 0) {
+                    /*
+                     * 这一单的队列先落进 store。
+                     *
+                     * 后面的兜底全在 store 的 playQueue 里找歌：syncTo 认领
+                     * （useAppPlaybackBridges 的 onSyncToSong）、nativePlayFailed 回退
+                     * （同文件的 onNativePlayFailed）。store 里还是点歌前那份旧队列的话，
+                     * 这两条都会「找不到这首歌」然后安静地什么都不做 —— 点歌一旦失败就
+                     * 再也回不来，只能按下一首自救。
+                     */
+                    setPlayQueue(mirrorQueue);
                     try {
                         const { ok } = await FoliaPlayback.playFromQueue({
                             songKey: nativeKey,
@@ -557,13 +569,28 @@ export function usePlaybackQueueController({
                             index: mirrorIndex,
                         });
                         if (ok) {
-                            // 乐观 UI：原生还在解析 / 起播，界面先跟上；syncTo 到达后
-                            // UI-only 认领补齐位置与时长（key 相等走早退分支，同样补 PLAYING）。
-                            // 这是一次交付，不是另一次问歌：画面交给这首歌用 `makeSongCurrent`
-                            // （问 + 显示一起），别绕过 currentSong 直接写 store。
-                            makeSongCurrent(song);
-                            setPlayerState(PlayerState.PLAYING);
-                            return;
+                            /*
+                             * `ok` 只表示原生**受理**了这一单，不表示地址已经装进 ExoPlayer：
+                             * playFromQueue 在起解析线程之前就回了 true，真正换源要等平台的
+                             * 地址回来（nativePlayMirrorEntry）。这里以前把 ok 当作已起播直接
+                             * makeSongCurrent 乐观提交，于是解析失败（身份不全 / 守卫丢弃 /
+                             * 网络拿不到）时界面名字换了、声音和歌词留在上一首，也没有下文 ——
+                             * 用户报的「从歌单点歌只改名字」就是这条。
+                             *
+                             * 等一个到达信号：原生快照里的 songKey 变成这首歌。等不到就
+                             * 不认这一单，落回下面的 Web 全流程自己放（那边会重新问歌、
+                             * 装地址），保证名字与声音永远一起变。
+                             */
+                            const arrived = await waitForNativeArrival({
+                                readSnapshot: () => FoliaPlayback.getPlaybackSnapshot(),
+                                expectsKey: nativeKey,
+                                stillWanted,
+                            });
+                            if (arrived) {
+                                makeSongCurrent(song);
+                                setPlayerState(PlayerState.PLAYING);
+                                return;
+                            }
                         }
                     } catch {
                         // 桥不可用（老版本原生没有这个方法）：照常走 Web 全流程。

@@ -303,6 +303,21 @@ class FoliaPlaybackService : android.app.Service() {
                 mainHandler.removeCallbacks(playConfirmCheck)
                 mainHandler.postDelayed(playConfirmCheck, PLAY_CONFIRM_GRACE_MS)
                 syncWallpaperAnchor(true)
+                /*
+                 * 与 onPause 对称：原生这一路已经接手在放了，快照就该说在放。
+                 *
+                 * 但**不要**顺手把 cachedPlaying 置 true —— 它同时是 playConfirmCheck
+                 * 里「Web 层回过话没有」的判据，置 true 会把锚点回收与补发一起关掉，
+                 * 那条「长时间暂停后播放拉不起来」的兜底就废了。cachedPlaying 只由
+                 * Web 推上来的状态写（见 updatePlaybackState）。
+                 */
+                if (top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+                    cachedState = PlaybackStateCompat.STATE_PLAYING
+                    cachedPositionMs = resolvePlaybackPositionMs()
+                    publishSnapshot()
+                    applyPlaybackState()
+                    publishNotification()
+                }
             }
 
             override fun onPause() {
@@ -321,6 +336,25 @@ class FoliaPlaybackService : android.app.Service() {
                 // 尽头，那一句歌词就永远停在那儿 —— 这时候再点播放也回不来了，
                 // 因为锚点早就飞出去了。
                 syncWallpaperAnchor(false)
+                /*
+                 * 原生真的停下来了，就把状态就地写回来。
+                 *
+                 * cachedState 原先只有 Web 推状态那一条路会改，而这一下暂停常常发生在
+                 * WebView 被系统冻结的时候（退到后台、锁屏），那条推送根本不会到 ——
+                 * 于是快照里一直是 playing=true：界面按它在播继续外推进度条，播放键也
+                 * 变成「已经是播放中」，用户再点只是又发一次 pause，表现为
+                 * 「暂停了进度条还在走，而且点不动/无法播放」（用户报的就是这个）。
+                 *
+                 * 只在原生手上真有歌时改：走 <audio> 的那首归 Web 管，别抢。
+                 */
+                if (top.izuna.foliamajor.player.FoliaNativePlayerPlugin.hasActiveMedia()) {
+                    cachedState = PlaybackStateCompat.STATE_PAUSED
+                    cachedPlaying = false
+                    cachedPositionMs = resolvePlaybackPositionMs()
+                    publishSnapshot()
+                    applyPlaybackState()
+                    publishNotification()
+                }
             }
 
             override fun onSkipToNext() {
@@ -449,14 +483,32 @@ class FoliaPlaybackService : android.app.Service() {
                          */
                         val entries = NativeQueueEntry.fromArray(mirroredQueueJson)
                         if (entries.isNotEmpty()) {
+                            // 冷启动时状态机是空的，syncEntries 没有「同一首歌」可保留，
+                            // 只会给下标 0；而前台推来的 index 才是真正正播的那一首。
+                            // 空手上任时按前台说的来 —— 否则 getQueueState().index 一直是
+                            // 队首，前台照着它恢复/播放，就会出现「声音和界面不是同一首」
+                            // （用户报的「刚启动直接播放」那条）。
+                            val hadCurrent = playQueue.current() != null
                             playQueue.syncEntries(entries)
+                            if (!hadCurrent && mirroredIndex in entries.indices) {
+                                playQueue.seekTo(mirroredIndex)
+                            }
                             playQueue.bumpRevision()
                         }
                     }
                     ACTION_UPDATE_QUEUE_INDEX -> {
                         // 队列本体不变、只是换了一首正播的：轻量更新游标。全量队列一推
                         // 几百 KB，不能跟着切歌一起反复过桥。
-                        mirroredIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1)
+                        //
+                        // 游标要**同时**写进状态机：getQueueState().index 读的是 playQueue
+                        // 的下标，只改 mirroredIndex 的话前台拿到的「当前是第几首」永远停在
+                        // 旧值（冷启动时是队首）。原生刚切过歌、前台还没认领时不写 ——
+                        // 那条路上原生才是真源，别被前台的旧值拽回去。
+                        val nextIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1)
+                        mirroredIndex = nextIndex
+                        if (nextIndex >= 0 && nativeSkipSongKey.isNullOrEmpty()) {
+                            playQueue.seekTo(nextIndex)?.let { playQueue.bumpRevision() }
+                        }
                     }
                     ACTION_SCHEDULE_LIKE_FALLBACK -> {
                         // 通知栏 / 锁屏那颗心走 FoliaCommandReceiver，不经 MediaSession 回调，
@@ -988,7 +1040,15 @@ class FoliaPlaybackService : android.app.Service() {
                     && ((direction > 0 && idx + 1 >= count) || (direction < 0 && idx - 1 < 0))
             if (offBoundary && !queue.optBoolean("shuffle", false)) return false
             val picked = playQueue.onSkip(direction) ?: return false
-            val wrapped = queue.optInt("index", index)
+            /*
+             * 下标必须取**切完之后**的。
+             *
+             * 上面那个 `queue` 是 onSkip 之前的快照，拿它的 index 会读到上一首，
+             * 于是下面「状态机选的」和「镜像该格的」永远对不上，直接走脱节分支
+             * return false —— 表现为队列在走、歌不换、通知栏也不动（用户报的
+             * 「按下一首没反应」正是这条）。onSkip 内部已经把下标推到了新的一格。
+             */
+            val wrapped = playQueue.currentIndex()
             if (wrapped < 0 || wrapped >= count) return false
             val entry = array.getJSONObject(wrapped)
             val pickedKey = picked.songKey
@@ -1004,8 +1064,10 @@ class FoliaPlaybackService : android.app.Service() {
             if (url == null || url.isEmpty()) {
                 url = entry.optString("url", "")
             }
+            // 先占位再决定要不要异步解析，与上面按 songKey 定位那条路径一致：
+            // 解析期间用户又按了下一首的话，mirroredIndex 已经变了，回来的这份被守卫丢掉。
+            mirroredIndex = wrapped
             if (url != null && !url.isEmpty()) {
-                mirroredIndex = wrapped
                 nativePlayMirrorEntry(entry, url)
                 /*
                  * 回绕那一格是队首：预取方向也要跟着换（否则会去预取队首的「下一首」，
@@ -1019,7 +1081,7 @@ class FoliaPlaybackService : android.app.Service() {
             // 每首歌的身份（providerId / serverSongId / songmid）都在，缺的只是地址 ——
             // 这就是「连按几首下一首就切不动」的解药。解析在后台线程（桥的线程规则），
             // 成了回主线程换源；期间用户又按了的，以 mirroredIndex 为准作废重算。
-            resolveMirrorEntryAsync(array, entry, wrapped, index, direction)
+            resolveMirrorEntryAsync(array, entry, wrapped, wrapped, direction)
             return true
         } catch (ignored: org.json.JSONException) {
             return false
@@ -1037,10 +1099,21 @@ class FoliaPlaybackService : android.app.Service() {
         val mid = entry.optString("providerMid", "")
         val hash = entry.optString("providerHash", "")
         val albumAudioId = entry.optString("providerAlbumAudioId", "")
+        val songKey = entry.optString("songKey", "")
         if (providerId.isEmpty() || (songId.isEmpty() && mid.isEmpty() && hash.isEmpty())) {
+            /*
+             * 身份不全，连问都问不了。**必须回执**：这条以前是静默 return，而 playFromQueue
+             * 早在起线程之前就回了 true，前台据此已经把这一单当成成功（乐观写 currentSong、
+             * 推元数据）—— 于是名字换成了新歌、声音和歌词留在上一首，而且再也没有下文。
+             * 与下面「重试也拿不到地址」那条对齐：回执 + 按设置决定跳不跳。
+             */
+            Log.w(TAG, "解析地址失败：队列条目身份不全 songKey=" + songKey)
+            if (!songKey.isEmpty()) {
+                mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
+            }
+            mainHandler.post { onEntryUnplayable(songKey) }
             return
         }
-        val songKey = entry.optString("songKey", "")
         Thread({
             val url = resolveWithRetry(providerId, songId, mid, hash, albumAudioId)
             if (url == null || url.isEmpty()) {
@@ -1063,7 +1136,22 @@ class FoliaPlaybackService : android.app.Service() {
                 resolvedUrlCache.put(songKey, url)
             }
             mainHandler.post {
-                if (mirroredIndex != originIndex) return@post
+                /*
+                 * 出队守卫：只看「出发时那一格还是不是这首歌」，不看「下标有没有被动过」。
+                 *
+                 * 原来比的是 `mirroredIndex != originIndex` —— 解析这一两秒里前台任何一次
+                 * 游标推送（切歌后界面认领、镜像 effect、甚至别处无关的一次 setQueueMirrorIndex）
+                 * 都会改掉 mirroredIndex，这一份解析回来的地址就被丢掉，而调用方那边
+                 * 早就收到 true 了：结果正是「点了歌只换名字」。按下标「没变」来判太脆，
+                 * 按身份判才是本意：只要现在该放的那一格还是这首，地址就还有用。
+                 */
+                val stillWanted = mirroredIndex == originIndex ||
+                    (mirroredIndex in 0 until array.length() &&
+                        array.optJSONObject(mirroredIndex)?.optString("songKey", "") == songKey)
+                if (!stillWanted) {
+                    Log.w(TAG, "地址解析回来时那一格已经换歌，丢弃 songKey=" + songKey)
+                    return@post
+                }
                 mirroredIndex = target
                 nativePlayMirrorEntry(entry, url)
                 preloadMirrorNeighbors(array, target, direction)

@@ -265,6 +265,13 @@ class MainActivity : BridgeActivity() {
 
         super.onCreate(savedInstanceState)
 
+        // WebView 远程调试口：用 CDP 读 console / DOM / 插件状态，这是唯一能看见
+        // WebView 内部（含被冻结前后）的手段，真机排查全靠它。
+        // 必须放在 super.onCreate() 之后：Capacitor 的 Bridge 在 super 里创建，会把调试开关
+        // 按 release 配置关掉，写在前面等于白写。
+        // 这个口只在 127.0.0.1 上、且要 adb forward 才能连，用户明确同意留着不删。
+        android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+
         attachYtmSignInLauncher()
 
         checkWebViewSupport()

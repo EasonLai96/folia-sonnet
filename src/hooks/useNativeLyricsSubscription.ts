@@ -76,17 +76,24 @@ export const useNativeLyricsSubscription = (currentSongKey: string | null): void
     useEffect(() => {
         if (!isCapacitorAndroid()) return;
         let disposed = false;
-        let unsubscribe: (() => void) | null = null;
+        let unsubscribe: { remove: () => Promise<void> | void } | null = null;
 
         const subscribe = async (): Promise<void> => {
             const g = window as unknown as {
                 Capacitor?: { Plugins?: Record<string, unknown> };
             };
             const plugin = g.Capacitor?.Plugins?.FoliaPlayback as
-                | { addListener?: (name: string, cb: (payload: NativeLyricsPayload) => void) => Promise<() => void> }
+                | {
+                      addListener?: (
+                          name: string,
+                          cb: (payload: NativeLyricsPayload) => void,
+                      ) => Promise<{ remove: () => Promise<void> | void }>;
+                  }
                 | undefined;
             if (!plugin?.addListener) return;
-            const off = await plugin.addListener('foliaPlaybackLyrics', (payload) => {
+            // Capacitor 的 addListener 返回**句柄对象** `{ remove }`，不是函数：
+            // 以前把它当函数在 effect 的清理里调，TypeError 直接把渲染打掉（黑屏）。
+            const handle = await plugin.addListener('foliaPlaybackLyrics', (payload) => {
                 if (disposed) return;
                 // 只认当前这首：原生可能在我们切歌的同一瞬间推来上一首的结果。
                 if (!payload?.songKey || payload.songKey !== currentSongKey) return;
@@ -97,14 +104,14 @@ export const useNativeLyricsSubscription = (currentSongKey: string | null): void
                 }
                 setLyricsState(toLyricData(payload.lrc, payload.translated ?? ''));
             });
-            if (disposed) off();
-            else unsubscribe = off;
+            if (disposed) void handle?.remove?.();
+            else unsubscribe = handle;
         };
 
         void subscribe();
         return () => {
             disposed = true;
-            unsubscribe?.();
+            void unsubscribe?.remove?.();
         };
     }, [currentSongKey]);
 };

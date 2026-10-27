@@ -338,7 +338,32 @@ export const useAppPlaybackBridges = (model: Input) => {
             nativeFailedKeysRef.current.add(songKey);
             const state = usePlaybackStore.getState();
             const song = state.playQueue.find((item) => getPlaybackSongKey(item) === songKey);
-            if (song) void playSong(song, state.playQueue);
+            if (song) {
+                void playSong(song, state.playQueue);
+                return;
+            }
+            /*
+             * store 里没有这首：**不能就这么算了**。
+             *
+             * 点歌交给原生时商店里的队列可能还不是这一份（分派那一拍 setPlayQueue 才落地），
+             * 而以前这里就是 `if (song)`，找不到就静默跳过 —— 于是原生解析失败的回执被吃掉，
+             * 界面停在「名字换了、声音还是上一首」，用户只能按下一首自救。
+             * 拉一次原生队列把歌还原出来再回退：原生那份队列就是分派时给它的那一份。
+             */
+            void (async () => {
+                try {
+                    const native = await readNativeQueueState();
+                    const entry = native?.entries.find((item) => item.songKey === songKey);
+                    if (!entry) {
+                        console.warn('[NativePlayer] 原生解析失败且队列里找不到这首歌，无法回退', songKey);
+                        return;
+                    }
+                    const restored = songFromMirrorEntry(entry);
+                    void playSong(restored, usePlaybackStore.getState().playQueue);
+                } catch (error) {
+                    console.warn('[NativePlayer] 回退原生解析失败的歌时出错', error);
+                }
+            })();
         },
         /*
          * 队列镜像与红心状态：这两个 prop 也在 App.tsx 拆分（4de8e8be）时被弄丢了 ——
