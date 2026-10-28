@@ -111,6 +111,10 @@ dependencies {
     // ⚠️ 版本改动要看 media3 的 release notes：1.x 之间 API 有移动。
     implementation "androidx.media3:media3-exoplayer:1.11.1"
     implementation project(':capacitor-android')
+    // JVM 单测里 android.jar 的 org.json 是空壳（一调用就 "not mocked"），而设置与队列
+    // 这两层的数据载体就是 JSONObject —— 它们恰恰最该被单测钉住（合并语义、队列推进）。
+    // 给测试类路径放一份真实实现即可，不进包。
+    testImplementation "org.json:json:20240303"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
@@ -151,3 +155,26 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+// capacitor.plugins.json 兜底。
+//
+// 这份清单由 `cap sync` 生成，而它在 .gitignore 里 —— 只跑 gradle（本仓库的常态，
+// 见 MainActivity 里那段说明）时它并不存在。Capacitor 8 的 PluginManager 在缺文件时
+// 不是跳过、而是抛 PluginLoadException，且 BridgeActivity.onCreate 没有 try/catch：
+// 整个 Activity 起不来，开机就是一片黑，logcat 里只有一行
+// `Error loading plugins ... Could not load capacitor.plugins.json`。
+//
+// 官方插件都在 MainActivity 里手动 registerPlugin，所以这里补一份空清单就够了；
+// 有 sync 生成的真清单时不覆盖。
+tasks.register('ensureCapacitorPluginsJson') {
+    def manifest = file('src/main/assets/capacitor.plugins.json')
+    outputs.file(manifest)
+    doLast {
+        if (!manifest.exists()) {
+            manifest.parentFile.mkdirs()
+            manifest.text = '[]'
+        }
+    }
+}
+
+tasks.named('preBuild').configure { dependsOn 'ensureCapacitorPluginsJson' }

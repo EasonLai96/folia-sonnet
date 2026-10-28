@@ -38,6 +38,9 @@ import { useTransportCommandRefs } from '../playback/bridges/useTransportCommand
 import { useRef, useCallback } from 'react';
 import type { SongResult } from '../../../types';
 import { usePlaybackStore } from '../../../stores/usePlaybackStore';
+import { useSongThemeFollow } from '../../../hooks/useSongThemeFollow';
+import { readNativeQueueState } from '../../../services/nativeQueueBridge';
+import { songFromMirrorEntry } from '../../../utils/queueMirrorEntry';
 
 // src/components/app/appWiring/useAppPlaybackBridges.ts
 // 播放与系统之间的桥：音频分析、转码兜底、transport、系统媒体会话、通知栏、歌词推送。
@@ -67,6 +70,18 @@ export const useAppPlaybackBridges = (model: Input) => {
         stageLyricsSession, stageStatus, starredNavidromeSongIds, syncNowPlayingClock, syncOutputGain,
         syncStageLyricsClock, t, theme, themeSettling
     } = model;
+    /*
+     * 当前曲目一变就恢复它该有的主题。判据只有一个：songKey。
+     *
+     * 原来主题恢复只挂在三条路上（playSong 的 Web 全流程、原生 syncTo 的认领、会话恢复），
+     * 而原生派发的点歌三条都绕过了 —— 于是「切了歌单，主题还停在上一个歌单那首」。
+     * 现在不管谁发起、走哪条链路，当前曲目换了就跟着换。
+     */
+    useSongThemeFollow({
+        currentSong: displaySong ?? currentSong ?? null,
+        // displaySong 可能带 automix 的过渡信息，恢复主题要的是这首歌本身。
+        restoreCachedThemeForSong: restoreCachedThemeForSong as (song: SongResult) => Promise<unknown>,
+    });
     const { setupAudioAnalyzer, cacheSongAssets, cacheSongAssetsFor, adoptActiveDeckSource } = usePlaybackAudioBridge({
         audioRef,
         localSongs,
@@ -225,6 +240,23 @@ export const useAppPlaybackBridges = (model: Input) => {
         // 没人收，失败的歌每按一次都再撞一次原生。这里按原语义接回来。
         onSyncToSong: (songKey, positionMs) => {
             const state = usePlaybackStore.getState();
+            /*
+             * 队列也要对齐：WebView 冻结期间原生可能自动跳过了放不了的歌、随机挑了
+             * 格、通知栏切了歌 —— 它的 playQueue 换过下标甚至内容。只认领 currentSong
+             * 不认领队列的话，用户回来看到的还是旧队列：点「下一首」会跳回冻结前的
+             * 位置，列表顺序也是错的。拉一次整份状态，队列与下标一起摆正。
+             */
+            void (async () => {
+                const native = await readNativeQueueState();
+                if (!native || native.revision === 0) return;
+                const shown = usePlaybackStore.getState().playQueue;
+                const nativeKeys = native.entries.map(entry => entry.songKey).join('|');
+                const shownKeys = shown.map(item => getPlaybackSongKey(item)).join('|');
+                if (nativeKeys === shownKeys) return;
+                usePlaybackStore.getState().setPlayQueue(
+                    native.entries.map(entry => songFromMirrorEntry(entry)),
+                );
+            })();
             const shown = state.currentSong;
             if (shown && getPlaybackSongKey(shown) === songKey) {
                 // key 相等也要补齐：乐观 setCurrentSong 之后的 syncTo、以及 WebView
@@ -306,7 +338,32 @@ export const useAppPlaybackBridges = (model: Input) => {
             nativeFailedKeysRef.current.add(songKey);
             const state = usePlaybackStore.getState();
             const song = state.playQueue.find((item) => getPlaybackSongKey(item) === songKey);
-            if (song) void playSong(song, state.playQueue);
+            if (song) {
+                void playSong(song, state.playQueue);
+                return;
+            }
+            /*
+             * store 里没有这首：**不能就这么算了**。
+             *
+             * 点歌交给原生时商店里的队列可能还不是这一份（分派那一拍 setPlayQueue 才落地），
+             * 而以前这里就是 `if (song)`，找不到就静默跳过 —— 于是原生解析失败的回执被吃掉，
+             * 界面停在「名字换了、声音还是上一首」，用户只能按下一首自救。
+             * 拉一次原生队列把歌还原出来再回退：原生那份队列就是分派时给它的那一份。
+             */
+            void (async () => {
+                try {
+                    const native = await readNativeQueueState();
+                    const entry = native?.entries.find((item) => item.songKey === songKey);
+                    if (!entry) {
+                        console.warn('[NativePlayer] 原生解析失败且队列里找不到这首歌，无法回退', songKey);
+                        return;
+                    }
+                    const restored = songFromMirrorEntry(entry);
+                    void playSong(restored, usePlaybackStore.getState().playQueue);
+                } catch (error) {
+                    console.warn('[NativePlayer] 回退原生解析失败的歌时出错', error);
+                }
+            })();
         },
         /*
          * 队列镜像与红心状态：这两个 prop 也在 App.tsx 拆分（4de8e8be）时被弄丢了 ——

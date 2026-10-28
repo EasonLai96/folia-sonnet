@@ -1,4 +1,5 @@
 import { createAiFetch } from './aiNativeFetch';
+import { requestAiCompletionViaNative } from './aiNativeCompletion';
 import {
     aiProtocolOf,
     isAiConfigured,
@@ -293,6 +294,14 @@ export const requestAiCompletion = async (request: AiCompletionRequest): Promise
     }
     const { target, configured } = readAiTarget();
     if (!configured) throw new Error(AI_NOT_CONFIGURED);
+
+    /*
+     * 安卓先走原生补全：请求由原生发起后，WebView 冻不冻结都与它无关 —— OkHttp 在
+     * 自己的线程池里跑完，答案照样回来。没有这个方法（老版本 App / 非安卓）回落到
+     * 下面那条（它经 aiNativeFetch 也是原生 OkHttp 发，只是发起那一刻需要 JS 活着）。
+     */
+    const native = await requestAiCompletionViaNative(request);
+    if (native !== null) return { text: native, target };
 
     const send = createAiFetch();
     try {

@@ -265,6 +265,13 @@ class MainActivity : BridgeActivity() {
 
         super.onCreate(savedInstanceState)
 
+        // WebView 远程调试口：用 CDP 读 console / DOM / 插件状态，这是唯一能看见
+        // WebView 内部（含被冻结前后）的手段，真机排查全靠它。
+        // 必须放在 super.onCreate() 之后：Capacitor 的 Bridge 在 super 里创建，会把调试开关
+        // 按 release 配置关掉，写在前面等于白写。
+        // 这个口只在 127.0.0.1 上、且要 adb forward 才能连，用户明确同意留着不删。
+        android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+
         attachYtmSignInLauncher()
 
         checkWebViewSupport()
@@ -416,6 +423,15 @@ class MainActivity : BridgeActivity() {
         // 延后一拍再压一次，避免出现一瞬间的状态栏/导航栏残留。
         window.decorView.postDelayed(this::applyImmersiveMode, 120)
         window.decorView.postDelayed({ PhoneFitCutout.apply(this) }, 120)
+        /*
+         * 回前台按当前状态重算一次方向。
+         *
+         * Activity 会一直维持着**上一次请求的方向**：在播放页（横屏）被切走，回来时
+         * 页面可能已经换了、或者 WebView 那一份状态丢了，没人重新下发，横屏就留在
+         * 了不该横的那一页上 —— 用户看到的是「打开 App，海报墙也是横的」。
+         * 重算是幂等的：还在播放页就还是横屏，不在就交回系统。
+         */
+        PhoneLayoutOrientation.apply(this)
     }
 
     // 必须是 public：BridgeActivity 里的这两个回调是 public，降成 protected 属于收窄

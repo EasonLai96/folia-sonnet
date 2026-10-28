@@ -17,6 +17,9 @@ import { currentTime } from '../../../stores/motionSignals';
 import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { selectAudioSettingsSnapshot, useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
+import { writeNativeLoopMode } from '../../../services/nativeQueueBridge';
+import { writeNativeSettings } from '../../../services/nativeSettingsBridge';
+import { useNativeAiConfigSync } from '../../../hooks/useNativeAiConfigSync';
 import { useAutomixSettingsStore } from '../../../stores/useAutomixSettingsStore';
 import { selectDesktopSettingsSnapshot, useDesktopSettingsStore } from '../../../stores/useDesktopSettingsStore';
 import { useLibraryStore } from '../../../stores/useLibraryStore';
@@ -38,6 +41,9 @@ import { useBackgroundLyricHoldStore } from '../backgroundThrottling/backgroundL
 import { useBackgroundLyricHold } from '../backgroundThrottling/useBackgroundLyricHold';
 import { usePlaybackRuntimeRefs } from '../playback/usePlaybackRuntimeRefs';
 import { useProviderNotices } from '../useProviderNotices';
+import { useAndroidPlaybackOrientation } from '../../../hooks/useAndroidPlaybackOrientation';
+import { useNativeLyricsSubscription } from '../../../hooks/useNativeLyricsSubscription';
+import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
@@ -175,6 +181,58 @@ export const useAppFoundation = () => {
     const updatePrompt = useStartupUpdatePrompt();
 
     useEffect(() => initializeSyncCoordinator(), []);
+
+    // 「进入可视化自动横屏」：Web 只上报「在不在播放页」，转不转由原生按设置判。
+    useAndroidPlaybackOrientation();
+
+    // 循环模式的启动同步：Web 这边从 localStorage 恢复了模式，但原生设置里还没有 ——
+    // 不发一次的话，放完往哪走（原生的队列状态机）会一直按默认顺序，直到用户再动一次
+    // 循环开关。放这里只做一次，后续变化由 handleSetLoopMode 自己下发。
+    useEffect(() => {
+        const mode = useAudioSettingsStore.getState().loopMode;
+        void writeNativeLoopMode(
+            mode === 'shuffle' ? 'all' : mode,
+            mode === 'shuffle',
+        );
+    }, []);
+
+    // AI 配置的启动同步与变化跟随：凭据只存原生，真正发请求的是原生。
+    useNativeAiConfigSync();
+
+    /*
+     * 「无法播放时自动跳过」的启动同步，理由同上面的循环模式：这一项原生也读
+     * （FoliaPlaybackService.onEntryUnplayable），而 Web 这边只写在 localStorage 里。
+     * 不推一次的话，原生永远按默认的 true 走 —— Web 侧默认是 false，两边相反：
+     * 用户明明关着，WebView 一冻结，原生兜底照样一首首跳过去。
+     */
+    useEffect(() => {
+        let cancelled = false;
+        let attempts = 0;
+        const push = async () => {
+            const merged = await writeNativeSettings({
+                autoSkipUnplayable: useAudioSettingsStore.getState().autoSkipUnplayable,
+                // 「播放淡入淡出」也归原生执行（音量斜坡在播放器里），启动时对一次表。
+                playbackFade: useAudioSettingsStore.getState().playbackFadeEnabled,
+                // 交叉淡化也是原生执行：开关与时长（秒 → 毫秒）在启动时对一次表。
+                crossfadeEnabled: useAutomixSettingsStore.getState().automixEnabled,
+                crossfadeMs: Math.round(useAutomixSettingsStore.getState().crossfadeMaxSec * 1000),
+            });
+            if (merged || cancelled || attempts >= 20) return;
+            attempts += 1;
+            setTimeout(() => {
+                void push();
+            }, 500);
+        };
+        void push();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // 歌词由原生拉、原生推：这里只按 songKey 认领并渲染。
+    // 自己拉会挂在 currentSong 的 effect 上，而原生派发的点歌绕过它 ——
+    // 「切了歌单歌词不换」就是这么来的。
+    useNativeLyricsSubscription(currentSong ? getPlaybackSongKey(currentSong) : null);
 
     const loadNavidromeFavorites = useCallback(async () => {
         if (!navidromeEnabled) {

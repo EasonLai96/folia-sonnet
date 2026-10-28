@@ -58,6 +58,12 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     companion object {
         private const val POSITION_TICK_MS = 250L
 
+        /** 暂停 / 继续那条音量斜坡有多长。够长听得出来，够短不挡事。 */
+        private const val PAUSE_FADE_MS = 160
+
+        /** 斜坡分几步。8 步在 160ms 下约 20ms 一步，听感上没有台阶。 */
+        private const val FADE_STEPS = 8
+
         /**
          * 伪装成浏览器的 UA。
          *
@@ -94,8 +100,31 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      */
     @Volatile
     private var lastUrl: String? = null
+
+    /**
+     * 最后一首的**身份**（装源时写进 MediaItem 的 mediaId，就是 songKey）。
+     *
+     * 「点歌到底有没有换过去」只能看引擎自己装的是谁：服务里的 cachedSongKey 会随 Web
+     * 推的 metadata 一起变，拿它当判据等于自己给自己盖章 —— 界面一认领新歌就算到达，
+     * 引擎还在放上一首（用户实测：冷启动自动播放后从歌单点歌，界面是新歌、声音是上一首）。
+     *
+     * 与 lastUrl 同纪律：调用线程写、别的线程读，所以 volatile。
+     */
+    @Volatile
+    private var lastMediaId: String? = null
     private var tickScheduled = false
     private var requestedVolume = 1f
+    /**
+     * 暂停 / 继续那一下的淡化。
+     *
+     * ExoPlayer 没有内建的淡入淡出：`setPlayWhenReady(false)` 是当场断音，「继续」是当场
+     * 满音量出声，两下都像被切了一刀。这里自己做一条音量斜坡：暂停先滑到 0 再停，继续先从
+     * 0 滑上来。开关由设置里的「播放淡入淡出」跟着 [setPauseFadeEnabled] 进来 —— 那一项在
+     * Web 侧以前是 Web Audio 上的 gain 斜坡，原生出声后它管不到，所以搬到这里。
+     */
+    @Volatile
+    private var pauseFadeEnabled = true
+    private var fadeTick: Runnable? = null
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -134,8 +163,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     }
 
     /** 装上地址并缓冲。startPositionMs 小于 0 表示从头播。 */
-    fun prepare(url: String, startPositionMs: Long) {
+    fun prepare(url: String, startPositionMs: Long, mediaId: String? = null) {
         lastUrl = url
+        lastMediaId = mediaId
         /*
          * ⭐ 位置与时长在**调用线程上**立刻归零，不等播放器线程。
          *
@@ -153,7 +183,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             // 有些源要附带请求头（飞牛的音频流认 Cookie: music-token）：
             // 每次换源都按地址重问一遍，没有就清空，别把上一首的头带给下一首。
             applySourceHeaders(url)
-            current.setMediaItem(MediaItem.fromUri(url))
+            current.setMediaItem(mediaItemFor(url, mediaId))
             current.setRepeatMode(requestedRepeatMode)
             current.setVolume(requestedVolume)
             current.setPlaybackParameters(PlaybackParameters(requestedSpeed))
@@ -169,7 +199,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     fun play() {
         runOnPlayer {
             val current = ensurePlayer()
+            val resuming = !cachedPlaying
             current.setPlayWhenReady(true)
+            if (pauseFadeEnabled && resuming) {
+                // 先从 0 滑上来；不这么做，「继续」是当场满音量。
+                current.setVolume(0f)
+                rampVolume(0f, requestedVolume, PAUSE_FADE_MS)
+            }
             cachedPlaying = true
         }
     }
@@ -177,11 +213,65 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     fun pause() {
         runOnPlayer {
             val current = player ?: return@runOnPlayer
-            current.setPlayWhenReady(false)
             cachedPlaying = false
-            stopTicking()
             cachedPositionMs = current.currentPosition
+            // 位置与状态当场报出去：界面上的进度条不该跟着斜坡走 160ms。
             emit("paused", cachedPositionMs, cachedDurationMs, null)
+            if (!pauseFadeEnabled) {
+                current.setPlayWhenReady(false)
+                stopTicking()
+                return@runOnPlayer
+            }
+            rampVolume(requestedVolume, 0f, PAUSE_FADE_MS) {
+                current.setPlayWhenReady(false)
+                // 音量回到「本该是多少」：下一首从 0 淡进来，而不是继承这条斜坡的 0。
+                current.setVolume(requestedVolume)
+                stopTicking()
+            }
+        }
+    }
+
+    /**
+     * 音量斜坡：把播放器音量从 [from] 滑到 [to]，分 [FADE_STEPS] 步、共 [durationMs]，
+     * 滑完调 [then]（在播放器线程上）。淡入淡出关掉时直接落位、立刻回调。
+     */
+    private fun rampVolume(from: Float, to: Float, durationMs: Int, then: (() -> Unit)? = null) {
+        cancelFade()
+        if (!pauseFadeEnabled || durationMs <= 0) {
+            player?.setVolume(to)
+            then?.invoke()
+            return
+        }
+        val stepMs = (durationMs / FADE_STEPS).coerceAtLeast(1)
+        var step = 0
+        val tick = object : Runnable {
+            override fun run() {
+                step++
+                val progress = step.toFloat() / FADE_STEPS
+                player?.setVolume((from + (to - from) * progress).coerceIn(0f, 1f))
+                if (step >= FADE_STEPS) {
+                    fadeTick = null
+                    then?.invoke()
+                } else {
+                    handler.postDelayed(this, stepMs.toLong())
+                }
+            }
+        }
+        fadeTick = tick
+        handler.postDelayed(tick, stepMs.toLong())
+    }
+
+    private fun cancelFade() {
+        fadeTick?.let { handler.removeCallbacks(it) }
+        fadeTick = null
+    }
+
+    /** 设置里的「播放淡入淡出」跟着这一项走（默认开，见 FoliaSettingsStore 的 playbackFade）。 */
+    fun setPauseFadeEnabled(enabled: Boolean) {
+        pauseFadeEnabled = enabled
+        if (!enabled) {
+            cancelFade()
+            player?.setVolume(requestedVolume)
         }
     }
 
@@ -194,9 +284,11 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             current.clearMediaItems()
             // 真的停了：系统控件就不该再把它拉起来。
             lastUrl = null
+            lastMediaId = null
             cachedPlaying = false
             cachedPositionMs = 0L
             cachedDurationMs = 0L
+            cancelFade()
             stopTicking()
             emit("idle", 0L, 0L, null)
         }
@@ -233,6 +325,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         val clamped = Math.max(0f, Math.min(1f, volume))
         requestedVolume = clamped
         runOnPlayer {
+            // 正在淡的那条斜坡作废：用户拖到哪儿就是哪儿，不能被斜坡拽回去。
+            cancelFade()
             val current = player
             if (current != null) current.setVolume(requestedVolume)
         }
@@ -278,6 +372,26 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     /** 手上有没有还在播的那一首（系统控件该不该直接碰它，就问这个）。 */
     fun hasMedia(): Boolean {
         return lastUrl != null
+    }
+
+    /**
+     * 引擎此刻装的那首歌的身份（MediaItem 的 mediaId）；没装东西时是空串。
+     *
+     * 读的是缓存的 volatile 字段，不碰播放器：调用方在插件线程上，而播放器在这条
+     * 专用线程里独占。身份是**换源那一刻**写下的，紧跟着 cachedDurationMs 被清零，
+     * 所以「身份已经是这首 + 时长/位置有值」才是「真的装载了」。
+     */
+    fun currentMediaId(): String {
+        return lastMediaId ?: ""
+    }
+
+    /** 装源用的 MediaItem：带身份才认得出「引擎现在装的是谁」。 */
+    private fun mediaItemFor(url: String, mediaId: String?): MediaItem {
+        return if (mediaId.isNullOrEmpty()) {
+            MediaItem.fromUri(url)
+        } else {
+            MediaItem.Builder().setUri(url).setMediaId(mediaId).build()
+        }
     }
 
     /** 缓存值：调用方可能在插件线程上，这里绝不去碰播放器。 */
@@ -339,6 +453,88 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         factory.setDefaultRequestProperties(headers)
     }
 
+    /**
+     * 交叉淡化到下一首：另起一台播放器播新歌，旧那台在 [durationMs] 内淡出，淡完释放。
+     *
+     * 为什么必须是两台：一台播放器同一时刻只有一个音源，先停旧的再放新的，中间那段静音
+     * 是断的 —— 那就不是交叉，是切换。所以进来的那台先以 0 音量起播，两条音量斜坡反向
+     * 跑完，再收掉旧的那台。
+     *
+     * 状态（位置 / 时长 / mediaId / 事件）从调用那一刻起就归新那台报：界面上不该看见
+     * 「旧歌又跳了一下」。
+     *
+     * 返回 false = 没做交叉（没有正在出声的歌，或时长无效），调用方照旧 prepare + play。
+     */
+    fun crossfadeTo(url: String, mediaId: String?, durationMs: Int): Boolean {
+        if (durationMs <= 0) return false
+        val outgoing = player
+        if (outgoing == null || !cachedPlaying || outgoing.mediaItemCount == 0) return false
+        runOnPlayer {
+            val old = player
+            val incoming = buildExtraPlayer()
+            lastUrl = url
+            lastMediaId = mediaId
+            cachedPositionMs = 0L
+            cachedDurationMs = 0L
+            cachedPlaying = true
+            player = incoming
+            applySourceHeaders(url)
+            incoming.setMediaItem(mediaItemFor(url, mediaId))
+            incoming.setRepeatMode(requestedRepeatMode)
+            incoming.setPlaybackParameters(PlaybackParameters(requestedSpeed))
+            incoming.setVolume(0f)
+            incoming.prepare()
+            incoming.setPlayWhenReady(true)
+            emit("playing", 0L, 0L, null)
+            if (old == null) {
+                // 交叉判据是「旧那台在放」，走到这里说明它刚被换掉：直接满音量起播。
+                incoming.setVolume(requestedVolume)
+                return@runOnPlayer
+            }
+            rampCrossfade(old, incoming, durationMs)
+        }
+        return true
+    }
+
+    /** 两条反向音量斜坡：新那台 0 → 音量，旧那台 音量 → 0，跑完释放旧的。 */
+    private fun rampCrossfade(outgoing: ExoPlayer, incoming: ExoPlayer, durationMs: Int) {
+        cancelFade()
+        val stepMs = (durationMs / FADE_STEPS).coerceAtLeast(1)
+        val target = requestedVolume
+        var step = 0
+        val tick = object : Runnable {
+            override fun run() {
+                step++
+                val progress = (step.toFloat() / FADE_STEPS).coerceIn(0f, 1f)
+                incoming.setVolume((target * progress).coerceIn(0f, 1f))
+                outgoing.setVolume((target * (1f - progress)).coerceIn(0f, 1f))
+                if (step >= FADE_STEPS) {
+                    fadeTick = null
+                    outgoing.stop()
+                    outgoing.release()
+                } else {
+                    handler.postDelayed(this, stepMs.toLong())
+                }
+            }
+        }
+        fadeTick = tick
+        handler.postDelayed(tick, stepMs.toLong())
+    }
+
+    /** 交叉淡化用的第二台播放器：与 ensurePlayer 同规格，但不接管 [player]，也不报名事件。 */
+    private fun buildExtraPlayer(): ExoPlayer {
+        val factory = DefaultHttpDataSource.Factory()
+            .setUserAgent(BROWSER_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+        httpFactory = factory
+        val created = ExoPlayer.Builder(context)
+            .setLooper(playerLooper)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+            .build()
+        created.setAudioAttributes(AudioAttributes.DEFAULT, true)
+        return created
+    }
+
     private fun ensurePlayer(): ExoPlayer {
         val current = player
         if (current != null) return current
@@ -369,7 +565,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         val restoredUrl = lastUrl
         if (restoredUrl != null && created.mediaItemCount == 0) {
             applySourceHeaders(restoredUrl)
-            created.setMediaItem(MediaItem.fromUri(restoredUrl))
+            created.setMediaItem(mediaItemFor(restoredUrl, lastMediaId))
             created.setRepeatMode(requestedRepeatMode)
             created.setVolume(requestedVolume)
             created.prepare()

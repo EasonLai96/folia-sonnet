@@ -82,23 +82,27 @@ interface FoliaPlaybackPlugin {
    * 问原生要当前的状态（原生是播放的真源）。
    * WebView 冻结期间通知栏的镜像换源、原生补写红心都发生在原生侧，JS 醒来后
    * 第一件事是拉这份快照对齐自己的队列 / 位置 / 红心，而不是推旧状态过去。
+   *
+   * **返回的是快照本身，不是 `{ snapshot }`**：原生那边 `getPlaybackSnapshot`
+   * 直接 `call.resolve(snapshotJson())`（FoliaPlaybackPlugin.kt）。这里以前写成
+   * `{ snapshot: {...} }`，于是调用方 `const { snapshot } = ...` 拿到 undefined、
+   * 第一轮就 `return true` 退出 —— 整个「启动时认领原生正在放的那首」的 effect
+   * 一次都没真正跑过。
    */
   getPlaybackSnapshot(): Promise<{
-    snapshot: {
-      hasSong: boolean;
-      songKey: string;
-      title: string;
-      artist: string;
-      album: string;
-      durationMs: number;
-      positionMs: number;
-      playing: boolean;
-      liked: boolean;
-      canLike: boolean;
-      providerId: string;
-      serverSongId: string;
-      artworkUrl: string;
-    };
+    hasSong: boolean;
+    songKey: string;
+    title: string;
+    artist: string;
+    album: string;
+    durationMs: number;
+    positionMs: number;
+    playing: boolean;
+    liked: boolean;
+    canLike: boolean;
+    providerId: string;
+    serverSongId: string;
+    artworkUrl: string;
   }>;
   /**
    * 两轨合一：App 内点歌 / 切歌全走原生桥执行。
@@ -116,11 +120,28 @@ interface FoliaPlaybackPlugin {
    * App 启动时取走一次，对齐进账号缓存，App 里的心才不会与通知栏打架。
    */
   consumeLikeOverrides(): Promise<{ overrides: NativeLikeOverrideInput[] }>;
-  /** 原生在用户点击通知栏/锁屏/耳机按键时派发的事件。 */
+  /**
+   * 原生在用户点击通知栏/锁屏/耳机按键时派发的事件。
+   *
+   * 返回的是 Capacitor 的监听句柄对象 `{ remove }`，**不是函数** —— 当成函数调用会
+   * 抛 `xxx is not a function`，而它发生在 effect 的清理里，React 会因此卸载整棵树，
+   * 表现为一进播放器就黑屏。
+   */
   addListener(
     eventName: 'foliaPlaybackCommand',
     listener: (payload: { command: string; positionMs?: number; songKey?: string }) => void,
-  ): Promise<() => void>;
+  ): Promise<{ remove: () => Promise<void> | void }>;
+  /**
+   * 原生拉到的歌词。**歌词的拉取归原生**：它知道当前该是哪首（队列在它手里），
+   * 拉到就推过来，播放页只按 songKey 认领并渲染。
+   *
+   * 以前歌词是 JS 自己按 currentSong 的 effect 拉的，而原生派发的点歌绕过那个 effect，
+   * 于是「切了歌单，歌词还停在上一个歌单那首」。
+   */
+  addListener(
+    eventName: 'foliaPlaybackLyrics',
+    listener: (payload: { songKey: string; lrc?: string; translated?: string }) => void,
+  ): Promise<{ remove: () => Promise<void> | void }>;
 }
 
 const FoliaPlayback = registerPlugin<FoliaPlaybackPlugin>('FoliaPlayback');
@@ -232,7 +253,7 @@ export const useCapacitorPlaybackBridge = ({
     if (!enabled) return;
     let cancelled = false;
     const attempt = async (): Promise<boolean> => {
-      const { snapshot } = await FoliaPlayback.getPlaybackSnapshot();
+      const snapshot = await FoliaPlayback.getPlaybackSnapshot();
       if (cancelled || !snapshot || !snapshot.hasSong || !snapshot.songKey) return true;
       return Boolean(callbacksRef.current.onSyncToSong?.(snapshot.songKey, snapshot.positionMs));
     };
@@ -256,7 +277,7 @@ export const useCapacitorPlaybackBridge = ({
   // 通知栏/锁屏/耳机的控制键走这里回到 Web 层。
   React.useEffect(() => {
     if (!enabled) return;
-    let dispose: (() => void) | undefined;
+    let dispose: { remove: () => Promise<void> | void } | undefined;
     let cancelled = false;
     void FoliaPlayback.addListener('foliaPlaybackCommand', ({ command, positionMs, songKey }) => {
       switch (command) {
@@ -308,14 +329,22 @@ export const useCapacitorPlaybackBridge = ({
           // 拉黑（本次会话内不再分流给它）并回退 Web 全流程自己放，不卡住不重试。
           if (songKey) callbacksRef.current.onNativePlayFailed?.(songKey);
           break;
+        case 'repeatRestart':
+          // 单曲循环重播（原生在放时 ExoPlayer 无缝回绕，不发 ended）。**故意没有
+          // 动作**：进度基准的复位在原生自己那条事件链上（引擎 onPositionDiscontinuity
+          // 发 seeked，插件复位 lastDeliveredMs），Web 的 rAF 时钟读原生位置自然跟上。
+          // 这里写出来是让后人知道这条命令收到了、并且**什么都不该做**——
+          // 在这里再 set currentTime 反而会与原生时钟打架。
+          break;
       }
-    }).then((off) => {
-      if (cancelled) off();
-      else dispose = off;
+    }).then((handle) => {
+      // handle 是 Capacitor 的监听句柄 `{ remove }`，不是函数。
+      if (cancelled) void handle.remove();
+      else dispose = handle;
     });
     return () => {
       cancelled = true;
-      dispose?.();
+      void dispose?.remove();
     };
   }, [enabled, mediaSessionPlayRef, mediaSessionPauseRef, mediaSessionPrevRef, mediaSessionNextRef]);
 

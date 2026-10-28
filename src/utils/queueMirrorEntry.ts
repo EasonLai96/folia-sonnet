@@ -126,3 +126,51 @@ export const buildQueueMirrorEntries = (
     list: SongResult[],
     likeStateOf?: QueueMirrorLikeStateOf,
 ): QueueMirrorEntry[] => list.map(song => buildQueueMirrorEntry(song, likeStateOf));
+
+/**
+ * 把原生队列状态里的一条还原回 `SongResult`。
+ *
+ * 反向映射（buildQueueMirrorEntry 的逆）：JS 醒来对齐队列时用 —— WebView 冻结期间
+ * 原生可能自动跳过/随机挑格/通知栏切歌，playQueue 换过内容，认领 currentSong 时要
+ * 把队列一起摆正。
+ *
+ * **只能还原镜像里带的那些字段**：来源身份（sourceRef）按 providerId + 各 id 重建，
+ * 其余（音质偏好、无版权标记、歌词状态这些）不在镜像里，给安全默认值。这够队列
+ * 渲染与再次下发给原生用；点开详情页时由原有那条按 id 拉详情的链路补全。
+ */
+export const songFromMirrorEntry = (entry: {
+    songKey: string;
+    providerId: string;
+    songId: string;
+    mid: string;
+    hash: string;
+    albumAudioId: string;
+    title: string;
+    artist: string;
+    album: string;
+    coverUrl: string;
+    durationSec: number;
+}): SongResult => {
+    const mediaId = entry.songId || entry.mid || entry.hash || entry.albumAudioId || entry.songKey;
+    const artists = entry.artist
+        ? entry.artist.split('/').map(name => name.trim()).filter(Boolean).map((name, index) => ({ id: `${mediaId}-a${index}`, name }))
+        : [];
+    return {
+        id: mediaId,
+        name: entry.title,
+        artists,
+        album: { id: `${mediaId}-al`, name: entry.album },
+        durationMs: Math.round((entry.durationSec || 0) * 1000),
+        sourceRef: {
+            kind: 'online',
+            providerId: entry.providerId,
+            mediaId,
+            providerData: {
+                songId: entry.songId,
+                songmid: entry.mid,
+                hash: entry.hash,
+                albumAudioId: entry.albumAudioId,
+            },
+        } as SongResult['sourceRef'],
+    } as SongResult;
+};

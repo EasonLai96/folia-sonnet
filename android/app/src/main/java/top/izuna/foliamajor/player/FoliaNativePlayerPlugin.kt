@@ -111,11 +111,12 @@ class FoliaNativePlayerPlugin : Plugin() {
          * 队列取出相邻条目走这里。播放器内部自己处理线程（与 resumeFromSystem 同纪律）。
          */
         @JvmStatic
-        fun prepareFromSystem(url: String?) {
+        fun prepareFromSystem(url: String?, mediaId: String? = null): Boolean {
             val current = instance
             val player = current?.player
-            if (current == null || player == null || url == null || url.isEmpty()) return
-            player.prepare(url, -1L)
+            if (current == null || player == null || url == null || url.isEmpty()) return false
+            player.prepare(url, -1L, mediaId)
+            return true
         }
 
         /** 同上，方向相反。 */
@@ -167,6 +168,28 @@ class FoliaNativePlayerPlugin : Plugin() {
             val current = instance
             val player = current?.player
             return current != null && player != null && player.isPlaying()
+        }
+
+        /**
+         * 把设置里的「播放淡入淡出」摊到播放器上。
+         *
+         * 这一项以前是 Web Audio 上的 gain 斜坡，原生出声之后那条链不参与了，所以斜坡搬到
+         * 播放器自己身上（见 FoliaNativePlayer.rampVolume）。写设置与插件加载时各调一次。
+         */
+        /**
+         * 交叉淡化到下一首（服务自己切歌时用）：两台播放器互相淡入淡出。
+         * 返回 false = 没交叉（没在放 / 时长无效），调用方照旧 prepare + play。
+         */
+        @JvmStatic
+        fun crossfadeFromSystem(url: String, mediaId: String?, durationMs: Int): Boolean {
+            val current = instance ?: return false
+            val player = current.player ?: return false
+            return player.crossfadeTo(url, mediaId, durationMs)
+        }
+
+        @JvmStatic
+        fun applyPlaybackFade(enabled: Boolean) {
+            instance?.player?.setPauseFadeEnabled(enabled)
         }
 
         /**
@@ -291,25 +314,23 @@ class FoliaNativePlayerPlugin : Plugin() {
                  */
                 if ("ended" == type) {
                     /*
-                     * 播完了 = 这首真的走完了，**两条路都要接住**。
+                     * 播完了 = 这首真的走完了。**原生立即决定接下来播什么**，不再等 JS。
                      *
-                     * 老判据是「桥死了才兜底」—— 但桥活着不等于 JS 在跑：退到后台之后
-                     * 插件实例还在（`isBridgeAlive()` 为真），WebView 的 JS 却被系统挂起，
-                     * `onEnded` 那条回调根本不会执行。于是「后台放完一首就不动了」。
-                     * 这也是用户报的「原生的放完了不会自动下一首」。
+                     * 老做法是「先按 JS 那条路发一次 next，再挂一个 2.5 秒的原生兜底」：
+                     * 桥活着不等于 JS 在跑 —— 退到后台之后插件实例还在（isBridgeAlive()
+                     * 为真），WebView 的 JS 却被系统挂起，onEnded 那条回调根本不会执行。
+                     * 于是「后台放完一首就不动了」，用户报的正是这句。
                      *
-                     * 所以改成「先按 JS 那条路发一次 next，再挂一个原生兜底」：
-                     *   · JS 活着 → 它自己切歌，并推出新 metadata（服务那边看得到）；
-                     *   · JS 被挂起 → 到点由镜像在原生换源（skipViaMirror，队尾会回绕）。
-                     * 兜底是**幂等**的：JS 若已经切过去，镜像游标与当前歌对不上就不动手
-                     * （见 scheduleSkipFallback 判据），不会双倍跳歌。
+                     * 现在反过来：FoliaPlaybackService.onTrackFinished 按原生队列的循环模式
+                     * 立刻决定（单曲循环重播 / 换下一首 / 顺序播放走到头才停），它自己不叫醒
+                     * 前台。前台在场时会收到一条 "next" 用来把界面跟上，不在场也没有损失。
                      */
                     MAIN.post {
                         val context = instance?.getContext()
                         if (context != null
                             && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
                             top.izuna.foliamajor.FoliaPlaybackService
-                                    .requestNativeAutoNext(context)
+                                    .requestNativeTrackFinished(context)
                         }
                     }
                 }
@@ -323,6 +344,15 @@ class FoliaNativePlayerPlugin : Plugin() {
                 MAIN.post { notifyListeners(EVENT, payload) }
             }
         })
+        // 「播放淡入淡出」跟着设置走：插件是新进程里第一个起来的东西，这里读一次就够，
+        // 之后每次写设置都会再摊一遍（见 FoliaNativePlugin.setSettings）。
+        try {
+            val fadeEnabled = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+                    .getBoolean("playbackFade", true)
+            player?.setPauseFadeEnabled(fadeEnabled)
+        } catch (error: Throwable) {
+            android.util.Log.w("FoliaNativePlayer", "读取淡入淡出设置失败，按开启处理", error)
+        }
     }
 
     override fun handleOnDestroy() {
@@ -348,7 +378,11 @@ class FoliaNativePlayerPlugin : Plugin() {
         if (repeatMode != null) {
             current.setRepeatMode(repeatMode)
         }
-        current.prepare(url, if (startPositionMs != null) startPositionMs.toLong() else -1L)
+        current.prepare(
+            url,
+            if (startPositionMs != null) startPositionMs.toLong() else -1L,
+            call.getString("songKey"),
+        )
         val result = JSObject()
         result.put("ok", true)
         call.resolve(result)
@@ -453,6 +487,9 @@ class FoliaNativePlayerPlugin : Plugin() {
         result.put("positionMs", current.getPositionMs().toDouble())
         result.put("durationMs", current.getDurationMs().toDouble())
         result.put("playing", current.isPlaying())
+        // 引擎此刻装的是哪一首：Web 层判「点歌有没有真的换过去」只信这一个
+        // （服务里的 cachedSongKey 会随它自己推的 metadata 变，当判据等于自证）。
+        result.put("songKey", current.currentMediaId())
         call.resolve(result)
     }
 

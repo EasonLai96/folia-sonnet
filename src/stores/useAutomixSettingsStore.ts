@@ -7,12 +7,11 @@
 import { create } from 'zustand';
 
 import { clampCrossfadeSeconds, CROSSFADE_DEFAULT_SEC } from '../services/automix/crossfadePlanner';
-import { DEFAULT_TRANSITION_SETTINGS, isTransitionMode, type TransitionMode } from '../services/automix/transitionStrategy';
+import { DEFAULT_TRANSITION_SETTINGS, type TransitionMode } from '../services/automix/transitionStrategy';
+import { writeNativeSettings } from '../services/nativeSettingsBridge';
 import { getStoredBoolean, setStoredBoolean } from './storagePrimitives';
 
 const AUTOMIX_ENABLED_KEY = 'folia_automix_enabled';
-
-const TRANSITION_MODE_KEY = 'folia_transition_mode';
 
 const CROSSFADE_MAX_SEC_KEY = 'folia_crossfade_max_sec';
 
@@ -48,12 +47,6 @@ const readTransitionAnimationCard = (): boolean => {
     return inherited;
 };
 
-const readStoredTransitionMode = (): TransitionMode => {
-    if (typeof window === 'undefined') return DEFAULT_TRANSITION_SETTINGS.mode;
-    const saved = localStorage.getItem(TRANSITION_MODE_KEY);
-    return isTransitionMode(saved) ? saved : DEFAULT_TRANSITION_SETTINGS.mode;
-};
-
 const readStoredCrossfadeMaxSec = (): number => {
     if (typeof window === 'undefined') return CROSSFADE_DEFAULT_SEC;
     const saved = localStorage.getItem(CROSSFADE_MAX_SEC_KEY);
@@ -62,7 +55,14 @@ const readStoredCrossfadeMaxSec = (): number => {
 
 export type AutomixSettingsState = {
     automixEnabled: boolean;
-    /** Which strategy plans a song change once blending is on. */
+    /**
+     * 恒为 `'crossfade'`。
+     *
+     * 原来这里是「用哪套策略规划换歌」的用户选择（crossfade / automix），AutoMix 那一档连同
+     * 它的性能档与过渡动画已经删掉了：出声交给原生 ExoPlayer 之后，AutoMix 那条链全在 Web
+     * Audio 图上，开了也只是空跑。字段留着是因为还有几处 `transitionMode === 'automix'` 的
+     * 判断（浮层、命令面板、上报），它们现在恒为假 —— 删引擎是另一件事，不在这次范围里。
+     */
     transitionMode: TransitionMode;
     /** Seconds. The crossfade mode's ceiling; automix computes its own and ignores this. */
     crossfadeMaxSec: number;
@@ -92,7 +92,8 @@ export type AutomixSettingsState = {
 
 export const useAutomixSettingsStore = create<AutomixSettingsState>((set, get) => ({
     automixEnabled: getStoredBoolean(AUTOMIX_ENABLED_KEY, false),
-    transitionMode: readStoredTransitionMode(),
+    // 锁在 crossfade：`folia_transition_mode` 里存着的旧值（可能还是 'automix'）不再读。
+    transitionMode: 'crossfade',
     crossfadeMaxSec: readStoredCrossfadeMaxSec(),
     transitionPerformance: getStoredBoolean(
         TRANSITION_PERFORMANCE_KEY, DEFAULT_TRANSITION_SETTINGS.performance,
@@ -103,16 +104,15 @@ export const useAutomixSettingsStore = create<AutomixSettingsState>((set, get) =
     transitionAnimationCard: readTransitionAnimationCard(),
     handleToggleAutomix: (enable) => {
         setStoredBoolean(AUTOMIX_ENABLED_KEY, enable);
+        // 换歌的交叉淡化现在由原生做（两台播放器互相淡入淡出），开关得推过去。
+        void writeNativeSettings({ crossfadeEnabled: enable });
         // The models ship with the app, so there is nothing to prompt for (the "download the
         // models" reminder that opened here is gone with the downloads).
         set({ automixEnabled: enable });
     },
-    handleSetTransitionMode: (mode) => {
-        if (!isTransitionMode(mode)) return;
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(TRANSITION_MODE_KEY, mode);
-        }
-        set({ transitionMode: mode });
+    // 模式锁在 crossfade：命令面板那条「切到 crossfade」保留形状，但不再有另一档可切。
+    handleSetTransitionMode: () => {
+        set({ transitionMode: 'crossfade' });
     },
     handleSetCrossfadeMaxSec: (seconds) => {
         const next = clampCrossfadeSeconds(seconds);
@@ -120,6 +120,8 @@ export const useAutomixSettingsStore = create<AutomixSettingsState>((set, get) =
             localStorage.setItem(CROSSFADE_MAX_SEC_KEY, String(next));
         }
         set({ crossfadeMaxSec: next });
+        // 原生拿毫秒：这边是秒。
+        void writeNativeSettings({ crossfadeMs: Math.round(next * 1000) });
     },
     handleToggleTransitionPerformance: (enable) => {
         setStoredBoolean(TRANSITION_PERFORMANCE_KEY, enable);

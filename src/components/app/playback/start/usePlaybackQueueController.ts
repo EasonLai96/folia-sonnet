@@ -71,7 +71,9 @@ import { noteQueueStart } from './queueStarts';
 import { errorMessage } from '../../../../utils/errorText';
 import { isPlaybackInterfaceHidden, notifyBackgroundPlaybackNotice } from '../../../../services/playbackRecovery/backgroundFailureNotice';
 import { FoliaPlayback } from '../../../../hooks/useCapacitorPlaybackBridge';
+import { nativePlayer } from '../../../../services/playbackEngine/nativePlayerPlugin';
 import { buildQueueMirrorEntries } from '../../../../utils/queueMirrorEntry';
+import { waitForNativeArrival } from './waitForNativeArrival';
 
 // src/components/app/playback/start/usePlaybackQueueController.ts
 
@@ -543,13 +545,24 @@ export function usePlaybackQueueController({
             if (!nativeFailedKeysRef.current.has(nativeKey)) {
                 // 作废一切在途的 Web 播放 / 切歌：这一单归原生，认领走 syncTo。
                 playSongCallIdRef.current += 1;
-                startPlay();
+                // 留着这一单的「还要不要」判据：等原生真起播的时候，用户可能已经点了别的歌。
+                const stillWanted = startPlay();
                 interruptStagePlaybackForMainTransition();
                 if (options.shouldNavigateToPlayer ?? true) navigateToPlaybackView();
                 // 调用者手里的队列是最新的（镜像 effect 可能还没跑），随分派一起落进原生。
                 const mirrorQueue = queue.length > 0 ? queue : usePlaybackStore.getState().playQueue;
                 const mirrorIndex = mirrorQueue.findIndex((entry) => getPlaybackSongKey(entry) === nativeKey);
                 if (mirrorIndex >= 0) {
+                    /*
+                     * 这一单的队列先落进 store。
+                     *
+                     * 后面的兜底全在 store 的 playQueue 里找歌：syncTo 认领
+                     * （useAppPlaybackBridges 的 onSyncToSong）、nativePlayFailed 回退
+                     * （同文件的 onNativePlayFailed）。store 里还是点歌前那份旧队列的话，
+                     * 这两条都会「找不到这首歌」然后安静地什么都不做 —— 点歌一旦失败就
+                     * 再也回不来，只能按下一首自救。
+                     */
+                    setPlayQueue(mirrorQueue);
                     try {
                         const { ok } = await FoliaPlayback.playFromQueue({
                             songKey: nativeKey,
@@ -557,13 +570,29 @@ export function usePlaybackQueueController({
                             index: mirrorIndex,
                         });
                         if (ok) {
-                            // 乐观 UI：原生还在解析 / 起播，界面先跟上；syncTo 到达后
-                            // UI-only 认领补齐位置与时长（key 相等走早退分支，同样补 PLAYING）。
-                            // 这是一次交付，不是另一次问歌：画面交给这首歌用 `makeSongCurrent`
-                            // （问 + 显示一起），别绕过 currentSong 直接写 store。
-                            makeSongCurrent(song);
-                            setPlayerState(PlayerState.PLAYING);
-                            return;
+                            /*
+                             * `ok` 只表示原生**受理**了这一单，不表示地址已经装进 ExoPlayer：
+                             * playFromQueue 在起解析线程之前就回了 true，真正换源要等平台的
+                             * 地址回来（nativePlayMirrorEntry）。
+                             *
+                             * 等一个到达信号，而且**只信引擎**：`FoliaNativePlayer.getSnapshot()`
+                             * 报的 songKey 是 MediaItem 的 mediaId，等于引擎真的换过去了。
+                             * 之前读的是 FoliaPlayback.getPlaybackSnapshot().songKey，那个值
+                             * Web 自己推一次 metadata 就改了 —— 界面一认领新歌就算「到达」，
+                             * 引擎还在放上一首也照样通过（用户实测：冷启动自动播放后再点歌单，
+                             * 界面是刚点的歌、声音是上一首）。等不到就不认这一单，落回下面的
+                             * Web 全流程自己放，保证名字与声音永远一起变。
+                             */
+                            const arrived = await waitForNativeArrival({
+                                readEngine: () => nativePlayer.getSnapshot(),
+                                expectsKey: nativeKey,
+                                stillWanted,
+                            });
+                            if (arrived) {
+                                makeSongCurrent(song);
+                                setPlayerState(PlayerState.PLAYING);
+                                return;
+                            }
                         }
                     } catch {
                         // 桥不可用（老版本原生没有这个方法）：照常走 Web 全流程。

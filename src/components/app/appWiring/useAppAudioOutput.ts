@@ -2,7 +2,6 @@ import type { AppFoundation } from './useAppFoundation';
 import { useAudioOutputDevice } from '../../../hooks/useAudioOutputDevice';
 import { NATIVE_PLAYBACK_ENABLED, nativePlaybackEngine } from '../../../services/playbackEngine/nativePlaybackEngine';
 import { isNativePlayerAvailable } from '../../../services/playbackEngine/nativePlayerPlugin';
-import { useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
 import { LyricData, StageLoopMode } from '../../../types';
 import { clampMediaVolume } from '../../../utils/appPlaybackHelpers';
 import { createCoverUrlResolver } from '../../../utils/coverUrlResolver';
@@ -62,21 +61,21 @@ export const useAppAudioOutput = (model: Input) => {
     /*
      * 原生播放（P1）。
      *
-     * ⛔ **已停用**：`NATIVE_PLAYBACK_ENABLED` 是总闸（见 nativePlaybackEngine.ts）。
-     * 下面三个层次都保留着，闸一关它们自然全为 false，所以不用逐个去改分支。
+     * **安卓上恒开**：出声这件事交给 ExoPlayer，不再由 WebView 的 `<audio>` 解码。
+     * 以前这里还有一道用户开关（设置里的「原生播放（实验）」），它已经删掉了 ——
+     * 留着开关就是留着一条「一半歌走原生、一半走网页」的岔路，同一个问题在两种
+     * 音频栈上表现不同，最难复现。
      *
-     *  · `nativePlaybackEnabled` —— 用户开关（设置里那一项，已随停用一起撤掉）；
-     *  · `nativeActive`          —— 总闸 ∧ 开关 ∧ 原生插件真的在（不能靠 `typeof
-     *                               plugin.method === 'function'` 判，registerPlugin 给的是代理）；
-     *  · `nativeTakes`           —— 这一首真的交给原生：地址还得是原生吃得下的
-     *                               （blob 是 WebView 自己的对象 URL，本地导入的歌就是这种，
-     *                                 那首整首回落 `<audio>`；媒体缓存走本机回环地址，原生能读）。
+     *  · `nativeActive` —— 原生插件真的在（不能靠 `typeof plugin.method === 'function'`
+     *                     判，registerPlugin 给的是代理）；
+     *  · `nativeTakes`  —— 这一首真的交给原生：地址还得是原生吃得下的（blob 是
+     *                     WebView 自己的对象 URL，本地导入的歌就是这种，那一首整首
+     *                     回落 `<audio>`；媒体缓存走本机回环地址，原生能读）。
      *
      * `nativeTakesRef` 给那些「用户按下时才跑」的回调（音量、seek、transport）用：
      * 它们不该因为换了一首歌就换身份。
      */
-    const nativePlaybackEnabled = useAudioSettingsStore(state => state.nativePlaybackEnabled);
-    const nativeActive = NATIVE_PLAYBACK_ENABLED && nativePlaybackEnabled && isNativePlayerAvailable();
+    const nativeActive = NATIVE_PLAYBACK_ENABLED && isNativePlayerAvailable();
     const nativeTakes = nativeActive && nativePlaybackEngine.supports(audioSrc);
     const nativeTakesRef = useRef(false);
     useEffect(() => {

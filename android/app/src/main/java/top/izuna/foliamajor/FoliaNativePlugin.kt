@@ -617,6 +617,14 @@ class FoliaNativePlugin : Plugin() {
 
     override fun load() {
         instance = this
+        /*
+         * 新的一份页面（冷启动 / WebView 重载）：「我在不在播放页」这件事归零。
+         *
+         * 那是静态字段，跨页面还活着。重载后它若停在旧的 true，而新页面又没来得及
+         * 上报（桥刚起来的头几秒），`MainActivity.onResume` 会把方向重算成横屏 ——
+         * 用户看到的就是「打开 App，海报墙也是横的」。新页面挂载后会立刻报一次真实值。
+         */
+        top.izuna.foliamajor.PhoneLayoutOrientation.setPlayerVisible(false)
         // 意图可能比 Web 层更早到（Activity.onCreate 交过来时 Bridge 还没建好），先攒在静态
         // 列表里；插件上线后立即拿去拷。
         startExternalAudioImport()
@@ -2426,10 +2434,148 @@ class FoliaNativePlugin : Plugin() {
         if (activity != null) {
             activity.runOnUiThread { PhoneLayoutOrientation.apply(activity) }
         }
+        // 方向也是设置的一部分：落进原生设置，下次冷启动由原生自己按它摆好，
+        // 不必等 WebView 起来再说一遍。
+        top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            .putAll(mapOf("phoneFitOrientation" to orientation, "forceLandscape" to enabled))
         val result = JSObject()
         result.put("enabled", enabled)
         result.put("orientation", PhoneLayoutOrientation.getOrientation(getContext()))
         call.resolve(result)
+    }
+
+    /**
+     * 「我现在在播放页」—— Web 每次切页上报一次，原生据此决定要不要按
+     * 「进入可视化自动横屏」把屏幕转过去。
+     *
+     * 之所以由 Web 只说「在哪一页」、而不是自己判断该不该转：判断要用设置，而设置在
+     * 原生；两处各判一次，就会出现「Web 觉得该转、原生觉得不该」的静默分歧。
+     */
+    @PluginMethod
+    fun setPlayerVisible(call: PluginCall) {
+        val visible = java.lang.Boolean.TRUE.equals(call.getBoolean("visible", false))
+        PhoneLayoutOrientation.setPlayerVisible(visible)
+        val activity = getActivity()
+        if (activity != null) {
+            activity.runOnUiThread { PhoneLayoutOrientation.apply(activity) }
+        }
+        val result = JSObject()
+        result.put("visible", visible)
+        result.put("orientation", if (PhoneLayoutOrientation.resolve(getContext())
+                == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+            "landscape" else "portrait")
+        call.resolve(result)
+    }
+
+    /**
+     * 启动时拉一次设置。**WebView 里不再有设置真相**，它起来第一件事就是拿这份把界面填满。
+     * 一次性整份返回而不是逐项问：逐项读会让「界面显示一半」成为可能的状态，而设置之间
+     * 是有关系的（循环模式与随机、方向与强制横屏），半新半旧最容易出现「明明开了却没效果」。
+     */
+    @PluginMethod
+    fun getSettings(call: PluginCall) {
+        try {
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            call.resolve(JSObject.fromJSONObject(store.snapshot()))
+        } catch (error: Exception) {
+            call.reject("读取设置失败", error)
+        }
+    }
+
+    /**
+     * 写设置：整份或部分，合并写入，返回合并后的整份快照。
+     *
+     * 同步落盘（见 FoliaSettingsStore.putAll）：设置改完紧接着就有播放动作按它走，
+     * 异步写在进程被杀时会丢，而丢的正好是「用户刚改的那一项」。
+     */
+    @PluginMethod
+    fun setSettings(call: PluginCall) {
+        try {
+            val values = call.getObject("values")
+            if (values == null) {
+                call.reject("缺少 values")
+                return
+            }
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            val merged = java.util.HashMap<String, Any?>()
+            values.keys().forEach { key ->
+                // opt 而不是 get：JS 传 null 表示「删掉这一项」，交给 store 处理。
+                merged[key] = values.opt(key)
+            }
+            val snapshot = store.putAll(merged)
+            // 「播放淡入淡出」这一项原生自己要用（音量斜坡），写完当场摊给播放器。
+            top.izuna.foliamajor.player.FoliaNativePlayerPlugin
+                    .applyPlaybackFade(snapshot.optBoolean("playbackFade", true))
+            call.resolve(JSObject.fromJSONObject(snapshot))
+        } catch (error: Exception) {
+            call.reject("写入设置失败", error)
+        }
+    }
+
+    /**
+     * AI 连接配置推给原生：凭据**只存原生**（FoliaSettingsStore）。
+     *
+     * Web 侧的 localStorage 那份照旧给设置界面用，但真正发请求的是原生 —— 与播放链路
+     * 「凭据与真相在原生」同一条纪律。设置变化与启动时各推一次。
+     */
+    @PluginMethod
+    fun setAiConfig(call: PluginCall) {
+        try {
+            val config = call.getObject("config")
+            if (config == null) {
+                call.reject("缺少 config")
+                return
+            }
+            val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            store.put("ai.provider", config.optString("provider", "gemini"))
+            store.put("ai.geminiApiKey", config.optString("geminiApiKey", ""))
+            store.put("ai.geminiApiUrl", config.optString("geminiApiUrl", ""))
+            store.put("ai.apiKey", config.optString("apiKey", ""))
+            store.put("ai.model", config.optString("model", ""))
+            store.put("ai.baseUrl", config.optString("baseUrl", ""))
+            store.put("ai.temperature", config.optDouble("temperature", 0.7))
+            call.resolve()
+        } catch (error: Exception) {
+            call.reject("写入 AI 配置失败", error)
+        }
+    }
+
+    /**
+     * 原生跑一次 AI 补全。请求由原生发起：WebView 冻不冻结都与它无关。
+     *
+     * 返回 `{ text }`；失败 reject，错误码前缀与 Web 侧同一族
+     * （ai-not-configured / ai-http-error:N / ai-empty-response / ai-request-failed / ai-refused），
+     * 调用方照旧走封面取色兜底。
+     */
+    @PluginMethod
+    fun runAiCompletion(call: PluginCall) {
+        val system = call.getString("system") ?: ""
+        val prompt = call.getString("prompt") ?: ""
+        val maxTokens = call.getInt("maxTokens", 0) ?: 0
+        val jsonMode = call.getBoolean("json", true) != false
+        Thread({
+            try {
+                val store = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+                val config = top.izuna.foliamajor.ai.AiConfig(
+                    provider = store.getString("ai.provider") ?: "gemini",
+                    geminiApiKey = store.getString("ai.geminiApiKey") ?: "",
+                    geminiApiUrl = store.getString("ai.geminiApiUrl") ?: "",
+                    apiKey = store.getString("ai.apiKey") ?: "",
+                    model = store.getString("ai.model") ?: "",
+                    baseUrl = store.getString("ai.baseUrl") ?: "",
+                    temperature = store.getDouble("ai.temperature", 0.7),
+                )
+                val text = top.izuna.foliamajor.ai.AiCompletion.run(
+                        config, system, prompt, maxTokens, jsonMode)
+                val out = JSObject()
+                out.put("text", text)
+                call.resolve(out)
+            } catch (error: top.izuna.foliamajor.ai.AiCompletion.AiException) {
+                call.reject("${error.code}: ${error.message ?: ""}".trimEnd(':', ' '))
+            } catch (error: Exception) {
+                call.reject("ai-request-failed: ${error.message ?: "unknown"}")
+            }
+        }, "folia-ai-completion").start()
     }
 
     /*
