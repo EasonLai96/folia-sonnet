@@ -684,6 +684,31 @@ class FoliaPlaybackService : android.app.Service() {
             publishNotification()
             return
         }
+        advanceToNextEntry(next)
+    }
+
+    /**
+     * 快到末尾：**提前换下一首**，为的是让交叉淡化有东西可淡。
+     *
+     * 自然播完那条路（[onTrackFinished]）是「已经没声了才换」，那时旧那台停在末尾，
+     * 淡出淡的是静音 —— 用户听到的就是「末尾没有淡出，直接断」。所以播放器在还剩一个
+     * 斜坡的时候报一声 nearEnd，这里立刻起交叉：旧那台还在出声，淡出才是真的淡出，
+     * 而且斜坡跑完正好接上这首歌原本该结束的时刻。
+     *
+     * 两种情况不动：单曲循环（不换歌，重播走 [seekToStartForRepeat]）、顺序播放到头
+     * （没有下一首，让它正常放完停住）。
+     */
+    fun onNearEnd() {
+        if (!nativePlaybackActive()) return
+        if (playQueue.loopMode == NativeLoopMode.ONE) return
+        // 只看不动：最后一首时 peekNext 给 null，交给 onTrackFinished 去停。
+        if (playQueue.peekNext() == null) return
+        val next = playQueue.onFinished() ?: return
+        advanceToNextEntry(next)
+    }
+
+    /** 队列已经推进到 [next]：装源 + 让界面跟上（放完自动前进与提前换共用这一段）。 */
+    private fun advanceToNextEntry(next: NativeQueueEntry) {
         playQueue.bumpRevision()
         // 镜像下标要跟着状态机一起推进：resolveMirrorEntryAsync 的过期守卫按
         // mirroredIndex 判「出发时那格还在不在」，不同步的话刚出发的请求就会被
@@ -881,6 +906,8 @@ class FoliaPlaybackService : android.app.Service() {
             // 不经过 handleTransportSkip —— 手按下一首与放完自动前进的语义不同：
             // 手按时单曲循环也该真的换歌，放完时单曲循环该重播同一首。
             "finished" -> onTrackFinished()
+            // 快到末尾（还剩一个斜坡）：交叉淡化要提前换，见 onNearEnd。
+            "nearEnd" -> onNearEnd()
             "like" -> handleTransportLike()
             "seek" -> {
                 val positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L)
@@ -2523,6 +2550,24 @@ class FoliaPlaybackService : android.app.Service() {
          * 要等 2.5 秒确认 JS 没接才动手；这条进去就直接推进队列。前台在场时同样会收到
          * 一条广播用来更新界面，但它不再参与「播什么」的决定。
          */
+        /**
+         * 快到末尾 → 服务提前换下一首（交叉淡化用）。同 [requestNativeTrackFinished] 的送法。
+         */
+        @JvmStatic
+        fun requestNativeNearEnd(context: Context?) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "nearEnd")
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "末尾提前换歌的通知没送到服务", ignored as? Throwable)
+            }
+        }
+
         @JvmStatic
         fun requestNativeTrackFinished(context: Context?) {
             if (context == null || !isRunning()) {

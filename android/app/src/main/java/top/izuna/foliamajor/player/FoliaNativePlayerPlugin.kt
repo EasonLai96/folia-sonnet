@@ -187,6 +187,16 @@ class FoliaNativePlayerPlugin : Plugin() {
             return player.crossfadeTo(url, mediaId, durationMs)
         }
 
+        /**
+         * 交叉淡化的「提前换歌窗口」：由设置里的时长推下来，写进播放器。
+         *
+         * 写设置与插件加载时各调一次（与 [applyPlaybackFade] 同一条纪律）。
+         */
+        @JvmStatic
+        fun applyCrossfadeAhead(durationMs: Int) {
+            instance?.player?.setCrossfadeAhead(durationMs)
+        }
+
         @JvmStatic
         fun applyPlaybackFade(enabled: Boolean) {
             instance?.player?.setPauseFadeEnabled(enabled)
@@ -312,6 +322,24 @@ class FoliaNativePlayerPlugin : Plugin() {
                  * （用户报的「播放完毕之后不会自动下一首」）。下面那段把这一下
                  * 转成一条 next 指令进服务，由服务去分「JS 接住了没有」。
                  */
+                /*
+                 * ⭐ 快到末尾了：交叉淡化要在**旧那台还在出声**的时候起跑。
+                 *
+                 * 等到「ended」才换，能淡的只剩静音 —— 用户听到的就是「放完没有淡出、直接断」。
+                 * 所以播放器在「还剩一个斜坡」的时候报一声，这条直接进服务让它提前换下一首；
+                 * 不过桥、也不给 JS 加新事件类型（界面那一侧不需要知道这件事）。
+                 */
+                if ("nearEnd" == type) {
+                    MAIN.post {
+                        val context = instance?.getContext()
+                        if (context != null
+                            && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
+                            top.izuna.foliamajor.FoliaPlaybackService
+                                    .requestNativeNearEnd(context)
+                        }
+                    }
+                    return
+                }
                 if ("ended" == type) {
                     /*
                      * 播完了 = 这首真的走完了。**原生立即决定接下来播什么**，不再等 JS。
@@ -347,9 +375,13 @@ class FoliaNativePlayerPlugin : Plugin() {
         // 「播放淡入淡出」跟着设置走：插件是新进程里第一个起来的东西，这里读一次就够，
         // 之后每次写设置都会再摊一遍（见 FoliaNativePlugin.setSettings）。
         try {
-            val fadeEnabled = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
-                    .getBoolean("playbackFade", true)
+            val settings = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+            val fadeEnabled = settings.getBoolean("playbackFade", true)
             player?.setPauseFadeEnabled(fadeEnabled)
+            // 交叉淡化同理：窗口决定了「自然播完时到底有没有淡出」。
+            val crossfadeMs = if (settings.getBoolean("crossfadeEnabled", false))
+                settings.getInt("crossfadeMs", 0) else 0
+            player?.setCrossfadeAhead(crossfadeMs)
         } catch (error: Throwable) {
             android.util.Log.w("FoliaNativePlayer", "读取淡入淡出设置失败，按开启处理", error)
         }

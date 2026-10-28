@@ -236,6 +236,18 @@ class NativePlayQueue {    private val entries = mutableListOf<NativeQueueEntry>
     }
 
     /**
+     * 「下一首会是谁」——只看不动。
+     *
+     * 交叉淡化要在**放完之前**就决定换不换（换到哪一首、地址有没有），而 [onFinished]
+     * 会推进下标。提前问一句得有个不动状态机的问法，否则问一次就等于切了一首。
+     */
+    fun peekNext(): NativeQueueEntry? {
+        if (loopMode == NativeLoopMode.ONE) return current()
+        val next = pickNext(direction = +1) ?: return null
+        return entries.getOrNull(next)
+    }
+
+    /**
      * 用户按「下一首 / 上一首」。**与 onFinished 分开**：手按时单曲循环也该真的换一首，
      * 否则按了没反应。到边界时回绕（与 Web 层一致），队列只有一首就停在原地。
      */

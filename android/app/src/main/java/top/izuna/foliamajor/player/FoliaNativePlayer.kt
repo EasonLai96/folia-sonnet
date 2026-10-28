@@ -1,4 +1,4 @@
-package top.izuna.foliamajor.player
+﻿package top.izuna.foliamajor.player
 
 import android.content.Context
 import android.os.Handler
@@ -57,6 +57,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
 
     companion object {
         private const val POSITION_TICK_MS = 250L
+        /** 提前换歌的窗口上限：斜坡太长没有意义，也省得设置里的离谱值把整首吃光。 */
+        private const val MAX_CROSSFADE_AHEAD_MS = 15_000
 
         /** 暂停 / 继续那条音量斜坡有多长。够长听得出来，够短不挡事。 */
         private const val PAUSE_FADE_MS = 160
@@ -132,6 +134,16 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      * 目标、不该当场跳。淡出的目标是 0，不受它影响。
      */
     private var fadeFollowsVolume = false
+    /**
+     * 「离末尾还有多远就开始换下一首」，毫秒。0 = 不做提前换（换歌时的淡化只发生在切歌那一瞬）。
+     *
+     * 由设置里的交叉淡化时长推下来（见 FoliaNativePlayerPlugin.applyCrossfadeAhead）：
+     * 自然播完时要是等到 STATE_ENDED 才换，旧那台已经没声了，能淡出的只剩「静音到静音」——
+     * 用户听到的就是「末尾没有淡出」。所以斜坡要在**还剩这么久**的时候起跑，跑到 0 正好换完。
+     */
+    @Volatile private var crossfadeAheadMs = 0
+    /** 这一首的「快到尾巴了」是不是已经报过（每首只报一次，seek 回去要重新上膛）。 */
+    private var nearEndFired = false
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -156,6 +168,17 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             val duration = current.duration
             cachedPositionMs = position
             cachedDurationMs = if (duration > 0) duration else 0L
+            /*
+             * 快到尾巴了：报一次 nearEnd，由服务去决定「提前换下一首」。
+             *
+             * 报在**还剩不到一个斜坡**的那一刻，服务收到就立刻起交叉 —— 旧那台还在出声，
+             * 淡出才是真的淡出；等到 STATE_ENDED 才换，能淡的就只剩静音了。
+             */
+            if (!nearEndFired && crossfadeAheadMs > 0 && cachedDurationMs > 0
+                    && cachedDurationMs - position <= crossfadeAheadMs) {
+                nearEndFired = true
+                emit("nearEnd", position, cachedDurationMs, null)
+            }
             emit("position", position, cachedDurationMs, null)
             handler.postDelayed(this, POSITION_TICK_MS)
         }
@@ -200,6 +223,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             cachedPositionMs = if (startPositionMs > 0) startPositionMs else 0L
             cachedDurationMs = 0L
+            // 新的一首：快到尾巴这件事重新上膛。
+            nearEndFired = false
         }
     }
 
@@ -334,6 +359,17 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             current.seekTo(clamped)
             cachedPositionMs = clamped
+            /*
+             * 上膛/退膛跟着这次 seek 走：拖回窗口之外要能再报一次，拖进窗口里则当场报 ——
+             * 否则「手动拖进交叉淡化那一段」就什么都不会发生（进度条也就一直停在末尾）。
+             */
+            val stillInWindow = crossfadeAheadMs > 0 && duration > 0
+                    && duration - clamped <= crossfadeAheadMs
+            nearEndFired = false
+            if (stillInWindow) {
+                nearEndFired = true
+                emit("nearEnd", clamped, duration, null)
+            }
             emit("position", clamped, if (duration > 0) duration else 0L, null)
         }
     }
@@ -371,11 +407,27 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     }
 
     fun setRepeatMode(repeatMode: Int) {
-        requestedRepeatMode = repeatMode
+        /*
+         * ⭐ 单曲循环**不交给 ExoPlayer**，一律按 OFF 发下去，由服务在 STATE_ENDED 上 seek(0) 重播。
+         *
+         * ExoPlayer 的 REPEAT_MODE_ONE 是**无缝**的：既不回调 onPositionDiscontinuity 也不发
+         * STATE_ENDED，位置直接从末尾跳回 0。于是这里什么都不报 —— 缓存位置停在末尾、通知栏
+         * 进度条停在末尾、Web 侧那条只进不退的夹子也停在末尾，而声音确实又响了。用户报的
+         * 「单曲循环播完进度条不重置，音频正常」就是它。
+         *
+         * 服务那边本来就有这条路（FoliaPlaybackService.seekToStartForRepeat：seek(0) + 报一次
+         * seeked），只是原来被 ExoPlayer 自己的循环挡在前面，从来没轮到它。
+         */
+        requestedRepeatMode = if (repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else repeatMode
         runOnPlayer {
             val current = player
             if (current != null) current.setRepeatMode(requestedRepeatMode)
         }
+    }
+
+    /** 提前换歌的窗口（毫秒）：0 = 不做。写完立即生效，不动播放器。 */
+    fun setCrossfadeAhead(durationMs: Int) {
+        crossfadeAheadMs = if (durationMs > 0) Math.min(durationMs, MAX_CROSSFADE_AHEAD_MS) else 0
     }
 
     fun release() {
@@ -512,6 +564,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             cachedPositionMs = 0L
             cachedDurationMs = 0L
             cachedPlaying = true
+            nearEndFired = false
+            /*
+             * 旧那台在交叉期间还会自己播到尾巴上（斜坡跑完正好是它该结束的时刻）。
+             * 那一下 STATE_ENDED 会走到本类的监听里 —— 而此刻 `player` 已经是新的那台，
+             * 于是一条「ended」会被当成本曲结束，服务再往前推一格：一次换歌跳两首。
+             * 所以交叉一开始就把它摘掉，它之后的状态与我们无关。
+             */
+            old?.removeListener(playerListener)
             player = incoming
             applySourceHeaders(url)
             incoming.setMediaItem(mediaItemFor(url, mediaId))
