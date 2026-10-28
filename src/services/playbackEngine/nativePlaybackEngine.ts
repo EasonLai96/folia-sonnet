@@ -67,6 +67,14 @@ class NativePlaybackEngine {
     private stalled = false;
     private repeatMode = 0;
     private volume = 1;
+    /**
+     * 这一首自己的响度补偿系数（线性，1 = 不动）。
+     *
+     * ReplayGain 原来乘在 Web Audio 的 gain 节点上；原生出声之后那条链不参与，所以乘进
+     * 播放器音量里：真正下发的是 volume × trackGain。两个乘数分开存，用户拖音量时
+     * 补偿不会被覆盖，换歌时补偿归 1 由调用方负责（见 usePlaybackAudioBridge.applyReplayGain）。
+     */
+    private trackGain = 1;
     private currentUrl: string | null = null;
     private listeners = new Set<(event: NativePlaybackEvent) => void>();
     private subscriptionStarted = false;
@@ -182,10 +190,27 @@ class NativePlaybackEngine {
         await nativePlayer.stop();
     }
 
+    /** 用户音量（0..1）。与 [trackGain] 分开：拖音量不该把响度补偿抹掉。 */
     setVolume(volume: number): void {
         this.volume = clamp(volume, 0, 1);
         if (!this.hasSource) return;
-        void nativePlayer.setVolume(this.volume).catch(() => undefined);
+        void nativePlayer.setVolume(this.effectiveVolume()).catch(() => undefined);
+    }
+
+    /**
+     * 这一首的响度补偿（线性系数，见 src/utils/replayGain.ts 的 linearGain）。
+     *
+     * 乘在音量上一起下发，而不是另开一条原生接口：播放器只有一个音量旋钮。
+     */
+    setTrackGain(gain: number): void {
+        this.trackGain = clamp(gain, 0, 4);
+        if (!this.hasSource) return;
+        void nativePlayer.setVolume(this.effectiveVolume()).catch(() => undefined);
+    }
+
+    /** 真正下发给播放器的音量。 */
+    private effectiveVolume(): number {
+        return clamp(this.volume * this.trackGain, 0, 1);
     }
 
     setSpeed(speed: number): void {

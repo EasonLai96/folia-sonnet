@@ -4,6 +4,7 @@ import { PlayerState } from '../../../../types';
 import type { ReplayGainInfo, ReplayGainMode, SongResult, StatusMessage } from '../../../../types';
 import type { LocalSong } from '../../../../types';
 import { resolveNavidromePlaybackCarrier } from '../../../../utils/appPlaybackGuards';
+import { nativePlaybackEngine } from '../../../../services/playbackEngine/nativePlaybackEngine';
 import { calculateReplayGain } from '../../../../utils/replayGain';
 import { applyAudioEqualizerSettings, planAudioEqualizerApply } from '../../../../services/audioEqualizerGraph';
 import { type AudioEffectChain } from '../../../../services/audioEffects/effectChain';
@@ -131,7 +132,9 @@ export function usePlaybackAudioBridge({
 
     // Recalculates source-specific gain after the audio graph or playback settings become ready.
     const applyReplayGain = useCallback(() => {
-        if (!currentSong || !gainNodeRef.current || !audioContextRef.current) return;
+        // 只要求「有歌」：原生出声时 gainNodeRef / audioContextRef 是空的（那张图根本没建），
+        // 照旧把它们当门槛的话，原生这条路上 ReplayGain 永远算不出来。
+        if (!currentSong) return;
 
         let replayGainInfo: ReplayGainInfo | undefined;
         const localSongId = (currentSong as SongResult & { localRef?: { songId: string } }).localRef?.songId;
@@ -159,12 +162,19 @@ export function usePlaybackAudioBridge({
 
         const calculation = calculateReplayGain(replayGainInfo, replayGainMode);
 
+        /*
+         * 原生播放：响度补偿乘进播放器音量（见 nativePlaybackEngine.setTrackGain）。
+         * 播放器只有一个音量旋钮，所以补偿与用户音量在那边相乘下发。
+         */
+        nativePlaybackEngine.setTrackGain(calculation.linearGain);
+
         try {
             // Onto the deck rather than the shared output: loudness compensation is a per-track
             // value, so during a blend the two decks legitimately need different ones.
+            const context = audioContextRef.current;
             const activeChain = getActiveChain();
-            if (activeChain) {
-                rampGain(audioContextRef.current, activeChain.replayGain, calculation.linearGain, 0.1);
+            if (activeChain && context) {
+                rampGain(context, activeChain.replayGain, calculation.linearGain, 0.1);
             }
 
             const replayGainLogSignature = JSON.stringify({
