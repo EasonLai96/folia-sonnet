@@ -661,6 +661,20 @@ class FoliaPlaybackService : android.app.Service() {
      * **它不再决定播什么**，收到只是渲染。JS 不在场也没有损失。
      */
     fun onTrackFinished() {
+        /*
+         * ⭐ 已经为这一首提前换过了：这条 ended 是**旧那台**放完报上来的，丢掉。
+         *
+         * onNearEnd 先推进队列，真正起交叉要等下一首的地址（没预取命中时那是异步平台
+         * 请求）；这期间旧播放器的监听还挂着，它照常播到尾巴上报一次 ended ——
+         * 不拦一下就是一次换歌跳两首。
+         *
+         * 用时间窗而不是「为哪一首推进过」的标记：提前换歌可能压根没走成
+         * （最后一首、单曲循环、地址解析失败），那时候 ended 必须照常处理。
+         */
+        if (android.os.SystemClock.elapsedRealtime() - advancedAheadAtMs < ADVANCE_AHEAD_GUARD_MS) {
+            publishSnapshot()
+            return
+        }
         if (!nativePlaybackActive()) {
             // 当前这首走的是 <audio>（Web 全流程），队列在 JS 那边，原生没有立场替它决定。
             // 这一档只在「原生从没接管过播放」时发生。
@@ -684,6 +698,48 @@ class FoliaPlaybackService : android.app.Service() {
             publishNotification()
             return
         }
+        advanceToNextEntry(next)
+    }
+
+    /**
+     * 快到末尾：**提前换下一首**，为的是让交叉淡化有东西可淡。
+     *
+     * 自然播完那条路（[onTrackFinished]）是「已经没声了才换」，那时旧那台停在末尾，
+     * 淡出淡的是静音 —— 用户听到的就是「末尾没有淡出，直接断」。所以播放器在还剩一个
+     * 斜坡的时候报一声 nearEnd，这里立刻起交叉：旧那台还在出声，淡出才是真的淡出，
+     * 而且斜坡跑完正好接上这首歌原本该结束的时刻。
+     *
+     * 两种情况不动：单曲循环（不换歌，重播走 [seekToStartForRepeat]）、顺序播放到头
+     * （没有下一首，让它正常放完停住）。
+     */
+    fun onNearEnd() {
+        if (!nativePlaybackActive()) return
+        if (playQueue.loopMode == NativeLoopMode.ONE) return
+        // 只看不动：最后一首时 peekNext 给 null，交给 onTrackFinished 去停。
+        val peeked = playQueue.peekNext() ?: return
+        /*
+         * 下一首还是同一首（列表循环但队列只有一首）：那不是「换歌」，是重播。
+         * 交叉淡化到这里会变成「同一首硬切一下、还剪掉最后几秒」，比不淡更糟 ——
+         * 让它正常播完，交给 onTrackFinished 的 seek 重播那条路。
+         */
+        if (peeked.songKey == playQueue.current()?.songKey) return
+        val next = playQueue.onFinished() ?: return
+        // 记下这一发：旧那台随后的 ended 要丢掉（见 onTrackFinished 开头）。
+        advancedAheadAtMs = android.os.SystemClock.elapsedRealtime()
+        advanceToNextEntry(next)
+    }
+
+    /** 队列已经推进到 [next]：装源 + 让界面跟上（放完自动前进与提前换共用这一段）。 */
+    /**
+     * 「已经提前换过歌」的有效窗口。
+     *
+     * 要盖住最坏情况：下一首地址没预取到时的异步解析 + 一个完整的交叉淡化斜坡。
+     * 提前换歌之后这首歌其实已经结束了，所以窗口放宽不会误伤——真正的 ended 只在
+     * 队列没推进过的时候才有意义。
+     */
+    private var advancedAheadAtMs = 0L
+
+    private fun advanceToNextEntry(next: NativeQueueEntry) {
         playQueue.bumpRevision()
         // 镜像下标要跟着状态机一起推进：resolveMirrorEntryAsync 的过期守卫按
         // mirroredIndex 判「出发时那格还在不在」，不同步的话刚出发的请求就会被
@@ -847,6 +903,28 @@ class FoliaPlaybackService : android.app.Service() {
                 .shared(this@FoliaPlaybackService).invalidateOverlay()
     }
 
+    /**
+     * 位置被跳过了：把通知栏 / 锁屏那条进度条重挂一次。
+     *
+     * 系统媒体通知与锁屏读的是 MediaSession 里的 PlaybackState，而它的位置**只在
+     * setPlaybackState 那一刻定格** —— 之后由系统按速率自己外推。所以：
+     *   · 在 App 里拖动进度条（Web → player.seek）：不重挂，通知栏那条还在原处继续数；
+     *   · 单曲循环回到开头：位置从末尾跳回 0，不重挂就一直数下去，永远不归零。
+     * 两件事用户都报了，根子是同一个：位置变了却没人告诉 MediaSession。
+     *
+     * 通知栏 / 锁屏自己拖动那条路（handleTransportSeek）本来就是全的，缺的是「App 内
+     * 拖动」和「播放器自己回绕」这两条没有 MediaSession 回调可走的路径 —— 它们都是从
+     * 播放器的 seeked 事件转进来的。
+     */
+    fun onPositionJump(positionMs: Long) {
+        if (positionMs >= 0L) {
+            cachedPositionMs = positionMs
+        }
+        publishSnapshot()
+        applyPlaybackState()
+        publishNotification()
+    }
+
     /** 「喜欢 / 取消喜欢」（通知栏、锁屏、系统媒体控制器共用）。 */
     private fun handleTransportLike() {
         if (nativePlaybackActive()) {
@@ -881,6 +959,10 @@ class FoliaPlaybackService : android.app.Service() {
             // 不经过 handleTransportSkip —— 手按下一首与放完自动前进的语义不同：
             // 手按时单曲循环也该真的换歌，放完时单曲循环该重播同一首。
             "finished" -> onTrackFinished()
+            // 快到末尾（还剩一个斜坡）：交叉淡化要提前换，见 onNearEnd。
+            "nearEnd" -> onNearEnd()
+            // 位置被跳过（App 里拖进度条 / 单曲循环回绕）：重挂一次进度，见 onPositionJump。
+            "positionJump" -> onPositionJump(intent.getLongExtra(EXTRA_COMMAND_POSITION, -1L))
             "like" -> handleTransportLike()
             "seek" -> {
                 val positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L)
@@ -2248,6 +2330,11 @@ class FoliaPlaybackService : android.app.Service() {
 
         /** 交叉淡化的上限。再长就变成「两首歌叠在一起」而不是过渡了。 */
         private const val MAX_CROSSFADE_MS = 12_000
+        /**
+         * 「已经提前换过歌」的窗口：见 onTrackFinished 开头。
+         * 最坏情况 = 没预取到地址时的异步解析 + 一个完整的交叉淡化斜坡，再留余量。
+         */
+        private const val ADVANCE_AHEAD_GUARD_MS = 20_000L
 
         /**
          * 前台改了循环模式：落进设置，再让队列跟上。返回落盘后的整份设置给前台确认。
@@ -2523,6 +2610,43 @@ class FoliaPlaybackService : android.app.Service() {
          * 要等 2.5 秒确认 JS 没接才动手；这条进去就直接推进队列。前台在场时同样会收到
          * 一条广播用来更新界面，但它不再参与「播什么」的决定。
          */
+        /**
+         * 快到末尾 → 服务提前换下一首（交叉淡化用）。同 [requestNativeTrackFinished] 的送法。
+         */
+        @JvmStatic
+        fun requestNativeNearEnd(context: Context?) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "nearEnd")
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "末尾提前换歌的通知没送到服务", ignored as? Throwable)
+            }
+        }
+
+        /**
+         * 播放器那边位置跳了（App 内拖进度条 / 单曲循环回绕）→ 服务重挂 MediaSession 的进度。
+         */
+        @JvmStatic
+        fun requestNativePositionJump(context: Context?, positionMs: Long) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "positionJump")
+            intent.putExtra(EXTRA_COMMAND_POSITION, positionMs)
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "位置跳变的通知没送到服务", ignored as? Throwable)
+            }
+        }
+
         @JvmStatic
         fun requestNativeTrackFinished(context: Context?) {
             if (context == null || !isRunning()) {

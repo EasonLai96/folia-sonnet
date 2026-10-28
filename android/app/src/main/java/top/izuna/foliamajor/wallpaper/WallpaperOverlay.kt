@@ -2514,6 +2514,8 @@ class WallpaperOverlay(private val context: Context) {
          * 页面重载时会在 onPageFinished 把 lastPushedCover 清掉重推一次。
          */
         pushCoverIfChanged()
+        // 群唱自定义头像 / 表情图同理：走单独一条通道，不挤进整包（那是几百 KB 的 base64）。
+        pushCappellaImagesIfChanged()
         // 注意 lastSignature 在 detach 时会被清空：页面是重新加载出来的，
         // 「上次推过什么」对它没有意义。不清的话切回桌面后签名没变、一次都不推，
         // 就会出现「回到桌面没歌词，非得暂停一下触发事件才更新」。
@@ -2623,6 +2625,60 @@ class WallpaperOverlay(private val context: Context) {
         } catch (ignored: Throwable) {
             // 页面还在导航期会静默失败；把判重键清掉，下一轮巡检会再推一次。
             lastPushedCover = null
+        // 图同理：新页面什么都没收到过。
+        lastPushedCappella = -1
+        }
+    }
+
+    /** 上一次推给页面的群唱图版本号（见 WallpaperCappellaImages.revision）。 */
+    private var lastPushedCappella = -1
+
+    /**
+     * 群唱自定义头像 / 表情图变了就单独推一次。
+     *
+     * 与封面同一条纪律：叠层是另一个 WebView，App 的 IndexedDB 它读不到，图只能从这条
+     * 通道过来；判重按版本号，图没变就不重推（几百 KB 的 base64 不该每 250ms 走一遍）。
+     */
+    private fun pushCappellaImagesIfChanged() {
+        val view = webView
+        if (view == null || !pageReady) {
+            return
+        }
+        val snapshot = WallpaperCappellaImages.read()
+        if (snapshot.revision == lastPushedCappella) {
+            return
+        }
+        lastPushedCappella = snapshot.revision
+        val payload = org.json.JSONObject()
+        try {
+            payload.put("avatars", org.json.JSONArray(snapshot.avatars))
+            payload.put("emojis", org.json.JSONArray(snapshot.emojis))
+        } catch (error: Throwable) {
+            // 解析不了就当没有：Cappella 回退到封面，不影响其它任何东西。
+            lastPushedCappella = -1
+            return
+        }
+        try {
+            /*
+             * 要**回执**，不是「调用没抛异常」。
+             *
+             * 页面里那个 handler 还没装上（脚本仍在跑 / 页面刚重载）时，注入的这段会
+             * 返回 "0" —— evaluateJavascript 是静默成功的，把「推过了」记进判重键，
+             * 图这一整首歌都不会再来了。整包那条通道也是靠回执判送达的。
+             */
+            view.evaluateJavascript(
+                "(function(){if(window.__foliaWallpaperPushCappellaImages){" +
+                "window.__foliaWallpaperPushCappellaImages(" + payload.toString() + ");return 1;}" +
+                "return 0;})()"
+            ) { result ->
+                if (result != null && result.contains("1")) {
+                    return@evaluateJavascript
+                }
+                lastPushedCappella = -1
+            }
+        } catch (ignored: Throwable) {
+            // 页面还在导航期会静默失败；把判重键清掉，下一轮巡检会再推一次。
+            lastPushedCappella = -1
         }
     }
 
@@ -2832,6 +2888,8 @@ class WallpaperOverlay(private val context: Context) {
              * 表现是「刚挂上叠层时没有封面，非得换一首歌才出现」。
              */
             lastPushedCover = null
+            // 群唱自定义图同理：新页面一张都没收到过，版本号归到「没推过」。
+            lastPushedCappella = -1
             lastAudioSilent = false
             /*
              * 音频采集跟着页面一起起。

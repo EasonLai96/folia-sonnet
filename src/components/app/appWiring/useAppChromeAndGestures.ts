@@ -201,7 +201,7 @@ export const useAppChromeAndGestures = (model: Input) => {
         if (!hdrProjectionActive) return;
         setStatusMsg({
             type: 'info',
-            text: t('ui.hdrProjectionOnHint', 'HDR 投影已开启 · 点两次空白退出'),
+            text: t('ui.hdrProjectionOnHint', 'HUD 投影已开启 · 点两次空白退出'),
             nonce: Date.now(),
         });
     }, [hdrProjectionActive, setStatusMsg, t]);

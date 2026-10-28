@@ -58,6 +58,17 @@ window.__foliaWallpaperPush = (incoming) => {
         payload = { ...payload, coverUrl: latest.coverUrl, cover: latest.cover };
     }
     /*
+     * 群唱自定义图同理：它们走单独那条通道，整包里根本没有这两个字段 ——
+     * 不补的话，每一次换歌推送都会把已经到位的头像冲成空，
+     * Cappella 当场退回封面。
+     */
+    if (!payload.cappellaAvatarImages && latest.cappellaAvatarImages) {
+        payload = { ...payload, cappellaAvatarImages: latest.cappellaAvatarImages };
+    }
+    if (!payload.cappellaEmojiImages && latest.cappellaEmojiImages) {
+        payload = { ...payload, cappellaEmojiImages: latest.cappellaEmojiImages };
+    }
+    /*
      * 安全区必须在**通知订阅者之前**落下去。
      *
      * 叠层这一层没有 Capacitor 桥，量不到自己的安全区（见 WallpaperPayload.insets）。
@@ -89,6 +100,24 @@ window.__foliaWallpaperPushCover = (incoming) => {
     if (!url && !data) return;
     if (latest.coverUrl === url && latest.cover === data) return;
     latest = { ...latest, coverUrl: url, cover: data };
+    subscribers.forEach(notify => notify());
+};
+
+/**
+ * 群唱自定义头像 / 表情图单独那条通道。
+ *
+ * 和封面一样落在 `latest` 上：组件那边只读一份快照，不会出现两套互相打架的数据。
+ */
+window.__foliaWallpaperPushCappellaImages = (incoming) => {
+    if (!incoming || typeof incoming !== 'object') return;
+    const avatars = Array.isArray(incoming.avatars) ? incoming.avatars : undefined;
+    const emojis = Array.isArray(incoming.emojis) ? incoming.emojis : undefined;
+    if (!avatars && !emojis) return;
+    latest = {
+        ...latest,
+        cappellaAvatarImages: avatars ?? latest.cappellaAvatarImages,
+        cappellaEmojiImages: emojis ?? latest.cappellaEmojiImages,
+    };
     subscribers.forEach(notify => notify());
 };
 

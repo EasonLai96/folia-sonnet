@@ -29,6 +29,12 @@ import { useBridgedAudio } from './useWallpaperBridgedAudio';
 const CONTENT_DWELL_MS = 400;
 
 /**
+ * 群唱自定义图的空数组：身份必须稳定，不能每次渲染都新建一个 []。
+ * 可视化那边把它当 props 依赖，新建一次就等于「配置变了」，会把头像层重建一遍。
+ */
+const NO_CAPPELLA_IMAGES: never[] = [];
+
+/**
  * 叠层的内容要**等 payload 安静下来**才画。
  *
  * 为什么：切歌不是一次到位，是**分几拍**补齐的 —— 先来歌名（歌词还是空表），
@@ -493,6 +499,13 @@ const WallpaperSurface: React.FC = () => {
                  * 优先用地址：它每首必变、能直接加载；base64 那份只在地址也没有时才用。
                  */
                 coverUrl={payload.coverUrl ?? payload.cover ?? null}
+                /*
+                 * 群唱自定义头像 / 表情图：原生从主应用那边收下来再推给我们（见
+                 * WallpaperOverlay.pushCappellaImagesIfChanged）。不传的话这一层的
+                 * IndexedDB 是空的，Cappella 会按「没有自定义头像」回退到封面。
+                 */
+                cappellaCustomAvatarImages={payload.cappellaAvatarImages ?? NO_CAPPELLA_IMAGES}
+                cappellaCustomEmojiImages={payload.cappellaEmojiImages ?? NO_CAPPELLA_IMAGES}
                 /*
                  * 叠层的封面默认是隐藏的。
                  *

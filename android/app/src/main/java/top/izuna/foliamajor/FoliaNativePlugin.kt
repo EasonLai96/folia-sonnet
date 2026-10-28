@@ -2506,6 +2506,15 @@ class FoliaNativePlugin : Plugin() {
             // 「播放淡入淡出」这一项原生自己要用（音量斜坡），写完当场摊给播放器。
             top.izuna.foliamajor.player.FoliaNativePlayerPlugin
                     .applyPlaybackFade(snapshot.optBoolean("playbackFade", true))
+            /*
+             * 交叉淡化的「提前换歌窗口」同理：不摊下去就只认进程启动时读到的那一份 ——
+             * 用户在设置里刚打开交叉淡化 / 改了时长，提前换歌不生效，末尾仍然没有淡出，
+             * 得杀掉进程重进才对。两个键都在同一份 snapshot 里（写是全量合并）。
+             */
+            val crossfadeOn = snapshot.optBoolean("crossfadeEnabled", false)
+            top.izuna.foliamajor.player.FoliaNativePlayerPlugin
+                    .applyCrossfadeAhead(
+                            if (crossfadeOn) snapshot.optInt("crossfadeMs", 0) else 0)
             call.resolve(JSObject.fromJSONObject(snapshot))
         } catch (error: Exception) {
             call.reject("写入设置失败", error)

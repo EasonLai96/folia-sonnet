@@ -9,6 +9,7 @@ import { useColorOsLyricFeed } from '../../../hooks/useColorOsLyricFeed';
 import { useElectronVideoExportController } from '../../../hooks/useElectronVideoExportController';
 import { useImmersiveLyricsBars } from '../../../hooks/useImmersiveLyricsBars';
 import { useLyriconFeed } from '../../../hooks/useLyriconFeed';
+import { useWallpaperCappellaImagesPublisher } from '../../../hooks/useWallpaperCappellaImagesPublisher';
 import { useLyricsWallpaperFeed } from '../../../hooks/useLyricsWallpaperFeed';
 import { useMediaSessionBridge } from '../../../hooks/useMediaSessionBridge';
 import { useNavidromeScrobbleReporter } from '../../../hooks/useNavidromeScrobbleReporter';
@@ -378,6 +379,13 @@ export const useAppPlaybackBridges = (model: Input) => {
             canLike: !resolveLikeAvailability(song, false, isNowPlayingStageActive).disabled,
         }),
     });
+
+    /*
+     * 群唱自定义头像 / 表情图：叠层那个 WebView 读不到主应用的 IndexedDB，必须由这里
+     * 解析成 data URL 再推给原生（不推的话 Cappella 在叠层上按「没有自定义头像」
+     * 回退到封面）。
+     */
+    useWallpaperCappellaImagesPublisher();
 
     // Capacitor Android 专有：把当前行与行内进度喂给原生歌词动态壁纸。
     // 壁纸是另一个组件，读不到 React 状态，只能由这里主动推过去。
