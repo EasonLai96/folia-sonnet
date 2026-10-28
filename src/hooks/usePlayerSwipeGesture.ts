@@ -49,23 +49,24 @@ export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwip
     }, []);
 
     const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        // 已经有手指在跟就不再接新的：换起点会把原手势的几何整个打乱；也不能顺手重置
+        // suppressClickRef，那会把刚触发那下滑的 click 放出来。
         /*
-         * 只跟「主指针」：安卓上多指同时触屏很常见（扶着手机的手、搭在屏幕边上的手指）。
-         * 用 isPrimary 判比比 pointerId 可靠 —— 浏览器不保证 pointerId 复用。
-         */
-        if (!event.isPrimary) return;
-        /*
-         * 走到这里就是**新的一手**，无条件重置。
+         * 上一次手势可能**没收到收尾**：目标元素被换掉（换歌时可视化层重建）、
+         * pointerup 落在别的元素上、或者页面在这一手中间重新挂载。那时候 startRef 一直
+         * 不为空，之后每一次 pointerdown 都会在这里被忽略 —— 滑动从此彻底不响应，
+         * 而且一路带到下一首。同一根指针又来一次 down，就说明那一手早结束了：重置再开始。
          *
-         * 上一次手势可能没收到收尾：目标元素被换掉（换歌时可视化层重建）、pointerup 落在
-         * 别的元素上、或者页面在这一手中间重新挂载。那时候 startRef 一直不为空，之后每
-         * 一次 pointerdown 都被「已经有手指在跟」挡掉 —— 滑动从此彻底不响应，还会一路带
-         * 到下一首。上一次滑动那一发 click 早派发完了（click 总在 pointerup 之后），
-         * 所以这个标记也可以放心清掉。
+         * 兜底主要靠 window 捕获阶段的 pointerup / pointercancel（见下面的 effect），
+         * 这里只是「同一根指针又按下」的那一条。
          */
-        startRef.current = null;
-        pointerIdRef.current = null;
-        triggeredRef.current = false;
+        if (startRef.current !== null) {
+            if (event.pointerId !== pointerIdRef.current) return;
+            startRef.current = null;
+            pointerIdRef.current = null;
+            triggeredRef.current = false;
+            suppressClickRef.current = false;
+        }
         suppressClickRef.current = false;
         if (!enabled) return;
         startRef.current = { x: event.clientX, y: event.clientY };
