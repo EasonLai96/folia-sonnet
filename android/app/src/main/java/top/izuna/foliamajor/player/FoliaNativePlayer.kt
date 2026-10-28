@@ -125,6 +125,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     @Volatile
     private var pauseFadeEnabled = true
     private var fadeTick: Runnable? = null
+    /**
+     * 正在跑的是不是淡入那条斜坡。
+     *
+     * 淡入的目标是「此刻该有的音量」：它中途可能变（下一首的响度补偿不一样），变的时候该改
+     * 目标、不该当场跳。淡出的目标是 0，不受它影响。
+     */
+    private var fadeFollowsVolume = false
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -204,6 +211,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             if (pauseFadeEnabled && resuming) {
                 // 先从 0 滑上来；不这么做，「继续」是当场满音量。
                 current.setVolume(0f)
+                fadeFollowsVolume = true
                 rampVolume(0f, requestedVolume, PAUSE_FADE_MS)
             }
             cachedPlaying = true
@@ -236,9 +244,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      * 滑完调 [then]（在播放器线程上）。淡入淡出关掉时直接落位、立刻回调。
      */
     private fun rampVolume(from: Float, to: Float, durationMs: Int, then: (() -> Unit)? = null) {
+        // cancelFade 会把标记清掉，先把它记下来（play() 是在调本函数之前打开的）。
+        val followsVolume = fadeFollowsVolume
         cancelFade()
+        fadeFollowsVolume = followsVolume
         if (!pauseFadeEnabled || durationMs <= 0) {
-            player?.setVolume(to)
+            player?.setVolume(if (fadeFollowsVolume) requestedVolume else to)
+            fadeFollowsVolume = false
             then?.invoke()
             return
         }
@@ -248,9 +260,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             override fun run() {
                 step++
                 val progress = step.toFloat() / FADE_STEPS
-                player?.setVolume((from + (to - from) * progress).coerceIn(0f, 1f))
+                // 淡入的目标是「此刻该有的音量」：这一首的响度补偿中途到位时，坡道跟着走完，
+                // 而不是被一次 setVolume 当场打断。
+                val target = if (fadeFollowsVolume) requestedVolume else to
+                player?.setVolume((from + (target - from) * progress).coerceIn(0f, 1f))
                 if (step >= FADE_STEPS) {
                     fadeTick = null
+                    fadeFollowsVolume = false
                     then?.invoke()
                 } else {
                     handler.postDelayed(this, stepMs.toLong())
@@ -264,6 +280,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     private fun cancelFade() {
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
+        fadeFollowsVolume = false
     }
 
     /** 设置里的「播放淡入淡出」跟着这一项走（默认开，见 FoliaSettingsStore 的 playbackFade）。 */
@@ -323,9 +340,21 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
 
     fun setVolume(volume: Float) {
         val clamped = Math.max(0f, Math.min(1f, volume))
+        /*
+         * ⭐ 音量没变 = 一次状态同步，不是用户动作。
+         *
+         * 继续播放时 Web 那边会顺手把音量再推一次（原生音量、响度补偿都走这条路）。原来这一下
+         * 会 cancelFade + setVolume(满音量)，把刚开始的淡入当场掐成满音量 —— 用户听到的是
+         * 「淡出正常、淡入无效」。同值直接不管。
+         */
+        if (clamped == requestedVolume) return
         requestedVolume = clamped
         runOnPlayer {
-            // 正在淡的那条斜坡作废：用户拖到哪儿就是哪儿，不能被斜坡拽回去。
+            if (fadeTick != null && fadeFollowsVolume) {
+                // 淡入还没跑完：只换目标，坡道继续（见 rampVolume 的刻度）。
+                return@runOnPlayer
+            }
+            // 其他情况：正在淡的那条斜坡作废 —— 用户拖到哪儿就是哪儿，不能被斜坡拽回去。
             cancelFade()
             val current = player
             if (current != null) current.setVolume(requestedVolume)
@@ -467,8 +496,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      */
     fun crossfadeTo(url: String, mediaId: String?, durationMs: Int): Boolean {
         if (durationMs <= 0) return false
-        val outgoing = player
-        if (outgoing == null || !cachedPlaying || outgoing.mediaItemCount == 0) return false
+        /*
+         * ⭐ 判据只能用线程安全的缓存字段。
+         *
+         * ExoPlayer 钉在 playerLooper 上，从主线程读 mediaItemCount 属于「在错误的线程碰播放器」，
+         * 换歌时必崩（Player is accessed on the wrong thread）。hasMedia()/cachedPlaying 都是
+         * volatile，与 lastUrl 同纪律；真正的「旧那台手上有没有东西」在播放器线程里再判一次。
+         */
+        if (!cachedPlaying || !hasMedia()) return false
         runOnPlayer {
             val old = player
             val incoming = buildExtraPlayer()
@@ -486,8 +521,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             incoming.prepare()
             incoming.setPlayWhenReady(true)
             emit("playing", 0L, 0L, null)
-            if (old == null) {
-                // 交叉判据是「旧那台在放」，走到这里说明它刚被换掉：直接满音量起播。
+            if (old == null || old.mediaItemCount == 0) {
+                // 交叉判据是「旧那台在放」，走到这里说明它手上已经没东西（刚被换掉 / 刚停下）：
+                // 没得淡出，直接满音量起播。（这一问在播放器线程上，安全。）
                 incoming.setVolume(requestedVolume)
                 return@runOnPlayer
             }

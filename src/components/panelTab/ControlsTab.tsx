@@ -137,7 +137,7 @@ const ControlsTab: React.FC<ControlsTabProps> = ({
                 isDaylight={isDaylight}
                 onToggleDaylight={onToggleDaylight}
             />
-            {/* HDR 投影：三件事都跟「怎么显示」有关，与上面的外观分开摆；非安卓自己不渲染。 */}
+            {/* HUD 投影：三件事都跟「怎么显示」有关，与上面的外观分开摆；非安卓自己不渲染。 */}
             <HdrProjectionRow theme={theme} />
         </>
     );
