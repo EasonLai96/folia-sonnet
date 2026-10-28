@@ -284,6 +284,7 @@ export const GridView: React.FC<GridViewProps> = ({
         handleExportLocalPlaylist,
         handleOrganizeSongInfo,
         handleEditEntity,
+        handleSetCover,
         handleAddNavidromeCollectionToPlaylist,
         handleCreateNavidromePlaylist,
         resumeBackgroundSync,
@@ -675,6 +676,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 onResyncFolder={handleResyncLocalFolder}
                 onResyncAllFolders={handleResyncAllLocalFolders}
                 onOrganizeSongInfo={handleOrganizeSongInfo}
+                onSetCover={handleSetCover}
                 showSubscribeButton={showSubscribeButton}
                 playlistSubscribed={playlistSubscribed}
                 isOnlineAlbum={isOnlineAlbum}

@@ -14,6 +14,8 @@ import {
     type LocalHomeSectionKey,
 } from './localHomeModel';
 import { getLocalCoverAssetUrl } from '../../../services/localCoverAssetUrl';
+import { applyLocalCollectionCoverOverrides } from '../collection/cover/localCollectionCover';
+import { useLocalCollectionCoverUrls } from '../collection/cover/useLocalCollectionCoverUrls';
 import { backfillLocalCovers } from '../../../services/localCoverBackfill';
 
 // src/library/core/home/useLibraryHomeLocal.ts
@@ -55,13 +57,21 @@ export const useLibraryHomeLocal = ({
 }): LibraryHomeLocal => {
     const { t } = useTranslation();
     const { ready, entities, assignments } = catalog;
-    const groups = useMemo(() => buildLocalHomeGroups(
+    const builtGroups = useMemo(() => buildLocalHomeGroups(
         localSongs,
         localPlaylists,
         t,
         ready ? { entities, assignments } : undefined,
         getLocalCoverAssetUrl,
     ), [assignments, entities, localPlaylists, localSongs, ready, t]);
+    // 自定义封面盖在自动封面上：分组本身照旧按歌推出来，换封面不必重新分组。
+    const coverOverrides = useLocalCollectionCoverUrls();
+    const groups = useMemo(() => ({
+        folders: applyLocalCollectionCoverOverrides(builtGroups.folders, coverOverrides),
+        albums: applyLocalCollectionCoverOverrides(builtGroups.albums, coverOverrides),
+        artists: builtGroups.artists,
+        playlists: applyLocalCollectionCoverOverrides(builtGroups.playlists, coverOverrides),
+    }), [builtGroups, coverOverrides]);
 
     const sections = useMemo<LibraryHomeLocalSection[]>(() => LOCAL_HOME_SECTIONS.map(section => {
         const sectionGroups = groups[section.key];
