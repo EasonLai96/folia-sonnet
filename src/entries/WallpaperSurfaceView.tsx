@@ -26,6 +26,12 @@ import { useBridgedAudio } from './useWallpaperBridgedAudio';
  * （尤其是会动的那一层：动态背景、粒子、逐字流光）恰好落在窗口已经全不透明的时候，
  * 用户看到的就是「歌词淡入正常，动态效果突然出现」。这 400ms 是为了吃掉那段空窗。
  */
+/**
+ * 群唱自定义图的空数组：身份必须稳定，不能每次渲染都新建一个 []。
+ * 可视化那边把它当 props 依赖，新建一次就等于「配置变了」，会把头像层重建一遍。
+ */
+const NO_CAPPELLA_IMAGES: never[] = [];
+
 const CONTENT_DWELL_MS = 400;
 
 /**
@@ -493,6 +499,13 @@ const WallpaperSurface: React.FC = () => {
                  * 优先用地址：它每首必变、能直接加载；base64 那份只在地址也没有时才用。
                  */
                 coverUrl={payload.coverUrl ?? payload.cover ?? null}
+                /*
+                 * 群唱自定义头像 / 表情图：原生从主应用那边收下来再推给我们（见
+                 * WallpaperOverlay.pushCappellaImagesIfChanged）。不传的话这一层的
+                 * IndexedDB 是空的，Cappella 会按「没有自定义头像」回退到封面。
+                 */
+                cappellaCustomAvatarImages={payload.cappellaAvatarImages ?? NO_CAPPELLA_IMAGES}
+                cappellaCustomEmojiImages={payload.cappellaEmojiImages ?? NO_CAPPELLA_IMAGES}
                 /*
                  * 叠层的封面默认是隐藏的。
                  *

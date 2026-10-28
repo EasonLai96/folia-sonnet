@@ -1,4 +1,5 @@
 import { registerPlugin } from '@capacitor/core';
+import type { CappellaAvatarImage, CappellaEmojiImage } from '../types';
 
 // src/platform/foliaWallpaper.ts
 // 歌词动态壁纸的 Web 侧入口。原生实现见 android/.../wallpaper/LyricsWallpaperService。
@@ -127,6 +128,13 @@ export interface FoliaWallpaperAppearance {
 interface FoliaWallpaperPlugin {
     publish(options: FoliaWallpaperPublishOptions): Promise<void>;
     setAppearance(options: FoliaWallpaperAppearance): Promise<void>;
+    /**
+     * 群唱自定义头像 / 表情图（JSON 数组字符串，[{id,name,url}]，url 是 data URL）。
+     *
+     * 叠层是另一个 WebView，读不到主应用 IndexedDB 里的上传图，只能这样推过去；
+     * 不推的话 Cappella 在叠层上会回退到封面。
+     */
+    publishCappellaImages(options: { avatars: string; emojis: string }): Promise<void>;
     clearImage(): Promise<void>;
     /** 打开系统文件选择器挑字体；原生自己拷贝，不走 base64。 */
     pickFont(): Promise<{ picked: boolean; rejected?: boolean }>;
@@ -203,6 +211,25 @@ export const publishLyricsWallpaper = async (
         await FoliaWallpaper.publish(options);
     } catch {
         // 壁纸没启用或插件不可用时静默失败：它不该影响播放本身。
+    }
+};
+
+/**
+ * 把群唱的自定义头像 / 表情图推给原生（叠层那个 WebView 读不到我们的 IndexedDB）。
+ *
+ * 只有变的时候才该调：一次可能是几百 KB 的 base64。调用方按数组引用去重即可。
+ */
+export const publishWallpaperCappellaImages = async (
+    avatars: CappellaAvatarImage[],
+    emojis: CappellaEmojiImage[],
+): Promise<void> => {
+    try {
+        await FoliaWallpaper.publishCappellaImages({
+            avatars: JSON.stringify(avatars),
+            emojis: JSON.stringify(emojis),
+        });
+    } catch {
+        // 壁纸 / 叠层没启用或插件不可用时静默失败：它不该影响播放本身。
     }
 };
 

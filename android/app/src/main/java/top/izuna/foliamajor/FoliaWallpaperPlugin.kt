@@ -148,6 +148,24 @@ class FoliaWallpaperPlugin : Plugin() {
     }
 
     /**
+     * 群唱（Cappella）自定义头像 / 表情图推给原生。
+     *
+     * 叠层是另一个 WebView，它读不到主应用 IndexedDB 里的上传图 —— 不推这一份，Cappella
+     * 在叠层上就按「没有自定义头像」回退到封面（用户报的「群唱自定义头像显示的是封面」）。
+     *
+     * 两个参数都是 JSON 数组字符串（[{id,name,url}]，url 是 data URL）。字符串而不是
+     * JSArray：几百 KB 的 base64 走 Capacitor 的数组解析只会更慢，且这里根本不需要拆开。
+     */
+    @PluginMethod
+    fun publishCappellaImages(call: PluginCall) {
+        top.izuna.foliamajor.wallpaper.WallpaperCappellaImages.set(
+            call.getString("avatars"),
+            call.getString("emojis"),
+        )
+        call.resolve()
+    }
+
+    /**
      * 音乐锁屏的自诊断。
      *
      * 真机上 logcat 基本取不到（很多 ROM 根本不给读），而「后台启动 Activity 被系统拦」
