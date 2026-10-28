@@ -144,6 +144,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     @Volatile private var crossfadeAheadMs = 0
     /** 这一首的「快到尾巴了」是不是已经报过（每首只报一次，seek 回去要重新上膛）。 */
     private var nearEndFired = false
+    /** 上一拍的播放位置：单曲循环回绕（位置从末尾跳回 0）靠它认出来。 */
+    private var lastTickPositionMs = 0L
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -166,8 +168,24 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             val position = current.currentPosition
             val duration = current.duration
+            /*
+             * ⭐ 单曲循环的回绕：位置从末尾直接跳回 0，而且**什么事件都不发**。
+             *
+             * 缓存位置这里会跟着更新，但通知栏 / 桌面歌词 / Web 侧那条只进不退的夹子都只认
+             * 事件 —— 不发这条 seeked，它们就停在末尾（用户报的「单曲循环播完进度条不重置，
+             * 音频正常」）。判据是「往回跳了一大截」，阈值取得比任何正常抖动都大。
+             */
+            val wrapped = requestedRepeatMode == Player.REPEAT_MODE_ONE
+                    && lastTickPositionMs > 1_000L
+                    && position + 1_000L < lastTickPositionMs
+            lastTickPositionMs = position
             cachedPositionMs = position
             cachedDurationMs = if (duration > 0) duration else 0L
+            if (wrapped) {
+                // 下一圈还要能再报一次「快到尾巴」，进度也要从 0 重新算。
+                nearEndFired = false
+                emit("seeked", position, cachedDurationMs, null)
+            }
             /*
              * 快到尾巴了：报一次 nearEnd，由服务去决定「提前换下一首」。
              *
@@ -223,8 +241,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             cachedPositionMs = if (startPositionMs > 0) startPositionMs else 0L
             cachedDurationMs = 0L
-            // 新的一首：快到尾巴这件事重新上膛。
+            // 新的一首：快到尾巴这件事重新上膛，回绕判定的上一拍也清掉。
             nearEndFired = false
+            lastTickPositionMs = 0L
         }
     }
 
@@ -408,17 +427,17 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
 
     fun setRepeatMode(repeatMode: Int) {
         /*
-         * ⭐ 单曲循环**不交给 ExoPlayer**，一律按 OFF 发下去，由服务在 STATE_ENDED 上 seek(0) 重播。
+         * 单曲循环照旧交给 ExoPlayer（REPEAT_MODE_ONE）。
          *
-         * ExoPlayer 的 REPEAT_MODE_ONE 是**无缝**的：既不回调 onPositionDiscontinuity 也不发
-         * STATE_ENDED，位置直接从末尾跳回 0。于是这里什么都不报 —— 缓存位置停在末尾、通知栏
-         * 进度条停在末尾、Web 侧那条只进不退的夹子也停在末尾，而声音确实又响了。用户报的
-         * 「单曲循环播完进度条不重置，音频正常」就是它。
+         * 它的循环是**无缝**的：既不回调 onPositionDiscontinuity 也不发 STATE_ENDED，位置
+         * 直接从末尾跳回 0 —— 所以「进度不重置」不能靠事件，得靠刻度自己认出来（见
+         * positionTick 里的回绕判定）。
          *
-         * 服务那边本来就有这条路（FoliaPlaybackService.seekToStartForRepeat：seek(0) + 报一次
-         * seeked），只是原来被 ExoPlayer 自己的循环挡在前面，从来没轮到它。
+         * ⚠️ 别改成按 OFF 发下去指望服务 seek(0) 重播：原生队列的循环模式与 JS 的
+         * effectiveLoopMode 不是同一份，走到 onTrackFinished 时常常还停在 OFF，结果是
+         * 「播完直接停住」—— 比原来的进度不重置更糟。已经踩过。
          */
-        requestedRepeatMode = if (repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else repeatMode
+        requestedRepeatMode = repeatMode
         runOnPlayer {
             val current = player
             if (current != null) current.setRepeatMode(requestedRepeatMode)
@@ -565,6 +584,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             cachedDurationMs = 0L
             cachedPlaying = true
             nearEndFired = false
+            lastTickPositionMs = 0L
             /*
              * 旧那台在交叉期间还会自己播到尾巴上（斜坡跑完正好是它该结束的时刻）。
              * 那一下 STATE_ENDED 会走到本类的监听里 —— 而此刻 `player` 已经是新的那台，

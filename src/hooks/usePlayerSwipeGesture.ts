@@ -13,7 +13,7 @@
 //
 // 判定本身是纯函数，不碰 DOM 也不碰 React —— 单测直接测那个。
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { resolvePlayerSwipe, type PlayerSwipePoint } from '../utils/playerSwipeGesture';
 
@@ -52,7 +52,19 @@ export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwip
         // 上一次手势的 click 已经派发完了（click 总在 pointerup 之后），这里可以安全重置。
         // 已经有手指在跟就不再接新的：换起点会把原手势的几何整个打乱；也不能顺手重置
         // suppressClickRef，那会把刚触发那下滑的 click 放出来。
-        if (startRef.current !== null) return;
+        /*
+         * 上一次手势可能**没收到收尾**：目标元素被换掉（换歌时可视化层重建）、
+         * pointerup 落在别的元素上、或者页面在这一手中间重新挂载。那时候 startRef 一直
+         * 不为空，之后每一次 pointerdown 都会在这里被忽略 —— 滑动从此彻底不响应，
+         * 而且一路带到下一首。同一根指针又来一次 down，就说明那一手早结束了：重置再开始。
+         */
+        if (startRef.current !== null) {
+            if (event.pointerId !== pointerIdRef.current) return;
+            startRef.current = null;
+            pointerIdRef.current = null;
+            triggeredRef.current = false;
+            suppressClickRef.current = false;
+        }
         suppressClickRef.current = false;
         if (!enabled) return;
         startRef.current = { x: event.clientX, y: event.clientY };
@@ -80,6 +92,25 @@ export function usePlayerSwipeGesture({ enabled, onNext, onPrev }: UsePlayerSwip
     const onPointerCancel = useCallback((event: ReactPointerEvent<HTMLElement>) => {
         if (event.pointerId !== pointerIdRef.current) return;
         finish();
+    }, [finish]);
+
+    /*
+     * 收尾兜底：pointerup / pointercancel 也挂在 window 上（捕获阶段）。
+     *
+     * 视觉层上的那一发在元素被换掉之后不一定会到（换歌会重建可视化层），而收尾丢了就是
+     * 「手势从此瘫掉」。这里只认这一手的那根指针，别的手指抬起照旧不算收尾。
+     */
+    useEffect(() => {
+        const release = (event: PointerEvent) => {
+            if (pointerIdRef.current === null || event.pointerId !== pointerIdRef.current) return;
+            finish();
+        };
+        window.addEventListener('pointerup', release, true);
+        window.addEventListener('pointercancel', release, true);
+        return () => {
+            window.removeEventListener('pointerup', release, true);
+            window.removeEventListener('pointercancel', release, true);
+        };
     }, [finish]);
 
     const consumeSuppressedClick = useCallback(() => {

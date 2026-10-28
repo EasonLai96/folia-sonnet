@@ -80,7 +80,16 @@ export const useAppChromeAndGestures = (model: Input) => {
      * 误触概率高得多，而界面一收反射里只剩一块黑 —— 连该点哪儿叫回来都看不出来。
      * 所以那档里第一次点只弹一句提示，再点一次才收。**不铺遮罩**，滑动切歌照旧。
      */
+    /* ⚠️ 临时诊断（定位完删）：数一下这几个处理函数到底跑没跑。 */
+    const bumpProbe = (name: string) => {
+        const w = window as unknown as { __foliaProbeCounts?: Record<string, number> };
+        const counts = w.__foliaProbeCounts ?? {};
+        counts[name] = (counts[name] ?? 0) + 1;
+        w.__foliaProbeCounts = counts;
+    };
+
     const handleVisualSurfaceTap = useCallback(() => {
+        bumpProbe('tap');
         if (isPanelOpen) {
             handleContainerClick();
             return;
@@ -124,6 +133,7 @@ export const useAppChromeAndGestures = (model: Input) => {
      * 是既看不见也猜不到的。
      */
     const handlePlayerSwipeNext = useCallback(() => {
+        bumpProbe('swipe');
         // 滑动一旦成立，滑动前那一下点击就不是单击了，别再补翻控件显隐。
         resetPlayerTapSequence();
         void handleNextTrack();

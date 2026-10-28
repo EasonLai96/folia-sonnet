@@ -97,8 +97,8 @@ const AppSurface = ({ model }: { model: AppModel }) => {
     useEffect(() => {
         installTouchProbe();
         (window as unknown as { __foliaProbeState?: () => string }).__foliaProbeState = () =>
-            `view=${currentView} panelHd=${model.isPanelOpen ? 1 : 0} swipe=${isPlayerSwipeEnabled ? 1 : 0} hud=${probeHdrActive ? 1 : 0}`;
-    }, [currentView, isPlayerSwipeEnabled, model.isPanelOpen, probeHdrActive]);
+            `view=${currentView} panelHd=${model.isPanelOpen ? 1 : 0} swipe=${isPlayerSwipeEnabled ? 1 : 0} hud=${probeHdrActive ? 1 : 0} hideTap=${model.hidePlayerChromeOnTap ? 1 : 0} mode=${model.playerChromeVisibilityMode}`;
+    }, [currentView, isPlayerSwipeEnabled, model.hidePlayerChromeOnTap, model.isPanelOpen, model.playerChromeVisibilityMode, probeHdrActive]);
     // The two automix decks are identical and interchangeable. Every handler below ignores the
     // deck that is not currently active, so a track fading out in the background can never drive
     // the progress bar, the duration, the queue, or the player state.
