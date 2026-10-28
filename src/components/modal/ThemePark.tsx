@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -23,6 +23,9 @@ import { ThemeParkHeaderActions, ThemeParkHeaderSlot } from './theme-park/ThemeP
 import ThemeParkColumn from './theme-park/ThemeParkColumn';
 import { useThemeParkDraft } from './theme-park/useThemeParkDraft';
 import { useThemeParkPreviewClock } from './theme-park/useThemeParkPreviewClock';
+import type { PreviewSource } from '../visualizer/preview/PreviewSourceSwitch';
+import { useLivePreviewFeed } from '../visualizer/preview/useLivePreviewFeed';
+import { useStillClockPulse } from '../visualizer/preview/stillClockPulse';
 import { useThemeRecommendedColors } from './theme-park/useThemeRecommendedColors';
 import { isDualThemeNameValid } from './theme-park/themeParkDraft';
 
@@ -83,6 +86,11 @@ const ThemePark: React.FC<ThemeParkProps> = ({
     // The app's own theme colours the window; the sample alone shows the theme being edited.
     const { theme: appTheme } = useSettingsKitTheme();
     const [isPaused, setIsPaused] = useState(false);
+    const [previewSource, setPreviewSource] = useState<PreviewSource>('builtin');
+    const previewBoxRef = useRef<HTMLDivElement>(null);
+    // 内置示例让位给「实时」时，这里放的是播放器现在显示的内容；没有歌词就是 null。
+    const livePreview = useLivePreviewFeed({ enabled: previewSource === 'live', paused: isPaused, stageRef: previewBoxRef });
+    const liveContent = livePreview.content;
 
     // Shared theme-editing context (also feeding the quick editor): the live AI / custom themes
     // plus the current song, so a saved AI theme lands on the right cache entry.
@@ -110,7 +118,12 @@ const ThemePark: React.FC<ThemeParkProps> = ({
     });
     const { target, setTarget, mode, draft, safeDraft, baseTheme, reset, buildFinalTheme } = editor;
 
-    const { currentTime, audioPower, audioBands, currentLineIndex } = useThemeParkPreviewClock(visualizerMode, isPaused);
+    // 实时画面在画的时候，内置示例的时钟歇着。
+    const sampleClock = useThemeParkPreviewClock(visualizerMode, isPaused || liveContent !== null);
+    // 示例暂停时时间不动，而刚挂上去的样式要一次变化才会画出来（从实时切回来时就是这种情况）。
+    useStillClockPulse({ time: sampleClock.currentTime, still: isPaused && liveContent === null, boxRef: previewBoxRef, restartKey: previewSource });
+    const { currentTime, audioPower, audioBands } = liveContent ? livePreview : sampleClock;
+    const currentLineIndex = liveContent ? liveContent.currentLineIndex : sampleClock.currentLineIndex;
 
     const recommendedColors = useThemeRecommendedColors(baseTheme, coverUrl, 4);
 
@@ -181,6 +194,10 @@ const ThemePark: React.FC<ThemeParkProps> = ({
                     audioBands={audioBands}
                     isPaused={isPaused}
                     onTogglePause={() => setIsPaused(previous => !previous)}
+                    previewSource={previewSource}
+                    onPreviewSourceChange={setPreviewSource}
+                    liveContent={liveContent}
+                    boxRef={previewBoxRef}
                 />
             )}
         >
