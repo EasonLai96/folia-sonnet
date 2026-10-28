@@ -22,7 +22,7 @@ import { setTemperaTransitionBlur } from './temperaSceneFilters';
 import { destroyTemperaGradientFills } from './temperaShapes';
 import { TemperaImageTextures } from './temperaImageTextures';
 import { TemperaOverlay } from './temperaOverlay';
-import { TemperaInkFlash } from './temperaInkFlash';
+import { createTemperaInkFlashFrame, TemperaInkFlash } from './temperaInkFlash';
 import { getBeatEffectStrength, getBeatFxHeard } from '../../../services/beatFx/beatFxLive';
 import { BEAT_EFFECT_IDS } from '../../../services/beatFx/beatEffects';
 import { getDrumHits } from '../../../services/analysis/drumHits';
@@ -137,6 +137,9 @@ export class TemperaPixiRuntime {
     /** 智能动感模式「墨染奥行」's ink: the stain and the ink flash, between the scenes and the overlay. */
     private inkFlash!: TemperaInkFlash;
     private inkFlashSupported: boolean | undefined;
+    /** 墨层上一次是不是亮着：关掉的那一拍要补一发 strength 0 让它收起来。 */
+    private inkFlashShown = false;
+    private readonly inkFrame = createTemperaInkFlashFrame();
     /**
      * 墨染奥行 also owns the depth: the baked depth blur, the parallax, the per-shot camera pan and the
      * size-as-depth glyphs. Off, Tempera looks as it did before the effect.
@@ -571,17 +574,34 @@ export class TemperaPixiRuntime {
         this.inkFlashSupported ??= typeof WebGL2RenderingContext !== 'undefined'
             && (this.app.renderer as { gl?: unknown }).gl instanceof WebGL2RenderingContext;
         const strength = this.options.staticMode || !this.inkFlashSupported ? 0 : getBeatEffectStrength(BEAT_EFFECT_IDS.temperaInkFlash);
-        const heard = getBeatFxHeard();
-        const known = strength > 0 ? getDrumHits(heard.key) : null;
-        const hitTime = heard.time ?? time;
-        const hits = known && (known.until === undefined || hitTime < known.until) ? known : null;
-        if (!hits) {
-            // The strength still goes in: with the effect on, the ink's noise starts building before the hits are in.
-            this.inkFlash.update({ time: hitTime, width, height, strength, hits: null, paragraphIndex, inkColor: '' });
+        // 关着时每帧什么都不做：这条是逐帧路径，getBeatFxHeard() 每次返回新对象。
+        // 只在刚关掉的那一拍补一发 strength 0，让墨层收起来。
+        if (strength <= 0) {
+            if (this.inkFlashShown) {
+                this.inkFlashShown = false;
+                this.inkFrame.strength = 0;
+                this.inkFlash.update(this.inkFrame);
+            }
             return;
         }
-        const inkColor = this.sceneCache.get(paragraphIndex)?.palette.accent ?? this.options.theme.accentColor;
-        this.inkFlash.update({ time: hitTime, width, height, strength, hits, paragraphIndex, inkColor });
+        const heard = getBeatFxHeard();
+        const known = getDrumHits(heard.key);
+        const hitTime = heard.time ?? time;
+        const hits = known && (known.until === undefined || hitTime < known.until) ? known : null;
+        // 帧对象逐帧复用（字段就地改）；没拿到 hits 时 strength 照样发下去 ——
+        // 效果开着的时候，墨的噪声要先开始堆。
+        const frame = this.inkFrame;
+        frame.time = hitTime;
+        frame.width = width;
+        frame.height = height;
+        frame.strength = strength;
+        frame.hits = hits;
+        frame.paragraphIndex = paragraphIndex;
+        frame.inkColor = hits
+            ? this.sceneCache.get(paragraphIndex)?.palette.accent ?? this.options.theme.accentColor
+            : '';
+        this.inkFlashShown = true;
+        this.inkFlash.update(frame);
     }
 
     renderOnce() {
