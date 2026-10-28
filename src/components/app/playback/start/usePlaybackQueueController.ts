@@ -71,6 +71,7 @@ import { noteQueueStart } from './queueStarts';
 import { errorMessage } from '../../../../utils/errorText';
 import { isPlaybackInterfaceHidden, notifyBackgroundPlaybackNotice } from '../../../../services/playbackRecovery/backgroundFailureNotice';
 import { FoliaPlayback } from '../../../../hooks/useCapacitorPlaybackBridge';
+import { nativePlayer } from '../../../../services/playbackEngine/nativePlayerPlugin';
 import { buildQueueMirrorEntries } from '../../../../utils/queueMirrorEntry';
 import { waitForNativeArrival } from './waitForNativeArrival';
 
@@ -572,17 +573,18 @@ export function usePlaybackQueueController({
                             /*
                              * `ok` 只表示原生**受理**了这一单，不表示地址已经装进 ExoPlayer：
                              * playFromQueue 在起解析线程之前就回了 true，真正换源要等平台的
-                             * 地址回来（nativePlayMirrorEntry）。这里以前把 ok 当作已起播直接
-                             * makeSongCurrent 乐观提交，于是解析失败（身份不全 / 守卫丢弃 /
-                             * 网络拿不到）时界面名字换了、声音和歌词留在上一首，也没有下文 ——
-                             * 用户报的「从歌单点歌只改名字」就是这条。
+                             * 地址回来（nativePlayMirrorEntry）。
                              *
-                             * 等一个到达信号：原生快照里的 songKey 变成这首歌。等不到就
-                             * 不认这一单，落回下面的 Web 全流程自己放（那边会重新问歌、
-                             * 装地址），保证名字与声音永远一起变。
+                             * 等一个到达信号，而且**只信引擎**：`FoliaNativePlayer.getSnapshot()`
+                             * 报的 songKey 是 MediaItem 的 mediaId，等于引擎真的换过去了。
+                             * 之前读的是 FoliaPlayback.getPlaybackSnapshot().songKey，那个值
+                             * Web 自己推一次 metadata 就改了 —— 界面一认领新歌就算「到达」，
+                             * 引擎还在放上一首也照样通过（用户实测：冷启动自动播放后再点歌单，
+                             * 界面是刚点的歌、声音是上一首）。等不到就不认这一单，落回下面的
+                             * Web 全流程自己放，保证名字与声音永远一起变。
                              */
                             const arrived = await waitForNativeArrival({
-                                readSnapshot: () => FoliaPlayback.getPlaybackSnapshot(),
+                                readEngine: () => nativePlayer.getSnapshot(),
                                 expectsKey: nativeKey,
                                 stillWanted,
                             });

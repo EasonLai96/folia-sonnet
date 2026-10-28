@@ -111,11 +111,12 @@ class FoliaNativePlayerPlugin : Plugin() {
          * 队列取出相邻条目走这里。播放器内部自己处理线程（与 resumeFromSystem 同纪律）。
          */
         @JvmStatic
-        fun prepareFromSystem(url: String?) {
+        fun prepareFromSystem(url: String?, mediaId: String? = null): Boolean {
             val current = instance
             val player = current?.player
-            if (current == null || player == null || url == null || url.isEmpty()) return
-            player.prepare(url, -1L)
+            if (current == null || player == null || url == null || url.isEmpty()) return false
+            player.prepare(url, -1L, mediaId)
+            return true
         }
 
         /** 同上，方向相反。 */
@@ -346,7 +347,11 @@ class FoliaNativePlayerPlugin : Plugin() {
         if (repeatMode != null) {
             current.setRepeatMode(repeatMode)
         }
-        current.prepare(url, if (startPositionMs != null) startPositionMs.toLong() else -1L)
+        current.prepare(
+            url,
+            if (startPositionMs != null) startPositionMs.toLong() else -1L,
+            call.getString("songKey"),
+        )
         val result = JSObject()
         result.put("ok", true)
         call.resolve(result)
@@ -451,6 +456,9 @@ class FoliaNativePlayerPlugin : Plugin() {
         result.put("positionMs", current.getPositionMs().toDouble())
         result.put("durationMs", current.getDurationMs().toDouble())
         result.put("playing", current.isPlaying())
+        // 引擎此刻装的是哪一首：Web 层判「点歌有没有真的换过去」只信这一个
+        // （服务里的 cachedSongKey 会随它自己推的 metadata 变，当判据等于自证）。
+        result.put("songKey", current.currentMediaId())
         call.resolve(result)
     }
 

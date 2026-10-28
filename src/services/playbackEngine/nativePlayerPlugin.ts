@@ -28,6 +28,13 @@ export type NativePlaybackSnapshot = {
     positionMs: number;
     durationMs: number;
     playing: boolean;
+    /**
+     * 引擎此刻**装的那一首**（装源时写进 MediaItem 的 mediaId），没装东西时为空串。
+     *
+     * 判「点歌有没有真的换过去」只能看这个：服务里的 `cachedSongKey` 会随 Web 推的
+     * metadata 变，拿它当判据等于自己给自己盖章。
+     */
+    songKey?: string;
 };
 
 interface FoliaNativePlayerPlugin {
@@ -36,6 +43,8 @@ interface FoliaNativePlayerPlugin {
         startPositionMs?: number | null;
         /** Player.REPEAT_MODE_OFF(0) / ONE(1) / ALL(2)，与 androidx.media3.common.Player 一致。 */
         repeatMode?: number | null;
+        /** 这首歌的身份，装进去之后 getSnapshot().songKey 会回它。 */
+        songKey?: string | null;
     }): Promise<{ ok: boolean }>;
     play(): Promise<void>;
     pause(): Promise<void>;

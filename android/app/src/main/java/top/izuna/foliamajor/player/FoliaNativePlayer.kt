@@ -94,6 +94,18 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      */
     @Volatile
     private var lastUrl: String? = null
+
+    /**
+     * 最后一首的**身份**（装源时写进 MediaItem 的 mediaId，就是 songKey）。
+     *
+     * 「点歌到底有没有换过去」只能看引擎自己装的是谁：服务里的 cachedSongKey 会随 Web
+     * 推的 metadata 一起变，拿它当判据等于自己给自己盖章 —— 界面一认领新歌就算到达，
+     * 引擎还在放上一首（用户实测：冷启动自动播放后从歌单点歌，界面是新歌、声音是上一首）。
+     *
+     * 与 lastUrl 同纪律：调用线程写、别的线程读，所以 volatile。
+     */
+    @Volatile
+    private var lastMediaId: String? = null
     private var tickScheduled = false
     private var requestedVolume = 1f
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
@@ -134,8 +146,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     }
 
     /** 装上地址并缓冲。startPositionMs 小于 0 表示从头播。 */
-    fun prepare(url: String, startPositionMs: Long) {
+    fun prepare(url: String, startPositionMs: Long, mediaId: String? = null) {
         lastUrl = url
+        lastMediaId = mediaId
         /*
          * ⭐ 位置与时长在**调用线程上**立刻归零，不等播放器线程。
          *
@@ -153,7 +166,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             // 有些源要附带请求头（飞牛的音频流认 Cookie: music-token）：
             // 每次换源都按地址重问一遍，没有就清空，别把上一首的头带给下一首。
             applySourceHeaders(url)
-            current.setMediaItem(MediaItem.fromUri(url))
+            current.setMediaItem(mediaItemFor(url, mediaId))
             current.setRepeatMode(requestedRepeatMode)
             current.setVolume(requestedVolume)
             current.setPlaybackParameters(PlaybackParameters(requestedSpeed))
@@ -194,6 +207,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             current.clearMediaItems()
             // 真的停了：系统控件就不该再把它拉起来。
             lastUrl = null
+            lastMediaId = null
             cachedPlaying = false
             cachedPositionMs = 0L
             cachedDurationMs = 0L
@@ -278,6 +292,26 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     /** 手上有没有还在播的那一首（系统控件该不该直接碰它，就问这个）。 */
     fun hasMedia(): Boolean {
         return lastUrl != null
+    }
+
+    /**
+     * 引擎此刻装的那首歌的身份（MediaItem 的 mediaId）；没装东西时是空串。
+     *
+     * 读的是缓存的 volatile 字段，不碰播放器：调用方在插件线程上，而播放器在这条
+     * 专用线程里独占。身份是**换源那一刻**写下的，紧跟着 cachedDurationMs 被清零，
+     * 所以「身份已经是这首 + 时长/位置有值」才是「真的装载了」。
+     */
+    fun currentMediaId(): String {
+        return lastMediaId ?: ""
+    }
+
+    /** 装源用的 MediaItem：带身份才认得出「引擎现在装的是谁」。 */
+    private fun mediaItemFor(url: String, mediaId: String?): MediaItem {
+        return if (mediaId.isNullOrEmpty()) {
+            MediaItem.fromUri(url)
+        } else {
+            MediaItem.Builder().setUri(url).setMediaId(mediaId).build()
+        }
     }
 
     /** 缓存值：调用方可能在插件线程上，这里绝不去碰播放器。 */
@@ -369,7 +403,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         val restoredUrl = lastUrl
         if (restoredUrl != null && created.mediaItemCount == 0) {
             applySourceHeaders(restoredUrl)
-            created.setMediaItem(MediaItem.fromUri(restoredUrl))
+            created.setMediaItem(mediaItemFor(restoredUrl, lastMediaId))
             created.setRepeatMode(requestedRepeatMode)
             created.setVolume(requestedVolume)
             created.prepare()

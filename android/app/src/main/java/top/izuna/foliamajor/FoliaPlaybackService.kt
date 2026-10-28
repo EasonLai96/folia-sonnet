@@ -727,10 +727,9 @@ class FoliaPlaybackService : android.app.Service() {
             return
         }
         /*
-         * 手上没有地址要向平台要。数组给**状态机的全量**而不是只这一条：下面的
-         * originIndex 守卫按「出发时那格还在不在」作废过期请求，镜像下标（mirroredIndex）
-         * 此时还指着上一首，单条数组 + target=0 会让守卫永远判「过期」—— 解析成功
-         * 也丢弃，自动下一首就卡死在这。预取邻居同样需要全量才找得到前后几首。
+         * 手上没有地址要向平台要。数组给**状态机的全量**而不是只这一条：预取邻居要靠
+         * 全量才找得到前后几首；守卫用的「当前那一格」取的是镜像（不是这份数组），
+         * 所以数组全量只是为了预取。
          */
         val full = org.json.JSONArray()
         var target = -1
@@ -739,7 +738,9 @@ class FoliaPlaybackService : android.app.Service() {
             if (e.songKey == entry.songKey) target = i
         }
         if (target < 0) target = 0
-        resolveMirrorEntryAsync(full, json, target, target, +1)
+        // 这一单开出去，此前在途的解析全部作废（见 resolveMirrorEntryAsync 的代次守卫）。
+        val generation = beginDispatch()
+        resolveMirrorEntryAsync(full, json, target, +1, generation)
     }
 
     /** App 内点歌 / 切歌走原生（两轨合一）的入口：见 FoliaPlaybackPlugin.playFromQueue。 */
@@ -799,16 +800,19 @@ class FoliaPlaybackService : android.app.Service() {
                 return false
             }
             mirroredIndex = target
+            // 这一单开出去：此前在途的解析全部作废（见 resolveMirrorEntryAsync 的代次守卫）。
+            val generation = beginDispatch()
             var url = resolvedUrlCache.get(songKey)
             if (url == null || url.isEmpty()) {
                 url = entry.optString("url", "")
             }
             if (url != null && !url.isEmpty()) {
-                nativePlayMirrorEntry(entry, url)
+                // 装不上就如实回 false：调用方（JS）据此回退 Web 全流程，别让界面先换歌。
+                val installed = nativePlayMirrorEntry(entry, url)
                 preloadMirrorNeighbors(array, target, +1)
-                return true
+                return installed
             }
-            resolveMirrorEntryAsync(array, entry, target, target, +1)
+            resolveMirrorEntryAsync(array, entry, target, +1, generation)
             return true
         } catch (ignored: org.json.JSONException) {
             return false
@@ -1065,8 +1069,9 @@ class FoliaPlaybackService : android.app.Service() {
                 url = entry.optString("url", "")
             }
             // 先占位再决定要不要异步解析，与上面按 songKey 定位那条路径一致：
-            // 解析期间用户又按了下一首的话，mirroredIndex 已经变了，回来的这份被守卫丢掉。
+            // 解析期间用户又按了下一首的话，这一单的代次已经变了，回来的那份被守卫丢掉。
             mirroredIndex = wrapped
+            val generation = beginDispatch()
             if (url != null && !url.isEmpty()) {
                 nativePlayMirrorEntry(entry, url)
                 /*
@@ -1081,7 +1086,7 @@ class FoliaPlaybackService : android.app.Service() {
             // 每首歌的身份（providerId / serverSongId / songmid）都在，缺的只是地址 ——
             // 这就是「连按几首下一首就切不动」的解药。解析在后台线程（桥的线程规则），
             // 成了回主线程换源；期间用户又按了的，以 mirroredIndex 为准作废重算。
-            resolveMirrorEntryAsync(array, entry, wrapped, wrapped, direction)
+            resolveMirrorEntryAsync(array, entry, wrapped, direction, generation)
             return true
         } catch (ignored: org.json.JSONException) {
             return false
@@ -1089,11 +1094,19 @@ class FoliaPlaybackService : android.app.Service() {
     }
 
     /**
-     * 后台向平台要地址。只认「出发时那一格」还没被动过的请求：解析一趟网络的时间里
-     * 用户可能又按了下一首，回来的这一份已经不对题，丢弃（用户按的那一次有自己的请求）。
+     * 后台向平台要地址。只认「出发的那一单还没被顶掉」的请求：解析一趟网络的时间里
+     * 用户可能又点了别的歌，回来的这一份已经不对题，丢弃（用户那一次有自己的请求）。
+     *
+     * 两道判据，缺一不可：
+     *   · **代次**没变 —— 期间没有任何新的派发；
+     *   · 镜像里当前该放的那一格仍然是这首歌 —— 防止「同代次里游标被挪走」。
+     *
+     * 以前只看「下标有没有被动过」（`mirroredIndex == originIndex` 就算数）。换个歌单
+     * 之后下标会撞车：上一单的 originIndex 正好等于这一单的目标格，这份陈旧地址就被
+     * 当成当前这一单装上 —— 用户看到「界面是刚点的歌、声音是上一首」。
      */
     private fun resolveMirrorEntryAsync(array: org.json.JSONArray, entry: org.json.JSONObject,
-                                        target: Int, originIndex: Int, direction: Int) {
+                                        target: Int, direction: Int, generation: Long) {
         val providerId = entry.optString("providerId", "")
         val songId = entry.optString("serverSongId", "")
         val mid = entry.optString("providerMid", "")
@@ -1137,19 +1150,30 @@ class FoliaPlaybackService : android.app.Service() {
             }
             mainHandler.post {
                 /*
-                 * 出队守卫：只看「出发时那一格还是不是这首歌」，不看「下标有没有被动过」。
+                 * 出队守卫：代次 + 身份。
                  *
-                 * 原来比的是 `mirroredIndex != originIndex` —— 解析这一两秒里前台任何一次
-                 * 游标推送（切歌后界面认领、镜像 effect、甚至别处无关的一次 setQueueMirrorIndex）
-                 * 都会改掉 mirroredIndex，这一份解析回来的地址就被丢掉，而调用方那边
-                 * 早就收到 true 了：结果正是「点了歌只换名字」。按下标「没变」来判太脆，
-                 * 按身份判才是本意：只要现在该放的那一格还是这首，地址就还有用。
+                 * 代次没变 = 期间没有新的「要放某一首」派发；镜像里当前那一格还是这首歌
+                 * = 游标没在同代次里被挪走。两条都过才装。
+                 *
+                 * 原来还有一条「`mirroredIndex == originIndex` 就算数」，那是错的：
+                 * 换个歌单之后下标会撞车，上一单的陈旧地址会被当成这一单装上，
+                 * 结果是「界面是刚点的歌、声音是上一首」。
                  */
-                val stillWanted = mirroredIndex == originIndex ||
-                    (mirroredIndex in 0 until array.length() &&
-                        array.optJSONObject(mirroredIndex)?.optString("songKey", "") == songKey)
+                val currentArray = mirroredQueueJson?.let {
+                    try {
+                        org.json.JSONArray(it)
+                    } catch (ignored: org.json.JSONException) {
+                        null
+                    }
+                }
+                val mirroredKeyNow = if (currentArray != null && mirroredIndex in 0 until currentArray.length()) {
+                    currentArray.optJSONObject(mirroredIndex)?.optString("songKey", "")
+                } else {
+                    null
+                }
+                val stillWanted = generation == dispatchGeneration && mirroredKeyNow == songKey
                 if (!stillWanted) {
-                    Log.w(TAG, "地址解析回来时那一格已经换歌，丢弃 songKey=" + songKey)
+                    Log.w(TAG, "地址解析回来时这一单已经过期，丢弃 songKey=" + songKey)
                     return@post
                 }
                 mirroredIndex = target
@@ -1256,13 +1280,26 @@ class FoliaPlaybackService : android.app.Service() {
         }
     }
 
-    /** 用镜像条目直接接管播放：换源、起播、通知与壁纸锚点全部就地更新。 */
-    private fun nativePlayMirrorEntry(entry: org.json.JSONObject, url: String) {
+    /**
+     * 用镜像条目直接接管播放：换源、起播、通知与壁纸锚点全部就地更新。
+     *
+     * 回 false = 播放器壳子不在（插件实例已经拆了），地址根本装不上。这条以前是静默的：
+     * 上层照旧按「成功」写状态，JS 那边也收到了 ok，于是界面换成了新歌、声音留在上一首，
+     * 而且没有任何下文。现在如实回执，JS 转 Web 全流程自己放。
+     */
+    private fun nativePlayMirrorEntry(entry: org.json.JSONObject, url: String): Boolean {
+        val songKey = entry.optString("songKey", "")
+        if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url, songKey)) {
+            Log.w(TAG, "原生播放器不在，地址装不上 songKey=" + songKey)
+            if (!songKey.isEmpty()) {
+                mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
+            }
+            mainHandler.post { onEntryUnplayable(songKey) }
+            return false
+        }
         // 起播成功就把「连续放不了」清掉：那是给自动跳过兜的上限，不该跨歌累计。
         consecutiveSkips = 0
-        top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url)
         top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
-        val songKey = entry.optString("songKey", "")
         val songChanged = !songKey.isEmpty() && songKey != cachedSongKey
         if (songChanged) {
             cachedSongKey = songKey
@@ -1360,6 +1397,7 @@ class FoliaPlaybackService : android.app.Service() {
                     entry.optString("providerHash", ""),
                     entryDuration)
         }
+        return true
     }
 
     /**
@@ -2140,6 +2178,23 @@ class FoliaPlaybackService : android.app.Service() {
         private var mirroredQueueJson: String? = null
         @Volatile
         private var mirroredIndex = -1
+
+        /**
+         * 换歌派发的代次。每次「要放某一首」的派发 +1（App 内点歌、通知栏切歌、自然放完）。
+         *
+         * 异步解析回来的地址只认代次没变的那一单。**只比下标不行**：换个歌单之后下标
+         * 会撞车 —— 上一单出发时的 originIndex 正好等于这一单的目标格，那一份陈旧的地址
+         * 就会被当成当前这一单装上。用户看到的是「界面是刚点的这首、声音是上一首」
+         * （冷启动自动播放后再从歌单点歌，实测复现）。
+         */
+        @Volatile
+        private var dispatchGeneration = 0L
+
+        /** 开一单：代次 +1 并返回。此前在途的解析从此作废。 */
+        private fun beginDispatch(): Long {
+            dispatchGeneration += 1
+            return dispatchGeneration
+        }
         /** JS 没回话等多久就自己动手。预取命中的下一首 2.5s 内足够换好源。 */
         private const val SKIP_FALLBACK_MS = 2_500L
 
