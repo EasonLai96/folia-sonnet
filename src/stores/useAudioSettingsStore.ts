@@ -22,6 +22,7 @@ import {
 } from '../utils/audioEqualizerModCurve';
 import { getStoredBoolean, getStoredString, removeStoredKey, setStoredBoolean, setStoredString } from './storagePrimitives';
 import { writeNativeLoopMode } from '../services/nativeQueueBridge';
+import { writeNativeSettings } from '../services/nativeSettingsBridge';
 import { setStatusMessage } from './useStatusMessageStore';
 import { setAudioFocusPolicy } from '../platform/foliaNative';
 import i18n from '../i18n/config';
@@ -448,6 +449,13 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     handleToggleAutoSkipUnplayable: (enable) => {
         setStoredBoolean(AUTO_SKIP_UNPLAYABLE_KEY, enable);
         set({ autoSkipUnplayable: enable });
+        /*
+         * 原生也要知道。这一项不止 Web 那条路在用：WebView 冻结时、换源失败时，
+         * 原生兜底（FoliaPlaybackService.onEntryUnplayable）自己决定跳不跳，读的是
+         * 原生设置。以前没人推过它，原生永远按默认的 true 走 —— 用户把开关关掉，
+         * 后台那条路照样一路跳。
+         */
+        void writeNativeSettings({ autoSkipUnplayable: enable });
     },
     handleToggleKeepScreenOnWhilePlaying: (enable) => {
         setStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, enable);

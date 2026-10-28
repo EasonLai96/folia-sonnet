@@ -11,7 +11,7 @@
 // 不做本地缓存、不做乐观更新 —— 那正是「界面显示开了、实际没生效」的来源。
 
 import type { PluginListenerHandle } from '@capacitor/core';
-import { isCapacitorAndroid } from '../platform/runtime';
+import { isAndroidAppShell } from '../platform/runtime';
 
 /** 原生设置的形状。键名与原生 `FoliaSettingsStore.DEFAULTS` 一一对应。 */
 export type NativeSettings = Record<string, unknown>;
@@ -30,7 +30,10 @@ const capacitor = (): CapacitorGlobal | null =>
     typeof window === 'undefined' ? null : ((window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor ?? null);
 
 const plugin = (): NativeSettingsPlugin | null => {
-    if (!isCapacitorAndroid()) return null;
+    // 用 isAndroidAppShell 而不是 isCapacitorAndroid：后者要等桥初始化完才为真，
+    // 冷启动头几秒会把「桥还没起来」当成「这个平台没有原生设置」——读回 null、
+    // 写也写不进去。这里只判「是不是 App 壳」，能不能真调由下面的 typeof 兜住。
+    if (!isAndroidAppShell()) return null;
     const candidate = capacitor()?.Plugins?.FoliaNative as NativeSettingsPlugin | undefined;
     return candidate && typeof candidate.getSettings === 'function' ? candidate : null;
 };

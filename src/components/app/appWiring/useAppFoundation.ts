@@ -18,6 +18,7 @@ import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { selectAudioSettingsSnapshot, useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
 import { writeNativeLoopMode } from '../../../services/nativeQueueBridge';
+import { writeNativeSettings } from '../../../services/nativeSettingsBridge';
 import { useNativeAiConfigSync } from '../../../hooks/useNativeAiConfigSync';
 import { useAutomixSettingsStore } from '../../../stores/useAutomixSettingsStore';
 import { selectDesktopSettingsSnapshot, useDesktopSettingsStore } from '../../../stores/useDesktopSettingsStore';
@@ -197,6 +198,31 @@ export const useAppFoundation = () => {
 
     // AI 配置的启动同步与变化跟随：凭据只存原生，真正发请求的是原生。
     useNativeAiConfigSync();
+
+    /*
+     * 「无法播放时自动跳过」的启动同步，理由同上面的循环模式：这一项原生也读
+     * （FoliaPlaybackService.onEntryUnplayable），而 Web 这边只写在 localStorage 里。
+     * 不推一次的话，原生永远按默认的 true 走 —— Web 侧默认是 false，两边相反：
+     * 用户明明关着，WebView 一冻结，原生兜底照样一首首跳过去。
+     */
+    useEffect(() => {
+        let cancelled = false;
+        let attempts = 0;
+        const push = async () => {
+            const merged = await writeNativeSettings({
+                autoSkipUnplayable: useAudioSettingsStore.getState().autoSkipUnplayable,
+            });
+            if (merged || cancelled || attempts >= 20) return;
+            attempts += 1;
+            setTimeout(() => {
+                void push();
+            }, 500);
+        };
+        void push();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     // 歌词由原生拉、原生推：这里只按 songKey 认领并渲染。
     // 自己拉会挂在 currentSong 的 effect 上，而原生派发的点歌绕过它 ——

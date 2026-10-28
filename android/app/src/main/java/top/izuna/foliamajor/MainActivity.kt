@@ -423,6 +423,15 @@ class MainActivity : BridgeActivity() {
         // 延后一拍再压一次，避免出现一瞬间的状态栏/导航栏残留。
         window.decorView.postDelayed(this::applyImmersiveMode, 120)
         window.decorView.postDelayed({ PhoneFitCutout.apply(this) }, 120)
+        /*
+         * 回前台按当前状态重算一次方向。
+         *
+         * Activity 会一直维持着**上一次请求的方向**：在播放页（横屏）被切走，回来时
+         * 页面可能已经换了、或者 WebView 那一份状态丢了，没人重新下发，横屏就留在
+         * 了不该横的那一页上 —— 用户看到的是「打开 App，海报墙也是横的」。
+         * 重算是幂等的：还在播放页就还是横屏，不在就交回系统。
+         */
+        PhoneLayoutOrientation.apply(this)
     }
 
     // 必须是 public：BridgeActivity 里的这两个回调是 public，降成 protected 属于收窄

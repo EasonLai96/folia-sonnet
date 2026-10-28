@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
+import android.util.Log
 
 /**
  * 「强制横屏」的方向锁。
@@ -18,6 +19,8 @@ import android.content.pm.ActivityInfo
 class PhoneLayoutOrientation private constructor() {
 
     companion object {
+        // tag 必须是 ASCII：中文标签会被 Android 的日志系统直接丢掉（排查时白等一场）。
+        private const val TAG = "FoliaOrientation"
         private const val PREFS_NAME = "folia_native_prefs"
         private const val KEY_ENABLED = "phone_fit_enabled"
         private const val KEY_ORIENTATION = "phone_fit_orientation"
@@ -66,8 +69,15 @@ class PhoneLayoutOrientation private constructor() {
          */
         @JvmStatic
         fun apply(activity: Activity?) {
-            if (activity == null) return
-            activity.setRequestedOrientation(resolve(activity))
+            if (activity == null) {
+                // 没有 Activity 谁都改不了方向。这里以前是静默 return：界面上看到的现象
+                // 和「判了不该转」一模一样，排查时分不出是哪一种。
+                Log.w(TAG, "没有 Activity，方向不重算（playerVisible=$playerVisible）")
+                return
+            }
+            val orientation = resolve(activity)
+            Log.i(TAG, "重算方向 playerVisible=$playerVisible 结果=$orientation")
+            activity.setRequestedOrientation(orientation)
         }
 
         /** 当前是否在播放页（可视化）。由 Web 上报「我进了哪一页」，原生据此决定要不要转。 */

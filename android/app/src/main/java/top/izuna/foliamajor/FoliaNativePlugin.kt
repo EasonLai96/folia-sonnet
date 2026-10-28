@@ -617,6 +617,14 @@ class FoliaNativePlugin : Plugin() {
 
     override fun load() {
         instance = this
+        /*
+         * 新的一份页面（冷启动 / WebView 重载）：「我在不在播放页」这件事归零。
+         *
+         * 那是静态字段，跨页面还活着。重载后它若停在旧的 true，而新页面又没来得及
+         * 上报（桥刚起来的头几秒），`MainActivity.onResume` 会把方向重算成横屏 ——
+         * 用户看到的就是「打开 App，海报墙也是横的」。新页面挂载后会立刻报一次真实值。
+         */
+        top.izuna.foliamajor.PhoneLayoutOrientation.setPlayerVisible(false)
         // 意图可能比 Web 层更早到（Activity.onCreate 交过来时 Bridge 还没建好），先攒在静态
         // 列表里；插件上线后立即拿去拷。
         startExternalAudioImport()
