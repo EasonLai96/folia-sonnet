@@ -150,6 +150,10 @@ const FIELD_GROUPS: Record<string, ImportGroup> = {
     libraryWallBackdropLyrics: 'libraryWall',
     libraryWallBackdropBlur: 'libraryWall',
     libraryWallSeamDirection: 'libraryWall',
+
+    // 播放页标题栏后面的磨砂底。归在 visualizer 组，和同样会跟着导出的
+    // hidePlayerTranslationSubtitle 一起：它属于「播放页长什么样」。
+    playerHeaderBlur: 'visualizer',
     libraryWallSeamDirectionReverse: 'libraryWall',
 };
 

@@ -55,6 +55,8 @@ export type PlayerChromeSettingsState = {
     alwaysShowPlayerBackButton: boolean;
     alwaysShowTrackSwitchButtons: boolean;
     alwaysShowMainWindowTitlebar: boolean;
+    /** 播放页窗口标题栏后面垫一层磨砂底，按钮压在什么画面上都看得清。 */
+    playerHeaderBlur: boolean;
     hideFullscreenButton: boolean;
     useNativeMacFullscreenButton: boolean;
     transparentPlayerBackground: boolean;
@@ -83,6 +85,7 @@ export type PlayerChromeSettingsState = {
     handleToggleAlwaysShowPlayerBackButton: (enable: boolean) => void;
     handleToggleAlwaysShowTrackSwitchButtons: (enable: boolean) => void;
     handleToggleAlwaysShowMainWindowTitlebar: (enable: boolean) => void;
+    handleTogglePlayerHeaderBlur: (enable: boolean) => void;
     handleToggleHideFullscreenButton: (enable: boolean) => void;
     handleToggleNativeMacFullscreenButton: (enable: boolean) => void;
     handleToggleTransparentPlayerBackground: (enable: boolean) => void;
@@ -112,6 +115,7 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
     // 用户看到的就是「上一首 / 下一首不能用了」。要藏是主动的选择，交给开关。
     alwaysShowTrackSwitchButtons: getStoredBoolean('always_show_track_switch_buttons', true),
     alwaysShowMainWindowTitlebar: getStoredBoolean('always_show_main_window_titlebar', false),
+    playerHeaderBlur: getStoredBoolean('player_header_blur', false),
     hideFullscreenButton: getStoredBoolean('hide_fullscreen_button', false),
     useNativeMacFullscreenButton: getStoredBoolean('use_native_mac_fullscreen_button', false),
     transparentPlayerBackground: getStoredBoolean('transparent_player_background', false),
@@ -226,6 +230,14 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
             text: i18n.t('notifications.' + (enable ? 'mainWindowTitlebarAlwaysShown' : 'mainWindowTitlebarAutoHidden')),
         });
     },
+    handleTogglePlayerHeaderBlur: (enable) => {
+        setStoredBoolean('player_header_blur', enable);
+        set({ playerHeaderBlur: enable });
+        setStatusMessage({
+            type: 'info',
+            text: i18n.t('notifications.' + (enable ? 'playerHeaderBlurOn' : 'playerHeaderBlurOff')),
+        });
+    },
     handleToggleHideFullscreenButton: (enable) => {
         setStoredBoolean('hide_fullscreen_button', enable);
         set({ hideFullscreenButton: enable });
@@ -281,6 +293,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     alwaysShowPlayerBackButton: state.alwaysShowPlayerBackButton,
     alwaysShowTrackSwitchButtons: state.alwaysShowTrackSwitchButtons,
     alwaysShowMainWindowTitlebar: state.alwaysShowMainWindowTitlebar,
+    playerHeaderBlur: state.playerHeaderBlur,
     hideFullscreenButton: state.hideFullscreenButton,
     useNativeMacFullscreenButton: state.useNativeMacFullscreenButton,
     transparentPlayerBackground: state.transparentPlayerBackground,
@@ -298,6 +311,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     handleToggleAlwaysShowPlayerBackButton: state.handleToggleAlwaysShowPlayerBackButton,
     handleToggleAlwaysShowTrackSwitchButtons: state.handleToggleAlwaysShowTrackSwitchButtons,
     handleToggleAlwaysShowMainWindowTitlebar: state.handleToggleAlwaysShowMainWindowTitlebar,
+    handleTogglePlayerHeaderBlur: state.handleTogglePlayerHeaderBlur,
     handleToggleHideFullscreenButton: state.handleToggleHideFullscreenButton,
     handleToggleNativeMacFullscreenButton: state.handleToggleNativeMacFullscreenButton,
     handleToggleTransparentPlayerBackground: state.handleToggleTransparentPlayerBackground,

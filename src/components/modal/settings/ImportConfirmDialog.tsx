@@ -101,6 +101,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
     libraryWallBackdropLyrics: 'options.bravaisBackdropLyrics',
     libraryWallBackdropBlur: 'options.bravaisBackdropBlur',
     libraryWallSeamDirection: 'options.bravaisSeamDirection',
+    playerHeaderBlur: 'options.playerHeaderBlur',
     libraryWallSeamDirectionReverse: 'options.bravaisSeamDirectionReverse',
 };
 

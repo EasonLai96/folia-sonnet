@@ -676,4 +676,11 @@ describe('buildImportPlan', () => {
         expect(p.groups).toEqual(['libraryWall']);
         expect(keys(plan({ libraryWallSeamDirection: '' }, { libraryWallSeamDirection: 'auto' }, unpinned))).toEqual([]);
     });
+
+    // 播放页顶栏模糊底属于「播放页长什么样」，归在 visualizer 组；false 是个真值，不能被当成「没写」。
+    it('plans the blurred player header under the visualizer group', () => {
+        const p = plan({ playerHeaderBlur: false }, { playerHeaderBlur: true }, unpinned);
+        expect(keys(p)).toEqual(['playerHeaderBlur']);
+        expect(p.groups).toEqual(['visualizer']);
+    });
 });
