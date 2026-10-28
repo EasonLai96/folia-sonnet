@@ -94,12 +94,14 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
     stageTrackPillMode: 'options.stageTrackPill',
     stageTrackPillTimeoutSec: 'options.stageTrackPillTimeout',
     stageTrackPillOnHome: 'options.stageTrackPillOnHome',
+    stageTrackPillPosition: 'options.stageTrackPillPosition',
     libraryWallStackEdges: 'options.bravaisStackEdges',
     libraryWallSeamClear: 'options.bravaisSeamClear',
     libraryWallSeamStyle: 'options.bravaisSeamStyle',
     libraryWallBackdropLyrics: 'options.bravaisBackdropLyrics',
     libraryWallBackdropBlur: 'options.bravaisBackdropBlur',
     libraryWallSeamDirection: 'options.bravaisSeamDirection',
+    playerHeaderBlur: 'options.playerHeaderBlur',
     libraryWallSeamDirectionReverse: 'options.bravaisSeamDirectionReverse',
 };
 

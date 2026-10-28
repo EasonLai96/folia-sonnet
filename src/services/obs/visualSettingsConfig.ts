@@ -7,6 +7,7 @@ import { useTypographySettingsStore } from '../../stores/useTypographySettingsSt
 import { useThemeSettingsStore } from '../../stores/useThemeSettingsStore';
 import { useStageSettingsStore } from '../../stores/useStageSettingsStore';
 import { useLibraryWallLookStore } from '../../stores/useLibraryWallLookStore';
+import { usePlayerChromeSettingsStore } from '../../stores/usePlayerChromeSettingsStore';
 
 // src/services/obs/visualSettingsConfig.ts
 // Everything compressConfig serializes except the theme. Reads the live settings store, so both
@@ -99,6 +100,7 @@ export function buildVisualSettingsConfig(): Record<string, unknown> {
     stageTrackPillMode: storeStageSettings.stageTrackPillMode,
     stageTrackPillTimeoutSec: storeStageSettings.stageTrackPillTimeoutSec,
     stageTrackPillOnHome: storeStageSettings.stageTrackPillOnHome,
+    stageTrackPillPosition: storeStageSettings.stageTrackPillPosition,
     // The bravais wall's collection stack edges (a tile look, so it travels with a shared look by the
     // settings rule). The wall's transparency and windows per block deliberately stay out — the user
     // decided so; see useLibraryWallLookStore.
@@ -113,6 +115,9 @@ export function buildVisualSettingsConfig(): Record<string, unknown> {
     // Which way the info strip opens (a column split, a row split across the wall, or by the screen's
     // shape): part of the wall's look, no user exception.
     libraryWallSeamDirection: useLibraryWallLookStore.getState().seamDirection,
+    // 播放页标题栏后面那层磨砂底：属于播放页的样子，不给用户例外。OBS 覆盖层不画标题栏，用不上它，
+    // 但它跟着一起走，导出的「样子」才是完整的。
+    playerHeaderBlur: usePlayerChromeSettingsStore.getState().playerHeaderBlur,
     // Whether the automatic branch is flipped (a column on tall screens, a row on wide ones).
     libraryWallSeamDirectionReverse: useLibraryWallLookStore.getState().seamDirectionReverse,
   };

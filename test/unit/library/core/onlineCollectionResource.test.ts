@@ -3,9 +3,10 @@ import type { SongResult } from '@/types';
 import type { OmniPage, ProviderCollection } from '@/types/onlineMusic';
 import { OmniError } from '@/types/onlineMusic';
 import type { OnlineGridViewCollectionDescriptor } from '@/library/core/collection/collection.contract';
-import { createOnlineCollectionResource, type OnlineCollectionResourceDeps } from '@/library/core/collection/resource/onlineCollectionResource.service';
+import { createOnlineCollectionResource, UNVERSIONED_COLLECTION_REUSE_MS, type OnlineCollectionResourceDeps } from '@/library/core/collection/resource/onlineCollectionResource.service';
 import { ONLINE_TRACKS_CACHE_SCHEMA_VERSION, type OnlineTracksCacheEntry } from '@/library/core/collection/resource/onlineCollectionCache.service';
 import { getPlaybackSongKey } from '@/utils/appPlaybackGuards';
+import { createCollectionResourceRegistry } from '@/library/core/collection/resource/collectionResourceRegistry.service';
 
 // test/unit/library/core/onlineCollectionResource.test.ts
 // 在线集合资源：读缓存 → 首页 → 后台补页的规则与 GridView 原先一致；请求归属在资源上，
@@ -372,3 +373,112 @@ describe('online collection resource: edit bridge', () => {
         expect(ids(resource.getSnapshot().tracks)).toEqual(['history-0', 'history-1']);
     });
 });
+
+describe('online collection resource: 无版本集合的内存复用', () => {
+    it('离开再打开不会再拉一次首页，超时之后才重新拉', async () => {
+        vi.useFakeTimers();
+        try {
+            let time = 1000;
+            const descriptor = playlist({ tracksUpdatedAt: undefined, trackCount: 10 });
+            const h = harness(songs(10), { now: () => time });
+            const registry = createCollectionResourceRegistry({ releaseGraceMs: 0 });
+            const create = () => createOnlineCollectionResource('k', h.deps);
+            const first = registry.peekOrCreate('k', descriptor, create);
+            const release = registry.retain(first)!;
+            first.ensure(descriptor, {});
+            await settle();
+            release();
+            vi.advanceTimersByTime(1);
+
+            const reopened = registry.peekOrCreate('k', descriptor, create);
+            expect(reopened).toBe(first);
+            const releaseAgain = registry.retain(reopened)!;
+            reopened.ensure(descriptor, {});
+            await settle();
+            expect(h.deps.getCollectionTracks).toHaveBeenCalledTimes(1);
+            releaseAgain();
+            vi.advanceTimersByTime(1);
+
+            time += UNVERSIONED_COLLECTION_REUSE_MS;
+            const expired = registry.peekOrCreate('k', descriptor, create);
+            expect(expired).not.toBe(first);
+            const releaseExpired = registry.retain(expired)!;
+            expired.ensure(descriptor, {});
+            await settle();
+            expect(h.deps.getCollectionTracks).toHaveBeenCalledTimes(2);
+            releaseExpired();
+            vi.advanceTimersByTime(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it.each(['playlist', 'album'] as const)('加载好的 %s 只在原来的时限内复用', async type => {
+        let time = 1000;
+        const descriptor = playlist({ type, tracksUpdatedAt: undefined, trackCount: 10 });
+        const h = harness(songs(10), { now: () => time });
+        const resource = createOnlineCollectionResource('k', h.deps);
+        resource.ensure(descriptor, {});
+        await settle();
+        resource.pause();
+
+        expect(resource.canReuse(descriptor)).toBe(true);
+        expect(resource.canReuse({ ...descriptor, trackCount: 11 })).toBe(false);
+        time += UNVERSIONED_COLLECTION_REUSE_MS - 1;
+        resource.ensure(descriptor, {});
+        expect(resource.canReuse(descriptor)).toBe(true);
+        expect(h.pages).toHaveLength(1);
+        time += 1;
+        expect(resource.canReuse(descriptor)).toBe(false);
+    });
+
+    it('成功加载的空歌单可以复用，但不接受无版本的磁盘快照', async () => {
+        const descriptor = playlist({ tracksUpdatedAt: undefined, trackCount: 0 });
+        const h = harness([], {}, {
+            tracks: songs(2, 'stale'), snapshotTime: 0, schemaVersion: ONLINE_TRACKS_CACHE_SCHEMA_VERSION,
+            nextOffset: 2, hasMore: false,
+        });
+        const resource = createOnlineCollectionResource('k', h.deps);
+        resource.ensure(descriptor, {});
+        await settle();
+        expect(h.pages).toHaveLength(1);
+        expect(resource.getSnapshot().tracks).toEqual([]);
+        expect(resource.canReuse(descriptor)).toBe(true);
+    });
+
+    it.each(['daily_recommendations', 'radio', 'cloud'] as const)('动态的 %s 不走这条兜底复用', async type => {
+        const descriptor = playlist({ type, tracksUpdatedAt: undefined, trackCount: 10 });
+        const h = harness(songs(10));
+        const resource = createOnlineCollectionResource('k', h.deps);
+        resource.ensure(descriptor, {});
+        await settle();
+        expect(resource.canReuse(descriptor)).toBe(false);
+    });
+
+    it('刷新时绕开留存的曲目，刷新失败则不许复用', async () => {
+        const descriptor = playlist({ tracksUpdatedAt: undefined, trackCount: 10 });
+        const h = harness(songs(10));
+        const resource = createOnlineCollectionResource('k', h.deps);
+        resource.ensure(descriptor, {});
+        await settle();
+        expect(resource.canReuse(descriptor)).toBe(true);
+        vi.mocked(h.deps.getCollectionTracks).mockRejectedValueOnce(new Error('refresh failed'));
+        resource.reload();
+        await settle();
+        expect(h.deps.getCollectionTracks).toHaveBeenCalledTimes(2);
+        expect(h.deps.readCache).toHaveBeenCalledTimes(1);
+        expect(resource.canReuse(descriptor)).toBe(false);
+    });
+
+    it.each(['removeTracks', 'removeAt'] as const)('%s 之后内存复用失效', async operation => {
+        const descriptor = playlist({ tracksUpdatedAt: undefined, trackCount: 10 });
+        const h = harness(songs(10));
+        const resource = createOnlineCollectionResource('k', h.deps);
+        resource.ensure(descriptor, {});
+        await settle();
+        if (operation === 'removeTracks') await resource.removeTracks(track => track.id === 's-0');
+        else resource.removeAt(0, getPlaybackSongKey(song(0)));
+        expect(resource.getSnapshot().tracks).toHaveLength(9);
+        expect(resource.canReuse(descriptor)).toBe(false);
+    });
+})

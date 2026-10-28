@@ -1,6 +1,7 @@
 import { layoutWithLines, prepareWithSegments } from '@chenglou/pretext';
 import 'pixi.js/advanced-blend-modes';
 import type { Theme } from '../../../types';
+import { resolveGlowColorStrength } from '../../../utils/visualizer/colorMix';
 import { buildSonnetGlyphLayout } from './sonnetGlyphLayout';
 import { resolveSonnetSegmentDepth, resolveSonnetSegmentNormalOffset } from './sonnetMotion';
 import { hashSonnetSeed } from './sonnetRandom';
@@ -148,10 +149,17 @@ export const buildSonnetTextView = (
     const blurAmount = Math.abs(zDepth) * fontSize * 0.12;
     const isBlurry = blurAmount > 2;
 
-    const baseDropShadow = options.glowEnabled && !isDecoration ? {
+    const hasGlow = options.glowEnabled && !isDecoration;
+    const glowBlur = Math.max(12, fontSize * 0.18);
+    let glowStrength = 0;
+    if (hasGlow) {
+        const glowRgb = pixi.Color.shared.setValue(glowColor);
+        glowStrength = resolveGlowColorStrength(glowRgb.red * 255, glowRgb.green * 255, glowRgb.blue * 255);
+    }
+    const baseDropShadow = glowStrength > 0 ? {
         color: glowColor,
-        alpha: 0.8,
-        blur: Math.max(12, fontSize * 0.18),
+        alpha: 0.8 * glowStrength,
+        blur: glowBlur,
         distance: 0,
     } : undefined;
 

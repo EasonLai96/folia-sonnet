@@ -1,3 +1,4 @@
+import { normalizeNowPlayingCardPosition } from './nowPlayingCardPosition';
 import {
     DEFAULT_CLADDAGH_TUNING,
     DEFAULT_DIORAMA_TUNING,
@@ -452,6 +453,9 @@ const compressTempera = (t: any): any => ({
     gm: t.glyphMotion,
     wll: t.wholeLineLyrics,
     gss: t.glyphSettleStretch,
+    dof: t.depthOfField,
+    dpn: t.depthPan,
+    gd: t.glyphDepth,
     cm: t.colorMode,
     sb: t.showBlocks,
     sd: t.showDecor,
@@ -475,6 +479,9 @@ const decompressTempera = (o: any): any => ({
     glyphMotion: o.gm !== undefined ? o.gm : DEFAULT_TEMPERA_TUNING.glyphMotion,
     wholeLineLyrics: o.wll !== undefined ? o.wll : DEFAULT_TEMPERA_TUNING.wholeLineLyrics,
     glyphSettleStretch: o.gss !== undefined ? o.gss : DEFAULT_TEMPERA_TUNING.glyphSettleStretch,
+    depthOfField: o.dof !== undefined ? o.dof : DEFAULT_TEMPERA_TUNING.depthOfField,
+    depthPan: o.dpn !== undefined ? o.dpn : DEFAULT_TEMPERA_TUNING.depthPan,
+    glyphDepth: o.gd !== undefined ? o.gd : DEFAULT_TEMPERA_TUNING.glyphDepth,
     colorMode: o.cm !== undefined ? o.cm : DEFAULT_TEMPERA_TUNING.colorMode,
     showBlocks: o.sb !== undefined ? o.sb : DEFAULT_TEMPERA_TUNING.showBlocks,
     showDecor: o.sd !== undefined ? o.sd : DEFAULT_TEMPERA_TUNING.showDecor,
@@ -598,12 +605,14 @@ export const compressConfig = (config: any): string => {
     if (config.stageTrackPillMode !== undefined) minified.stp = config.stageTrackPillMode;
     if (config.stageTrackPillTimeoutSec !== undefined) minified.stpt = config.stageTrackPillTimeoutSec;
     if (config.stageTrackPillOnHome !== undefined) minified.stph = config.stageTrackPillOnHome;
+    if (config.stageTrackPillPosition !== undefined) minified.stpp = normalizeNowPlayingCardPosition(config.stageTrackPillPosition);
     if (config.libraryWallStackEdges !== undefined) minified.lwse = config.libraryWallStackEdges;
     if (config.libraryWallSeamClear !== undefined) minified.lwsc = config.libraryWallSeamClear;
     if (config.libraryWallSeamStyle !== undefined) minified.lwss = config.libraryWallSeamStyle;
     if (config.libraryWallBackdropLyrics !== undefined) minified.lwbl = config.libraryWallBackdropLyrics;
     if (config.libraryWallBackdropBlur !== undefined) minified.lwbb = config.libraryWallBackdropBlur;
     if (config.libraryWallSeamDirection !== undefined) minified.lwsd = config.libraryWallSeamDirection;
+    if (config.playerHeaderBlur !== undefined) minified.phb = config.playerHeaderBlur;
     if (config.libraryWallSeamDirectionReverse !== undefined) minified.lwdr = config.libraryWallSeamDirectionReverse;
 
     const jsonStr = JSON.stringify(minified);
@@ -668,13 +677,15 @@ export const decompressConfig = (str: string): any => {
         || parsed.stp !== undefined
         || parsed.stpt !== undefined
         || parsed.stph !== undefined
+        || parsed.stpp !== undefined
         // The bravais wall's collection stack edges, info strip and backdrop, for the same reason.
         || parsed.lwse !== undefined
         || parsed.lwsc !== undefined
         || parsed.lwss !== undefined
         || parsed.lwbl !== undefined
         || parsed.lwbb !== undefined
-        || parsed.lwsd !== undefined;
+        || parsed.lwsd !== undefined
+        || parsed.phb !== undefined;
     if (isMinified) {
         const decompressed: any = {};
         if (parsed.t) {
@@ -744,12 +755,14 @@ export const decompressConfig = (str: string): any => {
         if (parsed.stp !== undefined) decompressed.stageTrackPillMode = parsed.stp;
         if (parsed.stpt !== undefined) decompressed.stageTrackPillTimeoutSec = parsed.stpt;
         if (parsed.stph !== undefined) decompressed.stageTrackPillOnHome = parsed.stph;
+        if (parsed.stpp !== undefined) decompressed.stageTrackPillPosition = normalizeNowPlayingCardPosition(parsed.stpp);
         if (parsed.lwse !== undefined) decompressed.libraryWallStackEdges = parsed.lwse;
         if (parsed.lwsc !== undefined) decompressed.libraryWallSeamClear = parsed.lwsc;
         if (parsed.lwss !== undefined) decompressed.libraryWallSeamStyle = parsed.lwss;
         if (parsed.lwbl !== undefined) decompressed.libraryWallBackdropLyrics = parsed.lwbl;
         if (parsed.lwbb !== undefined) decompressed.libraryWallBackdropBlur = parsed.lwbb;
         if (parsed.lwsd !== undefined) decompressed.libraryWallSeamDirection = parsed.lwsd;
+        if (parsed.phb !== undefined) decompressed.playerHeaderBlur = parsed.phb;
         if (parsed.lwdr !== undefined) decompressed.libraryWallSeamDirectionReverse = parsed.lwdr;
 
         return decompressed;
@@ -770,10 +783,11 @@ export const decompressConfig = (str: string): any => {
             'pendoloTuning', 'sonnetTuning', 'smartBeat', 'temperaTuning', 'lumiereTuning', 'foliumParams',
             'urlBackgroundList', 'urlBackgroundSelectedId',
             'songThemeAutoSwitchEnabled', 'songThemeAutoGenerateEnabled', 'themeGenerationSource', 'followSystemTheme',
-            'stageTrackPillMode', 'stageTrackPillTimeoutSec', 'stageTrackPillOnHome',
+            'stageTrackPillMode', 'stageTrackPillTimeoutSec', 'stageTrackPillOnHome', 'stageTrackPillPosition',
             'libraryWallStackEdges',
             'libraryWallSeamClear', 'libraryWallSeamStyle', 'libraryWallBackdropLyrics', 'libraryWallBackdropBlur',
-            'libraryWallSeamDirection', 'libraryWallSeamDirectionReverse',
+            'libraryWallSeamDirection',
+            'playerHeaderBlur', 'libraryWallSeamDirectionReverse',
         ];
         const hasValidKey = validKeys.some(k => parsed[k] !== undefined);
         if (!hasValidKey) {

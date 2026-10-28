@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { DEFAULT_CADENZA_TUNING, Line } from '../../../types';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { colorWithAlpha, mixColors } from '../../../utils/visualizer/colorMix';
-import { isGlowBlurQuantized } from '../../../utils/glowBlurQuantize';
 import { prepareActiveAndUpcoming, useVisualizerRuntime } from '../runtime';
 import { type VisualizerSharedProps } from '../definition';
 import VisualizerShell from '../VisualizerShell';
@@ -429,10 +428,10 @@ const VisualizerCadenza: React.FC<VisualizerProps> = (props) => {
 
                     writeOverlayWord(overlayWord, {
                         outerTransform: `translate3d(${overlayAnchorX}px, ${overlayAnchorY}px, 0) rotate(${animatedState.rotation}deg) scale(${animatedState.scale})`,
-                        // Own compositing layer while Lab > Fix lyric animation freeze on Linux is on: otherwise every
-                        // new scale re-rasterizes the word and its 40px text-shadow at a new device size, and Chromium's
-                        // glyph cache leaks shared memory for each one. See utils/glowBlurQuantize.ts.
-                        willChange: isGlowBlurQuantized() ? 'transform' : '',
+                        // 任何平台都自己占一层合成层：否则每次新的 scale 都要按新的设备尺寸重新光栅化这个词和它
+                        // 40px 的 text-shadow，Chromium 的字形缓存按 strike 泄漏共享内存（Linux 上会致命，见
+                        // utils/glowBlurQuantize.ts），120Hz 的 Mac 上也让光栅线程每秒烧掉约 150ms。
+                        willChange: 'transform',
                         font: preparedState.font,
                         innerTransform: `translate3d(${overlayOffsetX}px, ${overlayOffsetY}px, 0)`,
                         text: placement.text,

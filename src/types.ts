@@ -689,6 +689,12 @@ export interface TemperaTuning {
    * lyric end - continuous, but nothing is ever still. See temperaLayout for the measurements.
    */
   glyphSettleStretch: number;
+  /** 墨染奥行 景深, 0..2：景深模糊与各层视差。只在墨染奥行开着时生效。 */
+  depthOfField: number;
+  /** 墨染奥行 镜头平移, 0..2：每个镜头推多远、漂多少。只在墨染奥行开着时生效。 */
+  depthPan: number;
+  /** 墨染奥行 歌词远近, 0..2：小字退多远、大字领多前。只在墨染奥行开着时生效。 */
+  glyphDepth: number;
   /** duo derives blocks from theme hues; mono collapses to a grayscale ink/paper ladder. */
   colorMode: TemperaColorMode;
   showBlocks: boolean;
@@ -734,6 +740,9 @@ export const DEFAULT_TEMPERA_TUNING: TemperaTuning = {
   glyphMotion: 1,
   wholeLineLyrics: false,
   glyphSettleStretch: 0.5,
+  depthOfField: 1,
+  depthPan: 1,
+  glyphDepth: 1,
   colorMode: 'duo',
   showBlocks: true,
   showDecor: true,

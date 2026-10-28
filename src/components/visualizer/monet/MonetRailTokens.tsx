@@ -169,19 +169,22 @@ const MonetWordSweep: React.FC<{
             (isLineActive && status === 'passed') || lineStatus === 'passed' ? wordColor : baseColor,
         );
 
-        const glowShadow = useTransform(glowTime, latest => {
-            if (!canRenderGlow || latest <= startTime) return 'none';
-
-            const intensity = resolveMonetGlow(latest, startTime, endTime, lineRenderEndTime);
-
-            if (intensity <= 0) return 'none';
-
+        // 光晕单独占一层：强度固定在满值，靠 opacity 淡入淡出。直接插值 text-shadow 会让每个
+        // 发光的词每帧都重绘重光栅化（120Hz 的 Mac 上占了这个模式大部分光栅，GPU 进程每秒约 70ms）；
+        // opacity 在自己的合成层上由合成器处理。满强度时与旧光晕完全一致；低于满强度时，
+        // 光晕保持词色，而不是往底色那边靠。
+        const glowOpacity = useTransform(glowTime, latest => {
+            if (!canRenderGlow || latest <= startTime) return 0;
+            return Math.max(0, resolveMonetGlow(latest, startTime, endTime, lineRenderEndTime));
+        });
+        // 只在亮着的时候给合成层，免得轨道上每个闲置的词都占一层。
+        const glowWillChange = useTransform(glowOpacity, opacity => (opacity > 0 ? 'opacity' : 'auto'));
+        const glowHalo = useMemo(() => {
             const radiusOne = Math.round(fontPx * (isChorus ? 0.45 : 0.28));
             const radiusTwo = Math.round(fontPx * (isChorus ? 0.90 : 0.65));
-            const maxAlpha = isChorus ? 1.0 : 0.88;
-            const glowColor = mixColors(baseColor, wordColor, intensity, intensity * maxAlpha);
+            const glowColor = mixColors(baseColor, wordColor, 1, isChorus ? 1.0 : 0.88);
             return `0 0 ${radiusOne}px ${glowColor}, 0 0 ${radiusTwo}px ${glowColor}`;
-        }) as unknown as MotionValue<string>;
+        }, [baseColor, fontPx, isChorus, wordColor]);
 
         // Glyphs with deep descenders (g, j, p, y, and many CJK forms) sit below the line box
         // whenever the font's em box is taller than `line-height`, which drives half-leading
@@ -192,7 +195,17 @@ const MonetWordSweep: React.FC<{
 
         return (
             <span className="relative inline-block whitespace-pre-wrap break-words">
-                <motion.span style={{ color: resolvedBaseColor, textShadow: glowShadow }}>
+                {canRenderGlow ? (
+                    <motion.span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 block whitespace-pre-wrap break-words"
+                        style={{ color: 'transparent', textShadow: glowHalo, opacity: glowOpacity, willChange: glowWillChange }}
+                    >
+                        {text}
+                    </motion.span>
+                ) : null}
+                {/* relative 让正文压在绝对定位的光晕层上面，和它当年压在自己影子上一样。 */}
+                <motion.span className="relative" style={{ color: resolvedBaseColor }}>
                     {text}
                 </motion.span>
                 {isLineActive ? (

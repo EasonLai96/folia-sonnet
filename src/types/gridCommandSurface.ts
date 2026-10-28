@@ -31,6 +31,7 @@ export type GridSurfaceActionId =
     | 'organize-song-info'
     | 'export-playlist'
     | 'edit-entity'
+    | 'set-cover'
     | 'toggle-edit-mode'
     | 'reload-online-collection'
     | 'toggle-subscribe';

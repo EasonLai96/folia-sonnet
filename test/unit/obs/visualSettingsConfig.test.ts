@@ -21,6 +21,7 @@ import { useTypographySettingsStore } from '@/stores/useTypographySettingsStore'
 import { useThemeSettingsStore } from '@/stores/useThemeSettingsStore';
 import { useStageSettingsStore } from '@/stores/useStageSettingsStore';
 import { useLibraryWallLookStore } from '@/stores/useLibraryWallLookStore';
+import { usePlayerChromeSettingsStore } from '@/stores/usePlayerChromeSettingsStore';
 
 const switchMock = vi.mocked(readStoredThemeAutoSwitchEnabled);
 const generateMock = vi.mocked(readStoredThemeAutoGenerateEnabled);
@@ -271,5 +272,16 @@ describe('buildVisualSettingsConfig', () => {
         expect(decompressConfig(JSON.stringify({ lwsd: 'vertical' }))).toEqual({ libraryWallSeamDirection: 'vertical' });
         expect(decompressConfig(JSON.stringify({ libraryWallSeamDirection: 'auto' }))).toMatchObject({ libraryWallSeamDirection: 'auto' });
         useLibraryWallLookStore.setState({ seamDirection: 'auto' });
+    });
+
+    // 播放页标题栏后面那层磨砂底跟着「样子」一起走（短键 phb）；false 是个真值，配置能把它关掉。
+    it('carries the blurred player header', () => {
+        usePlayerChromeSettingsStore.setState({ playerHeaderBlur: true });
+        const config = buildVisualSettingsConfig();
+        expect(config.playerHeaderBlur).toBe(true);
+        expect(decompressConfig(extractCfgFromInput(asObsUrl(compressConfig(config))))).toMatchObject({ playerHeaderBlur: true });
+        expect(decompressConfig(JSON.stringify({ phb: false }))).toEqual({ playerHeaderBlur: false });
+        expect(decompressConfig(JSON.stringify({ playerHeaderBlur: true }))).toMatchObject({ playerHeaderBlur: true });
+        usePlayerChromeSettingsStore.setState({ playerHeaderBlur: false });
     });
 });

@@ -8,21 +8,29 @@ import ind from './locales/in.ts';
 import { resolveMissingTranslation } from './missingTranslation';
 
 /*
- * Hardcoded Chinese fallback dictionary.
- * Flattened at build-time from zh-CN.ts so every key has a Chinese fallback
- * baked directly into the JS bundle — no dependency on i18next resource loading.
+ * Chinese fallback for keys the active locale does not contain.
+ *
+ * zh-CN 在这个模块加载时铺成一张点号键的表，`parseMissingKeyHandler` 经
+ * resolveMissingTranslation 读它。原来每一层都用 `{ ...result, ...子结果 }` 拼，
+ * 一个键就复制一次整张表 —— 启动时要拷几十万次（来自上游 #763）。
+ *
+ * 现在只往一个对象里写：同一个路径重复出现时，位置取第一次、值取最后一次；
+ * 数组按下标铺（`items.0`）；空对象不产生键；其他叶子一律 String(value)。
  */
-function flattenLocale(obj: Record<string, any>, prefix = ''): Record<string, string> {
-  let result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (typeof value === 'object' && value !== null) {
-      result = { ...result, ...flattenLocale(value, path) };
-    } else {
-      result[path] = String(value);
-    }
-  }
-  return result;
+export function flattenLocale(obj: Record<string, any>, prefix = ''): Record<string, string> {
+    const result: Record<string, string> = {};
+    const visit = (node: Record<string, any>, pathPrefix: string) => {
+        for (const [key, value] of Object.entries(node)) {
+            const path = pathPrefix ? `${pathPrefix}.${key}` : key;
+            if (typeof value === 'object' && value !== null) {
+                visit(value, path);
+            } else {
+                result[path] = String(value);
+            }
+        }
+    };
+    visit(obj, prefix);
+    return result;
 }
 
 const ZH_FALLBACKS: Record<string, string> = flattenLocale(zhCN);

@@ -40,7 +40,8 @@ const buildCoverRequestUrl = (coverUrl: string): string => {
     return coverUrl;
 };
 
-const fetchCoverBlob = async (coverUrl: string): Promise<Blob> => {
+// 也在「从某首歌取一张集合封面」的地方用：那边只要一次远程封面的字节。
+export const fetchCoverBlob = async (coverUrl: string): Promise<Blob> => {
     const response = await fetch(buildCoverRequestUrl(coverUrl), { mode: 'cors' });
     if (response.ok === false) throw new Error(`Cover request failed: ${response.status}`);
     return await response.blob();
