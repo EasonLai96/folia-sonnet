@@ -5759,9 +5759,9 @@ export default {
       },
       "transition": {
         "enable": "This group is about how one song joins the next. The switch at the top is the same value as the “Smart transition” tile in the Controls tab — two places, one setting.",
-        "modes": "The transition mode has two segments: Folia Crossfade fades from one song to the next, Folia Automix analyses the audio and picks the joining point.",
-        "badge": "The small tag left of the two segments is the running state: “Full” or “Compatible” means Automix is running; “Using crossfade” means a condition is missing and the app fell back to a crossfade.",
-        "notice": "Automix needs song caching; “Turn song caching on” at the right end of the notice switches it on right there."
+        "modes": "One transition left: a crossfade. The old song fades out while the next one fades in, with no gap in between.",
+        "badge": "The change is faded rather than cut, which is why it sounds like one song handing over to the next.",
+        "notice": "How long the fade runs is set by the longest transition; too long and the two songs overlap, too short and it sounds like a cut."
       },
       "libraryWatch": {
         "enable": "With this on, Folia keeps an eye on the local folders you imported and runs an incremental scan whenever their files change \u2014 no going back to re-scan by hand every time you add music.",

@@ -5759,9 +5759,9 @@ export default {
       },
       "transition": {
         "enable": "Grup ini tentang bagaimana satu lagu menyambung ke lagu berikutnya. Sakelar di atas adalah nilai yang sama dengan petak “Transisi pintar” di tab Kontrol — dua tempat, satu pengaturan.",
-        "modes": "Mode transisi punya dua segmen: Folia Crossfade memudar dari satu lagu ke lagu berikutnya, Folia Automix menganalisis audio lalu memilih titik sambungnya.",
-        "badge": "Tanda kecil di kiri dua segmen itu adalah status berjalan: “Penuh” atau “Kompatibel” berarti Automix sedang berjalan; “Memakai crossfade” berarti ada syarat yang kurang dan aplikasi kembali memakai crossfade.",
-        "notice": "Automix butuh cache lagu; “Aktifkan cache lagu” di ujung kanan catatan menyalakannya saat itu juga."
+        "modes": "Tinggal satu transisi: crossfade. Lagu lama memudar sementara lagu berikutnya muncul, tanpa jeda di antaranya.",
+        "badge": "Pergantiannya memudar, bukan terpotong — itu sebabnya terdengar seperti satu lagu menyerahkan ke lagu berikutnya.",
+        "notice": "Lama pemudaran diatur oleh durasi transisi terpanjang; terlalu lama lagu bertumpuk, terlalu pendek terdengar seperti potongan."
       },
       "libraryWatch": {
         "enable": "Dengan ini menyala, Folia mengawasi folder lokal yang kamu impor dan menjalankan pemindaian inkremental setiap kali berkasnya berubah \u2014 tak perlu kembali memindai manual setiap menambah musik.",
