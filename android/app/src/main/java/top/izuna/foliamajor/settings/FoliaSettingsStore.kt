@@ -120,6 +120,7 @@ class FoliaSettingsStore private constructor(context: Context) {
             "visualizerHighQuality": false,
             "crossfadeEnabled": false,
             "crossfadeMs": 0,
+            "playbackFade": true,
             "audioQuality": "high",
             "preventSleep": false,
             "deviceType": "phone"

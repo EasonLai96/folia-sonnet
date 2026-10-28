@@ -211,6 +211,8 @@ export const useAppFoundation = () => {
         const push = async () => {
             const merged = await writeNativeSettings({
                 autoSkipUnplayable: useAudioSettingsStore.getState().autoSkipUnplayable,
+                // 「播放淡入淡出」也归原生执行（音量斜坡在播放器里），启动时对一次表。
+                playbackFade: useAudioSettingsStore.getState().playbackFadeEnabled,
             });
             if (merged || cancelled || attempts >= 20) return;
             attempts += 1;

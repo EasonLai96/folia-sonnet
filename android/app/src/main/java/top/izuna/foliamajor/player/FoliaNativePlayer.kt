@@ -58,6 +58,12 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     companion object {
         private const val POSITION_TICK_MS = 250L
 
+        /** 暂停 / 继续那条音量斜坡有多长。够长听得出来，够短不挡事。 */
+        private const val PAUSE_FADE_MS = 160
+
+        /** 斜坡分几步。8 步在 160ms 下约 20ms 一步，听感上没有台阶。 */
+        private const val FADE_STEPS = 8
+
         /**
          * 伪装成浏览器的 UA。
          *
@@ -108,6 +114,18 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     private var lastMediaId: String? = null
     private var tickScheduled = false
     private var requestedVolume = 1f
+    /**
+     * 暂停 / 继续那一下的淡化。
+     *
+     * ExoPlayer 没有内建的淡入淡出：`setPlayWhenReady(false)` 是当场断音，「继续」是当场
+     * 满音量出声，两下都像被切了一刀。这里自己做一条音量斜坡：暂停先滑到 0 再停，继续先从
+     * 0 滑上来。开关由设置里的「播放淡入淡出」跟着 [setPauseFadeEnabled] 进来 —— 那一项在
+     * Web 侧以前是 Web Audio 上的 gain 斜坡，原生出声后它管不到，所以搬到这里。
+     */
+    @Volatile
+    private var pauseFadeEnabled = true
+    private var fadeTick: Runnable? = null
+    private val fadeHandler = android.os.Handler(android.os.Looper.getMainLooper())
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -182,7 +200,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     fun play() {
         runOnPlayer {
             val current = ensurePlayer()
+            val resuming = !cachedPlaying
             current.setPlayWhenReady(true)
+            if (pauseFadeEnabled && resuming) {
+                // 先从 0 滑上来；不这么做，「继续」是当场满音量。
+                current.setVolume(0f)
+                rampVolume(0f, requestedVolume, PAUSE_FADE_MS)
+            }
             cachedPlaying = true
         }
     }
@@ -190,11 +214,65 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     fun pause() {
         runOnPlayer {
             val current = player ?: return@runOnPlayer
-            current.setPlayWhenReady(false)
             cachedPlaying = false
-            stopTicking()
             cachedPositionMs = current.currentPosition
+            // 位置与状态当场报出去：界面上的进度条不该跟着斜坡走 160ms。
             emit("paused", cachedPositionMs, cachedDurationMs, null)
+            if (!pauseFadeEnabled) {
+                current.setPlayWhenReady(false)
+                stopTicking()
+                return@runOnPlayer
+            }
+            rampVolume(requestedVolume, 0f, PAUSE_FADE_MS) {
+                current.setPlayWhenReady(false)
+                // 音量回到「本该是多少」：下一首从 0 淡进来，而不是继承这条斜坡的 0。
+                current.setVolume(requestedVolume)
+                stopTicking()
+            }
+        }
+    }
+
+    /**
+     * 音量斜坡：把播放器音量从 [from] 滑到 [to]，分 [FADE_STEPS] 步、共 [durationMs]，
+     * 滑完调 [then]（在播放器线程上）。淡入淡出关掉时直接落位、立刻回调。
+     */
+    private fun rampVolume(from: Float, to: Float, durationMs: Int, then: (() -> Unit)? = null) {
+        cancelFade()
+        if (!pauseFadeEnabled || durationMs <= 0) {
+            player?.setVolume(to)
+            then?.invoke()
+            return
+        }
+        val stepMs = (durationMs / FADE_STEPS).coerceAtLeast(1)
+        var step = 0
+        val tick = object : Runnable {
+            override fun run() {
+                step++
+                val progress = step.toFloat() / FADE_STEPS
+                player?.setVolume((from + (to - from) * progress).coerceIn(0f, 1f))
+                if (step >= FADE_STEPS) {
+                    fadeTick = null
+                    then?.invoke()
+                } else {
+                    fadeHandler.postDelayed(this, stepMs.toLong())
+                }
+            }
+        }
+        fadeTick = tick
+        fadeHandler.postDelayed(tick, stepMs.toLong())
+    }
+
+    private fun cancelFade() {
+        fadeTick?.let { fadeHandler.removeCallbacks(it) }
+        fadeTick = null
+    }
+
+    /** 设置里的「播放淡入淡出」跟着这一项走（默认开，见 FoliaSettingsStore 的 playbackFade）。 */
+    fun setPauseFadeEnabled(enabled: Boolean) {
+        pauseFadeEnabled = enabled
+        if (!enabled) {
+            cancelFade()
+            player?.setVolume(requestedVolume)
         }
     }
 
@@ -211,6 +289,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             cachedPlaying = false
             cachedPositionMs = 0L
             cachedDurationMs = 0L
+            cancelFade()
             stopTicking()
             emit("idle", 0L, 0L, null)
         }
@@ -247,6 +326,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         val clamped = Math.max(0f, Math.min(1f, volume))
         requestedVolume = clamped
         runOnPlayer {
+            // 正在淡的那条斜坡作废：用户拖到哪儿就是哪儿，不能被斜坡拽回去。
+            cancelFade()
             val current = player
             if (current != null) current.setVolume(requestedVolume)
         }

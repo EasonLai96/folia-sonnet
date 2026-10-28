@@ -171,6 +171,17 @@ class FoliaNativePlayerPlugin : Plugin() {
         }
 
         /**
+         * 把设置里的「播放淡入淡出」摊到播放器上。
+         *
+         * 这一项以前是 Web Audio 上的 gain 斜坡，原生出声之后那条链不参与了，所以斜坡搬到
+         * 播放器自己身上（见 FoliaNativePlayer.rampVolume）。写设置与插件加载时各调一次。
+         */
+        @JvmStatic
+        fun applyPlaybackFade(enabled: Boolean) {
+            instance?.player?.setPauseFadeEnabled(enabled)
+        }
+
+        /**
          * 原生播放器此刻的位置（毫秒）；没有播放器时给 -1。
          *
          * 通知栏 / 锁屏那条进度条用它：原生在放的时候位置只有播放器知道，而 Web 那一推
@@ -322,6 +333,15 @@ class FoliaNativePlayerPlugin : Plugin() {
                 MAIN.post { notifyListeners(EVENT, payload) }
             }
         })
+        // 「播放淡入淡出」跟着设置走：插件是新进程里第一个起来的东西，这里读一次就够，
+        // 之后每次写设置都会再摊一遍（见 FoliaNativePlugin.setSettings）。
+        try {
+            val fadeEnabled = top.izuna.foliamajor.settings.FoliaSettingsStore.get(getContext())
+                    .getBoolean("playbackFade", true)
+            player?.setPauseFadeEnabled(fadeEnabled)
+        } catch (error: Throwable) {
+            android.util.Log.w("FoliaNativePlayer", "读取淡入淡出设置失败，按开启处理", error)
+        }
     }
 
     override fun handleOnDestroy() {

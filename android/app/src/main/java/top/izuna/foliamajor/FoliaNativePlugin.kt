@@ -2503,6 +2503,9 @@ class FoliaNativePlugin : Plugin() {
                 merged[key] = values.opt(key)
             }
             val snapshot = store.putAll(merged)
+            // 「播放淡入淡出」这一项原生自己要用（音量斜坡），写完当场摊给播放器。
+            top.izuna.foliamajor.player.FoliaNativePlayerPlugin
+                    .applyPlaybackFade(snapshot.optBoolean("playbackFade", true))
             call.resolve(JSObject.fromJSONObject(snapshot))
         } catch (error: Exception) {
             call.reject("写入设置失败", error)

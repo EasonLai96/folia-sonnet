@@ -435,6 +435,12 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     handleTogglePlaybackFade: (enable) => {
         setStoredBoolean(PLAYBACK_FADE_KEY, enable);
         set({ playbackFadeEnabled: enable });
+        /*
+         * 这一项现在由原生执行：出声交给 ExoPlayer 之后，Web Audio 上那条 gain 斜坡不再参与，
+         * 淡入淡出改成播放器自己做的音量斜坡（见 FoliaNativePlayer.rampVolume）。不推过去，
+         * 界面上关掉它也不会有任何变化。
+         */
+        void writeNativeSettings({ playbackFade: enable });
     },
     handleToggleAutoSkipUnplayable: (enable) => {
         setStoredBoolean(AUTO_SKIP_UNPLAYABLE_KEY, enable);
