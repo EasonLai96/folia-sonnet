@@ -12,7 +12,7 @@ import { useAnalysisModelStore } from '../../../../stores/useAnalysisModelStore'
 import { useAutomixSettingsStore } from '../../../../stores/useAutomixSettingsStore';
 import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
 import { isCapacitorAndroid } from '../../../../platform/runtime';
-import { isNativePlayerAvailable } from '../../../../services/playbackEngine/nativePlayerPlugin';
+
 import { runsOnWindows } from '../../../../utils/platform';
 import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
@@ -60,16 +60,12 @@ const O = {
      */
     mixWithOtherAudio: option(SOUND, 'mixWithOtherAudio', 'options.mixWithOtherAudio', { available: isCapacitorAndroid }),
     /*
-     * 原生播放（P1）：音频改由 ExoPlayer 出声，不再走 WebView 的 `<audio>`。
+     * 原生播放（P1）不再有开关：安卓上恒开，出声交给 ExoPlayer。
      *
-     * 只在**原生播放器真的编进这个包**时出现（`isNativePlayerAvailable`）—— 桌面端与还没
-     * 带上这一层的包里，这一行既不画也不被搜索索引。说明走 noteKey（收进「i」）：
-     * fork 自建的行一律不占 label 下面那块地方。
+     * 原来这一行是「原生播放（实验）」，它留了一条「一半歌走原生、一半走网页」的岔路
+     * —— 同一个 bug 在两种音频栈上表现不同，最难复现。现在没有岔路可选。
+     * 已知代价（均衡器 / 音效 / 淡入淡出 / 频谱失效）写在 useAudioSettingsStore 的注释里。
      */
-    nativePlayback: option(SOUND, 'nativePlayback', 'options.nativePlayback', {
-        available: isNativePlayerAvailable,
-        noteKey: 'options.nativePlaybackNote',
-    }),
     queueBehavior: option(BEHAVIOR, 'queueDefaultBehavior', 'options.queueDefaultBehavior'),
     autoSkipUnplayable: option(BEHAVIOR, 'autoSkipUnplayable', 'options.autoSkipUnplayable'),
     preventSleep: option(BEHAVIOR, 'preventDisplaySleepDuringPlayback', 'options.preventDisplaySleepDuringPlayback', { electronOnly: true }),
@@ -192,14 +188,12 @@ const PlaybackPage: React.FC = () => {
         queueBehavior: state.queueAddBehavior,
         autoSkipUnplayable: state.autoSkipUnplayable,
         mixWithOtherAudio: state.mixWithOtherAudio,
-        nativePlayback: state.nativePlaybackEnabled,
         setMediaCache: state.handleToggleMediaCache,
         setFade: state.handleTogglePlaybackFade,
         setTranscode: state.handleToggleTranscodeFallback,
         setQueueBehavior: state.handleSetQueueAddBehavior,
         setAutoSkipUnplayable: state.handleToggleAutoSkipUnplayable,
         setMixWithOtherAudio: state.handleToggleMixWithOtherAudio,
-        setNativePlayback: state.handleToggleNativePlayback,
     })));
     const preventSleep = useDesktopSettingsStore(state => state.preventDisplaySleepDuringPlayback);
     const setPreventSleep = useDesktopSettingsStore(state => state.handleTogglePreventDisplaySleepDuringPlayback);
@@ -332,11 +326,6 @@ const PlaybackPage: React.FC = () => {
                 {isCapacitorAndroid() && (
                     <Row option={O.mixWithOtherAudio} note={t('options.mixWithOtherAudioDesc')}>
                         <Toggle checked={audio.mixWithOtherAudio} onChange={audio.setMixWithOtherAudio} />
-                    </Row>
-                )}
-                {isNativePlayerAvailable() && (
-                    <Row option={O.nativePlayback}>
-                        <Toggle checked={audio.nativePlayback} onChange={audio.setNativePlayback} />
                     </Row>
                 )}
             </Group>

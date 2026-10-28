@@ -33,6 +33,9 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
  *
  * ⚠️ 代价：走 `blob:` 的本地歌原生吃不下，那种歌整首回落 `<audio>`；
  * 原生出声时均衡器 / 音效 / 淡入淡出 / 混音过渡 / 频谱整体失效（都在 Web Audio 图上）。
+ *
+ * 设置里那个「原生播放（实验）」开关已经删掉了：安卓上恒开，没有第二条音频栈可选
+ * （见 useAppAudioOutput 的三层说明）。这里的总闸留着，只是代码级别的紧急关闭口。
  */
 export const NATIVE_PLAYBACK_ENABLED: boolean = true;
 

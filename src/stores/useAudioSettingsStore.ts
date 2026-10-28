@@ -90,18 +90,14 @@ export const AUTO_SKIP_UNPLAYABLE_KEY = 'folia_auto_skip_unplayable';
  */
 export const MIX_WITH_OTHER_AUDIO_KEY = 'folia_mix_with_other_audio';
 
-/**
- * 原生播放（Android，P1）。
+/*
+ * 原来的 `folia_native_playback`（原生播放开关）已经删掉：安卓上原生播放恒开，
+ * 不再给用户一条「回到网页音频图」的岔路。留在这里的说明是给读代码的人看的：
  *
- * 打开后音频不再由 WebView 的 `<audio>` 出声，改由原生 ExoPlayer 解码播放。
- * 默认关，且**只在原生播放器真的在**时才生效（Capacitor.isPluginAvailable）——
- * 桌面端、以及还没编进这个插件的包里，这一项既不显示也不起作用。
- *
- * ⚠️ 打开意味着 Web 音频图整体失效：均衡器、音效链、淡入淡出、automix 交叉淡化、
- * 以及播放页的频谱都是挂在 `createMediaElementSource` 上的，而它是单向不可逆的
- * —— 原生一出声，那些节点就都成了空跑。这是已知代价，不是 bug。
+ * 原生播放意味着 Web 音频图整体不参与出声 —— 均衡器、音效链、淡入淡出、automix
+ * 交叉淡化、播放页频谱都挂在 `createMediaElementSource` 上，而它是单向不可逆的。
+ * 这是已知代价，不是 bug。
  */
-export const NATIVE_PLAYBACK_KEY = 'folia_native_playback';
 
 /**
  * Folium 1.7: the equalizer curve a mod put in place over the listener's own sound (utils/audioEqualizerModCurve.ts),
@@ -256,8 +252,6 @@ export type AudioSettingsState = {
     keepScreenOnWhilePlaying: boolean;
     /** 后台与其他音源同时播放（Android）。Off by default，见 MIX_WITH_OTHER_AUDIO_KEY。 */
     mixWithOtherAudio: boolean;
-    /** 原生播放（Android，P1）。Off by default，见 NATIVE_PLAYBACK_KEY。 */
-    nativePlaybackEnabled: boolean;
     audioOutputDeviceId: string;
     /** The listener's own sound, always: a mod's curve is never written into it. */
     audioEqualizerSettings: AudioEqualizerSettings;
@@ -286,7 +280,6 @@ export type AudioSettingsState = {
     handleToggleAutoSkipUnplayable: (enable: boolean) => void;
     handleToggleKeepScreenOnWhilePlaying: (enable: boolean) => void;
     handleToggleMixWithOtherAudio: (enable: boolean) => void;
-    handleToggleNativePlayback: (enable: boolean) => void;
     handleSetAudioOutputDeviceId: (deviceId: string) => void;
     /*
      * The equalizer actions below return whether anything changed: the listener's settings they leave
@@ -379,9 +372,6 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
     // 默认关：常亮等于放弃系统那套自动熄屏，该由用户点头，不该替他决定。
     keepScreenOnWhilePlaying: getStoredBoolean(KEEP_SCREEN_ON_WHILE_PLAYING_KEY, false),
     mixWithOtherAudio: getStoredBoolean(MIX_WITH_OTHER_AUDIO_KEY, false),
-    // 默认开：切后台更稳、更省电，也少一层撕裂。代价是均衡器 / 音效 / 频谱整体失效，
-    // 所以设置里仍留着开关 —— 想回到网页那张音频图，拨一下就行。
-    nativePlaybackEnabled: getStoredBoolean(NATIVE_PLAYBACK_KEY, true),
     audioOutputDeviceId: readStoredAudioOutputDeviceId(),
     audioEqualizerSettings: initialAudioEqualizerSettings,
     audioEqualizerModCurve: readStoredAudioEqualizerModCurve(initialAudioEqualizerSettings),
@@ -471,10 +461,6 @@ export const useAudioSettingsStore = create<AudioSettingsState>((set, get) => ({
          * 开始播放才生效。被打断后的自动恢复走的是 JS 那条路，不依赖它，拨过去就管用。
          */
         void setAudioFocusPolicy(enable);
-    },
-    handleToggleNativePlayback: (enable) => {
-        setStoredBoolean(NATIVE_PLAYBACK_KEY, enable);
-        set({ nativePlaybackEnabled: enable });
     },
     handleSetAudioOutputDeviceId: (deviceId) => {
         set({ audioOutputDeviceId: deviceId });

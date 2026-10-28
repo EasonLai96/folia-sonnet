@@ -3249,8 +3249,6 @@ export default {
     "keepScreenOnWhilePlayingDesc": "Prevent the screen from turning off only while audio is playing, and hand control back to the system as soon as playback pauses. Applies to the foreground app only; the system still sleeps the screen once you leave it.",
     "mixWithOtherAudio": "Play alongside other audio",
     "mixWithOtherAudioDesc": "When on, another app making sound in the background (game effects, turn-by-turn navigation, short videos) no longer pauses the music - both play at once. When off, the system default applies: playback pauses as soon as another app starts playing.",
-    "nativePlayback": "Native playback (experimental)",
-    "nativePlaybackNote": "Hands the actual sound output to the system player (ExoPlayer) instead of decoding in the web audio engine. Background playback gets steadier, battery use drops, and one layer of audio tearing goes away. The cost: the equalizer, sound effects, fade, crossfade transitions and the spectrum on the player page are all built on the web audio graph, and they stop working the moment the native player makes sound. Songs served from the media cache play natively as well. On by default.",
     "deviceTypeSection": "Device type",
     "deviceType": "Phone or tablet",
     "deviceTypeDesc": "On a phone, the whole screen is scaled down a little in landscape so controls stop overlapping. A tablet is shown at full size in both orientations.",
