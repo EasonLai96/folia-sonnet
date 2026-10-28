@@ -661,6 +661,20 @@ class FoliaPlaybackService : android.app.Service() {
      * **它不再决定播什么**，收到只是渲染。JS 不在场也没有损失。
      */
     fun onTrackFinished() {
+        /*
+         * ⭐ 已经为这一首提前换过了：这条 ended 是**旧那台**放完报上来的，丢掉。
+         *
+         * onNearEnd 先推进队列，真正起交叉要等下一首的地址（没预取命中时那是异步平台
+         * 请求）；这期间旧播放器的监听还挂着，它照常播到尾巴上报一次 ended ——
+         * 不拦一下就是一次换歌跳两首。
+         *
+         * 用时间窗而不是「为哪一首推进过」的标记：提前换歌可能压根没走成
+         * （最后一首、单曲循环、地址解析失败），那时候 ended 必须照常处理。
+         */
+        if (android.os.SystemClock.elapsedRealtime() - advancedAheadAtMs < ADVANCE_AHEAD_GUARD_MS) {
+            publishSnapshot()
+            return
+        }
         if (!nativePlaybackActive()) {
             // 当前这首走的是 <audio>（Web 全流程），队列在 JS 那边，原生没有立场替它决定。
             // 这一档只在「原生从没接管过播放」时发生。
@@ -702,12 +716,29 @@ class FoliaPlaybackService : android.app.Service() {
         if (!nativePlaybackActive()) return
         if (playQueue.loopMode == NativeLoopMode.ONE) return
         // 只看不动：最后一首时 peekNext 给 null，交给 onTrackFinished 去停。
-        if (playQueue.peekNext() == null) return
+        val peeked = playQueue.peekNext() ?: return
+        /*
+         * 下一首还是同一首（列表循环但队列只有一首）：那不是「换歌」，是重播。
+         * 交叉淡化到这里会变成「同一首硬切一下、还剪掉最后几秒」，比不淡更糟 ——
+         * 让它正常播完，交给 onTrackFinished 的 seek 重播那条路。
+         */
+        if (peeked.songKey == playQueue.current()?.songKey) return
         val next = playQueue.onFinished() ?: return
+        // 记下这一发：旧那台随后的 ended 要丢掉（见 onTrackFinished 开头）。
+        advancedAheadAtMs = android.os.SystemClock.elapsedRealtime()
         advanceToNextEntry(next)
     }
 
     /** 队列已经推进到 [next]：装源 + 让界面跟上（放完自动前进与提前换共用这一段）。 */
+    /**
+     * 「已经提前换过歌」的有效窗口。
+     *
+     * 要盖住最坏情况：下一首地址没预取到时的异步解析 + 一个完整的交叉淡化斜坡。
+     * 提前换歌之后这首歌其实已经结束了，所以窗口放宽不会误伤——真正的 ended 只在
+     * 队列没推进过的时候才有意义。
+     */
+    private var advancedAheadAtMs = 0L
+
     private fun advanceToNextEntry(next: NativeQueueEntry) {
         playQueue.bumpRevision()
         // 镜像下标要跟着状态机一起推进：resolveMirrorEntryAsync 的过期守卫按
@@ -2299,6 +2330,11 @@ class FoliaPlaybackService : android.app.Service() {
 
         /** 交叉淡化的上限。再长就变成「两首歌叠在一起」而不是过渡了。 */
         private const val MAX_CROSSFADE_MS = 12_000
+        /**
+         * 「已经提前换过歌」的窗口：见 onTrackFinished 开头。
+         * 最坏情况 = 没预取到地址时的异步解析 + 一个完整的交叉淡化斜坡，再留余量。
+         */
+        private const val ADVANCE_AHEAD_GUARD_MS = 20_000L
 
         /**
          * 前台改了循环模式：落进设置，再让队列跟上。返回落盘后的整份设置给前台确认。

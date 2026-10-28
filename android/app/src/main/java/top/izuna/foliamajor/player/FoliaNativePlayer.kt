@@ -1,4 +1,4 @@
-﻿package top.izuna.foliamajor.player
+package top.izuna.foliamajor.player
 
 import android.content.Context
 import android.os.Handler
@@ -56,6 +56,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     }
 
     companion object {
+        /**
+         * 手动拖动之后，位置要自然走过这么远才允许报 nearEnd。
+         *
+         * 目的是「拖到末尾想听最后那几秒」时别被交叉淡化掐掉；一秒足够听出被打断了，
+         * 又短到不会让人觉得淡出没生效。
+         */
+        private const val NEAR_END_SEEK_GRACE_MS = 1_000L
         private const val POSITION_TICK_MS = 250L
         /** 提前换歌的窗口上限：斜坡太长没有意义，也省得设置里的离谱值把整首吃光。 */
         private const val MAX_CROSSFADE_AHEAD_MS = 15_000
@@ -115,7 +122,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     @Volatile
     private var lastMediaId: String? = null
     private var tickScheduled = false
-    private var requestedVolume = 1f
+    /** 桥线程上要先比一遍（同值 = 状态同步，不打断斜坡），所以是 volatile。 */
+    @Volatile private var requestedVolume = 1f
     /**
      * 暂停 / 继续那一下的淡化。
      *
@@ -144,6 +152,19 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     @Volatile private var crossfadeAheadMs = 0
     /** 这一首的「快到尾巴了」是不是已经报过（每首只报一次，seek 回去要重新上膛）。 */
     private var nearEndFired = false
+    /**
+     * 交叉淡化里**正在被淡出**的那台。
+     *
+     * 它已经不在 [player] 上了，但还在出声：斜坡被打断（暂停 / 换歌 / 播完）时如果只把
+     * fadeTick 摘掉，这一台既不会淡到 0、也没人 stop/release —— 两首歌同时响，还漏掉
+     * 一台 ExoPlayer。收尾统一走 [cancelFade]。
+     */
+    private var crossfadeOutgoing: ExoPlayer? = null
+    /**
+     * 手动拖动进度条之后，位置要**自然走过**这么远才允许报 nearEnd（见 seek 里的说明）。
+     * 0 = 没有这道限制。
+     */
+    private var nearEndFloorMs = 0L
     /** 上一拍的播放位置：单曲循环回绕（位置从末尾跳回 0）靠它认出来。 */
     private var lastTickPositionMs = 0L
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
@@ -200,6 +221,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
              */
             if (!nearEndFired && crossfadeAheadMs > 0 && cachedDurationMs > 0
                     && requestedRepeatMode != Player.REPEAT_MODE_ONE
+                    && position >= nearEndFloorMs
                     && cachedDurationMs - position <= crossfadeAheadMs) {
                 nearEndFired = true
                 emit("nearEnd", position, cachedDurationMs, null)
@@ -248,9 +270,10 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             cachedPositionMs = if (startPositionMs > 0) startPositionMs else 0L
             cachedDurationMs = 0L
-            // 新的一首：快到尾巴这件事重新上膛，回绕判定的上一拍也清掉。
+            // 新的一首：快到尾巴这件事重新上膛，回绕判定的上一拍与拖动门槛也清掉。
             nearEndFired = false
             lastTickPositionMs = 0L
+            nearEndFloorMs = 0L
         }
     }
 
@@ -281,7 +304,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
                 stopTicking()
                 return@runOnPlayer
             }
-            rampVolume(requestedVolume, 0f, PAUSE_FADE_MS) {
+            // 从当前音量淡下去，并且显式关掉「跟随音量」：淡入没跑完就暂停时，
+            // 那个标记会让这条淡出停在满音量上，一松手就是硬切。
+            rampVolume(current.volume, 0f, PAUSE_FADE_MS, followsVolume = false) {
                 current.setPlayWhenReady(false)
                 // 音量回到「本该是多少」：下一首从 0 淡进来，而不是继承这条斜坡的 0。
                 current.setVolume(requestedVolume)
@@ -294,11 +319,18 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      * 音量斜坡：把播放器音量从 [from] 滑到 [to]，分 [FADE_STEPS] 步、共 [durationMs]，
      * 滑完调 [then]（在播放器线程上）。淡入淡出关掉时直接落位、立刻回调。
      */
-    private fun rampVolume(from: Float, to: Float, durationMs: Int, then: (() -> Unit)? = null) {
+    private fun rampVolume(
+        from: Float,
+        to: Float,
+        durationMs: Int,
+        followsVolume: Boolean? = null,
+        then: (() -> Unit)? = null,
+    ) {
         // cancelFade 会把标记清掉，先把它记下来（play() 是在调本函数之前打开的）。
-        val followsVolume = fadeFollowsVolume
+        // 传了值就以传的为准：暂停要的是确定的淡出，不该跟着「跟随音量」跑。
+        val follow = followsVolume ?: fadeFollowsVolume
         cancelFade()
-        fadeFollowsVolume = followsVolume
+        fadeFollowsVolume = follow
         if (!pauseFadeEnabled || durationMs <= 0) {
             player?.setVolume(if (fadeFollowsVolume) requestedVolume else to)
             fadeFollowsVolume = false
@@ -332,12 +364,26 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
         fadeFollowsVolume = false
+        // 被淡出的那台还在出声：斜坡作废时必须在这里收掉，否则两首歌一起响。
+        crossfadeOutgoing?.let { outgoing ->
+            crossfadeOutgoing = null
+            try {
+                outgoing.stop()
+                outgoing.release()
+            } catch (ignored: Throwable) {
+                // 已经不可用了（重复 release / 线程已停）：没有更好的处理。
+            }
+        }
     }
 
     /** 设置里的「播放淡入淡出」跟着这一项走（默认开，见 FoliaSettingsStore 的 playbackFade）。 */
     fun setPauseFadeEnabled(enabled: Boolean) {
         pauseFadeEnabled = enabled
-        if (!enabled) {
+        if (enabled) {
+            return
+        }
+        // 这一发是从桥线程来的（设置页改开关）：碰播放器必须回播放器线程。
+        runOnPlayer {
             cancelFade()
             player?.setVolume(requestedVolume)
         }
@@ -389,14 +435,18 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
              * 上膛/退膛跟着这次 seek 走：拖回窗口之外要能再报一次，拖进窗口里则当场报 ——
              * 否则「手动拖进交叉淡化那一段」就什么都不会发生（进度条也就一直停在末尾）。
              */
-            val stillInWindow = crossfadeAheadMs > 0 && duration > 0
-                    && requestedRepeatMode != Player.REPEAT_MODE_ONE
-                    && duration - clamped <= crossfadeAheadMs
+            /*
+         * 拖进窗口**不当场换歌**，先松开手让它自然放一会儿。
+         *
+         * 用户把进度条拖到最后一小段，想听的是那几秒 —— 落地就起交叉等于把那几秒掐掉。
+         * 所以这里只重新上膛（拖回窗口之外要能再报一次），并给一道位置门槛：位置自然
+         * 走过这段之后，才轮到刻度里的判定（那里要求「剩余 ≤ 窗口」且「位置已过门槛」）。
+         * 拖到只剩不到这道门槛就什么都不会报，这首歌照常放完，由 ended 收尾。
+         */
             nearEndFired = false
-            if (stillInWindow) {
-                nearEndFired = true
-                emit("nearEnd", clamped, duration, null)
-            }
+            nearEndFloorMs = clamped + NEAR_END_SEEK_GRACE_MS
+            // 回绕判定以这次 seek 为基准，别把拖动当成「单曲循环转了一圈」。
+            lastTickPositionMs = clamped
             emit("position", clamped, if (duration > 0) duration else 0L, null)
         }
     }
@@ -413,6 +463,11 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         if (clamped == requestedVolume) return
         requestedVolume = clamped
         runOnPlayer {
+            if (crossfadeOutgoing != null) {
+                // 交叉淡化在跑：坡道每拍自己读 requestedVolume，这里换目标就够了，
+                // 绝不能 cancelFade —— 那台被淡出的旧播放器就再也没人收了。
+                return@runOnPlayer
+            }
             if (fadeTick != null && fadeFollowsVolume) {
                 // 淡入还没跑完：只换目标，坡道继续（见 rampVolume 的刻度）。
                 return@runOnPlayer
@@ -600,7 +655,18 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
              * 所以交叉一开始就把它摘掉，它之后的状态与我们无关。
              */
             old?.removeListener(playerListener)
+            /*
+             * ⭐ 新那台必须挂上监听。
+             *
+             * [buildExtraPlayer] 是「不报名事件」的（它建的时候还不是主角），但交叉一结束
+             * 它就成了 [player] —— 不挂，从第二首起就**彻底失去 ended / ready / buffering /
+             * onIsPlayingChanged**：最后一首放完不上报结束（自动下一首停在那里），
+             * 缓存里 cachedPlaying 也永远是 true。
+             */
+            incoming.addListener(playerListener)
             player = incoming
+            // 新的一首：手动拖动的宽限期作废。
+            nearEndFloorMs = 0L
             applySourceHeaders(url)
             incoming.setMediaItem(mediaItemFor(url, mediaId))
             incoming.setRepeatMode(requestedRepeatMode)
@@ -623,17 +689,25 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     /** 两条反向音量斜坡：新那台 0 → 音量，旧那台 音量 → 0，跑完释放旧的。 */
     private fun rampCrossfade(outgoing: ExoPlayer, incoming: ExoPlayer, durationMs: Int) {
         cancelFade()
+        crossfadeOutgoing = outgoing
         val stepMs = (durationMs / FADE_STEPS).coerceAtLeast(1)
-        val target = requestedVolume
         var step = 0
         val tick = object : Runnable {
             override fun run() {
                 step++
                 val progress = (step.toFloat() / FADE_STEPS).coerceIn(0f, 1f)
+                /*
+                 * 每拍读一次最新音量，而不是起跑那一刻定死。
+                 *
+                 * 交叉淡化跑好几秒，这期间响度补偿 / 用户改音量会推 setVolume 进来 ——
+                 * 目标定死的话，坡道跑完就落在一个过时的音量上（补偿白算）。
+                 */
+                val target = requestedVolume
                 incoming.setVolume((target * progress).coerceIn(0f, 1f))
                 outgoing.setVolume((target * (1f - progress)).coerceIn(0f, 1f))
                 if (step >= FADE_STEPS) {
                     fadeTick = null
+                    crossfadeOutgoing = null
                     outgoing.stop()
                     outgoing.release()
                 } else {

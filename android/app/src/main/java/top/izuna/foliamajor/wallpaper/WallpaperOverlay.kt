@@ -2644,27 +2644,38 @@ class WallpaperOverlay(private val context: Context) {
         if (view == null || !pageReady) {
             return
         }
-        val revision = WallpaperCappellaImages.revision()
-        if (revision == lastPushedCappella) {
+        val snapshot = WallpaperCappellaImages.read()
+        if (snapshot.revision == lastPushedCappella) {
             return
         }
-        lastPushedCappella = revision
+        lastPushedCappella = snapshot.revision
         val payload = org.json.JSONObject()
         try {
-            payload.put("avatars", org.json.JSONArray(WallpaperCappellaImages.avatars()))
-            payload.put("emojis", org.json.JSONArray(WallpaperCappellaImages.emojis()))
+            payload.put("avatars", org.json.JSONArray(snapshot.avatars))
+            payload.put("emojis", org.json.JSONArray(snapshot.emojis))
         } catch (error: Throwable) {
             // 解析不了就当没有：Cappella 回退到封面，不影响其它任何东西。
             lastPushedCappella = -1
             return
         }
         try {
+            /*
+             * 要**回执**，不是「调用没抛异常」。
+             *
+             * 页面里那个 handler 还没装上（脚本仍在跑 / 页面刚重载）时，注入的这段会
+             * 返回 "0" —— evaluateJavascript 是静默成功的，把「推过了」记进判重键，
+             * 图这一整首歌都不会再来了。整包那条通道也是靠回执判送达的。
+             */
             view.evaluateJavascript(
                 "(function(){if(window.__foliaWallpaperPushCappellaImages){" +
                 "window.__foliaWallpaperPushCappellaImages(" + payload.toString() + ");return 1;}" +
-                "return 0;})()",
-                null
-            )
+                "return 0;})()"
+            ) { result ->
+                if (result != null && result.contains("1")) {
+                    return@evaluateJavascript
+                }
+                lastPushedCappella = -1
+            }
         } catch (ignored: Throwable) {
             // 页面还在导航期会静默失败；把判重键清掉，下一轮巡检会再推一次。
             lastPushedCappella = -1

@@ -26,13 +26,13 @@ import { useBridgedAudio } from './useWallpaperBridgedAudio';
  * （尤其是会动的那一层：动态背景、粒子、逐字流光）恰好落在窗口已经全不透明的时候，
  * 用户看到的就是「歌词淡入正常，动态效果突然出现」。这 400ms 是为了吃掉那段空窗。
  */
+const CONTENT_DWELL_MS = 400;
+
 /**
  * 群唱自定义图的空数组：身份必须稳定，不能每次渲染都新建一个 []。
  * 可视化那边把它当 props 依赖，新建一次就等于「配置变了」，会把头像层重建一遍。
  */
 const NO_CAPPELLA_IMAGES: never[] = [];
-
-const CONTENT_DWELL_MS = 400;
 
 /**
  * 叠层的内容要**等 payload 安静下来**才画。

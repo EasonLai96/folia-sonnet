@@ -15,7 +15,6 @@ import type { AppOverlayModels } from './appWiring/useAppOverlayModels';
 import { FoliumStageLayerSlot } from '../../mods/folium/registries/stageLayers';
 import { type AutomixDeckId } from '../../services/automix/useAutomixDecks';
 import { consumeProgrammaticPause, playbackFade } from '../../services/playbackFade';
-// ⚠️ 临时诊断：横屏可视化里点击/滑动全无反应，装一版探针问清楚事件落在哪儿。定位完就删。
 import { hasLoopedToStart } from '../../services/playedTrackCache';
 import { currentTime, lyricCurrentTime } from '../../stores/motionSignals';
 import { endLoadingToPlay } from '../../stores/usePlaybackStore';

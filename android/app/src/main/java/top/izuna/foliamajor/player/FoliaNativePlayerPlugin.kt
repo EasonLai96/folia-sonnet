@@ -165,9 +165,10 @@ class FoliaNativePlayerPlugin : Plugin() {
          */
         @JvmStatic
         fun isNativePlaying(): Boolean {
-            val current = instance
-            val player = current?.player
-            return current != null && player != null && player.isPlaying()
+            // 读缓存（volatile），不碰播放器：这一发是从插件线程问的，而 ExoPlayer
+            // 独占自己那条 playerLooper —— 直读 isPlaying() 就是「Player is accessed
+            // on the wrong thread」那条崩溃的同款。
+            return instance?.player?.isPlaying() == true
         }
 
         /**
