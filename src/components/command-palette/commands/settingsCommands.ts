@@ -184,19 +184,6 @@ export const settingsCommands: CommandPaletteCommand[] = [
         },
     },
     {
-        id: 'transition-mode-automix',
-        isAvailable: context => (context ? context.settings.transitionMode !== 'automix' : true),
-        group: 'settings',
-        title: 'Transition mode: Folia Automix',
-        description: 'Analyse both tracks and mix them automatically',
-        keywords: ['automix', 'folia automix', 'transition mode automix', '自动混音', '过渡模式自动混音', 'gdmsauto'],
-        execute: (_input, context) => {
-            if (context.settings.transitionMode === 'automix') return false;
-            context.settings.setTransitionMode('automix');
-            return true;
-        },
-    },
-    {
         id: 'transition-performance-toggle',
         platform: ['electron'],
         // Hidden without a stem model, matching the disabled switch in the transition settings.

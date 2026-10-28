@@ -4,9 +4,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC } from '../../../../services/automix/crossfadePlanner';
 import { modelsPresent, subscribeModelAvailability } from '../../../../services/analysis/modelAvailability';
 import { ANALYSIS_MODELS_ENABLED, modelStoreSnapshot, subscribeModelStore, importModelFile, type DownloadableModel } from '../../../../services/analysis/modelStore';
-import { transitionCapabilities } from '../../../../services/automix/stems';
-import { announceTransition, type TransitionRenderer } from '../../../../services/automix/transitionCue';
-import { canAnalyseTracks } from '../../../../services/automix/transitionStrategy';
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { useAnalysisModelStore } from '../../../../stores/useAnalysisModelStore';
 import { useAutomixSettingsStore } from '../../../../stores/useAutomixSettingsStore';
@@ -14,7 +11,7 @@ import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsSt
 import { isCapacitorAndroid } from '../../../../platform/runtime';
 
 import { runsOnWindows } from '../../../../utils/platform';
-import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
+import { Button, Group, Reveal, Row, Segmented, Slider, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
 import AndroidAutoLandscapeSetting from '../AndroidAutoLandscapeSetting';
 import { useSettingsPage } from './settingsPageContext';
@@ -39,14 +36,16 @@ const BEHAVIOR: SettingsGroupDef = { id: 'queueSettings', titleKey: 'options.set
  */
 const MODELS: SettingsGroupDef = { id: 'analysisModels', titleKey: 'options.analysisModels', available: () => ANALYSIS_MODELS_ENABLED };
 
+/*
+ * 过渡只剩 crossfade 一档。
+ *
+ * AutoMix（那种按节拍对齐、能上分轨的过渡）与它那一组开关（性能档、过渡动画）已经删掉：
+ * 出声交给原生 ExoPlayer 之后，这些都是 Web Audio 图上的东西，开关在那儿也只是空跑。
+ * crossfade 与暂停 / 继续的淡化改由原生做音量斜坡（见 FoliaNativePlayer）。
+ */
 const O = {
     transition: option(TRANSITION, 'transitionEnable', 'options.transitionEnable'),
-    mode: option(TRANSITION, 'transitionMode', 'options.transitionMode'),
     crossfadeMax: option(TRANSITION, 'crossfadeMaxSeconds', 'options.crossfadeMaxSeconds'),
-    performance: option(TRANSITION, 'transitionPerformance', 'options.transitionPerformance'),
-    animation: option(TRANSITION, 'transitionAnimation', 'options.transitionAnimation'),
-    animationRing: option(TRANSITION, 'transitionAnimationRing', 'options.transitionAnimationRing'),
-    animationCard: option(TRANSITION, 'transitionAnimationCard', 'options.transitionAnimationCard'),
     outputDevice: option(SOUND, 'audioOutputDevice', 'options.audioOutputDevice'),
     replayGain: option(SOUND, 'replayGainSettings', 'options.replayGainMode'),
     fade: option(SOUND, 'playbackFade', 'options.playbackFade'),
@@ -84,14 +83,6 @@ const O = {
 };
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
-
-/**
- * The pass an animation chip plays when it is switched on: a ten-second blend at 120 BPM, addressed
- * to the drawing that was switched on, so the other one does not play again with it.
- */
-const previewCue = (renderer: TransitionRenderer) => (
-    { seconds: 10, crossover: 0.55, periodSec: 0.5, preview: renderer } as const
-);
 
 /**
  * One model's row: the switch is the listener's wish, and the words under it are what is actually
@@ -169,17 +160,9 @@ const PlaybackPage: React.FC = () => {
     const { voiceInputPause } = viewProps.lab;
     const automix = useAutomixSettingsStore(useShallow(state => ({
         enabled: state.automixEnabled,
-        mode: state.transitionMode,
         crossfadeMaxSec: state.crossfadeMaxSec,
-        performance: state.transitionPerformance,
-        animationRing: state.transitionAnimation,
-        animationCard: state.transitionAnimationCard,
         setEnabled: state.handleToggleAutomix,
-        setMode: state.handleSetTransitionMode,
         setCrossfadeMaxSec: state.handleSetCrossfadeMaxSec,
-        setPerformance: state.handleToggleTransitionPerformance,
-        setAnimationRing: state.handleToggleTransitionAnimation,
-        setAnimationCard: state.handleToggleTransitionAnimationCard,
     })));
     const audio = useAudioSettingsStore(useShallow(state => ({
         mediaCache: state.enableMediaCache,
@@ -201,26 +184,6 @@ const PlaybackPage: React.FC = () => {
     // Asked on every render, not kept: whether the models are on disk can change while the page is
     // open, and the subscription below only makes the page render again when it does.
     React.useSyncExternalStore(subscribeModelAvailability, modelsPresent);
-    const analysable = canAnalyseTracks();
-    const capabilities = transitionCapabilities();
-    const usesAutomix = automix.mode === 'automix';
-    // Automix without a full engine says why in place of what Automix does.
-    const modeHint = !usesAutomix
-        ? t('options.transitionCrossfadeDesc')
-        : !analysable || capabilities.full
-            ? t('options.transitionAutomixDesc')
-            : t(capabilities.desktop ? 'options.transitionEngineNeedsModels' : 'options.transitionEngineLiteDesc');
-
-    // Switching a drawing on plays it once at once; otherwise it would wait for the next long blend.
-    const animationChip = (def: SettingsOptionDef, renderer: TransitionRenderer, checked: boolean, set: (enabled: boolean) => void) => ({
-        id: def.id,
-        label: t(def.labelKey),
-        checked,
-        onChange: (next: boolean) => {
-            set(next);
-            if (next) announceTransition(previewCue(renderer));
-        },
-    });
 
     return (
         <>
@@ -229,75 +192,17 @@ const PlaybackPage: React.FC = () => {
                     <Toggle checked={automix.enabled} onChange={automix.setEnabled} />
                 </Row>
                 <Reveal when={automix.enabled}>
-                    <Row sub option={O.mode} hint={modeHint}>
-                        {/* The mode that runs is not always the chosen one: Automix that cannot
-                            measure a track runs as a crossfade, and without the models as the
-                            lighter engine. */}
-                        {usesAutomix && (analysable ? (
-                            <Status tone={capabilities.full ? 'ok' : undefined}>
-                                {t(capabilities.full ? 'options.transitionEngineFull' : 'options.transitionEngineLite')}
-                            </Status>
-                        ) : (
-                            <Status tone="warn">{t('options.transitionFellBack')}</Status>
-                        ))}
-                        <Segmented
-                            value={automix.mode}
-                            options={[
-                                { value: 'crossfade', label: t('options.transitionCrossfade') },
-                                { value: 'automix', label: t('options.transitionAutomix'), disabled: !analysable },
-                            ]}
-                            onChange={automix.setMode}
+                    {/* 只剩 crossfade 一档，所以「过渡要淡多久」直接跟着开关出现，
+                        不再挂在「选了哪个模式」下面。 */}
+                    <Row sub option={O.crossfadeMax} hint={t('options.transitionCrossfadeDesc')}>
+                        <Slider
+                            value={automix.crossfadeMaxSec}
+                            min={CROSSFADE_MIN_SEC}
+                            max={CROSSFADE_MAX_SEC}
+                            onChange={automix.setCrossfadeMaxSec}
+                            format={seconds => t('options.crossfadeSecondsValue', { seconds })}
                         />
                     </Row>
-                    <Reveal when={!usesAutomix}>
-                        <Row sub option={O.crossfadeMax}>
-                            <Slider
-                                value={automix.crossfadeMaxSec}
-                                min={CROSSFADE_MIN_SEC}
-                                max={CROSSFADE_MAX_SEC}
-                                onChange={automix.setCrossfadeMaxSec}
-                                format={seconds => t('options.crossfadeSecondsValue', { seconds })}
-                            />
-                        </Row>
-                    </Reveal>
-                    <Reveal when={usesAutomix}>
-                        {!analysable && <Row sub notice={t('options.transitionAutomixUnavailable')} />}
-                        <Reveal when={analysable && !audio.mediaCache}>
-                            <Row sub notice={t('options.transitionAutomixNeedsCache')}>
-                                <Button onClick={() => audio.setMediaCache(true)}>{t('options.transitionAutomixEnableCache')}</Button>
-                            </Row>
-                        </Reveal>
-                        {/* Kept in view when the app cannot separate a track: the reason is under the label. */}
-                        <Row
-                            sub
-                            option={O.performance}
-                            hint={t(capabilities.stems
-                                ? 'options.transitionPerformanceDesc'
-                                : capabilities.desktop ? 'options.transitionPerformanceNeedsModel' : 'options.transitionPerformanceNeedsStems')}
-                            disabled={!capabilities.stems}
-                        >
-                            <Toggle checked={automix.performance && capabilities.stems} onChange={automix.setPerformance} />
-                        </Row>
-                        <Row
-                            sub
-                            option={O.animation}
-                            hint={t('options.transitionAnimationDesc')}
-                            note={(
-                                <>
-                                    <span className="text-[color:var(--st-t1)]">{t('options.transitionAnimationRing')}</span> {t('options.transitionAnimationRingDesc')}
-                                    <br />
-                                    <span className="text-[color:var(--st-t1)]">{t('options.transitionAnimationCard')}</span> {t('options.transitionAnimationCardDesc')}
-                                </>
-                            )}
-                        >
-                            <Chips
-                                items={[
-                                    animationChip(O.animationRing, 'ring', automix.animationRing, automix.setAnimationRing),
-                                    animationChip(O.animationCard, 'card', automix.animationCard, automix.setAnimationCard),
-                                ]}
-                            />
-                        </Row>
-                    </Reveal>
                 </Reveal>
             </Group>
 
