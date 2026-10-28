@@ -16,8 +16,6 @@ import { FoliumStageLayerSlot } from '../../mods/folium/registries/stageLayers';
 import { type AutomixDeckId } from '../../services/automix/useAutomixDecks';
 import { consumeProgrammaticPause, playbackFade } from '../../services/playbackFade';
 // ⚠️ 临时诊断：横屏可视化里点击/滑动全无反应，装一版探针问清楚事件落在哪儿。定位完就删。
-import { installTouchProbe } from '../../services/touchProbe';
-import { useHdrProjectionActive } from '../../hooks/useHdrProjection';
 import { hasLoopedToStart } from '../../services/playedTrackCache';
 import { currentTime, lyricCurrentTime } from '../../stores/motionSignals';
 import { endLoadingToPlay } from '../../stores/usePlaybackStore';
@@ -55,7 +53,7 @@ import PlayerPanel from './PlayerPanel';
 import { visualizerBackdropStyle } from './presentation/playerVisualizerBackdrop';
 import StageSessionEmptyState from './stage/StageSessionEmptyState';
 import { AnimatePresence, motion } from 'framer-motion';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense } from 'react';
 
 // src/components/app/AppSurface.tsx
 // App 的舞台：音频元素与首页、墙、覆盖层的挂载顺序（原 App.tsx 里渲染的那一段）。
@@ -92,13 +90,6 @@ const AppSurface = ({ model }: { model: AppModel }) => {
         transitionMode, transparentPlayerBackground, updatePrompt, usesCustomWindowChrome, visualizerAroundWall,
         visualizerRendererModel, wallHandoff, wallToolsHost, wallpaperMode
     } = model;
-    /* ⚠️ 临时诊断（定位完删）：把横屏手势那几条判据挂到 window 上，探针弹条时一起报出来。 */
-    const probeHdrActive = useHdrProjectionActive();
-    useEffect(() => {
-        installTouchProbe();
-        (window as unknown as { __foliaProbeState?: () => string }).__foliaProbeState = () =>
-            `view=${currentView} panelHd=${model.isPanelOpen ? 1 : 0} swipe=${isPlayerSwipeEnabled ? 1 : 0} hud=${probeHdrActive ? 1 : 0} hideTap=${model.hidePlayerChromeOnTap ? 1 : 0} mode=${model.playerChromeVisibilityMode}`;
-    }, [currentView, isPlayerSwipeEnabled, model.hidePlayerChromeOnTap, model.isPanelOpen, model.playerChromeVisibilityMode, probeHdrActive]);
     // The two automix decks are identical and interchangeable. Every handler below ignores the
     // deck that is not currently active, so a track fading out in the background can never drive
     // the progress bar, the duration, the queue, or the player state.

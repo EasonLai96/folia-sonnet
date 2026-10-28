@@ -192,7 +192,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
              * 报在**还剩不到一个斜坡**的那一刻，服务收到就立刻起交叉 —— 旧那台还在出声，
              * 淡出才是真的淡出；等到 STATE_ENDED 才换，能淡的就只剩静音了。
              */
+            /*
+             * 单曲循环**不报 nearEnd**：那一圈结束要回到同一首的开头，而 nearEnd 是
+             * 「提前换下一首」的信号 —— 报出去就成了「单曲循环播到末尾自己跳下一首」。
+             * 判据用播放器自己的重复模式（JS 直接下发给播放器），比去问原生队列可靠：
+             * 队列的循环模式与 JS 的 effectiveLoopMode 不是同一份。
+             */
             if (!nearEndFired && crossfadeAheadMs > 0 && cachedDurationMs > 0
+                    && requestedRepeatMode != Player.REPEAT_MODE_ONE
                     && cachedDurationMs - position <= crossfadeAheadMs) {
                 nearEndFired = true
                 emit("nearEnd", position, cachedDurationMs, null)
@@ -383,6 +390,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
              * 否则「手动拖进交叉淡化那一段」就什么都不会发生（进度条也就一直停在末尾）。
              */
             val stillInWindow = crossfadeAheadMs > 0 && duration > 0
+                    && requestedRepeatMode != Player.REPEAT_MODE_ONE
                     && duration - clamped <= crossfadeAheadMs
             nearEndFired = false
             if (stillInWindow) {

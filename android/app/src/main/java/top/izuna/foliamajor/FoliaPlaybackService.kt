@@ -872,6 +872,28 @@ class FoliaPlaybackService : android.app.Service() {
                 .shared(this@FoliaPlaybackService).invalidateOverlay()
     }
 
+    /**
+     * 位置被跳过了：把通知栏 / 锁屏那条进度条重挂一次。
+     *
+     * 系统媒体通知与锁屏读的是 MediaSession 里的 PlaybackState，而它的位置**只在
+     * setPlaybackState 那一刻定格** —— 之后由系统按速率自己外推。所以：
+     *   · 在 App 里拖动进度条（Web → player.seek）：不重挂，通知栏那条还在原处继续数；
+     *   · 单曲循环回到开头：位置从末尾跳回 0，不重挂就一直数下去，永远不归零。
+     * 两件事用户都报了，根子是同一个：位置变了却没人告诉 MediaSession。
+     *
+     * 通知栏 / 锁屏自己拖动那条路（handleTransportSeek）本来就是全的，缺的是「App 内
+     * 拖动」和「播放器自己回绕」这两条没有 MediaSession 回调可走的路径 —— 它们都是从
+     * 播放器的 seeked 事件转进来的。
+     */
+    fun onPositionJump(positionMs: Long) {
+        if (positionMs >= 0L) {
+            cachedPositionMs = positionMs
+        }
+        publishSnapshot()
+        applyPlaybackState()
+        publishNotification()
+    }
+
     /** 「喜欢 / 取消喜欢」（通知栏、锁屏、系统媒体控制器共用）。 */
     private fun handleTransportLike() {
         if (nativePlaybackActive()) {
@@ -908,6 +930,8 @@ class FoliaPlaybackService : android.app.Service() {
             "finished" -> onTrackFinished()
             // 快到末尾（还剩一个斜坡）：交叉淡化要提前换，见 onNearEnd。
             "nearEnd" -> onNearEnd()
+            // 位置被跳过（App 里拖进度条 / 单曲循环回绕）：重挂一次进度，见 onPositionJump。
+            "positionJump" -> onPositionJump(intent.getLongExtra(EXTRA_COMMAND_POSITION, -1L))
             "like" -> handleTransportLike()
             "seek" -> {
                 val positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L)
@@ -2565,6 +2589,25 @@ class FoliaPlaybackService : android.app.Service() {
                 context.startService(intent)
             } catch (ignored: Throwable) {
                 Log.w(TAG, "末尾提前换歌的通知没送到服务", ignored as? Throwable)
+            }
+        }
+
+        /**
+         * 播放器那边位置跳了（App 内拖进度条 / 单曲循环回绕）→ 服务重挂 MediaSession 的进度。
+         */
+        @JvmStatic
+        fun requestNativePositionJump(context: Context?, positionMs: Long) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "positionJump")
+            intent.putExtra(EXTRA_COMMAND_POSITION, positionMs)
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "位置跳变的通知没送到服务", ignored as? Throwable)
             }
         }
 

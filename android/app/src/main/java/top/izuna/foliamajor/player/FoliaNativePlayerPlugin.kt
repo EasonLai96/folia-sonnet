@@ -340,7 +340,24 @@ class FoliaNativePlayerPlugin : Plugin() {
                     }
                     return
                 }
-                if ("ended" == type) {
+                /*
+         * 位置被跳过了：App 里拖动进度条（Web → player.seek）与单曲循环回绕都落到这里。
+         *
+         * 系统媒体通知 / 锁屏的进度条读的是 MediaSession 的 PlaybackState，位置只在
+         * setPlaybackState 那一刻定格、之后由系统外推 —— 不通知服务重挂一次，拖完进度条
+         * 通知栏还停在原处继续数，单曲循环回到开头也不会归零。
+         */
+        if ("seeked" == type) {
+            MAIN.post {
+                val context = instance?.getContext()
+                if (context != null
+                    && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
+                    top.izuna.foliamajor.FoliaPlaybackService
+                        .requestNativePositionJump(context, positionMs)
+                }
+            }
+        }
+        if ("ended" == type) {
                     /*
                      * 播完了 = 这首真的走完了。**原生立即决定接下来播什么**，不再等 JS。
                      *
