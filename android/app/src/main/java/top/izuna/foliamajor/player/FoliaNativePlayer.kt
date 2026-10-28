@@ -125,7 +125,6 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     @Volatile
     private var pauseFadeEnabled = true
     private var fadeTick: Runnable? = null
-    private val fadeHandler = android.os.Handler(android.os.Looper.getMainLooper())
     /** 别的线程要读（写锚点时判断要不要跳过），所以 volatile。 */
     @Volatile
     private var requestedSpeed = 1f
@@ -254,16 +253,16 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
                     fadeTick = null
                     then?.invoke()
                 } else {
-                    fadeHandler.postDelayed(this, stepMs.toLong())
+                    handler.postDelayed(this, stepMs.toLong())
                 }
             }
         }
         fadeTick = tick
-        fadeHandler.postDelayed(tick, stepMs.toLong())
+        handler.postDelayed(tick, stepMs.toLong())
     }
 
     private fun cancelFade() {
-        fadeTick?.let { fadeHandler.removeCallbacks(it) }
+        fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
     }
 
@@ -452,6 +451,88 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         val headers = top.izuna.foliamajor.online.MusicGateway.headersForPlaybackUrl(url)
         // media3 的 setDefaultRequestProperties 收 Map<String, String>（Kotlin 形态即可）。
         factory.setDefaultRequestProperties(headers)
+    }
+
+    /**
+     * 交叉淡化到下一首：另起一台播放器播新歌，旧那台在 [durationMs] 内淡出，淡完释放。
+     *
+     * 为什么必须是两台：一台播放器同一时刻只有一个音源，先停旧的再放新的，中间那段静音
+     * 是断的 —— 那就不是交叉，是切换。所以进来的那台先以 0 音量起播，两条音量斜坡反向
+     * 跑完，再收掉旧的那台。
+     *
+     * 状态（位置 / 时长 / mediaId / 事件）从调用那一刻起就归新那台报：界面上不该看见
+     * 「旧歌又跳了一下」。
+     *
+     * 返回 false = 没做交叉（没有正在出声的歌，或时长无效），调用方照旧 prepare + play。
+     */
+    fun crossfadeTo(url: String, mediaId: String?, durationMs: Int): Boolean {
+        if (durationMs <= 0) return false
+        val outgoing = player
+        if (outgoing == null || !cachedPlaying || outgoing.mediaItemCount == 0) return false
+        runOnPlayer {
+            val old = player
+            val incoming = buildExtraPlayer()
+            lastUrl = url
+            lastMediaId = mediaId
+            cachedPositionMs = 0L
+            cachedDurationMs = 0L
+            cachedPlaying = true
+            player = incoming
+            applySourceHeaders(url)
+            incoming.setMediaItem(mediaItemFor(url, mediaId))
+            incoming.setRepeatMode(requestedRepeatMode)
+            incoming.setPlaybackParameters(PlaybackParameters(requestedSpeed))
+            incoming.setVolume(0f)
+            incoming.prepare()
+            incoming.setPlayWhenReady(true)
+            emit("playing", 0L, 0L, null)
+            if (old == null) {
+                // 交叉判据是「旧那台在放」，走到这里说明它刚被换掉：直接满音量起播。
+                incoming.setVolume(requestedVolume)
+                return@runOnPlayer
+            }
+            rampCrossfade(old, incoming, durationMs)
+        }
+        return true
+    }
+
+    /** 两条反向音量斜坡：新那台 0 → 音量，旧那台 音量 → 0，跑完释放旧的。 */
+    private fun rampCrossfade(outgoing: ExoPlayer, incoming: ExoPlayer, durationMs: Int) {
+        cancelFade()
+        val stepMs = (durationMs / FADE_STEPS).coerceAtLeast(1)
+        val target = requestedVolume
+        var step = 0
+        val tick = object : Runnable {
+            override fun run() {
+                step++
+                val progress = (step.toFloat() / FADE_STEPS).coerceIn(0f, 1f)
+                incoming.setVolume((target * progress).coerceIn(0f, 1f))
+                outgoing.setVolume((target * (1f - progress)).coerceIn(0f, 1f))
+                if (step >= FADE_STEPS) {
+                    fadeTick = null
+                    outgoing.stop()
+                    outgoing.release()
+                } else {
+                    handler.postDelayed(this, stepMs.toLong())
+                }
+            }
+        }
+        fadeTick = tick
+        handler.postDelayed(tick, stepMs.toLong())
+    }
+
+    /** 交叉淡化用的第二台播放器：与 ensurePlayer 同规格，但不接管 [player]，也不报名事件。 */
+    private fun buildExtraPlayer(): ExoPlayer {
+        val factory = DefaultHttpDataSource.Factory()
+            .setUserAgent(BROWSER_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+        httpFactory = factory
+        val created = ExoPlayer.Builder(context)
+            .setLooper(playerLooper)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+            .build()
+        created.setAudioAttributes(AudioAttributes.DEFAULT, true)
+        return created
     }
 
     private fun ensurePlayer(): ExoPlayer {

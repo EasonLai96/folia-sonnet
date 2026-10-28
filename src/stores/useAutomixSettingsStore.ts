@@ -8,6 +8,7 @@ import { create } from 'zustand';
 
 import { clampCrossfadeSeconds, CROSSFADE_DEFAULT_SEC } from '../services/automix/crossfadePlanner';
 import { DEFAULT_TRANSITION_SETTINGS, type TransitionMode } from '../services/automix/transitionStrategy';
+import { writeNativeSettings } from '../services/nativeSettingsBridge';
 import { getStoredBoolean, setStoredBoolean } from './storagePrimitives';
 
 const AUTOMIX_ENABLED_KEY = 'folia_automix_enabled';
@@ -103,6 +104,8 @@ export const useAutomixSettingsStore = create<AutomixSettingsState>((set, get) =
     transitionAnimationCard: readTransitionAnimationCard(),
     handleToggleAutomix: (enable) => {
         setStoredBoolean(AUTOMIX_ENABLED_KEY, enable);
+        // 换歌的交叉淡化现在由原生做（两台播放器互相淡入淡出），开关得推过去。
+        void writeNativeSettings({ crossfadeEnabled: enable });
         // The models ship with the app, so there is nothing to prompt for (the "download the
         // models" reminder that opened here is gone with the downloads).
         set({ automixEnabled: enable });
@@ -117,6 +120,8 @@ export const useAutomixSettingsStore = create<AutomixSettingsState>((set, get) =
             localStorage.setItem(CROSSFADE_MAX_SEC_KEY, String(next));
         }
         set({ crossfadeMaxSec: next });
+        // 原生拿毫秒：这边是秒。
+        void writeNativeSettings({ crossfadeMs: Math.round(next * 1000) });
     },
     handleToggleTransitionPerformance: (enable) => {
         setStoredBoolean(TRANSITION_PERFORMANCE_KEY, enable);

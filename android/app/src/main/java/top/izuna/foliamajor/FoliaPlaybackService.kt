@@ -1287,9 +1287,37 @@ class FoliaPlaybackService : android.app.Service() {
      * 上层照旧按「成功」写状态，JS 那边也收到了 ok，于是界面换成了新歌、声音留在上一首，
      * 而且没有任何下文。现在如实回执，JS 转 Web 全流程自己放。
      */
+    /**
+     * 换歌时交叉淡化用多少毫秒：0 = 不做（没开过渡，或者换的就是同一首）。
+     *
+     * 设置里 crossfadeEnabled 是开关，crossfadeMs 是时长（Web 侧「最长秒数」推下来的）。
+     * 上限夹一下：斜坡本身分 FADE_STEPS 步，太长的值只会让步长变得没意义。
+     */
+    private fun crossfadeMsFor(songKey: String): Int {
+        if (songKey.isEmpty() || songKey == cachedSongKey) return 0
+        return try {
+            val settings = top.izuna.foliamajor.settings.FoliaSettingsStore.get(this)
+            if (!settings.getBoolean("crossfadeEnabled", false)) {
+                0
+            } else {
+                settings.getInt("crossfadeMs", 0).coerceIn(0, MAX_CROSSFADE_MS)
+            }
+        } catch (error: Throwable) {
+            Log.w(TAG, "读取交叉淡化设置失败，按不做处理", error)
+            0
+        }
+    }
+
     private fun nativePlayMirrorEntry(entry: org.json.JSONObject, url: String): Boolean {
         val songKey = entry.optString("songKey", "")
-        if (!top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url, songKey)) {
+        /*
+         * 交叉淡化：正在出声、换的是另一首、设置里开着，就走两台播放器的交叉。
+         * 没交叉成（没在放 / 时长 0）照旧装上一首就放。
+         */
+        val fadeMs = crossfadeMsFor(songKey)
+        val crossfaded = fadeMs > 0 &&
+                top.izuna.foliamajor.player.FoliaNativePlayerPlugin.crossfadeFromSystem(url, songKey, fadeMs)
+        if (!crossfaded && !top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url, songKey)) {
             Log.w(TAG, "原生播放器不在，地址装不上 songKey=" + songKey)
             if (!songKey.isEmpty()) {
                 mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
@@ -1299,7 +1327,8 @@ class FoliaPlaybackService : android.app.Service() {
         }
         // 起播成功就把「连续放不了」清掉：那是给自动跳过兜的上限，不该跨歌累计。
         consecutiveSkips = 0
-        top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
+        // 交叉那条路已经自己起播了；只有 prepare 那条需要显式 resume。
+        if (!crossfaded) top.izuna.foliamajor.player.FoliaNativePlayerPlugin.resumeFromSystem()
         val songChanged = !songKey.isEmpty() && songKey != cachedSongKey
         if (songChanged) {
             cachedSongKey = songKey
@@ -2216,6 +2245,9 @@ class FoliaPlaybackService : android.app.Service() {
          */
         private var consecutiveSkips = 0
         private const val MAX_CONSECUTIVE_SKIPS = 5
+
+        /** 交叉淡化的上限。再长就变成「两首歌叠在一起」而不是过渡了。 */
+        private const val MAX_CROSSFADE_MS = 12_000
 
         /**
          * 前台改了循环模式：落进设置，再让队列跟上。返回落盘后的整份设置给前台确认。

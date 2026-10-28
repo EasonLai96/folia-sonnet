@@ -176,6 +176,17 @@ class FoliaNativePlayerPlugin : Plugin() {
          * 这一项以前是 Web Audio 上的 gain 斜坡，原生出声之后那条链不参与了，所以斜坡搬到
          * 播放器自己身上（见 FoliaNativePlayer.rampVolume）。写设置与插件加载时各调一次。
          */
+        /**
+         * 交叉淡化到下一首（服务自己切歌时用）：两台播放器互相淡入淡出。
+         * 返回 false = 没交叉（没在放 / 时长无效），调用方照旧 prepare + play。
+         */
+        @JvmStatic
+        fun crossfadeFromSystem(url: String, mediaId: String?, durationMs: Int): Boolean {
+            val current = instance ?: return false
+            val player = current.player ?: return false
+            return player.crossfadeTo(url, mediaId, durationMs)
+        }
+
         @JvmStatic
         fun applyPlaybackFade(enabled: Boolean) {
             instance?.player?.setPauseFadeEnabled(enabled)
