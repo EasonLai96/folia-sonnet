@@ -5801,7 +5801,7 @@ export default {
         "sourceExportBatch": "The bottom row is the batch export: it opens the export page in the command palette and saves every lyric cached on this device at once. The Lyrics row under Cache Details in Settings · Storage & backup has the same entry.",
         "coverTab": "The Cover tab is the song itself: the large cover, the title, artists and album under it, then a row of actions. There is nothing else on this tab.",
         "coverTabDetail": "Artist and album are both links into their collections. Clicking the title copies \u201ctitle - artist - album\u201d together with the source page link; Ctrl-click opens this song's page on its source platform instead.",
-        "controlsTab": "The Controls tab starts with the volume row; the three tiles under it are loop, Smart transition and Audio effects: the first two switch on a click, the third opens a window.",
+        "controlsTab": "The Controls tab starts with the volume row; the two tiles under it, loop and Smart transition, switch on a click.",
         "controlsTabDetail": "Below are the Lyrics Style and Background Type rows and the “Transparent player background” switch; the last two rows are the theme: its source, the current theme, light or dark, and generating an AI theme. Audio gain and the lyric offset are on the source tab.",
         "queueTab": "The Playlist tab is the whole of the current play queue; the line at the top says how many songs are in it.",
         "queueTabDetail": "Click a row to play from that song; hover one and play next, move to the end and remove appear at its right. The header buttons lay the queue out as the Lattice wall and shuffle it. Rows cannot be dragged to reorder.",
