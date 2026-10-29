@@ -1410,58 +1410,64 @@ class MusicGateway private constructor() {
             val userId = session.userId
             val token = session.token
             val mid = kgMid()
+            // dfid 是 24 位大写随机串的语义（KuGouMusicApi 的 randomString(24)）：会话级复用，
+            // 真实 dfid（register_dev 颁发）有就用真实的。
             var dfid = session.dfid
-            if (dfid.isEmpty()) {
-                dfid = "-"
+            if (dfid.isEmpty() || "-" == dfid) {
+                dfid = kgRandomDfid()
             }
-            val parsed = LikeFallback.parseCookie(cookieFor("https://www.kugou.com/"))
             val clienttime = System.currentTimeMillis() / 1000L
-            // 参数表照 KuGouMusicApi song_url：key 与 signature 的拼法一字不差。
+            // 参数与签名照 KuGouMusicApi song_url（#103 真机验证过的唯一能过签的拼法）：
+            //  · key（tracker signKey）作为**普通参数**参与签名，而不是签名外的第二段；
+            //  · signature = MD5(盐 + 参数排序串 + 盐)，没有 body 段；
+            //  · 参数值全按字符串拼（数字在 JS 侧也是 toString 后进 query）。
+            // 之前两个失败拼法：v5/url 不带 signature（服务端按有签校验）与把 trackerKey
+            // 当签名第二段拼入 —— 都是 err signature（20006）。
+            val key = md5(cleanHash + KG_TRACKER_SECRET + KG_APPID + mid + userId)
             val params = java.util.TreeMap<String, String>()
-            params.put("album_id", "0")
-            params.put("album_audio_id", digitsOr(albumAudioId, "0"))
-            params.put("area_code", "1")
-            params.put("behavior", "play")
-            params.put("hash", cleanHash)
-            params.put("cmd", "26")
-            params.put("pid", KG_SONG_PID)
-            params.put("pidversion", "3001")
-            params.put("IsFreePart", "0")
-            params.put("cdnBackup", "1")
-            params.put("module", "")
-            params.put("page_id", KG_SONG_PAGE_ID)
-            params.put("ppage_id", KG_SONG_PPID)
-            params.put("quality", "128")
-            params.put("ssa_flag", "is_fromtrack")
-            params.put("version", KG_TRACKER_CLIENTVER)
-            params.put("clientver", KG_TRACKER_CLIENTVER)
-            params.put("appid", KG_APPID)
-            params.put("clienttime", clienttime.toString())
             params.put("dfid", dfid)
             params.put("mid", mid)
             params.put("uuid", "-")
-            params.put("userid", userId)
+            params.put("appid", KG_APPID)
+            params.put("clientver", KG_CLIENTVER)
+            params.put("clienttime", clienttime.toString())
             params.put("token", token)
-            // key 兼容官方 signKey：md5(hash + secret + appid + mid + userid)。
-            val trackerKey = md5(cleanHash + KG_TRACKER_SECRET + KG_APPID + mid + userId)
+            params.put("userid", userId)
+            params.put("album_id", "0")
+            params.put("area_code", "1")
+            params.put("hash", cleanHash)
+            params.put("ssa_flag", "is_fromtrack")
+            params.put("version", KG_TRACKER_CLIENTVER)
+            params.put("page_id", KG_SONG_PAGE_ID)
+            params.put("quality", "128")
+            params.put("album_audio_id", digitsOr(albumAudioId, "0"))
+            params.put("behavior", "play")
+            params.put("pid", KG_SONG_PID)
+            params.put("cmd", "26")
+            params.put("pidversion", "3001")
+            params.put("IsFreePart", "0")
+            params.put("ppage_id", KG_SONG_PPID)
+            params.put("cdnBackup", "1")
+            params.put("module", "")
+            params.put("clientver", KG_TRACKER_CLIENTVER)
+            params.put("key", key)
             val paramsString = StringBuilder()
             for (entry in params.entries) {
                 paramsString.append(entry.key).append('=').append(entry.value)
             }
-            val signature = md5(KG_SIGN_SALT + paramsString + trackerKey + KG_SIGN_SALT)
+            val signature = md5(KG_SIGN_SALT + paramsString + KG_SIGN_SALT)
             val query = StringBuilder()
             for (entry in params.entries) {
                 query.append(if (query.isNotEmpty()) "&" else "")
                         .append(urlEncode(entry.key)).append('=').append(urlEncode(entry.value))
             }
-            query.append("&key=").append(urlEncode(trackerKey))
-                    .append("&signature=").append(urlEncode(signature))
+            query.append("&signature=").append(urlEncode(signature))
             val connection = (URL("https://gateway.kugou.com/v5/url?" + query)
                     .openConnection()) as HttpURLConnection
             try {
                 connection.connectTimeout = 8000
                 connection.readTimeout = 10000
-                connection.setRequestProperty("Cookie", kgLeanCookie(parsed, userId, token, dfid))
+                connection.setRequestProperty("Cookie", kgLeanCookie(emptyMap(), userId, token, dfid))
                 connection.setRequestProperty("User-Agent", KG_ANDROID_UA)
                 connection.setRequestProperty("dfid", dfid)
                 connection.setRequestProperty("clienttime", clienttime.toString())
@@ -1480,6 +1486,17 @@ class MusicGateway private constructor() {
             } finally {
                 connection.disconnect()
             }
+        }
+
+        /** dfid 没有现成值时现造一个：24 位大写字母数字（照 KuGouMusicApi randomString(24) 的语义）。 */
+        private fun kgRandomDfid(): String {
+            val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            val builder = StringBuilder()
+            val random = Random()
+            for (i in 0 until 24) {
+                builder.append(alphabet[random.nextInt(alphabet.length)])
+            }
+            return builder.toString()
         }
 
         /** 照 parseKGPlayUrl：url / backupUrl / data.url 里挑第一个像 http 的。 */
