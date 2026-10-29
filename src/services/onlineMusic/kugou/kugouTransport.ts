@@ -417,6 +417,9 @@ const persistWebSession = (response: any): void => {
     if (token) writeProviderSessionValue('kugou', 'token', String(token));
     if (userId) writeProviderSessionValue('kugou', 'userid', String(userId));
     if (dfid) writeProviderSessionValue('kugou', 'dfid', String(dfid));
+    // 会话变了就同步一遍原生网关：原生兜底切歌拼 /v5/url 读的是推送过来的那份
+    // （cookie 罐不可靠，issue #103）。
+    syncKugouGatewayCredentials();
 };
 
 /**
@@ -439,6 +442,27 @@ export const getKugouTransportAvailability = () => {
     return getWebApiBase()
         ? { configured: true } as const
         : { configured: false, reason: 'not-configured' as const };
+};
+
+/**
+ * 把酷狗的会话三件套（userid / token / dfid）推给原生网关。
+ *
+ * 原生兜底切歌要自己拼 /v5/url，凭据只读 WebView 的 cookie 罐不可靠：罐子空了
+ * （系统清理 WebView 数据、登录没走到写 cookie 那步等）原生就按「游客」瞬间放弃，
+ * 自动跳过会把酷狗歌单连跳 5 首停住（issue #103）。凭据真正落在 providerStorage，
+ * 登录 / 登出（providerStorage 变化、账号刷新）时各推一次。没装插件（网页 / 桌面端、
+ * worker、单测）时空操作；userid/token 空＝登出，原生清掉。
+ */
+export const syncKugouGatewayCredentials = (): void => {
+    if (typeof window === 'undefined') return;
+    const plugin = (window as any).Capacitor?.Plugins?.FoliaNative;
+    if (!plugin?.setGatewayCredentials) return;
+    void plugin.setGatewayCredentials({
+        provider: 'kugou',
+        userId: readProviderSessionValue('kugou', 'userid') || '',
+        token: readProviderSessionValue('kugou', 'token') || '',
+        dfid: readProviderSessionValue('kugou', 'dfid') || '',
+    }).catch(() => undefined);
 };
 
 // Routes one provider request through Electron IPC or an explicitly configured Web backend.
@@ -522,6 +546,7 @@ export const requestKugou = async <T = unknown>(operation: KugouOperation, param
         const responseBody = await (limited ? withLoginRequestLimit(send) : send());
         // What a sign-out is answered with is the session that just left: it is not written back.
         if (targetOperation !== 'logout') persistWebSession(responseBody);
+        else syncKugouGatewayCredentials();
         const body = responseBody?.body ?? responseBody;
         return body;
     };

@@ -32,6 +32,7 @@ import {
     requestKugouAnonymousSearch,
     requestKugou,
     requestKugouLegacyPlayInfo,
+    syncKugouGatewayCredentials,
 } from './kugouTransport';
 import { describeKugouLoginFailure, kugouCheckFailure } from './kugouLoginFailure';
 import { describeKugouFailure, isKugouTimeout, kugouNoUrlError } from './kugouFailure';
@@ -1438,6 +1439,8 @@ export const kugouProvider: OnlineMusicProvider = {
         async logout() {
             const told = requestKugou('logout').catch(() => undefined);
             ['cookie', 'token', 'userid', 'dfid'].forEach(key => removeProviderSessionValue('kugou', key));
+            // 会话清了同步告诉原生：原生网关那份凭据跟着清（否则冻结期间还在用旧会话取流）。
+            syncKugouGatewayCredentials();
             clearKugouLikedCaches();
             kugouAnonymousSearchFallbackKeywords.clear();
             lastSeenKugouUserId = null;
@@ -1863,5 +1866,16 @@ export const kugouProvider: OnlineMusicProvider = {
                 list_create_listid: String(albumId),
             });
         },
+    },
+
+    /*
+     * 原生兜底切歌要用的酷狗凭据：交给原生网关（跑在 WebView 之外的那一份）。
+     *
+     * 原生拼 /v5/url 只读 cookie 罐不可靠（罐子空了就按「游客」瞬间放弃，自动跳过
+     * 连跳 5 首停住，issue #103）—— 凭据真正落在 providerStorage，这里推过去。
+     * 与飞牛的 nativeGateway 同一条纪律（见 omni.syncNativeGatewayCredentials）。
+     */
+    nativeGateway: {
+        syncCredentials: () => syncKugouGatewayCredentials(),
     },
 };

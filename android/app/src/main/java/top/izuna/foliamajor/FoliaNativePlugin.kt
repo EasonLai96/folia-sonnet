@@ -2023,6 +2023,14 @@ class FoliaNativePlugin : Plugin() {
             // 网易的「我喜欢」名单要 uid 才拉得动（weapi /song/like/get），
             // uid 只在 Web 层的账号缓存里 —— 登录 / 登出时推一份。
             top.izuna.foliamajor.online.MusicGateway.setNeteaseUid(call.getString("userId", ""))
+        } else if ("kugou" == provider) {
+            /*
+             * 酷狗的会话三件套：原生网关（MusicGateway.kugouPlayUrl）拼 /v5/url 要用。
+             * 只读 cookie 罐不可靠（罐子空了原生就按「游客」放弃，自动跳过连跳 5 首，
+             * issue #103），凭据真正落在 Web 层的 providerStorage —— 登录 / 登出时推一份。
+             */
+            top.izuna.foliamajor.online.MusicGateway.setKugouCredentials(
+                    call.getString("userId", ""), call.getString("token", ""), call.getString("dfid", ""))
         }
         call.resolve()
     }

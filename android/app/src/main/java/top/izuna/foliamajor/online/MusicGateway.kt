@@ -1351,24 +1351,70 @@ class MusicGateway private constructor() {
         @Volatile
         private var kgMidCache: String? = null
 
+        /*
+         * 酷狗的会话凭据（userid / token / dfid）。
+         *
+         * 只靠 WebView 的 cookie 罐是**不可靠的**：酷狗登录的凭据真正落在 Web 层的
+         * providerStorage（localStorage），cookie 罐里的 userid/token 只有走
+         * setBrowserCookies 那几条路才写进去；罐子一旦空了（系统清理 WebView 数据、
+         * 登录流程没走到写 cookie 那步等），这里读到的就是「游客」—— /v5/url 对游客
+         * 一律不回地址，按需解析瞬间 null，自动跳过就连跳 5 首停住（issue #103，
+         * 实测每次「解析」精确 1.7s ＝ 三次瞬间 null + 400/1200ms 退避，没发过网络请求）。
+         * 所以与飞牛同一条纪律：登录 / 登出时由 Web 层经 FoliaNative.setGatewayCredentials
+         * 推一份过来，cookie 罐只作回退（老版本 Web 没有这条推送）。
+         */
+        class KugouCredentials(val userId: String, val token: String, val dfid: String)
+
+        @Volatile
+        private var kugouCreds: KugouCredentials? = null
+
+        /** Web 层登录 / 登出时推送（FoliaNative.setGatewayCredentials）；userid/token 空＝登出。 */
+        @JvmStatic
+        fun setKugouCredentials(userId: String?, token: String?, dfid: String?) {
+            val cleanUser = userId?.trim() ?: ""
+            val cleanToken = token?.trim() ?: ""
+            if (cleanUser.isEmpty() || cleanToken.isEmpty() || "0" == cleanUser) {
+                kugouCreds = null
+                return
+            }
+            kugouCreds = KugouCredentials(cleanUser, cleanToken, dfid?.trim() ?: "")
+        }
+
+        /**
+         * 酷狗的会话三件套：先取 Web 层推送的那份，没有再读 cookie 罐。
+         * 回 null＝两边都没有登录态（真游客）。
+         */
+        private fun kugouSession(): KugouCredentials? {
+            kugouCreds?.let { return it }
+            val cookie = cookieFor("https://www.kugou.com/")
+            val parsed = LikeFallback.parseCookie(cookie)
+            val userId = digitsOr(LikeFallback.firstNonBlank(parsed, "userid", "KugooID"), "0")
+            val token = LikeFallback.firstNonBlank(parsed, "token", "t")
+            if ("0" == userId || token.isEmpty()) {
+                return null
+            }
+            return KugouCredentials(userId, token, LikeFallback.firstNonBlank(parsed, "dfid"))
+        }
+
         private fun kugouPlayUrl(hash: String?, albumAudioId: String?): String? {
             val cleanHash = hash?.trim()?.lowercase() ?: ""
             if (cleanHash.isEmpty()) {
                 return null
             }
-            val cookie = cookieFor("https://www.kugou.com/")
-            val parsed = LikeFallback.parseCookie(cookie)
-            val userId = digitsOr(LikeFallback.firstNonBlank(parsed, "userid", "KugooID"), "0")
-            val token = LikeFallback.firstNonBlank(parsed, "token", "t")
+            val session = kugouSession()
             // 没有会话（游客）时 /v5/url 不回地址：直接放弃，等 JS 那边的游客通道。
-            if ("0" == userId || token.isEmpty()) {
+            if (session == null) {
+                Log.w(TAG, "kugouPlayUrl: 无酷狗会话（推送凭据与 cookie 罐都没有），按游客放弃")
                 return null
             }
+            val userId = session.userId
+            val token = session.token
             val mid = kgMid()
-            var dfid = LikeFallback.firstNonBlank(parsed, "dfid")
+            var dfid = session.dfid
             if (dfid.isEmpty()) {
                 dfid = "-"
             }
+            val parsed = LikeFallback.parseCookie(cookieFor("https://www.kugou.com/"))
             val clienttime = System.currentTimeMillis() / 1000L
             // 参数表照 KuGouMusicApi song_url：key 与 signature 的拼法一字不差。
             val params = java.util.TreeMap<String, String>()
