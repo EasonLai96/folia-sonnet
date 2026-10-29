@@ -13,7 +13,8 @@ import { GroupLine } from './shell/GroupLine';
 import { useIsWideShortViewport } from './shell/panelViewport';
 
 // src/components/panelTab/ControlsTab.tsx
-// 控制标签页只负责装配，三组：声音（音量和三块）、外观（歌词样式、背景、播放页透明背景）、主题（来源和当前主题那一行）。
+// 控制标签页只负责装配，三组：声音（音量和两块）、外观（歌词样式、背景、播放页透明背景）、主题（来源和当前主题那一行）。
+// 音频效果器的入口已从声音组删掉（issue #107）；窗口仍由命令面板打开。
 //
 // 矮而宽（横过来的手机）时**分左右两栏**：那种窗口纵向只剩一百多像素，单栏要滚很久才看到
 // 主题那一行；横向反倒还剩一大半，摊成两栏一屏能看到的控件就多了一倍。竖屏不分 —— 那儿缺的
@@ -80,7 +81,7 @@ const ControlsTab: React.FC<ControlsTabProps> = ({
 }) => {
     const twoColumns = useIsWideShortViewport();
 
-    // 「声音」那一组：音量、播放顺序那三块、定时关闭。
+    // 「声音」那一组：音量、播放顺序那两块、定时关闭。
     const sound = (
         <>
             <VolumeRow
