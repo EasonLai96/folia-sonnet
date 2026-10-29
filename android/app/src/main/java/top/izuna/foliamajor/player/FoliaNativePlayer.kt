@@ -257,6 +257,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         cachedDurationMs = 0L
         runOnPlayer {
             val current = ensurePlayer()
+            /*
+             * 换源即收掉在途的交叉淡化（#104）。
+             *
+             * crossfadeTo 有 cancelFade 防重入，但普通换源不走它：连续自动跳过时
+             * 上一首还挂在 crossfadeOutgoing 里慢慢淡出，这里不收它就再也没人管 ——
+             * 新歌起播后旧歌继续出声，再来一次跳过就是 3+ 路音频叠着放。
+             */
+            cancelFade()
             // 有些源要附带请求头（飞牛的音频流认 Cookie: music-token）：
             // 每次换源都按地址重问一遍，没有就清空，别把上一首的头带给下一首。
             applySourceHeaders(url)
