@@ -1410,8 +1410,8 @@ class MusicGateway private constructor() {
             val userId = session.userId
             val token = session.token
             val mid = kgMid()
-            // dfid 是 24 位大写随机串的语义（KuGouMusicApi 的 randomString(24)）：会话级复用，
-            // 真实 dfid（register_dev 颁发）有就用真实的。
+            // dfid 是 24 位大写随机串的语义（KuGouMusicApi 的 randomString(24)）：
+            // 推送凭据里带了真 dfid 就用真的，没有现造一个（见 kgRandomDfid）。
             var dfid = session.dfid
             if (dfid.isEmpty() || "-" == dfid) {
                 dfid = kgRandomDfid()
@@ -1421,6 +1421,7 @@ class MusicGateway private constructor() {
             //  · key（tracker signKey）作为**普通参数**参与签名，而不是签名外的第二段；
             //  · signature = MD5(盐 + 参数排序串 + 盐)，没有 body 段；
             //  · 参数值全按字符串拼（数字在 JS 侧也是 toString 后进 query）。
+            //  · clientver 用 tracker 的 11430（song_url.js 的 clientver: 11430），不是 11440。
             // 之前两个失败拼法：v5/url 不带 signature（服务端按有签校验）与把 trackerKey
             // 当签名第二段拼入 —— 都是 err signature（20006）。
             val key = md5(cleanHash + KG_TRACKER_SECRET + KG_APPID + mid + userId)
@@ -1429,7 +1430,7 @@ class MusicGateway private constructor() {
             params.put("mid", mid)
             params.put("uuid", "-")
             params.put("appid", KG_APPID)
-            params.put("clientver", KG_CLIENTVER)
+            params.put("clientver", KG_TRACKER_CLIENTVER)
             params.put("clienttime", clienttime.toString())
             params.put("token", token)
             params.put("userid", userId)
@@ -1449,7 +1450,6 @@ class MusicGateway private constructor() {
             params.put("ppage_id", KG_SONG_PPID)
             params.put("cdnBackup", "1")
             params.put("module", "")
-            params.put("clientver", KG_TRACKER_CLIENTVER)
             params.put("key", key)
             val paramsString = StringBuilder()
             for (entry in params.entries) {
@@ -1488,7 +1488,13 @@ class MusicGateway private constructor() {
             }
         }
 
-        /** dfid 没有现成值时现造一个：24 位大写字母数字（照 KuGouMusicApi randomString(24) 的语义）。 */
+        /**
+         * dfid 没有现成值时现造一个：24 位大写字母数字（照 KuGouMusicApi randomString(24) 的语义）。
+         *
+         * 注意这是**每次调用新造**：官方客户端里 dfid 由 register_dev 颁发、长期不变，
+         * 我们拿不到真 dfid 时只能用一次性随机值。它只参与本次请求的签名与请求头，
+         * 服务端不要求跨请求一致，所以不必缓存。
+         */
         private fun kgRandomDfid(): String {
             val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
             val builder = StringBuilder()
