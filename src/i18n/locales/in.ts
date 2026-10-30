@@ -3340,6 +3340,7 @@ export default {
     "cloudCacheProbeFailed": "Tidak dapat menghubungi layanan awan: ",
     "cloudCachePrivacy": "Yang diunggah hanya hasil generasi (JSON tema / parameter animasi) dan MD5 file lirik — bukan teks lirik, prompt, maupun kunci.",
     "cloudCacheHit": "Diambil dari cache awan",
+    "cloudCacheHitLocal": "Diambil dari cache lokal",
     "openProviderConsole": "Buka konsol {{provider}}",
     "fontMarket": "Pasar font",
     "fontMarketDesc": "Font yang diterbitkan dari panel admin. Daftar memakai preview yang dibuat saat upload; file font baru diunduh setelah Anda menekan Pakai.",
