@@ -4,7 +4,7 @@ import { buildServiceStubModule, LOCAL_MUSIC_SERVICE_ROUTE } from '../../dev/pro
 import '../../dev/probes/homeBehavior/probeApi';
 
 // test/component/bravaisSeamRow.spec.ts
-// 信息条方向（设置「信息条方向」，默认自动）的组件用例（homeBehavior 探针 + setSuite('bravais')）：竖着的视口自动开横条、
+// 信息条方向（设置「信息条方向」，默认自动反向）的组件用例（homeBehavior 探针 + setSuite('bravais')）：显式自动在竖屏开横条、
 // 转屏时换方向；横条的首页窄缝按宽度退让（data-bravais-home-fit），测量副本不和真控件撞定位器；集合页的横条、
 // 「⋯ 更多」菜单完整落在视口里且离按钮近的一侧弹出；打开列表面板换成竖的开口、关上换回横条。
 // 只断言结构与几何（方向、退让级别、矩形），不比截图。
@@ -14,7 +14,7 @@ const seam = (page: Page) => page.locator('[data-bravais-seam]');
 const settled = (page: Page) => expect(stage(page)).not.toHaveAttribute('data-bravais-settling', /.*/, { timeout: 10_000 });
 const stack = (page: Page) => page.evaluate(() => window.__homeProbe!.stack());
 
-const setDirection = (page: Page, direction: 'auto' | 'vertical' | 'horizontal') => page.evaluate(async value => {
+const setDirection = (page: Page, direction: 'auto' | 'auto-reverse' | 'vertical' | 'horizontal') => page.evaluate(async value => {
     const modulePath = '/src/stores/useLibraryWallLookStore.ts';
     const { useLibraryWallLookStore } = await import(/* @vite-ignore */ modulePath);
     useLibraryWallLookStore.getState().setSeamDirection(value);
@@ -53,6 +53,7 @@ test.describe('[bravais-only] info strip direction', () => {
     test('auto opens a row on a portrait phone, gives way by width and turns with the screen', async ({ mount, page }) => {
         await page.setViewportSize({ width: 390, height: 844 });
         await mountBravais(mount, page);
+        await setDirection(page, 'auto');
         await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'y');
         await rowSettled(page);
 
@@ -79,10 +80,17 @@ test.describe('[bravais-only] info strip direction', () => {
         await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'x');
         await page.setViewportSize({ width: 390, height: 844 });
         await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'y', { timeout: 5_000 });
+
+        // 自动反向用同一个转屏判据，但横竖结果与自动相反。
+        await setDirection(page, 'auto-reverse');
+        await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'x', { timeout: 5_000 });
+        await page.setViewportSize({ width: 844, height: 390 });
+        await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'y', { timeout: 5_000 });
     });
 
     test('horizontal on a wide screen: full home row, collection row with its menu on screen, panel opens vertically', async ({ mount, page }) => {
         await mountBravais(mount, page);
+        await setDirection(page, 'vertical');
         await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'x');
         await setDirection(page, 'horizontal');
         await expect(seam(page)).toHaveAttribute('data-bravais-seam-axis', 'y', { timeout: 5_000 });

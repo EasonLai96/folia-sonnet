@@ -675,6 +675,9 @@ describe('buildImportPlan', () => {
         expect(keys(p)).toEqual(['libraryWallSeamDirection']);
         expect(p.groups).toEqual(['libraryWall']);
         expect(keys(plan({ libraryWallSeamDirection: '' }, { libraryWallSeamDirection: 'auto' }, unpinned))).toEqual([]);
+        const reversed = plan({ libraryWallSeamDirection: 'auto-reverse' }, { libraryWallSeamDirection: 'auto' }, unpinned);
+        expect(keys(reversed)).toEqual(['libraryWallSeamDirection']);
+        expect(reversed.groups).toEqual(['libraryWall']);
     });
 
     // 播放页顶栏模糊底属于「播放页长什么样」，归在 visualizer 组；false 是个真值，不能被当成「没写」。

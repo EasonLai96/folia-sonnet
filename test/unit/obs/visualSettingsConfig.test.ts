@@ -263,15 +263,18 @@ describe('buildVisualSettingsConfig', () => {
         useLibraryWallLookStore.setState({ seamClear: false, seamStyle: 'paper', backdropLyrics: false, backdropBlur: false });
     });
 
-    // Which way the info strip opens (auto / vertical / horizontal) travels with the look (short code lwsd).
-    it('carries the info strip direction', () => {
-        useLibraryWallLookStore.setState({ seamDirection: 'horizontal' });
+    // Issue #113：四档方向只用 lwsd 出口，不再导出独立 reverse 字段。
+    it.each(['auto', 'auto-reverse', 'vertical', 'horizontal'] as const)('exports and round-trips %s without the legacy reverse field', direction => {
+        useLibraryWallLookStore.setState({ seamDirection: direction });
         const config = buildVisualSettingsConfig();
-        expect(config.libraryWallSeamDirection).toBe('horizontal');
-        expect(decompressConfig(extractCfgFromInput(asObsUrl(compressConfig(config))))).toMatchObject({ libraryWallSeamDirection: 'horizontal' });
-        expect(decompressConfig(JSON.stringify({ lwsd: 'vertical' }))).toEqual({ libraryWallSeamDirection: 'vertical' });
-        expect(decompressConfig(JSON.stringify({ libraryWallSeamDirection: 'auto' }))).toMatchObject({ libraryWallSeamDirection: 'auto' });
-        useLibraryWallLookStore.setState({ seamDirection: 'auto' });
+        expect(config.libraryWallSeamDirection).toBe(direction);
+        expect(config).not.toHaveProperty('libraryWallSeamDirectionReverse');
+        const shortcode = compressConfig(config);
+        const minified = JSON.parse(Buffer.from(shortcode.slice('folia-theme://'.length), 'base64').toString('utf8'));
+        expect(minified.lwsd).toBe(direction);
+        expect(minified).not.toHaveProperty('lwdr');
+        expect(decompressConfig(extractCfgFromInput(asObsUrl(shortcode)))).toMatchObject({ libraryWallSeamDirection: direction });
+        useLibraryWallLookStore.setState({ seamDirection: 'auto-reverse' });
     });
 
     // 播放页标题栏后面那层磨砂底跟着「样子」一起走（短键 phb）；false 是个真值，配置能把它关掉。

@@ -17,6 +17,7 @@ import {
 } from '../types';
 import { normalizeRandomVisualizerModes } from './randomVisualizerModes';
 import { normalizeLumiereTuning } from './lumiereTuning';
+import { migrateLibraryWallSeamConfig } from './libraryWallSeamConfig';
 
 // src/utils/appearanceCodec.ts
 // The shareable appearance config codec: theme + visual settings <-> the minified `folia-theme://`
@@ -613,7 +614,6 @@ export const compressConfig = (config: any): string => {
     if (config.libraryWallBackdropBlur !== undefined) minified.lwbb = config.libraryWallBackdropBlur;
     if (config.libraryWallSeamDirection !== undefined) minified.lwsd = config.libraryWallSeamDirection;
     if (config.playerHeaderBlur !== undefined) minified.phb = config.playerHeaderBlur;
-    if (config.libraryWallSeamDirectionReverse !== undefined) minified.lwdr = config.libraryWallSeamDirectionReverse;
 
     const jsonStr = JSON.stringify(minified);
     const bytes = new TextEncoder().encode(jsonStr);
@@ -685,6 +685,7 @@ export const decompressConfig = (str: string): any => {
         || parsed.lwbl !== undefined
         || parsed.lwbb !== undefined
         || parsed.lwsd !== undefined
+        || parsed.lwdr !== undefined // 旧反向短码只读迁移。
         || parsed.phb !== undefined;
     if (isMinified) {
         const decompressed: any = {};
@@ -765,8 +766,9 @@ export const decompressConfig = (str: string): any => {
         if (parsed.phb !== undefined) decompressed.playerHeaderBlur = parsed.phb;
         if (parsed.lwdr !== undefined) decompressed.libraryWallSeamDirectionReverse = parsed.lwdr;
 
-        return decompressed;
+        return migrateLibraryWallSeamConfig(decompressed);
     } else {
+        parsed = migrateLibraryWallSeamConfig(parsed);
         // Frozen: the 13 lyric-style tunings in this list predate the visualizerTunings bundle, which carries any
         // new style. Do not add a lyric style here.
         const validKeys = [
@@ -787,7 +789,7 @@ export const decompressConfig = (str: string): any => {
             'libraryWallStackEdges',
             'libraryWallSeamClear', 'libraryWallSeamStyle', 'libraryWallBackdropLyrics', 'libraryWallBackdropBlur',
             'libraryWallSeamDirection',
-            'playerHeaderBlur', 'libraryWallSeamDirectionReverse',
+            'playerHeaderBlur',
         ];
         const hasValidKey = validKeys.some(k => parsed[k] !== undefined);
         if (!hasValidKey) {

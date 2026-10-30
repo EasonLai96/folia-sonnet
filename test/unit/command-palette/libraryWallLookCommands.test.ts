@@ -43,7 +43,7 @@ const createContext = (state: Settings) => {
             toggleLibraryWallSeamClear,
             toggleLibraryWallBackdropLyrics,
             toggleLibraryWallBackdropBlur,
-            libraryWallSeamDirection: () => state.seamDirection ?? 'auto',
+            libraryWallSeamDirection: () => state.seamDirection ?? 'auto-reverse',
             setLibraryWallSeamDirection,
             libraryWallSeamClear: () => state.seamClear ?? false,
             libraryWallSeamStyle: () => state.seamStyle ?? 'paper',
@@ -231,7 +231,7 @@ describe('bravais info strip and backdrop commands', () => {
 });
 
 describe('bravais info strip direction picker', () => {
-    it('is offered while bravais is the effective suite, lists auto / vertical / horizontal and applies the pick', async () => {
+    it('is offered while bravais is the effective suite, lists all four directions and applies the pick', async () => {
         const picker = command('library-wall-seam-direction-picker');
         expect(picker.surface).toBeDefined();
         expect(picker.executeShortcut).toBeUndefined();
@@ -240,12 +240,21 @@ describe('bravais info strip direction picker', () => {
 
         const { context, setLibraryWallSeamDirection } = createContext({ available: true, look: 'solid', windows: 3, seamDirection: 'auto' });
         const matches = libraryWallSeamDirectionPickerSurface.buildMatches!({ context, query: '' });
-        expect(matches.map(match => readLibraryWallPick(match.command.id))).toEqual(['auto', 'vertical', 'horizontal']);
+        expect(matches.map(match => readLibraryWallPick(match.command.id))).toEqual(['auto', 'auto-reverse', 'vertical', 'horizontal']);
         expect(matches[0].command.description).toMatch(/^In use/);
         const byLabel = libraryWallSeamDirectionPickerSurface.buildMatches!({ context, query: 'horiz' });
         expect(byLabel.map(match => readLibraryWallPick(match.command.id))).toEqual(['horizontal']);
         expect(await byLabel[0].command.execute('', context)).toBe(true);
         expect(setLibraryWallSeamDirection).toHaveBeenCalledWith('horizontal');
+    });
+
+    it('finds automatic reverse by reverse and applies it as a direction, not a separate toggle', async () => {
+        const { context, setLibraryWallSeamDirection } = createContext({ available: true, look: 'solid', windows: 3 });
+        const matches = libraryWallSeamDirectionPickerSurface.buildMatches!({ context, query: 'reverse' });
+        expect(matches.map(match => readLibraryWallPick(match.command.id))).toEqual(['auto-reverse']);
+        expect(matches[0].command.description).toMatch(/^In use/);
+        expect(await matches[0].command.execute('', context)).toBe(true);
+        expect(setLibraryWallSeamDirection).toHaveBeenCalledWith('auto-reverse');
     });
 });
 

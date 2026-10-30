@@ -41,7 +41,7 @@ beforeEach(async () => {
     document.body.appendChild(container);
     root = createRoot(container);
     const { useLibraryWallLookStore } = await import('@/stores/useLibraryWallLookStore');
-    useLibraryWallLookStore.setState({ look: 'partial', windowsPerBlock: 3, collectionStackEdges: true });
+    useLibraryWallLookStore.setState({ look: 'partial', windowsPerBlock: 3, collectionStackEdges: true, seamDirection: 'auto-reverse' });
 });
 
 afterEach(() => {
@@ -87,6 +87,30 @@ describe('BravaisWallGroup', () => {
         expect(lookButtons()).toHaveLength(3);
         expect(windowButtons()).toHaveLength(6);
         expect(container.querySelector('[data-settings-row="bravaisStackEdges"] [role="switch"]')).not.toBeNull();
+    });
+
+    it('offers four direction choices with automatic reverse selected and no separate reverse switch', async () => {
+        gate.isBravaisActive = true;
+        await render();
+        const { useLibraryWallLookStore } = await import('@/stores/useLibraryWallLookStore');
+        const choices = () => buttonsOf('bravaisSeamDirection');
+        expect(choices().map(button => button.textContent)).toEqual([
+            'options.bravaisSeamDirectionAuto',
+            'options.bravaisSeamDirectionAutoReverse',
+            'options.bravaisSeamDirectionVertical',
+            'options.bravaisSeamDirectionHorizontal',
+        ]);
+        expect(pressed(choices())).toEqual(['false', 'true', 'false', 'false']);
+        expect(container.querySelector('[data-settings-row="bravaisSeamDirectionReverse"]')).toBeNull();
+        expect(container.querySelector('[data-settings-row="bravaisSeamDirection"] [role="switch"]')).toBeNull();
+
+        for (const [index, direction] of ['auto', 'auto-reverse', 'vertical', 'horizontal'].entries()) {
+            act(() => choices()[index].click());
+            expect(useLibraryWallLookStore.getState().seamDirection).toBe(direction);
+            expect(storage.get('library_wall_seam_direction')).toBe(direction);
+            expect(storage.has('library_wall_seam_direction_reverse')).toBe(false);
+            expect(container.querySelector('[data-settings-row="bravaisSeamDirectionReverse"]')).toBeNull();
+        }
     });
 
     it('turns the collection stack edges off and on again', async () => {

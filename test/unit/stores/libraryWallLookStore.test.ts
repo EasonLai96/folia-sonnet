@@ -30,11 +30,13 @@ const BACKDROP_BLUR_KEY = 'library_wall_backdrop_blur';
 type StorageOptions = { throwOnGet?: boolean; throwOnSet?: boolean; noWindow?: boolean };
 
 let storage: Map<string, string>;
+let storageWrites = vi.fn<(key: string, value: string) => void>();
 
 /** 按给定的存储内容「重启」一次：重新 import store。 */
 const loadStore = async (initial: Record<string, string> = {}, options: StorageOptions = {}): Promise<typeof StoreHook> => {
     vi.resetModules();
     storage = new Map(Object.entries(initial));
+    storageWrites = vi.fn<(key: string, value: string) => void>();
     if (!options.noWindow) vi.stubGlobal('window', {});
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => {
@@ -42,6 +44,7 @@ const loadStore = async (initial: Record<string, string> = {}, options: StorageO
             return storage.get(key) ?? null;
         },
         setItem: (key: string, value: string) => {
+            storageWrites(key, value);
             if (options.throwOnSet) throw new Error('quota exceeded');
             storage.set(key, value);
         },
@@ -243,36 +246,68 @@ describe('useLibraryWallLookStore', () => {
         expect((await loadStore({ [BACKDROP_BLUR_KEY]: 'true' }, { throwOnGet: true })).getState().backdropBlur).toBe(false);
     });
 
-    // 信息条方向：默认自动（按视口形状）；三个取值以外的回默认后再写，读不到也按默认。
-    it('opens the info strip by the screen shape by default and persists a fixed direction', async () => {
+    // Issue #113：四档方向，默认自动反向；旧反向键仅在方向缺失 / 非法时兼容读取，不再写入。
+    it('defaults to auto-reverse and persists all four explicit choices without writing the legacy key', async () => {
         const store = await loadStore();
-        expect(store.getState().seamDirection).toBe('auto');
+        expect(store.getState().seamDirection).toBe('auto-reverse');
+        expect(store.getState()).not.toHaveProperty('seamDirectionReverse');
+        expect(store.getState()).not.toHaveProperty('setSeamDirectionReverse');
         expect(storage.size).toBe(0);
 
-        store.getState().setSeamDirection('horizontal');
-        expect(storage.get(SEAM_DIRECTION_KEY)).toBe('horizontal');
-        const restarted = await loadStore(Object.fromEntries(storage));
-        expect(restarted.getState().seamDirection).toBe('horizontal');
-
-        restarted.getState().setSeamDirection('sideways' as never);
-        expect(storage.get(SEAM_DIRECTION_KEY)).toBe('auto');
-        expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'Vertical' })).getState().seamDirection).toBe('auto');
-        expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'vertical' })).getState().seamDirection).toBe('vertical');
-        expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'vertical' }, { throwOnGet: true })).getState().seamDirection).toBe('auto');
+        for (const direction of ['auto', 'auto-reverse', 'vertical', 'horizontal'] as const) {
+            store.getState().setSeamDirection(direction);
+            expect(store.getState().seamDirection).toBe(direction);
+            expect(storage.get(SEAM_DIRECTION_KEY)).toBe(direction);
+            expect(storage.has(SEAM_DIRECTION_REVERSE_KEY)).toBe(false);
+            expect((await loadStore(Object.fromEntries(storage))).getState().seamDirection).toBe(direction);
+        }
     });
 
-    // 反向只翻「自动」那一支，默认开（2026-10-24）：只认 'false' 为关，读不到也按默认开。
-    it('flips the automatic direction by default and persists the choice', async () => {
+    it('normalizes invalid setter values and uses auto-reverse when storage is unavailable', async () => {
         const store = await loadStore();
-        expect(store.getState().seamDirectionReverse).toBe(true);
-        expect(storage.size).toBe(0);
+        store.getState().setSeamDirection('sideways' as never);
+        expect(store.getState().seamDirection).toBe('auto-reverse');
+        expect(storage.get(SEAM_DIRECTION_KEY)).toBe('auto-reverse');
+        expect((await loadStore({ [SEAM_DIRECTION_KEY]: 'vertical', [SEAM_DIRECTION_REVERSE_KEY]: 'false' }, { throwOnGet: true })).getState().seamDirection).toBe('auto-reverse');
+    });
 
-        store.getState().setSeamDirectionReverse(false);
+    it.each([
+        [{}, 'auto-reverse'],
+        [{ [SEAM_DIRECTION_REVERSE_KEY]: 'false' }, 'auto'],
+        [{ [SEAM_DIRECTION_REVERSE_KEY]: 'true' }, 'auto-reverse'],
+        [{ [SEAM_DIRECTION_REVERSE_KEY]: 'yes' }, 'auto-reverse'],
+        [{ [SEAM_DIRECTION_KEY]: 'sideways', [SEAM_DIRECTION_REVERSE_KEY]: 'false' }, 'auto'],
+        [{ [SEAM_DIRECTION_KEY]: 'sideways', [SEAM_DIRECTION_REVERSE_KEY]: 'true' }, 'auto-reverse'],
+        [{ [SEAM_DIRECTION_KEY]: 'Vertical' }, 'auto-reverse'],
+    ])('restores missing or invalid direction from legacy storage %j as %s', async (initial, expected) => {
+        const store = await loadStore(initial);
+        expect(store.getState().seamDirection).toBe(expected);
+        expect(Object.fromEntries(storage)).toEqual(initial);
+    });
+
+    it('lets every valid stored direction win over the legacy flag, including explicit auto', async () => {
+        for (const direction of ['auto', 'auto-reverse', 'vertical', 'horizontal']) {
+            for (const legacy of ['true', 'false']) {
+                const initial = { [SEAM_DIRECTION_KEY]: direction, [SEAM_DIRECTION_REVERSE_KEY]: legacy };
+                const store = await loadStore(initial);
+                expect(store.getState().seamDirection).toBe(direction);
+                expect(Object.fromEntries(storage)).toEqual(initial);
+                expect(storageWrites).not.toHaveBeenCalled();
+                store.getState().setSeamDirection('horizontal');
+                expect(storageWrites.mock.calls).toEqual([[SEAM_DIRECTION_KEY, 'horizontal']]);
+                expect(storage.get(SEAM_DIRECTION_REVERSE_KEY)).toBe(legacy);
+            }
+        }
+    });
+
+    it('applies the same legacy migration on hydrate without rewriting old preferences', async () => {
+        const store = await loadStore();
+        storage.set(SEAM_DIRECTION_REVERSE_KEY, 'false');
+        store.getState().hydrate();
+        expect(store.getState().seamDirection).toBe('auto');
+        storage.set(SEAM_DIRECTION_KEY, 'auto-reverse');
+        store.getState().hydrate();
+        expect(store.getState().seamDirection).toBe('auto-reverse');
         expect(storage.get(SEAM_DIRECTION_REVERSE_KEY)).toBe('false');
-        expect((await loadStore(Object.fromEntries(storage))).getState().seamDirectionReverse).toBe(false);
-
-        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'false' })).getState().seamDirectionReverse).toBe(false);
-        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'yes' })).getState().seamDirectionReverse).toBe(true);
-        expect((await loadStore({ [SEAM_DIRECTION_REVERSE_KEY]: 'false' }, { throwOnGet: true })).getState().seamDirectionReverse).toBe(true);
     });
 });

@@ -6,10 +6,13 @@ import {
     isLibraryWallSeamDirection,
     normalizeLibraryWallSeamDirection,
     resolveLibraryWallSeamHorizontal,
+    restoreLibraryWallSeamDirection,
+    LIBRARY_WALL_SEAM_DIRECTION_TEXT,
+    isPortraitWall,
 } from '@/utils/libraryWallSeamDirection';
 
 // test/unit/utils/libraryWallSeamDirection.test.ts
-// bravais 信息条方向的取值规则：三个取值、默认自动、非法值回默认；自动时只有明显竖着的视口（高 ≥ 宽 × 1.1）开横条。
+// bravais 信息条方向的取值规则：四档、默认自动反向、非法值回默认；两个自动档共享竖屏阈值，固定档不翻转。
 
 /** 按 CSS 的 max-aspect-ratio 语义算这条查询在某个视口上命不命中（宽 / 高 ≤ 比值）。 */
 const matchesPortraitQuery = (width: number, height: number) => {
@@ -19,21 +22,40 @@ const matchesPortraitQuery = (width: number, height: number) => {
 };
 
 describe('libraryWallSeamDirection', () => {
-    it('lists auto / vertical / horizontal, defaults to auto and normalizes anything else to it', () => {
-        expect(LIBRARY_WALL_SEAM_DIRECTIONS).toEqual(['auto', 'vertical', 'horizontal']);
-        expect(DEFAULT_LIBRARY_WALL_SEAM_DIRECTION).toBe('auto');
-        expect(LIBRARY_WALL_SEAM_DIRECTIONS.every(isLibraryWallSeamDirection)).toBe(true);
-        expect(normalizeLibraryWallSeamDirection('vertical')).toBe('vertical');
+    it('lists four choices, defaults to auto-reverse and preserves every valid direction', () => {
+        expect(LIBRARY_WALL_SEAM_DIRECTIONS).toEqual(['auto', 'auto-reverse', 'vertical', 'horizontal']);
+        expect(DEFAULT_LIBRARY_WALL_SEAM_DIRECTION).toBe('auto-reverse');
+        for (const direction of LIBRARY_WALL_SEAM_DIRECTIONS) {
+            expect(isLibraryWallSeamDirection(direction)).toBe(true);
+            expect(normalizeLibraryWallSeamDirection(direction)).toBe(direction);
+            expect(LIBRARY_WALL_SEAM_DIRECTION_TEXT[direction]).toHaveProperty('label');
+            expect(LIBRARY_WALL_SEAM_DIRECTION_TEXT[direction]).toHaveProperty('description');
+        }
         for (const value of [undefined, null, '', 'Horizontal', 'sideways', 1, true]) {
-            expect(normalizeLibraryWallSeamDirection(value)).toBe('auto');
+            expect(isLibraryWallSeamDirection(value)).toBe(false);
+            expect(normalizeLibraryWallSeamDirection(value)).toBe('auto-reverse');
         }
     });
 
-    it('opens rows on portrait screens only when automatic, and follows a fixed choice otherwise', () => {
-        expect(resolveLibraryWallSeamHorizontal('auto', true)).toBe(true);
-        expect(resolveLibraryWallSeamHorizontal('auto', false)).toBe(false);
-        expect(resolveLibraryWallSeamHorizontal('horizontal', false)).toBe(true);
-        expect(resolveLibraryWallSeamHorizontal('vertical', true)).toBe(false);
+    it.each([true, false])('uses opposite automatic axes and leaves fixed choices unchanged (portrait=%s)', portrait => {
+        expect(resolveLibraryWallSeamHorizontal('auto', portrait)).toBe(portrait);
+        expect(resolveLibraryWallSeamHorizontal('auto-reverse', portrait)).toBe(!portrait);
+        expect(resolveLibraryWallSeamHorizontal('horizontal', portrait)).toBe(true);
+        expect(resolveLibraryWallSeamHorizontal('vertical', portrait)).toBe(false);
+    });
+
+    it('restores the legacy reverse key only when the direction is missing or invalid', () => {
+        for (const direction of LIBRARY_WALL_SEAM_DIRECTIONS) {
+            for (const legacy of [undefined, null, 'true', 'false', 'yes']) {
+                expect(restoreLibraryWallSeamDirection(direction, legacy)).toBe(direction);
+            }
+        }
+        for (const invalid of [undefined, null, '', 'sideways']) {
+            expect(restoreLibraryWallSeamDirection(invalid, 'false')).toBe('auto');
+            for (const legacy of [undefined, null, 'true', 'False', 'yes']) {
+                expect(restoreLibraryWallSeamDirection(invalid, legacy)).toBe('auto-reverse');
+            }
+        }
     });
 
     it('counts only clearly tall viewports as portrait, so near-square windows do not flip back and forth', () => {
@@ -41,6 +63,9 @@ describe('libraryWallSeamDirection', () => {
         expect(matchesPortraitQuery(768, 1024)).toBe(true);
         expect(matchesPortraitQuery(1000, 1100)).toBe(true);
         expect(matchesPortraitQuery(1000, 1099)).toBe(false);
+        expect(isPortraitWall(1000, 1100)).toBe(true);
+        expect(isPortraitWall(1000, 1099)).toBe(false);
+        expect(isPortraitWall(0, 1100)).toBe(false);
         expect(matchesPortraitQuery(900, 950)).toBe(false);
         expect(matchesPortraitQuery(1440, 900)).toBe(false);
         expect(matchesPortraitQuery(852, 393)).toBe(false);
