@@ -3341,6 +3341,7 @@ export default {
     "cloudCacheProbeFailed": "连不上云服务：",
     "cloudCachePrivacy": "只上传生成结果（主题 JSON / 动画参数）与歌词文件的 MD5，不上传歌词原文、提示词与密钥。",
     "cloudCacheHit": "已从云端拉取缓存",
+    "cloudCacheHitLocal": "已从本地缓存拉取",
     "openProviderConsole": "前往 {{provider}} 开放平台",
     "fontMarket": "字体市场",
     "fontMarketDesc": "后台上架的字体。列表里看到的是上传时就烤好的预览图，点「使用」才会下载字体文件。",

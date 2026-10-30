@@ -3340,6 +3340,7 @@ export default {
     "cloudCacheProbeFailed": "Cannot reach the cloud service: ",
     "cloudCachePrivacy": "Only generation results (theme JSON / animation params) and the lyric file MD5 are uploaded — never lyric text, prompts or keys.",
     "cloudCacheHit": "Pulled from the cloud cache",
+    "cloudCacheHitLocal": "Pulled from the local cache",
     "openProviderConsole": "Open the {{provider}} console",
     "fontMarket": "Font market",
     "fontMarketDesc": "Fonts published from the admin panel. The list shows the preview baked at upload time; the font file is only downloaded once you tap Use.",
