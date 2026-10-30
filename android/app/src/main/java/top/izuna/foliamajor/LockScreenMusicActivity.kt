@@ -256,6 +256,12 @@ class LockScreenMusicActivity : Activity() {
         }
     }
 
+    override fun onStop() {
+        // 解锁后可能只停在 STOPPED，不会立刻销毁；先交还宿主，避免 PANEL 窗口残留在桌面。
+        top.izuna.foliamajor.wallpaper.WallpaperOverlay.shared(this).setLockScreenHost(null)
+        super.onStop()
+    }
+
     /**
      * 把窗口 token 交给叠层。
      *
