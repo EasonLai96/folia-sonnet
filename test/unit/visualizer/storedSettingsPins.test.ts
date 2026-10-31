@@ -20,6 +20,7 @@ import {
 } from '@/types';
 import { DEFAULT_HANABI_TUNING } from '@/components/visualizer/hanabi/types';
 import { DEFAULT_MACHI_TUNING } from '@/components/visualizer/machi/types';
+import { DEFAULT_NEBBIA_TUNING } from '@/components/visualizer/nebbia/types';
 
 // test/unit/visualizer/storedSettingsPins.test.ts
 // Pins what the lyric styles and the backgrounds keep in localStorage: for every one of them, what
@@ -157,6 +158,12 @@ const CURRENT: Record<string, unknown> = {
         motion: !DEFAULT_MACHI_TUNING.motion, motionSpeed: 1.5, aperture: 2.8, dof: 0.5, dofRange: 2,
         tiltShift: 0.6, focus: 'lyrics', focusOffset: 2,
     },
+    nebbia_tuning: {
+        ...DEFAULT_NEBBIA_TUNING,
+        jitter: 1.2, mist: 0.4, hold: 2, refog: 6, strokeWidth: 0.15, writeSpeed: 1.6, doodle: 0.8, busSpeed: 0.5,
+        neon: 0.6, spot: 1.2, spotX: 0.3, rainHit: 0.5, rainBig: 1.5, bump: 0.4, resolution: 1.5,
+        credits: !DEFAULT_NEBBIA_TUNING.credits, layouts: ['lines2', 'badge'],
+    },
     monet_background_tuning: {
         ...DEFAULT_MONET_BACKGROUND_TUNING,
         backgroundSource: 'uploaded-global', backgroundLayout: 'half-pane-gradient', backgroundBlurPx: 24, backgroundOverlayOpacity: 0.3,
@@ -187,7 +194,7 @@ const DEFAULTS: Record<string, unknown> = {
     fume_tuning: DEFAULT_FUME_TUNING, claddagh_tuning: DEFAULT_CLADDAGH_TUNING, cappella_tuning: DEFAULT_CAPPELLA_TUNING,
     tilt_tuning: DEFAULT_TILT_TUNING, diorama_tuning: DEFAULT_DIORAMA_TUNING, monet_tuning: DEFAULT_MONET_TUNING,
     pendolo_tuning: DEFAULT_PENDOLO_TUNING, sonnet_tuning: DEFAULT_SONNET_TUNING, tempera_tuning: DEFAULT_TEMPERA_TUNING,
-    lumiere_tuning: DEFAULT_LUMIERE_TUNING, hanabi_tuning: DEFAULT_HANABI_TUNING, machi_tuning: DEFAULT_MACHI_TUNING, monet_background_tuning: DEFAULT_MONET_BACKGROUND_TUNING,
+    lumiere_tuning: DEFAULT_LUMIERE_TUNING, hanabi_tuning: DEFAULT_HANABI_TUNING, machi_tuning: DEFAULT_MACHI_TUNING, nebbia_tuning: DEFAULT_NEBBIA_TUNING, monet_background_tuning: DEFAULT_MONET_BACKGROUND_TUNING,
     nomand_background_tuning: DEFAULT_NOMAND_BACKGROUND_TUNING, latent_background_tuning: DEFAULT_LATENT_BACKGROUND_TUNING,
     sora_background_tuning: DEFAULT_SORA_BACKGROUND_TUNING,
 };
