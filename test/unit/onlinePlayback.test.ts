@@ -558,4 +558,47 @@ describe('instrumental tracks, once auto-match has settled them', () => {
         expect(merged.importedLyrics).toBe(imported);
         expect(merged.matchedIsPureMusic).toBe(true);
     });
-});
+
+describe('#160 自动匹配的胜者是歌曲自己那个平台时，歌词不能被丢掉', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        songCacheMock.mockResolvedValue(null);
+        loadLyricsStateMock.mockResolvedValue(null);
+    });
+
+    it('uses the matched lyrics when only the song\'s own provider has them', async () => {
+        // 现场：酷狗这首歌自己的歌词接口回了空，自动匹配最后取到的胜者仍是 kugou
+        // （日志里的 "Keeping kugou line-by-line lyrics as fallback"）。
+        // 旧代码要求 bestMatch.source !== ownProviderId 才采用，于是这份唯一的歌词被丢掉，
+        // 用户看到空歌词；手动匹配走另一条路没有这个判断，所以手动匹一下就有了。
+        const kugouSong: SongResult = {
+            ...song,
+            id: 301,
+            sourceRef: { kind: 'online', providerId: 'kugou', mediaId: 'kg-hash' },
+        };
+        const matched = {
+            lines: [{ startTime: 0, endTime: 1, fullText: 'matched line', words: [] }],
+            isWordByWord: false,
+        };
+        // 原平台自己的歌词是空的。
+        lyricsMock.mockResolvedValue({ lyrics: null, mainText: null, isPureMusic: false });
+        // 自动匹配从同平台拿到了一份逐行歌词。
+        autoMatchMock.mockResolvedValue({
+            lyrics: matched,
+            source: 'kugou',
+            id: 'kg-hash',
+            song: kugouSong,
+        });
+
+        const onLyrics = vi.fn();
+        await loadOnlineSongLyrics(kugouSong, null, null, {
+            isCurrent: () => true,
+            onLyrics,
+            onDone: vi.fn(),
+        });
+
+        const delivered = onLyrics.mock.calls.map(call => call[0]).filter(Boolean);
+        expect(delivered.length).toBeGreaterThan(0);
+        expect(delivered.at(-1)).toMatchObject({ lines: matched.lines });
+    });
+});});

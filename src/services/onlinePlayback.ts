@@ -2,6 +2,7 @@ import { LyricData, OnlineLyricsState, ReplayGainInfo, SongResult } from '../typ
 import { saveToCache } from './db';
 import { PrefetchedSongData, isUrlValid, updatePrefetchedAudioUrl } from './prefetchService';
 import { isPureMusicLyricText } from '../utils/lyrics/pureMusic';
+import { hasRenderableLyrics } from '../utils/lyrics/validity';
 import { migrateLyricDataRenderHints } from '../utils/lyrics/renderHints';
 import { loadOnlineLyricsState, markOnlineLyricsPureMusic, resolveOnlineLyrics, resolveOnlineLyricsPureMusic, saveOnlineLyricsState } from '../utils/onlineLyricsState';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
@@ -320,7 +321,20 @@ export async function loadOnlineSongLyrics(
                     }
                     : undefined
             });
-            if (bestMatch && 'lyrics' in bestMatch && bestMatch.source !== ownProviderId) {
+            /*
+             * `bestMatch.source !== ownProviderId` 原本是「别把自己平台的词当成一次跨平台升级」，
+             * 但它把一种真实情形也挡掉了：原平台的歌词接口回了空，自动匹配最后取到的胜者
+             * 仍然是原平台（日志里的 "Keeping <platform> line-by-line lyrics as fallback"）。
+             * 那时这份歌词是**唯一的**一份，旧代码却因为「来源等于自己」把它丢掉，
+             * 最后走到下面 `onLyrics(null)` —— 用户看到的就是「这首歌没有歌词」。
+             * 手动匹配走的是另一条路、没有这个判断，所以手动匹一下就有了（#160 反馈）。
+             *
+             * 判断改成「手上还没有可显示的歌词」：原平台已经有词时，来自原平台的结果确实
+             * 没有带来任何升级，照旧不采用；只有现在是空的，才把它接下来。
+             */
+            const hasUsableLyricsNow = hasRenderableLyrics(resolvedLyrics);
+            const bringsNothingNew = bestMatch?.source === ownProviderId && hasUsableLyricsNow;
+            if (bestMatch && 'lyrics' in bestMatch && !bringsNothingNew) {
                 const overrideState: OnlineLyricsState = {
                     lyricsSource: 'online',
                     matchedSongId: bestMatch.id,
