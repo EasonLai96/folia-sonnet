@@ -8,6 +8,7 @@
 import { ReplayGainInfo, SongResult, LyricData, OnlineLyricsState, type LyricProviderSource } from '../types';
 import { migrateLyricDataRenderHints } from '../utils/lyrics/renderHints';
 import { isPureMusicLyricText } from '../utils/lyrics/pureMusic';
+import { hasRenderableLyrics } from '../utils/lyrics/validity';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
 import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { getPlatformLyricSource } from '../utils/lyrics/lyricSources';
@@ -401,7 +402,16 @@ const prefetchSong = async (
                                 } }
                                 : {})
                         });
-                        if (bestMatch && 'lyrics' in bestMatch && bestMatch.source !== sourceRef.providerId) {
+                        /*
+                         * 与 onlinePlayback.ts 同一个判断（#160）：原平台回空、自动匹配的胜者
+                         * 仍是原平台时，旧条件 `bestMatch.source !== sourceRef.providerId` 会把
+                         * 这份唯一的歌词丢掉，预取缓存里于是存了「没有歌词」，前台播放直接用这份
+                         * 缓存，用户看到的就是「这首歌没有歌词」。只有手上已有可显示歌词时，
+                         * 来自原平台的结果才算没带来升级。
+                         */
+                        const bringsNothingNew = bestMatch?.source === sourceRef.providerId
+                            && hasRenderableLyrics(resolvedLyrics);
+                        if (bestMatch && 'lyrics' in bestMatch && !bringsNothingNew) {
                             const overrideState: OnlineLyricsState = {
                                 lyricsSource: 'online',
                                 matchedSongId: bestMatch.id,

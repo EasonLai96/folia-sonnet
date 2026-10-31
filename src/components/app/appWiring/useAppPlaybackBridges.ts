@@ -465,9 +465,19 @@ export const useAppPlaybackBridges = (model: Input) => {
             if (effectiveLoopMode === 'one') return;
             void handleNextTrack({ allowStopOnMissing: true, shouldNavigateToPlayer: false });
         },
-        onError: () => {
-            setStatusMsg(prev => (prev?.persistent ? prev : { type: 'error', text: t('status.playbackError') }));
-            setPlayerState(PlayerState.IDLE);
+        onError: (message) => {
+            /*
+             * 原生播放器自己报错（ExoPlayer 的 onPlayerError）以前只在这里弹一句「播放失败」、
+             * 把状态打回 IDLE 就收工：地址明明解析到了，声音却没出来，而**自动跳过完全没接上** ——
+             * 「自动跳过无法播放的歌」只挂在「解析地址失败」那条路上，于是后台放着放着就停在那儿，
+             * 悬浮窗提示也不出来。这正是用户报的「后台自动跳过不工作」。
+             *
+             * 交回队列既有那条失败处理：它会按设置决定跳过还是停下，跳不动时把状态打回 IDLE，
+             * 并且在后台时发系统通知（notifyBackgroundPlaybackNotice 就是那颗悬浮窗）。
+             * 这里不自己再判一次设置，也不自己算有没有下一首 —— 一套规则只留一处。
+             */
+            console.warn('[NativePlayer] player error handed to the queue', message);
+            skipAfterPlaybackFailure(undefined, {});
         },
     });
 
