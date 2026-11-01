@@ -438,12 +438,15 @@ class MainActivity : BridgeActivity() {
     // 访问权限，javac 直接报「正在尝试分配更低的访问权限」。
     override fun onStart() {
         super.onStart()
+        // 原生播放器报错时据此决定交给 JS 还是原生自己跳过（见 FoliaPlaybackService.appUiVisible）。
+        FoliaPlaybackService.appUiVisible = true
         // 回前台：把渲染放回来。
         FoliaNativePlugin.emitAppBackground(false)
     }
 
     override fun onStop() {
         super.onStop()
+        FoliaPlaybackService.appUiVisible = false
         // 真的看不见了：让网页停掉整套渲染，把 CPU 让给音频解码。
         //
         // 放在 onStop 而不是 onPause —— 下拉通知栏、切多任务只到 onPause，那时画面还

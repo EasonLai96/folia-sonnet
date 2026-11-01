@@ -859,7 +859,7 @@ class FoliaPlaybackService : android.app.Service() {
             val generation = beginDispatch()
             var url = resolvedUrlCache.get(songKey)
             if (url == null || url.isEmpty()) {
-                url = entry.optString("url", "")
+                url = mirrorEntryUrl(entry)
             }
             if (url != null && !url.isEmpty()) {
                 // 装不上就如实回 false：调用方（JS）据此回退 Web 全流程，别让界面先换歌。
@@ -962,6 +962,8 @@ class FoliaPlaybackService : android.app.Service() {
             "nearEnd" -> onNearEnd()
             // 位置被跳过（App 里拖进度条 / 单曲循环回绕）：重挂一次进度，见 onPositionJump。
             "positionJump" -> onPositionJump(intent.getLongExtra(EXTRA_COMMAND_POSITION, -1L))
+            // 原生播放器报错且 App 在后台：原生自己跳过，见 onNativePlayerError。
+            "playerError" -> onNativePlayerError(intent.getStringExtra(EXTRA_SONG_KEY) ?: "")
             "like" -> handleTransportLike()
             "seek" -> {
                 val positionMs = intent.getLongExtra(EXTRA_COMMAND_POSITION, 0L)
@@ -1147,7 +1149,7 @@ class FoliaPlaybackService : android.app.Service() {
             val songKey = entryKey
             var url = if (songKey.isEmpty()) null else resolvedUrlCache.get(songKey)
             if (url == null || url.isEmpty()) {
-                url = entry.optString("url", "")
+                url = mirrorEntryUrl(entry)
             }
             // 先占位再决定要不要异步解析，与上面按 songKey 定位那条路径一致：
             // 解析期间用户又按了下一首的话，这一单的代次已经变了，回来的那份被守卫丢掉。
@@ -1202,10 +1204,7 @@ class FoliaPlaybackService : android.app.Service() {
              * 与下面「重试也拿不到地址」那条对齐：回执 + 按设置决定跳不跳。
              */
             Log.w(TAG, "解析地址失败：队列条目身份不全 songKey=" + songKey)
-            if (!songKey.isEmpty()) {
-                mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
-            }
-            mainHandler.post { onEntryUnplayable(songKey) }
+            mainHandler.post { onMirrorEntryFailed(songKey) }
             return
         }
         Thread({
@@ -1220,10 +1219,7 @@ class FoliaPlaybackService : android.app.Service() {
                  *   · 关着 → 停下并保留这首，让人自己决定。
                  * 两者都照旧发一条回执给前台：它在场时可以把界面标记出来。
                  */
-                if (!songKey.isEmpty()) {
-                    mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
-                }
-                mainHandler.post { onEntryUnplayable(songKey) }
+                mainHandler.post { onMirrorEntryFailed(songKey) }
                 return@Thread
             }
             if (!songKey.isEmpty()) {
@@ -1301,8 +1297,66 @@ class FoliaPlaybackService : android.app.Service() {
      * 跳过的次数有上限（连续 [MAX_CONSECUTIVE_SKIPS] 首都放不了就停），否则遇到整个歌单
      * 都无版权的情况会一路狂奔把队列扫空，用户只看到「自己一直在跳歌」。
      */
-    private fun onEntryUnplayable(songKey: String) {
-        val skip = try {
+    /**
+     * 镜像条目里预先给好的播放地址；没有就是空串。
+     *
+     * 不能直接 `optString("url", "")`：JS 推镜像时没地址的条目是 `"url": null`，
+     * org.json 的 optString 会把 JSON null 变成字符串 "null" —— 于是原生拿 "null"
+     * 当地址装进 ExoPlayer（MalformedURLException: no protocol: null），
+     * 也不会去向平台要真地址。后台切到一首没预取到的歌就是这样卡死、不出声的。
+     */
+    internal fun mirrorEntryUrl(entry: org.json.JSONObject): String {
+        if (entry.isNull("url")) return ""
+        val url = entry.optString("url", "")
+        return if (url == "null") "" else url
+    }
+
+    /**
+     * 原生播放器自己报错了（ExoPlayer onPlayerError：地址失效、403、解码失败……），
+     * 而且 App 不在前台。
+     *
+     * 前台时这件事归 JS（useAppPlaybackBridges 的 onError → skipAfterPlaybackFailure，
+     * 有倒计时提示和重试）；退到后台后 JS 那条路在对账闸门期间收不到事件，
+     * 页面也可能已被冻结 —— 以前就是停在这首、一直没声音。这里按「放不了」处理：
+     * 直接跳下一首（连续放不了的上限照旧），与前台 JS 对原因不明的失败的处理一致。
+     *
+     * songKey 对不上正在放的那首（报错的是早已被换掉的旧源）就不理。
+     */
+    fun onNativePlayerError(songKey: String) {
+        if (!nativePlaybackActive()) return
+        val current = top.izuna.foliamajor.player.FoliaNativePlayerPlugin.currentSongKey()
+        if (songKey.isNotEmpty() && current.isNotEmpty() && songKey != current) {
+            Log.w(TAG, "忽略旧源的播放错误 songKey=$songKey（正在放 $current）")
+            return
+        }
+        val key = if (songKey.isNotEmpty()) songKey else current
+        Log.w(TAG, "后台播放出错，按放不了处理 songKey=$key")
+        // 不发 nativePlayFailed：JS 收到它会用 Web 全流程**重放这首**，醒来时把这次跳过撤销掉。
+        // 界面靠换歌后的 syncTo / 回前台的快照认领跟上。
+        // 与前台一致：JS 对「原因不明的播放失败」（audio-unplayable）不看设置、总是跳过
+        // （onlineFailureCase 里它 stops=false）。只有连续跳过的上限会让它停下。
+        onEntryUnplayable(key, alwaysSkip = true)
+    }
+
+    /**
+     * 原生换源这一单失败了（地址要不到 / 播放器壳子不在）。
+     *
+     * App 在前台：交给 JS（nativePlayFailed 回执 → 拉黑这首、Web 全流程自己放，失败了
+     * 由它的提示与倒计时跳过）。App 在后台：JS 那条重放要么根本跑不起来（页面被冻结），
+     * 要么跑起来把原生刚做的跳过撤回到这首 —— 所以后台只由原生决定，跳就是跳，不回执。
+     */
+    private fun onMirrorEntryFailed(songKey: String) {
+        if (appUiVisible) {
+            if (songKey.isNotEmpty()) sendCommand("nativePlayFailed", 0L, songKey)
+            onEntryUnplayable(songKey)
+            return
+        }
+        Log.w(TAG, "后台换源失败，原生直接跳过 songKey=$songKey")
+        onEntryUnplayable(songKey, alwaysSkip = true)
+    }
+
+    private fun onEntryUnplayable(songKey: String, alwaysSkip: Boolean = false) {
+        val skip = alwaysSkip || try {
             top.izuna.foliamajor.settings.FoliaSettingsStore.get(this)
                     .getBoolean("autoSkipUnplayable", true)
         } catch (error: Throwable) {
@@ -1338,7 +1392,7 @@ class FoliaPlaybackService : android.app.Service() {
                 val entry = array.getJSONObject(idx)
                 val key = entry.optString("songKey", "")
                 if (key.isEmpty() || resolvedUrlCache.containsKey(key)) continue
-                val existing = entry.optString("url", "")
+                val existing = mirrorEntryUrl(entry)
                 if (!existing.isEmpty()) {
                     resolvedUrlCache.put(key, existing)
                     continue
@@ -1400,10 +1454,7 @@ class FoliaPlaybackService : android.app.Service() {
                 top.izuna.foliamajor.player.FoliaNativePlayerPlugin.crossfadeFromSystem(url, songKey, fadeMs)
         if (!crossfaded && !top.izuna.foliamajor.player.FoliaNativePlayerPlugin.prepareFromSystem(url, songKey)) {
             Log.w(TAG, "原生播放器不在，地址装不上 songKey=" + songKey)
-            if (!songKey.isEmpty()) {
-                mainHandler.post { sendCommand("nativePlayFailed", 0L, songKey) }
-            }
-            mainHandler.post { onEntryUnplayable(songKey) }
+            mainHandler.post { onMirrorEntryFailed(songKey) }
             return false
         }
         // 起播成功就把「连续放不了」清掉：那是给自动跳过兜的上限，不该跨歌累计。
@@ -2293,7 +2344,7 @@ class FoliaPlaybackService : android.app.Service() {
                     val songKey = entry.optString("songKey", "")
                     var url = if (songKey.isEmpty()) null else service.resolvedUrlCache[songKey]
                     if (url == null || url.isEmpty()) {
-                        url = entry.optString("url", "")
+                        url = service.mirrorEntryUrl(entry)
                     }
                     if (url == null || url.isEmpty()) null else url
                 } catch (ignored: org.json.JSONException) {
@@ -2664,6 +2715,31 @@ class FoliaPlaybackService : android.app.Service() {
                 context.startService(intent)
             } catch (ignored: Throwable) {
                 Log.w(TAG, "位置跳变的通知没送到服务", ignored as? Throwable)
+            }
+        }
+
+        /**
+         * App 界面（MainActivity）此刻是否可见：onStart 置 true、onStop 置 false。
+         * 原生播放器报错时据此决定交给 JS（可见）还是原生自己跳过（不可见）。
+         */
+        @Volatile
+        @JvmStatic
+        var appUiVisible = false
+
+        /** 原生播放器报错 + App 在后台 → 服务按「放不了」处理，见 onNativePlayerError。 */
+        @JvmStatic
+        fun requestNativePlayerError(context: Context?, songKey: String) {
+            if (context == null || !isRunning()) {
+                return
+            }
+            val intent = Intent(context, FoliaPlaybackService::class.java)
+            intent.setAction(ACTION_MEDIA_COMMAND)
+            intent.putExtra(EXTRA_COMMAND, "playerError")
+            intent.putExtra(EXTRA_SONG_KEY, songKey)
+            try {
+                context.startService(intent)
+            } catch (ignored: Throwable) {
+                Log.w(TAG, "播放错误的通知没送到服务", ignored as? Throwable)
             }
         }
 

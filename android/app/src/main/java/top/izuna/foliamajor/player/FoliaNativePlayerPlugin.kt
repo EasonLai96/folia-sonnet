@@ -173,6 +173,12 @@ class FoliaNativePlayerPlugin : Plugin() {
          * 壁纸那边靠它决定「位置该由谁给」：原生在放的时候，Web 推下来的那个位置是插值出来的，
          * 与播放器自己报的采样值交替写入，时间轴会被拽得来回抖 —— 所以那时 Web 那份要让位。
          */
+        /** 原生播放器手上那首的 songKey；没有就是空串。 */
+        @JvmStatic
+        fun currentSongKey(): String {
+            return instance?.player?.currentMediaId() ?: ""
+        }
+
         @JvmStatic
         fun hasActiveMedia(): Boolean {
             val current = instance
@@ -395,6 +401,23 @@ class FoliaNativePlayerPlugin : Plugin() {
                     && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
                     top.izuna.foliamajor.FoliaPlaybackService
                         .requestNativePositionJump(context, positionMs)
+                }
+            }
+        }
+        /*
+         * 播放器报错（地址失效 / 403 / 装源异常）且 App 不在前台：原生自己按「放不了」跳。
+         *
+         * 前台时照旧只过桥给 JS（它有倒计时提示和重试）。后台时 JS 那条路收不到 ——
+         * 退后台期间对账闸门把原生事件全丢掉，页面还可能被冻结 —— 以前就停在这首没声音。
+         */
+        if ("error" == type && !top.izuna.foliamajor.FoliaPlaybackService.appUiVisible) {
+            val failedKey = player?.currentMediaId() ?: ""
+            MAIN.post {
+                val context = instance?.getContext()
+                if (context != null
+                    && top.izuna.foliamajor.FoliaPlaybackService.isRunning()) {
+                    top.izuna.foliamajor.FoliaPlaybackService
+                        .requestNativePlayerError(context, failedKey)
                 }
             }
         }
