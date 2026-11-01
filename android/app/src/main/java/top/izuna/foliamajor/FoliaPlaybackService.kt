@@ -471,8 +471,13 @@ class FoliaPlaybackService : android.app.Service() {
                     ACTION_UPDATE_METADATA -> updateMetadata(intent)
                     ACTION_UPDATE_STATE -> updatePlaybackState(intent)
                     ACTION_UPDATE_QUEUE_MIRROR -> {
-                        val incomingQueue = intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON)
-                        val incomingIndex = intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1)
+                        // 大队列经进程内暂存交接（见 stageQueueMirror）；Intent 里的 JSON 只是旧路径兼容。
+                        val staged = if (intent.getBooleanExtra(EXTRA_QUEUE_MIRROR_STAGED, false)) takeStagedQueueMirror() else null
+                        val incomingQueue = staged?.first ?: intent.getStringExtra(EXTRA_QUEUE_MIRROR_JSON)
+                        val incomingIndex = staged?.second ?: intent.getIntExtra(EXTRA_QUEUE_MIRROR_INDEX, -1)
+                        if (incomingQueue != null) {
+                            Log.i(TAG, "队列镜像收到 ${incomingQueue.length} 字符，下标 $incomingIndex")
+                        }
                         /*
                          * 队列状态机用 syncEntries 跟上（replace 会把下标重置到队首）。
                          * 原生有明确媒体身份时游标只按它定位；没有才认前台下标（冷启动）。
@@ -2743,6 +2748,32 @@ class FoliaPlaybackService : android.app.Service() {
             }
         }
 
+        /*
+         * 队列镜像走进程内交接，不放进 Intent。
+         *
+         * 上千首的歌单序列化出来是几百 KB（实测 1000 首 ≈ 690 KB），装进 startService 的
+         * Intent 会撞上 Binder 事务上限（TransactionTooLargeException，系统直接丢掉）——
+         * 原生队列于是一直是空的：放完一首「没有下一首」，停在末尾，进度条不再动。
+         * 插件与服务在同一个进程，所以把 JSON 与下标成对暂存在这里，Intent 只当「来取」的信号。
+         * 连发两份时后一份覆盖前一份：镜像本来就是「以最新为准」。
+         */
+        private val stagedQueueMirrorLock = Any()
+        private var stagedQueueMirror: Pair<String, Int>? = null
+
+        @JvmStatic
+        fun stageQueueMirror(queueJson: String, index: Int) {
+            synchronized(stagedQueueMirrorLock) { stagedQueueMirror = queueJson to index }
+        }
+
+        @JvmStatic
+        internal fun takeStagedQueueMirror(): Pair<String, Int>? {
+            synchronized(stagedQueueMirrorLock) {
+                val staged = stagedQueueMirror
+                stagedQueueMirror = null
+                return staged
+            }
+        }
+
         @JvmStatic
         fun requestNativeTrackFinished(context: Context?) {
             if (context == null || !isRunning()) {
@@ -2765,6 +2796,8 @@ class FoliaPlaybackService : android.app.Service() {
         const val ACTION_UPDATE_QUEUE_MIRROR = "top.izuna.foliamajor.action.UPDATE_QUEUE_MIRROR"
         const val EXTRA_QUEUE_MIRROR_JSON = "queueMirrorJson"
         const val EXTRA_QUEUE_MIRROR_INDEX = "queueMirrorIndex"
+        /** true = 队列在进程内暂存里（stageQueueMirror），到 takeStagedQueueMirror 取。 */
+        const val EXTRA_QUEUE_MIRROR_STAGED = "queueMirrorStaged"
         /** 队列没变、只换正播那首：轻量推游标，见 ACTION_UPDATE_QUEUE_MIRROR。 */
         const val ACTION_UPDATE_QUEUE_INDEX = "top.izuna.foliamajor.action.UPDATE_QUEUE_INDEX"
         const val ACTION_UPDATE_STATE = "top.izuna.foliamajor.action.UPDATE_STATE"

@@ -66,7 +66,21 @@ export const useNativePlaybackRuntime = ({
         console.info('[NativePlayer] 接管这一首', audioSrc.slice(0, 24));
         nativePlaybackEngine.setRepeatMode(callbacksRef.current.repeatOne ? 1 : 0);
         const song = usePlaybackStore.getState().currentSong;
-        void nativePlaybackEngine.setSource(audioSrc, { songKey: song ? getPlaybackSongKey(song) : null }).catch(error => {
+        const songKey = song ? getPlaybackSongKey(song) : null;
+        void nativePlaybackEngine.setSource(audioSrc, { songKey }).then(() => {
+            /*
+             * 原生手上已经是同一首同一个地址（后台原生换歌后回前台、Web 再走一遍这首）时
+             * setSource 直接返回、不重新 prepare，也就不会再有 `ready` 事件 —— 而 playSong
+             * 已经把时长清成 0，进度条就一直是「xx:xx / 00:00」。这里从引擎补回已知时长。
+             */
+            const known = nativePlaybackEngine.getDurationSec();
+            const current = usePlaybackStore.getState().currentSong;
+            if (known > 0 && current && getPlaybackSongKey(current) === songKey
+                && usePlaybackStore.getState().duration <= 0) {
+                console.info('[NativePlayer] 同一首已在原生手上，补回时长', known);
+                setDuration(known);
+            }
+        }).catch(error => {
             console.error('[NativePlayer] prepare failed', error);
             callbacksRef.current.onError(String(error));
         });
