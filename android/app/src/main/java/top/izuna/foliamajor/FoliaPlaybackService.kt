@@ -1595,6 +1595,7 @@ class FoliaPlaybackService : android.app.Service() {
                 if (songKey != cachedSongKey) return@post
                 if (lines.isEmpty()) {
                     nativeLyrics.store(songKey, "", "")
+                    FoliaPlaybackPlugin.dispatchLyrics(songKey, "", "")
                     NativeLyricPresentation.clear(this, songKey, cachedSongKey, title,
                             artist, durationMs, cachedPlaying)
                     applyMetadata()
