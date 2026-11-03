@@ -1,0 +1,43 @@
+﻿{
+  "page": "http://127.0.0.1:5198/wallpaper.html?w=1280&h=720",
+  "scope": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "counts": {
+    "elements": 24,
+    "clickables": 0,
+    "focusables": 0,
+    "texts": 2,
+    "fixed": 1
+  },
+  "findings": [
+    {
+      "kind": "text-clipped",
+      "selector": "div.flex.flex-wrap > div.inline-block.origin-center > span.relative.z-10",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 144,
+        "clientWidth": 144,
+        "scrollHeight": 91,
+        "clientHeight": 88,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div.flex.flex-wrap > div.inline-block.origin-center > span.relative.z-10",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 504,
+        "clientWidth": 504,
+        "scrollHeight": 91,
+        "clientHeight": 88,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    }
+  ]
+}
