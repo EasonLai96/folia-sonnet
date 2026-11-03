@@ -1,0 +1,16 @@
+﻿{
+  "page": "http://127.0.0.1:18827/?mode=vinyl&theme=dark&cover=1",
+  "scope": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "counts": {
+    "elements": 57,
+    "clickables": 0,
+    "focusables": 0,
+    "texts": 0,
+    "fixed": 0
+  },
+  "findings": []
+}

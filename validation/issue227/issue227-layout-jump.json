@@ -1,0 +1,134 @@
+﻿{
+  "page": "http://127.0.0.1:18827/?mode=jump&theme=dark&cover=1",
+  "scope": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "counts": {
+    "elements": 137,
+    "clickables": 0,
+    "focusables": 0,
+    "texts": 9,
+    "fixed": 0
+  },
+  "findings": [
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(10) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(11) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(3) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(4) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(5) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(7) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 62,
+        "clientWidth": 62,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(8) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    },
+    {
+      "kind": "text-clipped",
+      "selector": "div:nth-of-type(2) > div:nth-of-type(9) > div:nth-of-type(1)",
+      "detail": "文本被裁切：横向多出 0px，纵向多出 3px",
+      "values": {
+        "scrollWidth": 124,
+        "clientWidth": 124,
+        "scrollHeight": 65,
+        "clientHeight": 62,
+        "overflowX": 0,
+        "overflowY": 3
+      }
+    }
+  ]
+}
