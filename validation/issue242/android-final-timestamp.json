@@ -1,0 +1,14 @@
+﻿{
+  "result": {
+    "type": "object",
+    "value": {
+      "head": "9eec00bc0bfd24611be273c02e7bc69b86fe9fb4",
+      "lyrics": "[00:04]Alpha final edited！\n[00:18]Look [here]!!",
+      "planStarts": [
+        4,
+        18
+      ],
+      "source": "[00:01.00]Alpha distinct first line\n[00:12.00]Alpha final line"
+    }
+  }
+}

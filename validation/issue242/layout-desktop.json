@@ -1,0 +1,16 @@
+﻿{
+  "page": "http://127.0.0.1:4224/dev-probe.html?probe=kineticIdentity",
+  "scope": "[data-kinetic-editor]",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "counts": {
+    "elements": 8,
+    "clickables": 1,
+    "focusables": 1,
+    "texts": 0,
+    "fixed": 0
+  },
+  "findings": []
+}
