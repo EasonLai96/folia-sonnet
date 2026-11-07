@@ -6,6 +6,7 @@ import {
     NEBBIA_APPEAR_STYLES,
     NEBBIA_BEHIND,
     NEBBIA_FADE_STYLES,
+    NEBBIA_GLYPH_SOURCES,
     NEBBIA_LAYOUTS,
     NEBBIA_GLASS,
     NEBBIA_GLASS_FOR,
@@ -74,6 +75,7 @@ export const normalizeNebbiaTuning = (stored: unknown): NebbiaTuning => {
         scenery: Array.isArray(values.scenery) ? NEBBIA_SCENERY.filter(c => (values.scenery as unknown[]).includes(c)) : [...base.scenery],
         rain: NEBBIA_RAIN.find(r => r === values.rain) ?? base.rain,
         credits: typeof values.credits === 'boolean' ? values.credits : base.credits,
+        glyphSource: NEBBIA_GLYPH_SOURCES.find(s => s === values.glyphSource) ?? base.glyphSource,
         ...numbers,
     };
 };
@@ -88,7 +90,14 @@ export default defineVisualizerTuning<NebbiaTuning>({
         key: 'nebbia_tuning',
         read: normalizeNebbiaTuning,
         // 先合并再归一化：设置面板、导入、同步走同一套校验。
-        merge: (held, patch) => normalizeNebbiaTuning({ ...held, ...patch }),
+        // 旧配置的 resolution 要先迁移，避免 held 中已有的 render 吞掉导入或同步来的分辨率。
+        merge: (held, patch) => {
+            const legacyResolution = (patch as { resolution?: unknown }).resolution;
+            const migrated = patch.render === undefined && legacyResolution !== undefined
+                ? { ...patch, render: readRender(undefined, legacyResolution) }
+                : patch;
+            return normalizeNebbiaTuning({ ...held, ...migrated });
+        },
         resetNotice: 'notifications.nebbiaReset',
     },
 });

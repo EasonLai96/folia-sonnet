@@ -1,4 +1,4 @@
-import { clamp, NEBBIA_FIXED, smooth } from './nebbiaConstants';
+import { clamp, smooth } from './nebbiaConstants';
 import { isIconChar, type NebbiaChar, type NebbiaSourceLine } from './nebbiaChars';
 import { isWideChar } from './nebbiaBlocks';
 import { pointAt, warpGlyph, type NebbiaGlyphCache, type Glyph } from './nebbiaGlyphs';
@@ -43,6 +43,8 @@ export interface LaidLine {
      */
     breathAt: number;
     breathUntil: number;
+    /** 这口气鼓开用几秒：一般是 breathSpread，挤的时候收短（旧句写完至少留 YIELD_READ 秒、新句开写前已经鼓开）。 */
+    breathDur: number;
     /** 出现方式选到「哈气后书写」的：开写前对着自己的位置哈一口气（Infinity = 不哈），白气留到 appearBreathUntil 再散。 */
     appearBreathAt: number;
     appearBreathUntil: number;
@@ -61,19 +63,19 @@ const LINGER_MAX = 16;
 const LINGER_LINES = 3;
 
 /** 一个字挑水珠：每一笔沿边缘零星凝出小水珠，少数笔画底部会淌下一颗。 */
-const decorate = (c: LaidChar, base: Glyph, rnd: () => number, warp: number) => {
+const decorate = (c: LaidChar, base: Glyph, rnd: () => number, warp: number, beadChance: number, dripChance: number) => {
     const g = warpGlyph(base, createVisualizerRng(Math.floor(rnd() * 1e9)), warp);
     c.glyph = g;
     c.beads = g.strokes.map(st => {
         const out: Bead[] = [], step = 7 / c.s;
         for (let s = step * rnd(); s < st.len; s += step * (0.5 + rnd())) {
-            if (rnd() > NEBBIA_FIXED.beads) continue;
+            if (rnd() > beadChance) continue;
             const [x, y, nx, ny] = pointAt(st, s), side = rnd() < 0.5 ? -1 : 1;
             out.push({ s, x, y, nx: nx * side, ny: ny * side, r: 1.6 + rnd() ** 2.2 * 3.6, j: rnd() });
         }
         return out;
     });
-    c.drips = g.strokes.map(() => (rnd() < NEBBIA_FIXED.drip * 0.22
+    c.drips = g.strokes.map(() => (rnd() < dripChance * 0.22
         ? { delay: 0.3 + rnd() * 1.6, len: 30 + rnd() * 130, dur: 2 + rnd() * 3.5, r: 3.2 + rnd() * 2.6, seed: rnd() * 100 } : null));
     // 收笔水珠的随机量放在最后取，不打乱前面的随机序列
     c.ends = g.strokes.map(() => ({ h: rnd(), j: rnd() }));
@@ -113,8 +115,8 @@ const applyAppear = (line: LaidLine, tuning: NebbiaTuning, idx: number, seed: nu
     const fade = !kind || (canFade && cs.length > 0 && plan.end > until + 1e-3);
     cs.forEach((c, i) => { c.wt = plan.starts[i]; c.wd = nat[i] * k; });
     if (kind === 'breath' && !fade && cs.length) {
-        line.appearBreathAt = cs[0].wt - NEBBIA_FIXED.breathSpread - 0.3;
-        line.appearBreathUntil = line.end + NEBBIA_FIXED.breathHold;
+        line.appearBreathAt = cs[0].wt - tuning.breathSpread - 0.3;
+        line.appearBreathUntil = line.end + tuning.breathHold;
     }
     for (const c of line.chars) c.appearDur = fade ? clamp(c.d * 3, 0.35, 1.2) : 0;
 };
@@ -163,13 +165,13 @@ export const buildNebbiaScene = (
         lingerUntil: i => lingerAt(i) + fadeOf(i),
     });
     const laid: LaidLine[] = source.map((line, li) => ({
-        t: line.t, end: line.end, next: line.next, mode: modes[li], fogAt: fogAt(li), yieldAt: Infinity, breathAt: Infinity, breathUntil: Infinity,
+        t: line.t, end: line.end, next: line.next, mode: modes[li], fogAt: fogAt(li), yieldAt: Infinity, breathAt: Infinity, breathUntil: Infinity, breathDur: tuning.breathSpread,
         appearBreathAt: Infinity, appearBreathUntil: Infinity,
         chars: line.chars.map((c, i) => {
             const p = pos[li][i], wide = isWideChar(c.ch) || isIconChar(c.ch);
             const out: LaidChar = { ...c, x: p.x, y: p.y, s: p.s * (wide ? 1 : 1.15), rot: p.rot, glyph: null, beads: [], drips: [], ends: [], appearDur: 0, wt: c.t, wd: 0 };
             const base = glyphs.get(c.ch);
-            if (base) decorate(out, base, createVisualizerRng((li * 131 + i * 17 + 5) >>> 0), tuning.warp);
+            if (base) decorate(out, base, createVisualizerRng((li * 131 + i * 17 + 5) >>> 0), tuning.warp, tuning.beads, tuning.drip);
             return out;
         }),
     }));
@@ -179,7 +181,7 @@ export const buildNebbiaScene = (
     // 多留：屏上还空着就晚点起雾，留到让位前 refog 秒（来得及慢慢起雾），不早于原来的时刻。
     // 到让位时还消失不了的（屏上满了），在那句开写前哈一口气把这句盖掉，那句写在白气上
     const rects = laid.map(lineRect);
-    const { breathSpread, breathHold } = NEBBIA_FIXED;
+    const { breathSpread, breathHold } = tuning;
     laid.forEach((line, i) => {
         if (source[i].credits) return;
         const gone = lingerAt(i) + fadeOf(i);
@@ -191,8 +193,14 @@ export const buildNebbiaScene = (
         line.fogAt = Math.max(fogAt(i), Math.min(lingerAt(i), line.yieldAt - fadeOf(i)));
         // 给片尾让位的不哈气：前面已经在散了，按让位快速起雾就好
         if (by >= 0 && !source[by].credits && line.yieldAt < line.fogAt + fadeOf(i)) {
-            line.breathAt = line.yieldAt - breathSpread - 0.3;
+            // 挤的时候（让位紧跟着写完）不提前那么多：从写完 YIELD_READ 秒后才哈，鼓开收短到让位前 0.3 秒鼓完，最短 0.3 秒
+            const from = Math.max(line.yieldAt - breathSpread - 0.3, writtenAt(line) + YIELD_READ);
+            line.breathAt = from;
+            line.breathDur = Math.max(0.3, line.yieldAt - 0.3 - from);
             line.breathUntil = laid[by].end + breathHold;
+        } else if (by >= 0 && line.mode === 'fingers') {
+            // 按手指搓掉的：搓开的地方后面那句不再先哈气（不然刚搓开又哈上白气，两个效果打架），直接写
+            laid[by].appearBreathAt = Infinity;
         }
     });
     return laid;
@@ -204,14 +212,25 @@ const YIELD_LEAD = 0.6, YIELD_READ = 0.3;
  * 这句最早什么时候让位：后面那句开写的时刻，但不早于这句最后一个字写完（慢慢显现的显出一半）再留 YIELD_READ 秒。
  * 不然唱得快、屏上又挤时，后面那句一压上来，这句写到一半就被哈气盖掉了（比如一句只唱一秒多，后半句没写就没了）。
  */
-export const yieldMoment = (nextT: number, line: Pick<LaidLine, 'chars' | 't'>) => {
+export const yieldMoment = (nextT: number, line: Pick<LaidLine, 'chars' | 't'>) => Math.max(nextT, writtenAt(line) + YIELD_READ + YIELD_LEAD);
+
+/** 这句最后一个字写完（慢慢显现的显出一半）的时刻。 */
+const writtenAt = (line: Pick<LaidLine, 'chars' | 't'>) => {
     let done = line.t;
     for (const c of line.chars) if (c.glyph) done = Math.max(done, c.wd > 0 ? c.wt + c.wd : c.t + Math.min(c.appearDur, 0.5));
-    return Math.max(nextT, done + YIELD_READ + YIELD_LEAD);
+    return done;
 };
 
 /** 让位的句子在后面那句开写前 0.6 秒起用 1 秒快速起雾；屏上满了要哈气盖掉的，在白气鼓开的这一下里没了。 */
 export const yieldFactor = (line: LaidLine, T: number) => (line.breathAt < Infinity
-    // 哈气盖掉的：白气鼓开的这一下里没了
-    ? 1 - smooth(clamp((T - line.breathAt) / NEBBIA_FIXED.breathSpread))
+    // 哈气盖掉的：白气鼓开的这一阵里先糊开（着色器按白气遮罩的 B 通道糊），晚一点起淡进雾里，鼓开到 85% 时没了
+    ? 1 - smooth(clamp(((T - line.breathAt) / line.breathDur - 0.15) / 0.7))
     : 1 - smooth(clamp((T - line.yieldAt + YIELD_LEAD) / 1)));
+
+/** 哈气盖掉的旧字在擦痕遮罩上留到多少：比起雾的阈值低，不再透出窗外，只让白气在那儿薄一点（着色器），留个浅浅的印子。 */
+export const BREATH_GHOST = 0.08;
+/** 擦痕遮罩用的让位系数：哈气盖掉的不降到 0，留 BREATH_GHOST 的印子，跟着这句自己慢慢起雾一起淡掉。水珠还是用 yieldFactor。 */
+export const yieldMask = (line: LaidLine, T: number) => {
+    const yf = yieldFactor(line, T);
+    return line.breathAt < Infinity ? Math.max(yf, BREATH_GHOST) : yf;
+};

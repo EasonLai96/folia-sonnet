@@ -1,15 +1,24 @@
 import React from 'react';
 import { Group, Row, Segmented, type SettingsGroupDef } from '../../modal/settings/kit';
 import { type VisualizerSettingsPanelProps } from '../definition';
-import { percent, SliderRow, times, ToggleRow } from '../panelRows';
+import { SliderRow, ToggleRow } from '../panelRows';
 import LyricRenderQualityRows from '../renderQuality/LyricRenderQualityRows';
+import {
+    AQUA_SLIDERS,
+    AQUA_WINDOW_SLIDERS,
+    fogDetailSlidersFor,
+    GLASS_SLIDERS,
+    WINDOW_SLIDERS,
+    WRITING_SLIDERS,
+    type NebbiaSliderSpec,
+} from './nebbiaSliderSpecs';
 import {
     DEFAULT_NEBBIA_TUNING,
     NEBBIA_APPEAR_STYLES,
     NEBBIA_BEHIND,
     NEBBIA_FADE_STYLES,
     NEBBIA_GLASS,
-    NEBBIA_GLASS_FOR,
+    NEBBIA_GLYPH_SOURCES,
     NEBBIA_LAYOUTS,
     NEBBIA_LIMITS,
     NEBBIA_RAIN,
@@ -26,7 +35,7 @@ import {
 // 窗外（车、霓虹、聚光灯），窗外画哪几样（聚光灯、楼群、光斑、车灯、马路各一个开关，雨斜着、竖直或不下），渲染（分辨率，
 // 默认跟随全局）。用设置窗口的共用控件画成几组。
 // 窗外选了水族箱时多三个滑块（水母数量、大小、气泡多少），开关和雨换成水族箱的说法（同一组位，见 nebbiaAquaGlsl.ts）。
-// 前面雾玻璃上的水单独一组：雨窗（小雨点密度、大雨点大小）或凝露（冷凝水珠多少、大小、高光）；换窗外时玻璃换成那套的默认搭配。
+// 前面雾玻璃上的水单独一组：雨窗（小雨点密度、大雨点大小）、凝露（冷凝水珠多少、大小、高光）或融雪（多少、大小、融化速度）；换窗外不动玻璃。
 
 export const NEBBIA_APPEAR_LABEL_KEYS: Record<NebbiaAppearStyle, string> = {
     write: 'options.nebbiaAppearWrite',
@@ -41,51 +50,15 @@ const LAYOUT_LABEL_KEYS = Object.fromEntries(
     NEBBIA_LAYOUTS.map(l => [l, `options.nebbiaLayout_${l}`]),
 ) as Record<NebbiaLayout, string>;
 
-const seconds = (value: number) => `${value.toFixed(1)}s`;
-const count = (value: number) => String(Math.round(value));
-type SliderSpec = [NebbiaNumberKey, string, number, (value: number) => string];
+type SliderSpec = NebbiaSliderSpec;
 
+// 滑块清单（字段、文案、步进、读数）在 nebbiaSliderSpecs.ts：播放页控制面板里的快捷滑块（NebbiaQuickSliders.tsx）画同一份
 const WRITING_GROUP: SettingsGroupDef = { id: 'vis-nebbia-writing', titleKey: 'options.nebbiaWriting' };
-const WRITING_SLIDERS: SliderSpec[] = [
-    ['strokeWidth', 'options.nebbiaStrokeWidth', 0.005, percent],
-    ['writeSpeed', 'options.nebbiaWriteSpeed', 0.05, times],
-    ['jitter', 'options.nebbiaJitter', 0.05, times],
-    ['warp', 'options.nebbiaWarp', 0.05, times],
-    ['doodle', 'options.nebbiaDoodle', 0.05, percent],
-    ['mist', 'options.nebbiaMist', 0.01, percent],
-    ['hold', 'options.nebbiaHold', 0.1, seconds],
-    ['refog', 'options.nebbiaRefog', 0.5, seconds],
-];
 const WINDOW_GROUP: SettingsGroupDef = { id: 'vis-nebbia-window', titleKey: 'options.nebbiaWindow' };
-const WINDOW_SLIDERS: SliderSpec[] = [
-    ['busSpeed', 'options.nebbiaBusSpeed', 0.05, times],
-    ['neon', 'options.nebbiaNeon', 0.05, times],
-    ['bump', 'options.nebbiaBump', 0.05, times],
-    ['spot', 'options.nebbiaSpot', 0.05, times],
-    ['spotX', 'options.nebbiaSpotX', 0.01, percent],
-];
 // 分辨率（#929）：原来窗外一组里的分辨率滑块换成共用的「跟随全局 / 指定倍数」；全屏着色器没有 MSAA，不出抗锯齿那行。
 const RENDER_GROUP: SettingsGroupDef = { id: 'vis-nebbia-render', titleKey: 'options.lyricRenderSection' };
-/** 水族箱里车不颠：这条不显示。 */
-const NOT_IN_AQUARIUM: readonly NebbiaNumberKey[] = ['bump'];
-const AQUA_WINDOW_SLIDERS = WINDOW_SLIDERS.filter(([key]) => !NOT_IN_AQUARIUM.includes(key));
-const AQUA_SLIDERS: SliderSpec[] = [
-    ['jellies', 'options.nebbiaJellies', 1, count],
-    ['jellySize', 'options.nebbiaJellySize', 0.05, times],
-    ['bubbles', 'options.nebbiaBubbles', 0.05, percent],
-];
 const GLASS_GROUP: SettingsGroupDef = { id: 'vis-nebbia-glass', titleKey: 'options.nebbiaGlass' };
-const GLASS_SLIDERS: Record<NebbiaTuning['glass'], SliderSpec[]> = {
-    rain: [
-        ['rainHit', 'options.nebbiaRainHit', 0.05, times],
-        ['rainBig', 'options.nebbiaRainBig', 0.05, times],
-    ],
-    dew: [
-        ['dew', 'options.nebbiaDew', 0.05, times],
-        ['dewSize', 'options.nebbiaDewSize', 0.05, times],
-        ['dewGlint', 'options.nebbiaDewGlint', 0.05, times],
-    ],
-};
+const FOG_DETAIL_GROUP: SettingsGroupDef = { id: 'vis-nebbia-fog-detail', titleKey: 'options.nebbiaFogDetail' };
 const APPEAR_GROUP: SettingsGroupDef = { id: 'vis-nebbia-appear', titleKey: 'options.nebbiaAppear' };
 const FADE_GROUP: SettingsGroupDef = { id: 'vis-nebbia-fade', titleKey: 'options.nebbiaFade' };
 const LAYOUT_GROUP: SettingsGroupDef = { id: 'vis-nebbia-layouts', titleKey: 'options.nebbiaLayouts' };
@@ -141,7 +114,14 @@ const NebbiaSettingsPanel: React.FC<VisualizerSettingsPanelProps<NebbiaTuning>> 
 
     return (
         <>
-            <Group def={WRITING_GROUP}>
+            <Group def={WRITING_GROUP} foot={t('options.nebbiaGlyphSourceHint')}>
+                <Row label={t('options.nebbiaGlyphSource')} note={t('options.nebbiaGlyphSourceNote')}>
+                    <Segmented<NebbiaTuning['glyphSource']>
+                        value={resolved.glyphSource}
+                        options={NEBBIA_GLYPH_SOURCES.map(source => ({ value: source, label: t(`options.nebbiaGlyphSource_${source}`) }))}
+                        onChange={glyphSource => onTuningChange({ glyphSource })}
+                    />
+                </Row>
                 {sliders(WRITING_SLIDERS)}
                 <ToggleRow
                     label={t('options.nebbiaCredits')}
@@ -176,7 +156,7 @@ const NebbiaSettingsPanel: React.FC<VisualizerSettingsPanelProps<NebbiaTuning>> 
                     <Segmented<NebbiaTuning['behind']>
                         value={resolved.behind}
                         options={NEBBIA_BEHIND.map(behind => ({ value: behind, label: t(`options.nebbiaBehind_${behind}`) }))}
-                        onChange={behind => onTuningChange({ behind, glass: NEBBIA_GLASS_FOR[behind] ?? resolved.glass })}
+                        onChange={behind => onTuningChange({ behind })}
                     />
                 </Row>
                 {aquarium && sliders(AQUA_SLIDERS)}
@@ -190,15 +170,18 @@ const NebbiaSettingsPanel: React.FC<VisualizerSettingsPanelProps<NebbiaTuning>> 
                         onChange={next => onTuningChange({ scenery: NEBBIA_SCENERY.filter(c => (c === part ? next : resolved.scenery.includes(c))) })}
                     />
                 ))}
-                {/* 街景的雨只画在聚光灯光柱里（被照亮的雨丝），聚光灯关着或强度为 0 时这项看不出来；水族箱的细气泡不看聚光灯 */}
+                {/* 街景的雨只画在聚光灯光柱里（被照亮的雨丝），聚光灯关着或强度为 0 时这项看不出来；水族箱的细气泡不看聚光灯；雪窗时街景窗外不下雨，这项不管用 */}
                 <Row label={t(rainKey)} note={t(`${rainKey}Hint`)}>
                     <Segmented<NebbiaTuning['rain']>
-                        disabled={resolved.behind === 'backdrop' || (!aquarium && (!resolved.scenery.includes('spot') || resolved.spot <= 0))}
+                        disabled={resolved.behind === 'backdrop' || (!aquarium && (resolved.glass === 'snow' || !resolved.scenery.includes('spot') || resolved.spot <= 0))}
                         value={resolved.rain}
                         options={NEBBIA_RAIN.map(rain => ({ value: rain, label: t(`${rainKey}_${rain}`) }))}
                         onChange={rain => onTuningChange({ rain })}
                     />
                 </Row>
+            </Group>
+            <Group def={FOG_DETAIL_GROUP} foot={t('options.nebbiaFogDetailHint')}>
+                {sliders(fogDetailSlidersFor(resolved.behind, resolved.glass))}
             </Group>
             <Group def={RENDER_GROUP}>
                 <LyricRenderQualityRows

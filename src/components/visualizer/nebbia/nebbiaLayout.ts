@@ -3,6 +3,7 @@ import type { NebbiaSourceLine } from './nebbiaChars';
 import { assignRoles, makeBlocks, mergeWords, ROLE_SCALE, ROLE_SCALE_FAST, type PlacedItem } from './nebbiaBlocks';
 import { COMPOSITION_BIAS, COMPOSITIONS, SIMPLE_COMPOSITIONS, type CompositionContext } from './nebbiaCompositions';
 import { createVisualizerRng, hashVisualizerSeed } from '../visualizerSeedHash';
+import { readableNebbiaRows } from './nebbiaReadableLayout';
 
 // src/components/visualizer/nebbia/nebbiaLayout.ts
 // 雾笺的整首排版：每句挑一个构图，再在屏上几个候选位置、几档字号里找一个不和「这句出现时还没消失的句子」
@@ -125,14 +126,20 @@ export const layoutNebbiaSong = (lines: NebbiaSourceLine[], opts: NebbiaLayoutOp
                 }
             }
         }
-        // 实在放不下（极长的一句）：三行，按屏幕能放下的字号居中
+        // 实在放不下（极长的一句）：先试三行；长词不能在块边界换行时，按已有字素换行，保留原来的逐字时间。
         if (!best) {
             const blocks = makeBlocks(chars, words, roles, ROLE_SCALE_FAST, 9);
             const ctx: CompositionContext = { blocks, h: 0, chars };
             const res = COMPOSITIONS.lines3(ctx) ?? COMPOSITIONS.lines2(ctx) ?? COMPOSITIONS.ribbon(ctx)!;
-            const bb = bboxOf(res.items);
-            const S = Math.min(Smax, (W - mx * 2) / bb.w, (H - my * 2) / bb.h);
-            best = { score: 0, name: 'lines3', items: res.items, bb, S, cx: W / 2, cy: H / 2, box: { x0: W / 2 - bb.w * S / 2, x1: W / 2 + bb.w * S / 2, y0: H / 2 - bb.h * S / 2, y1: H / 2 + bb.h * S / 2 } };
+            let items = res.items, bb = bboxOf(items);
+            let S = Math.min(Smax, (W - mx * 2) / bb.w, (H - my * 2) / bb.h);
+            if (S < Smin * 0.75) {
+                const readable = readableNebbiaRows(line, W - mx * 2, H * 0.6, Smin);
+                items = readable.items;
+                bb = bboxOf(items);
+                S = Math.min(readable.size, (W - mx * 2) / bb.w, (H - my * 2) / bb.h);
+            }
+            best = { score: 0, name: 'lines3', items, bb, S, cx: W / 2, cy: H / 2, box: { x0: W / 2 - bb.w * S / 2, x1: W / 2 + bb.w * S / 2, y0: H / 2 - bb.h * S / 2, y1: H / 2 + bb.h * S / 2 } };
         }
         const chosen: Candidate = best;
         placed.push({ box: chosen.box, until: visibleUntil(li), fogAt: fogAt(li), linger: Math.max(visibleUntil(li), lingerUntil?.(li) ?? 0) });

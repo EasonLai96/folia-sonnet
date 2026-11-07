@@ -6,7 +6,7 @@ import { getVisualizerRegistryEntry } from '../../visualizer/registry';
 import { smartBeatActive } from '../../../services/beatFx/beatEffects';
 import { isLyricSegmentationAiAvailable } from '../../../services/aiText';
 import type { LyricSegmentationActions } from '../playback/createLyricSegmentationActions';
-import { NEBBIA_BEHIND, NEBBIA_GLASS, NEBBIA_GLASS_FOR } from '../../visualizer/nebbia/types';
+import { NEBBIA_BEHIND, NEBBIA_GLASS } from '../../visualizer/nebbia/types';
 import { DEFAULT_RENDER_PIXEL_RATIO } from '../../../utils/renderPixelRatio';
 
 // src/components/app/command-palette-context/buildVisualizerCommandContext.ts
@@ -36,12 +36,12 @@ export const buildVisualizerCommandContext = (
         setVisualizerBackgroundMode: visualizer.handleSetVisualizerBackgroundMode,
         setMonetBackgroundTuning: visualizer.handleSetMonetBackgroundTuning,
         setLatentBackgroundTuning: visualizer.handleSetLatentBackgroundTuning,
-        // 和雾笺设置面板一样：换窗外时玻璃换成那套的默认搭配，换玻璃不动窗外
+        // 和雾笺设置面板一样：窗外和玻璃分别切换，保留用户选好的玻璃。
         cycleNebbiaBehind: () => {
             const latest = useVisualizerSettingsStore.getState();
-            const { behind, glass } = latest.nebbiaTuning;
+            const { behind } = latest.nebbiaTuning;
             const next = NEBBIA_BEHIND[(NEBBIA_BEHIND.indexOf(behind) + 1) % NEBBIA_BEHIND.length];
-            latest.handleSetNebbiaTuning({ behind: next, glass: NEBBIA_GLASS_FOR[next] ?? glass });
+            latest.handleSetNebbiaTuning({ behind: next });
             return next;
         },
         cycleNebbiaGlass: () => {

@@ -13,7 +13,7 @@ import type { Line } from '../../../types';
 export const NEBBIA_APPEAR_STYLES = ['write', 'fade', 'breath'] as const;
 export type NebbiaAppearStyle = typeof NEBBIA_APPEAR_STYLES[number];
 
-/** 写完怎么消失：慢慢起雾、几根手指来回抹掉；两种都开就每句随机。 */
+/** 写完怎么消失：慢慢起雾、两根手指来回搓掉；两种都开就每句随机。 */
 export const NEBBIA_FADE_STYLES = ['fog', 'fingers'] as const;
 export type NebbiaFadeStyle = typeof NEBBIA_FADE_STYLES[number];
 
@@ -24,6 +24,13 @@ export type NebbiaLayout = typeof NEBBIA_LAYOUTS[number];
 /** 窗外画哪几样（每样一个开关，可以全关）：聚光灯、楼群、霓虹路灯招牌的光斑、车灯、湿路面和倒影。 */
 export const NEBBIA_SCENERY = ['spot', 'buildings', 'lights', 'cars', 'road'] as const;
 export type NebbiaSceneryPart = typeof NEBBIA_SCENERY[number];
+
+/**
+ * 字形从哪来：笔顺数据（AnimCJK，中日文的笔顺是真的，默认）或跟随歌词字体（用主题字体、字体市场字体把每个字画出来再追成笔画，
+ * 笔顺是估的，但字形就是用户选的那个字体）。图标和没有笔顺数据的字（拉丁字母、标点）本来就走字体，不受这项影响。
+ */
+export const NEBBIA_GLYPH_SOURCES = ['strokes', 'font'] as const;
+export type NebbiaGlyphSource = typeof NEBBIA_GLYPH_SOURCES[number];
 
 /** 窗外的雨：跟着车速斜着落、竖直落、不下。 */
 export const NEBBIA_RAIN = ['slant', 'straight', 'off'] as const;
@@ -36,11 +43,12 @@ export const NEBBIA_BEHIND = ['night', 'aquarium', 'backdrop'] as const;
 export type NebbiaBehind = typeof NEBBIA_BEHIND[number];
 /**
  * 前面的雾玻璃上挂的水，和窗外是什么分开选：雨窗（大大小小的凝结水珠、雨点打窗）、凝露（一层很密的细小冷凝水珠慢慢渗出来，
- * nebbiaCondensation.ts）。换窗外时换成那套的默认搭配（NEBBIA_GLASS_FOR）。
+ * nebbiaCondensation.ts）、雪窗（雪花打在玻璃上粘住、慢慢化成水珠，写字的手指经过时把雪抹开，nebbiaSnow.ts；街景窗外不下雨）。
+ * 换窗外不动玻璃；没存过玻璃的旧 tuning 读时按窗外搭配（NEBBIA_GLASS_FOR）。
  */
-export const NEBBIA_GLASS = ['rain', 'dew'] as const;
+export const NEBBIA_GLASS = ['rain', 'dew', 'snow'] as const;
 export type NebbiaGlass = typeof NEBBIA_GLASS[number];
-/** 窗外的默认搭配：雨夜街景配雨窗、水族箱配凝露；共用背景不换。 */
+/** 窗外的默认搭配（只给没存过玻璃的旧 tuning 用）：雨夜街景配雨窗、水族箱配凝露；共用背景不换。 */
 export const NEBBIA_GLASS_FOR: Partial<Record<NebbiaBehind, NebbiaGlass>> = { night: 'rain', aquarium: 'dew' };
 /** 雾笺自己画的窗外场景（着色器按它编，nebbiaShaders.ts）：选了共用背景时水珠里折射的还是街景。 */
 export type NebbiaWindowScene = 'night' | 'aquarium';
@@ -68,6 +76,8 @@ export interface NebbiaTuning {
     rain: NebbiaRain;
     /** 最后一句唱完后在玻璃上写出曲名和歌手（nebbiaCredits.ts）。 */
     credits: boolean;
+    /** 字形来源：笔顺数据，或跟随歌词字体（字体市场换了字体，漢字也跟着变）。 */
+    glyphSource: NebbiaGlyphSource;
     /** 手写歪斜：整字转动、上下错落、整行倾斜。 */
     jitter: number;
     /** 手写变形：字形斜切胖瘦、笔画长短偏移、手抖。 */
@@ -109,6 +119,29 @@ export interface NebbiaTuning {
     dew: number;
     dewSize: number;
     dewGlint: number;
+    /** 雪窗：打到玻璃上的雪多少（× 默认，0 没有）、雪花大小（× 默认）、化得多快（× 默认）。 */
+    snow: number;
+    snowSize: number;
+    snowMelt: number;
+    /** 霧的細節（原型裡寫死的參數，現在開放；預設值和原來一樣）：擦痕邊緣毛糙、擦痕邊小水珠、往下淌的水珠、水珠折射、水珠高光。 */
+    edge: number;
+    beads: number;
+    drip: number;
+    refract: number;
+    glint: number;
+    /** 雾上凝结水珠的密度（只雨窗）、風把下淌水珠往旁邊推、收筆處堆起的大水珠大小、字被霧吞掉後水珠多挂幾秒。 */
+    fieldDrops: number;
+    wind: number;
+    endBead: number;
+    beadHold: number;
+    /** 哈氣：白氣鼓開用幾秒、新句唱完後再留幾秒、散掉用幾秒、濃度。 */
+    breathSpread: number;
+    breathHold: number;
+    breathFade: number;
+    breathThick: number;
+    /** 顛簸頻率、顛簸把大水珠震落的機率。 */
+    bumpRate: number;
+    bumpFall: number;
 }
 
 /** 各个数值项的范围：设置面板的滑块和归一化共用。 */
@@ -134,6 +167,24 @@ export const NEBBIA_LIMITS = {
     dew: { min: 0, max: 1.5 },
     dewSize: { min: 0.5, max: 2 },
     dewGlint: { min: 0, max: 2 },
+    snow: { min: 0, max: 3 },
+    snowSize: { min: 0.5, max: 2 },
+    snowMelt: { min: 0.25, max: 3 },
+    edge: { min: 0, max: 1.5 },
+    beads: { min: 0, max: 1 },
+    drip: { min: 0, max: 1 },
+    refract: { min: 0, max: 2 },
+    glint: { min: 0, max: 2 },
+    fieldDrops: { min: 0, max: 1.5 },
+    wind: { min: 0, max: 1 },
+    endBead: { min: 0, max: 2 },
+    beadHold: { min: 0, max: 12 },
+    breathSpread: { min: 0.4, max: 3 },
+    breathHold: { min: 0, max: 5 },
+    breathFade: { min: 2, max: 20 },
+    breathThick: { min: 0.2, max: 1 },
+    bumpRate: { min: 0, max: 3 },
+    bumpFall: { min: 0, max: 1 },
 } as const satisfies Partial<Record<keyof NebbiaTuning, { min: number; max: number }>>;
 
 export type NebbiaNumberKey = keyof typeof NEBBIA_LIMITS;
@@ -148,6 +199,7 @@ export const DEFAULT_NEBBIA_TUNING: NebbiaTuning = {
     scenery: [...NEBBIA_SCENERY],
     rain: 'slant',
     credits: true,
+    glyphSource: 'strokes',
     jitter: 0.6,
     warp: 0.6,
     mist: 0.75,
@@ -169,6 +221,25 @@ export const DEFAULT_NEBBIA_TUNING: NebbiaTuning = {
     dew: 1,
     dewSize: 1,
     dewGlint: 1,
+    snow: 1,
+    snowSize: 1,
+    snowMelt: 1,
+    // 下面 15 項的預設值就是原來 nebbiaConstants.ts 的 NEBBIA_FIXED，畫面不變
+    edge: 0.6,
+    beads: 0.35,
+    drip: 0.25,
+    refract: 1,
+    glint: 1,
+    fieldDrops: 0.5,
+    wind: 0,
+    endBead: 1,
+    beadHold: 4,
+    breathSpread: 1.2,
+    breathHold: 1,
+    breathFade: 8,
+    breathThick: 0.7,
+    bumpRate: 1,
+    bumpFall: 0.5,
 };
 
 /** 运行时（createNebbiaRuntime.ts）的歌：歌词、随机种子，片尾写的曲名和歌手。 */
