@@ -1,6 +1,7 @@
 import React, { forwardRef, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, MotionValue } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { useWindowButtonsAtTopLeft } from '../../hooks/useWindowButtonsAtTopLeft';
 import { ChevronLeft } from 'lucide-react';
 import { AudioBands, Theme } from '../../types';
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../utils/fontStacks';
@@ -48,21 +49,25 @@ interface VisualizerShellProps {
 }
 
 const PLAYER_CHROME_HOTSPOT_SIZE = 120;
+// The panel button's corner is wider and taller than the back button's: the pointer finds the
+// button (and the slide-to-palette guide on it) from further away, so the panel is easier to discover.
+const PLAYER_PANEL_HOTSPOT_WIDTH = 240;
+const PLAYER_PANEL_HOTSPOT_HEIGHT = 200;
 const TOUCH_GUIDE_DISPLAY_MS = 1400;
 const backRevealArea = (bounds: FoliumLayoutRect): FoliumLayoutRect => ({
     left: bounds.left, top: bounds.top,
     width: PLAYER_CHROME_HOTSPOT_SIZE, height: PLAYER_CHROME_HOTSPOT_SIZE,
 });
 const panelRevealArea = (bounds: FoliumLayoutRect): FoliumLayoutRect => ({
-    left: bounds.left + bounds.width - PLAYER_CHROME_HOTSPOT_SIZE,
-    top: bounds.top + bounds.height - PLAYER_CHROME_HOTSPOT_SIZE,
-    width: PLAYER_CHROME_HOTSPOT_SIZE, height: PLAYER_CHROME_HOTSPOT_SIZE,
+    left: bounds.left + bounds.width - PLAYER_PANEL_HOTSPOT_WIDTH,
+    top: bounds.top + bounds.height - PLAYER_PANEL_HOTSPOT_HEIGHT,
+    width: PLAYER_PANEL_HOTSPOT_WIDTH, height: PLAYER_PANEL_HOTSPOT_HEIGHT,
 });
 
 const isNearPlayerPanelHotspot = (clientX: number, clientY: number) => (
     typeof window !== 'undefined'
-    && clientX >= window.innerWidth - PLAYER_CHROME_HOTSPOT_SIZE
-    && clientY >= window.innerHeight - PLAYER_CHROME_HOTSPOT_SIZE
+    && clientX >= window.innerWidth - PLAYER_PANEL_HOTSPOT_WIDTH
+    && clientY >= window.innerHeight - PLAYER_PANEL_HOTSPOT_HEIGHT
 );
 
 const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
@@ -76,6 +81,7 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
     className = '',
 }, ref) => {
     const { t } = useTranslation();
+    const lowerBackButton = useWindowButtonsAtTopLeft();
     const backdrop = useContext(VisualizerBackdropContext);
     const isInBackdrop = backdrop !== null;
     const pointerArea = backdrop?.pointerArea ?? null;
@@ -235,11 +241,11 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
                         event.stopPropagation();
                         resolvedOnBack();
                     }}
-                    /* 安全区：`absolute top-6` 的浮层，CSS 用 margin-top 往下让（见 androidPhoneFit.css ⑥）。
+                    /* 安全区：`absolute top-N` 的浮层，CSS 用 margin-top 往下让（见 androidPhoneFit.css ⑥）。
                      * data-folia-player-back 让它比纯粹的避让再往下 6px —— 按安全区挪完仍贴着挖孔下沿。 */
                     data-folia-safe-top="shift"
                     data-folia-player-back
-                    className="absolute top-6 left-6 z-30 h-10 w-10 rounded-full flex items-center justify-center transition-colors backdrop-blur-md bg-black/20 hover:bg-white/10 text-white/60 pointer-events-auto"
+                    className={`absolute ${lowerBackButton ? 'top-12' : 'top-6'} left-6 z-30 h-10 w-10 rounded-full flex items-center justify-center transition-colors backdrop-blur-md bg-black/20 hover:bg-white/10 text-white/60 pointer-events-auto`}
                     style={{ pointerEvents: isBackButtonVisible ? 'auto' : 'none' }}
                 >
                     <ChevronLeft size={20} />

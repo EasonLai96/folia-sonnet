@@ -1,0 +1,14 @@
+{
+  "providers": [
+    "appleMusic",
+    "bodian",
+    "feiniu",
+    "kugou",
+    "lxmusic",
+    "netease",
+    "qishui",
+    "qq",
+    "spotify",
+    "ytm"
+  ]
+}

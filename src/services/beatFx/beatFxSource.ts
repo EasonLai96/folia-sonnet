@@ -2,6 +2,9 @@ import type { SongResult } from '../../types';
 import { mergeBeatFxEvents, type BeatFxEvent } from './clock';
 import { getTrackBeatAccents, getTrackBeatGrid } from '../analysis/beatGrid';
 import { getDrumHits, loadStoredDrumHits, loadTrackDrumHits, setWantedDrumTrack } from '../analysis/drumHits';
+import { getVocalEnvelope, loadStoredVocalEnvelope } from '../analysis/vocalEnvelope';
+import { loadTrackVocalEnvelope, releaseTrackVocals } from '../analysis/vocalStemRun';
+import { getBeatFxLastHeard } from './beatFxLive';
 import { BEAT_THIS_SAMPLE_RATE, canRunBeatThis } from '../analysis/beatThis';
 import { decodeAtRate, readLocalTrackBytes, toMidSide } from '../analysis/trackAudio';
 import { decodeTrackAtRate, loadTrackBytes, type TrackBytesSource } from '../analysis/trackBytes';
@@ -9,6 +12,9 @@ import { whyNotTheSong } from '../wholeSongCheck';
 import { getPlaybackAnalysisTarget } from '../playbackRecovery/representationRegistry';
 import { isCacheableAudioResponse } from '../playbackRecovery/mediaCacheGuard';
 import { getPrefetchedData, isUrlValid } from '../prefetchService';
+import { isNativeModelsAvailable } from '../automix/nativeModels';
+import { cacheNativeMediaFromUrl, hasNativeMediaCache, readNativeMediaCacheUrl } from '../mediaCacheStore';
+import { getSongResourceCacheKey } from '../onlineMusic/resourceKeys';
 import { getPlaybackSourceRef } from '../../utils/appPlaybackGuards';
 import type { PlaybackRepresentation } from '../../types/playbackRecovery';
 
@@ -76,6 +82,38 @@ const readStreamedTrackBytes = async (song: SongResult): Promise<ArrayBuffer | n
     const url = prefetched?.audioUrl;
     if (!url || url === 'CACHED_IN_DB' || !isUrlValid(prefetched.audioUrlFetchedAt) || !/^https?:/.test(url)) return null;
     try {
+        /*
+         * ★ 安卓：先让原生把音频落到磁盘，再读本地那份。
+         *
+         * 不能在这里直接 fetch(url)。整首歌是 5~15MB 的二进制，而 Capacitor 的
+         * HTTP 桥有 8MiB 的响应上限（FoliaNativePlugin.DEFAULT_MAX_RESPONSE_BYTES），
+         * 超了就是一句 "Native HTTP response exceeds the bridge size limit" ——
+         * 仿真鼓面因此在手机上一次都没跑起来过。放宽上限也不行：过桥时
+         * byte[] → base64 → 整份 JSON 会放大近 8 倍，20MB 就能撞穿 256MB 堆（#261）。
+         *
+         * 所以音频根本不过桥：让原生自己拉流、写进它自己的媒体缓存目录，
+         * 回来的只是一个回环地址（http://127.0.0.1:<port>/media-cache/<key>），
+         * 那个地址是本机直连，不再经过任何 IPC。这也正好是「资源先落本地」的规矩。
+         *
+         * 失败就返回 null，走原来的 fetch —— 桌面端那条路一直是对的，别动它。
+         */
+        if (isNativeModelsAvailable() && await hasNativeMediaCache()) {
+            const cacheKey = getSongResourceCacheKey('audio', song);
+            const stored = await cacheNativeMediaFromUrl(cacheKey, url, MAX_STREAM_CACHE_BYTES, song.durationMs);
+            if (stored) {
+                const localUrl = await readNativeMediaCacheUrl(cacheKey);
+                if (localUrl) {
+                    const local = await fetch(localUrl);
+                    if (local.ok) {
+                        const localBlob = await local.blob();
+                        const notTheSong = await whyNotTheSong(song, localUrl, localBlob);
+                        if (!notTheSong) return await localBlob.arrayBuffer();
+                        console.info(`[BeatFx] not analysing the cached stream: it is ${notTheSong}`);
+                        return null;
+                    }
+                }
+            }
+        }
         const response = await fetch(url);
         const blob = await response.blob();
         // An error page or a cut-off download decoded would be stored as this track's beats.
@@ -93,6 +131,14 @@ const readStreamedTrackBytes = async (song: SongResult): Promise<ArrayBuffer | n
     }
 };
 const MAX_TRACKS = 24;
+
+/**
+ * 为分析而缓存一首流媒体歌曲时允许的最大字节数。
+ *
+ * 40MB 覆盖到约 20 分钟的无损单曲；再大的（整场现场）不做缓存，
+ * 直接放弃这次分析 —— 鼓面效果不值得为它占掉几十兆磁盘。
+ */
+const MAX_STREAM_CACHE_BYTES = 40 * 1024 * 1024;
 
 interface TrackBytes {
     bytes: ArrayBuffer | null;
@@ -224,11 +270,16 @@ export type BeatFxTrackDrums = 'hits' | 'none' | 'retry';
  * (Since the analysis service's 2b, a picture switch too: the separation stops and keeps where it was,
  * DrumResume in drumHits.ts; from the PR #750 review.)
  * `storedOnly` (智能动感模式's `cached`): the cache alone, 'hits' or 'none', and no track is wanted.
+ * `vocals`: the vocal envelope is read too (analysis/vocalStemRun.ts, a task on the same stem run as
+ * the drum hits), and 'hits' once either is in (`getVocalEnvelope` answers for the key). Without it, a
+ * voice still being read for the track is let go there (雾笺 back to 时计): the drums carry on.
  */
-export const loadBeatFxTrackDrums = (song: SongResult, { storedOnly = false } = {}): { key: string; drums: Promise<BeatFxTrackDrums> } => {
+export const loadBeatFxTrackDrums = (song: SongResult, { storedOnly = false, vocals = false } = {}): { key: string; drums: Promise<BeatFxTrackDrums> } => {
     const { key, representation } = getPlaybackAnalysisTarget(song);
+    const found = () => Boolean(getDrumHits(key) || (vocals && getVocalEnvelope(key)));
     if (storedOnly) {
-        const drums = loadStoredDrumHits(key).then((analysis): BeatFxTrackDrums => (analysis && getDrumHits(key) ? 'hits' : 'none'));
+        const drums = Promise.all([loadStoredDrumHits(key), vocals ? loadStoredVocalEnvelope(key) : null])
+            .then((): BeatFxTrackDrums => (found() ? 'hits' : 'none'));
         return { key, drums };
     }
     setWantedDrumTrack(key);
@@ -238,7 +289,13 @@ export const loadBeatFxTrackDrums = (song: SongResult, { storedOnly = false } = 
         if (!read.bytes) missing = true;
         return read.bytes;
     };
-    const drums = loadTrackDrumHits(key, readBytes)
-        .then((analysis): BeatFxTrackDrums => (analysis && getDrumHits(key) ? 'hits' : missing ? 'retry' : 'none'));
+    // The voice from where the track was heard when it was asked for (analysis/vocalStemRun.ts), or
+    // from earlier if it was sought back before the separation started: what follows the switch is
+    // what was asked for, and a run starts seconds later (a stop, a decode).
+    const askedAt = getBeatFxLastHeard(key);
+    if (!vocals) releaseTrackVocals(key);
+    const voice = vocals ? loadTrackVocalEnvelope(key, readBytes, { at: () => Math.min(askedAt, getBeatFxLastHeard(key)), seconds: (song.durationMs || 0) / 1000 }) : null;
+    const drums = Promise.all([loadTrackDrumHits(key, readBytes), voice])
+        .then(([analysis, envelope]): BeatFxTrackDrums => ((analysis || envelope) && found() ? 'hits' : missing ? 'retry' : 'none'));
     return { key, drums };
 };

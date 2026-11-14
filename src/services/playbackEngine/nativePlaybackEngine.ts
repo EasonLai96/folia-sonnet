@@ -1,4 +1,5 @@
-import { nativePlayer, type NativePlaybackEvent } from './nativePlayerPlugin';
+import { nativePlayer, type NativePlaybackEvent, type NativePlaybackSnapshot } from './nativePlayerPlugin';
+import { isNativePlaybackReconciling } from './nativePlaybackSync';
 
 // src/services/playbackEngine/nativePlaybackEngine.ts
 //
@@ -33,6 +34,9 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
  *
  * ⚠️ 代价：走 `blob:` 的本地歌原生吃不下，那种歌整首回落 `<audio>`；
  * 原生出声时均衡器 / 音效 / 淡入淡出 / 混音过渡 / 频谱整体失效（都在 Web Audio 图上）。
+ *
+ * 设置里那个「原生播放（实验）」开关已经删掉了：安卓上恒开，没有第二条音频栈可选
+ * （见 useAppAudioOutput 的三层说明）。这里的总闸留着，只是代码级别的紧急关闭口。
  */
 export const NATIVE_PLAYBACK_ENABLED: boolean = true;
 
@@ -64,7 +68,31 @@ class NativePlaybackEngine {
     private stalled = false;
     private repeatMode = 0;
     private volume = 1;
+    /**
+     * 这一首自己的响度补偿系数（线性，1 = 不动）。
+     *
+     * ReplayGain 原来乘在 Web Audio 的 gain 节点上；原生出声之后那条链不参与，所以乘进
+     * 播放器音量里：真正下发的是 volume × trackGain。两个乘数分开存，用户拖音量时
+     * 补偿不会被覆盖，换歌时补偿归 1 由调用方负责（见 usePlaybackAudioBridge.applyReplayGain）。
+     */
+    private trackGain = 1;
     private currentUrl: string | null = null;
+    private songKey: string | null = null;
+
+    /** 认领只重置本地时钟，绝不 prepare / seek / play 原生。 */
+    adoptSnapshot(snapshot: NativePlaybackSnapshot & { url: string; speed?: number }): void {
+        this.ensureSubscription();
+        this.currentUrl = snapshot.url;
+        this.songKey = snapshot.songKey ?? null;
+        this.hasSource = true;
+        this.positionMs = Math.max(0, snapshot.positionMs);
+        this.durationMs = Math.max(0, snapshot.durationMs);
+        this.playing = snapshot.playing;
+        this.rate = snapshot.speed ?? 1;
+        this.stalled = snapshot.buffering ?? false;
+        this.updatedAtMs = performance.now();
+        this.lastDeliveredMs = this.positionMs;
+    }
     private listeners = new Set<(event: NativePlaybackEvent) => void>();
     private subscriptionStarted = false;
 
@@ -120,8 +148,11 @@ class NativePlaybackEngine {
         return this.durationMs > 0 ? this.durationMs / 1000 : 0;
     }
 
-    async setSource(url: string, options: { startPositionMs?: number | null; repeatMode?: number } = {}): Promise<void> {
+    async setSource(url: string, options: { startPositionMs?: number | null; repeatMode?: number; songKey?: string | null } = {}): Promise<void> {
+        if (isNativePlaybackReconciling()) return;
+        if (this.hasSource && this.currentUrl === url && (!options.songKey || options.songKey === this.songKey)) return;
         this.ensureSubscription();
+        this.songKey = options.songKey ?? null;
         this.currentUrl = url;
         this.hasSource = true;
         this.playing = false;
@@ -135,6 +166,7 @@ class NativePlaybackEngine {
             url,
             startPositionMs: options.startPositionMs ?? null,
             repeatMode: this.repeatMode,
+            songKey: this.songKey,
         });
         await nativePlayer.setVolume(this.volume);
     }
@@ -162,7 +194,7 @@ class NativePlaybackEngine {
         const targetMs = Math.max(0, Math.round(seconds * 1000));
         this.positionMs = targetMs;
         this.updatedAtMs = performance.now();
-        this.stalled = false;
+        // seek 是位置意图，不是缓冲结束：保留 stalled，等待原生实际播放状态（#168）。
         // 跳是唯一允许「往回走」的动作，所以这里必须把只进不退的基准一起复位。
         this.lastDeliveredMs = targetMs;
         await nativePlayer.seek(targetMs);
@@ -179,13 +211,33 @@ class NativePlaybackEngine {
         await nativePlayer.stop();
     }
 
+    /** 用户音量（0..1）。与 [trackGain] 分开：拖音量不该把响度补偿抹掉。 */
     setVolume(volume: number): void {
         this.volume = clamp(volume, 0, 1);
         if (!this.hasSource) return;
-        void nativePlayer.setVolume(this.volume).catch(() => undefined);
+        void nativePlayer.setVolume(this.effectiveVolume()).catch(() => undefined);
+    }
+
+    /**
+     * 这一首的响度补偿（线性系数，见 src/utils/replayGain.ts 的 linearGain）。
+     *
+     * 乘在音量上一起下发，而不是另开一条原生接口：播放器只有一个音量旋钮。
+     */
+    setTrackGain(gain: number): void {
+        this.trackGain = clamp(gain, 0, 4);
+        if (!this.hasSource) return;
+        void nativePlayer.setVolume(this.effectiveVolume()).catch(() => undefined);
+    }
+
+    /** 真正下发给播放器的音量。 */
+    private effectiveVolume(): number {
+        return clamp(this.volume * this.trackGain, 0, 1);
     }
 
     setSpeed(speed: number): void {
+        // 切倍速前结算旧速率，不能把过去整段墙钟按新倍速重新计算。
+        this.positionMs = this.getPositionSec() * 1000;
+        this.updatedAtMs = performance.now();
         this.rate = clamp(speed, 0.1, 4);
         if (!this.hasSource) return;
         void nativePlayer.setSpeed(this.rate).catch(() => undefined);
@@ -195,6 +247,19 @@ class NativePlaybackEngine {
         // 只记下来：下一次 prepare 会带上它。已经在播的这一首不重新装地址 —— 那会把
         // 当前这一首从头再来一遍，而「单曲循环」是随时能按的。
         this.repeatMode = repeatMode;
+    }
+
+    /**
+     * 立刻改循环模式：对已经在播的播放器直接下发，不重新装地址。
+     *
+     * `setRepeatMode` 只在下次 prepare 才生效，正在播的这首会丢循环 —— ExoPlayer
+     * 还是 OFF，歌放完停在末尾，进度条不动；Web 那条路的 `<audio>.loop` 是元素属性，
+     * React 一渲染就生效，原生这里得补上同一个时效性。播放器还没建时退化为只记录。
+     */
+    setRepeatModeNow(repeatMode: number): void {
+        this.repeatMode = repeatMode;
+        if (!this.hasSource) return;
+        void nativePlayer.setRepeatMode(repeatMode).catch(() => undefined);
     }
 
     subscribe(listener: (event: NativePlaybackEvent) => void): () => void {
@@ -209,6 +274,8 @@ class NativePlaybackEngine {
         if (this.subscriptionStarted) return;
         this.subscriptionStarted = true;
         void nativePlayer.addListener(event => {
+            if (isNativePlaybackReconciling()) return;
+            if (event.songKey && this.songKey && event.songKey !== this.songKey) return;
             this.apply(event);
             this.listeners.forEach(listener => listener(event));
         }).catch(() => undefined);
@@ -256,7 +323,8 @@ class NativePlaybackEngine {
                  * 用户 seek / 单曲循环回到开头：位置是**允许往回走**的，
                  * 所以把只进不退的基准一起复位。播放状态不变。
                  */
-                this.stalled = false;
+                if (typeof event.playing === 'boolean') this.playing = event.playing;
+                if (typeof event.buffering === 'boolean') this.stalled = event.buffering;
                 this.lastDeliveredMs = this.positionMs;
                 break;
             default:

@@ -13,6 +13,16 @@ import {
 // Guards sync schema parsing against malformed sync server responses.
 
 describe('sync schema parsing', () => {
+    it('preserves existing smartBeat settings across wire v1/v2 and library roundtrips', () => {
+        const smartBeat = { enabled: true, sensitivity: 0.75 };
+        for (const schemaVersion of [1, 2]) {
+            const settings = { schemaVersion, updatedAt: '2026-01-01T00:00:00Z', data: { smartBeat } };
+            expect(parseSyncedSettingsRecord(settings)?.data.smartBeat).toEqual(smartBeat);
+            const bundle = parseSyncLibraryExportBundle({ kind: 'folia-sync-export', schemaVersion, exportedAt: settings.updatedAt, settings, themes: [] });
+            expect(bundle?.settings?.data.smartBeat).toEqual(smartBeat);
+        }
+    });
+
     it('keeps only valid synced visual settings fields', () => {
         const record = parseSyncedSettingsRecord({
             schemaVersion: 1,
@@ -26,6 +36,7 @@ describe('sync schema parsing', () => {
                 hidePlayerTranslationSubtitle: 'false',
                 showSubtitleTranslation: true,
                 subtitleContentMode: 'romanization',
+                subtitleOverlayLayout: 'current+romanization',
                 subtitleOverlayBackground: true,
                 subtitleUpcomingLyricsBlur: false,
                 lyricsFontStyle: 'fantasy',
@@ -48,6 +59,7 @@ describe('sync schema parsing', () => {
             visualizerOpacity: 0.7,
             showSubtitleTranslation: true,
             subtitleContentMode: 'romanization',
+            subtitleOverlayLayout: 'current+romanization',
             subtitleOverlayBackground: true,
             subtitleUpcomingLyricsBlur: false,
             subtitleFontStyle: 'serif',
@@ -71,6 +83,20 @@ describe('sync schema parsing', () => {
 
         expect(parse('both')).toBe('both');
         expect(parse('triple')).toBeUndefined();
+    });
+
+    it('accepts bottom subtitle row layouts and drops anything else', () => {
+        const parse = (subtitleOverlayLayout: unknown) => parseSyncedSettingsRecord({
+            schemaVersion: 1,
+            updatedAt: '2026-10-28T00:00:00.000Z',
+            data: { subtitleOverlayLayout },
+        })?.data.subtitleOverlayLayout;
+
+        expect(parse('current+romanization+translation')).toBe('current+romanization+translation');
+        expect(parse('translation')).toBe('translation');
+        expect(parse('next')).toBeUndefined();
+        expect(parse('current+next+next+next')).toBeUndefined();
+        expect(parse(3)).toBeUndefined();
     });
 
     it('migrates the deprecated carousel home layout to grid', () => {

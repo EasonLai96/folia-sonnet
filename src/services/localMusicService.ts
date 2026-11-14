@@ -1,9 +1,8 @@
 import { LocalSong, LyricData, LocalLibrarySnapshot, LocalLibrarySnapshotFile, LocalLibrarySnapshotNode, type SongResult } from '../types';
-import { saveLocalSong, saveLocalSongs, deleteLocalSong as dbDeleteLocalSong, deleteLocalSongs as dbDeleteLocalSongs, saveDirHandles, getDirHandles, deleteDirHandle, getLocalSongs, getLocalLibrarySnapshot, saveLocalLibrarySnapshot, deleteLocalLibrarySnapshot } from './db';
+import { saveLocalSong, saveLocalSongs, deleteLocalSong as dbDeleteLocalSong, saveDirHandles, getDirHandles, deleteDirHandle, getLocalSongs, getLocalLibrarySnapshot, saveLocalLibrarySnapshot, deleteLocalLibrarySnapshot } from './db';
 import { getLocalPlaylists, saveLocalPlaylists } from './localPlaylistService';
 import { parseEmbeddedMetadataAsync, type EmbeddedMetadataResult } from '../utils/localMetadataWorkerClient';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
-import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
 import { normalizeLyricMatchText } from '../utils/lyrics/matchScore';
 import { createSafeObjectUrl } from '../utils/blobGuards';
 import { repairFlacMetadata } from '../utils/flacMetadataRepair';
@@ -11,7 +10,8 @@ import { resolveExplicitFileTimedLyricFormat, type ExplicitFileTimedLyricFormat 
 import { applyMatchedMetadata } from './localLibraryCatalogService';
 import { buildLyricSearchQuery } from '../utils/lyrics/searchQuery';
 import { buildLocalSongLyricMatchContext, shouldRefreshLocalSongLyricsFromMetadata } from '../utils/lyrics/localSongMatchContext';
-import { buildImportedMetadataSnapshot, extractMetadataFromFilename } from '../utils/localSongMetadata';
+import { isAndroidNativeRuntime, pickAndroidLocalMusic } from './nativeLocalMusic';
+import { buildImportedMetadataSnapshot } from '../utils/localSongMetadata';
 import { getLocalLibraryCatalogSnapshot } from './localLibraryEntityRepository';
 import { resolveLocalSongMetadata } from './playbackAdapters';
 import { removeCachedCover } from './coverCache';
@@ -30,37 +30,18 @@ import { getLocalLibraryAvailability } from './localLibraryAvailability';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { getLocalLyricFilePriority, isSameLocalLyricFormatOrder, normalizeLocalLyricFormatOrder, type LocalLyricFileFormat } from '../utils/lyrics/localLyricFormatOrder';
 import { readLyricFile } from '../utils/lyrics/lyricFileDecoding';
-import {
-    clearLocalRootRemoved,
-    isLocalFolderIgnored,
-    isLocalRootRemoved,
-    markLocalRootRemoved,
-    normalizeLocalFolderPath,
-    runLocalFolderMutation,
-    setLocalFolderIgnored,
-} from './localLibraryFolderIgnore';
-import { fetchOnlineCoversForImportedSongs } from './localCoverAutoFetch';
-import { announceLocalCoverReady } from './localCoverReadyEvent';
-import {
-    copyAndroidLocalAudio,
-    deleteAndroidImportedAudio,
-    isAndroidNativeRuntime,
-    nativeAudioUrlForRef,
-    pickAndroidLocalMusic,
-    scanAndroidDeviceMusic,
-} from './nativeLocalMusic';
+import { resolveLyricSourcePreference } from '../utils/lyrics/lyricSourcePreference';
+import { isLocalFolderIgnored, normalizeLocalFolderPath, runLocalFolderMutation, setLocalFolderIgnored } from './localLibraryFolderIgnore';
+
+// 重命名（dev 独有能力）：实现在 ./localMusic/renameSong，外壳文件这里只做再导出，调用方
+// （管理歌曲面板、本地歌单工具）始终从本模块 import。
+export { renameLocalSong } from './localMusic/renameSong';
+export type { LocalSongRenameResult } from './localMusic/renameSong';
 
 
 type EmbeddedMetadata = EmbeddedMetadataResult;
 
-/**
- * 8：给已入库的歌补一次歌手。
- *
- * 之前只有内嵌标签与 MediaStore 给了歌手才算有，两者都空（很常见）这首歌就永远没有歌手。
- * 现在 `buildImportedMetadataSnapshot` 会再退一步从文件名认，已经进库的歌得重抽一遍
- * 才吃得到 —— 版本号一变，扫描时 `embeddedMetadataVersion` 对不上就会重跑元数据。
- */
-export const EMBEDDED_METADATA_VERSION = 8;
+export const EMBEDDED_METADATA_VERSION = 7;
 
 interface ImportPreparationMetrics {
     getFileMs: number;
@@ -122,19 +103,6 @@ const TRANSLATION_LYRIC_EXTENSIONS = /\.t\.(lrc|vtt)$/i;
 const IMPORT_CONCURRENCY = 6;
 export const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 export const LOCAL_MUSIC_SCAN_PROGRESS_EVENT = 'folia-local-music-scan-progress';
-/**
- * 某一首本地歌的封面**这一刻才抽出来**（detail: `{ songId, assetId }`）。
- *
- * 队列（磁贴墙就是按它铺的）里的条目是**建队列那一刻**把封面烤进 `album.coverUrl` 的
- * （`buildLocalQueue` 按当时的 `localCoverAssetId` 算），而内嵌封面常常是后来才有的：
- * 播放这一首时、预热相邻几首时、列表回填时。没有这一下通知，那些条目就一直带着
- * 「没有封面」的那份快照 —— 于是播放页有封面、磁贴墙一片空白。
- */
-/**
- * 见 `services/localCoverReadyEvent`：写在线封面那一侧（`localSongMatchSelectionService`）
- * 也要广播同一个事件，而它不能 import 本模块（会成环），所以常量住在那边。
- */
-export { LOCAL_COVER_READY_EVENT } from './localCoverReadyEvent';
 const HYDRATION_BATCH_SIZE = 25;
 const HYDRATION_REFRESH_EVERY = 100;
 const SNAPSHOT_HASH_SEED = 2166136261;
@@ -158,10 +126,6 @@ function formatImportDuration(ms: number): string {
 
 function notifyLocalMusicUpdated() {
     window.dispatchEvent(new CustomEvent(LOCAL_MUSIC_UPDATED_EVENT));
-}
-
-function notifyLocalCoverReady(songId: string, assetId: string) {
-    announceLocalCoverReady({ songId, assetId });
 }
 
 async function removeDeletedSongIdsFromPlaylists(songIds: string[]): Promise<void> {
@@ -223,11 +187,6 @@ async function getImportDirectoryHandle(expectedRootName?: string): Promise<File
     const availability = getLocalLibraryAvailability();
     if (!availability.supported) throw new Error(`Local library unavailable: ${availability.reason}`);
 
-    // 安卓走原生，曲库里没有也不可能有持久化的目录句柄。可用性判定在那边是「原生可用」，
-    // 但 WebView 仍然没有 showDirectoryPicker —— 不挡住的话这里会直接抛
-    // 「showDirectoryPicker is not a function」。
-    if (isAndroidNativeRuntime()) return null;
-
     // @ts-ignore - showDirectoryPicker is not in all TypeScript definitions
     return await window.showDirectoryPicker();
 }
@@ -262,9 +221,42 @@ function generateId(): string {
 
 // Extract basic metadata from filename.
 // Expected format: "Artist - Title.mp3", "Artist-Title.mp3", or "Title.mp3".
-// The implementation lives in utils/localSongMetadata so every ingest path shares it; re-exported
-// here because callers inside this file (and anything that imported it from here) keep the name.
-export { extractMetadataFromFilename };
+export function extractMetadataFromFilename(fileName: string): { title?: string; artist?: string; } {
+    // 去掉扩展名
+    let nameWithoutExt = fileName.replace(KNOWN_AUDIO_EXTENSIONS, '');
+
+    // 去掉开头的cue切分产生的序号 "01. ", "01 - ", or "1-01 " 
+    nameWithoutExt = nameWithoutExt.replace(/^\d{1,3}(?:[-.]\d{1,3})?(?:\s*[-.]\s*|\s+)/, '');
+
+    // 分割艺术家和标题 - 尝试 " - " (带空格)
+    let parts = nameWithoutExt.split(' - ');
+    if (parts.length === 2) {
+        return {
+            artist: parts[0].trim(),
+            title: parts[1].trim()
+        };
+    }
+
+    // 尝试 "-" (不带空格) - 但要确保不是单词中间的连字符
+    // 我们检查最后一个"-"是否可能是分隔符
+    const lastDashIndex = nameWithoutExt.lastIndexOf('-');
+    if (lastDashIndex > 0 && lastDashIndex < nameWithoutExt.length - 1) {
+        const potentialTitle = nameWithoutExt.substring(0, lastDashIndex).trim();
+        const potentialArtist = nameWithoutExt.substring(lastDashIndex + 1).trim();
+
+        // 如果分割后的两部分都有内容，使用这个分割
+        if (potentialTitle && potentialArtist) {
+            return {
+                artist: potentialArtist,
+                title: potentialTitle
+            };
+        }
+    }
+
+    return {
+        title: nameWithoutExt.trim()
+    };
+}
 
 // Get audio duration from file
 async function getAudioDuration(file: File): Promise<number> {
@@ -1138,9 +1130,15 @@ async function hydrateImportedSongsInBackground(rootFolderName: string, songs: L
 // Import folder using File System Access API (if supported)
 export async function importFolder(expectedRootName?: string): Promise<LocalSong[]> {
     /*
-     * 安卓没有 File System Access API，这里不能去调 showDirectoryPicker —— 它会直接抛
-     * 「Local library unavailable」。改走原生：用系统文件管理器挑整个文件夹（或逐个文件），
-     * 选中的音频由原生复制进私有目录，再通过回环地址播放。
+     * 安卓走原生选择器。
+     *
+     * 这一条以前**漏了**：`localMusic/importFolders.ts` 里那份 importFolder
+     * 是有安卓分支的，但首页实际调的是这里这份 —— 它只会调
+     * getImportDirectoryHandle（File System Access API），而安卓 WebView
+     * 一个都不给。表现就是：点「导入文件夹」，加载动画闪一下就没了，
+     * 系统文件管理器根本不弹。
+     *
+     * 判断放最前面：要在任何 Web API 调用之前分叉，否则会在安卓上先抛。
      */
     if (isAndroidNativeRuntime()) {
         return await pickAndroidLocalMusic();
@@ -1155,6 +1153,11 @@ export async function importFolder(expectedRootName?: string): Promise<LocalSong
         if ((error as Error).name === 'AbortError') return [];
         throw error;
     }
+}
+
+/** Imports a folder the caller already holds instead of asking the picker (the dev mock song's OPFS folder). */
+export async function importDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promise<LocalSong[]> {
+    return await runLocalFolderMutation(() => importFolderContents(dirHandle));
 }
 
 async function importFolderContents(dirHandle: FileSystemDirectoryHandle, expectedRootName?: string): Promise<LocalSong[]> {
@@ -1193,9 +1196,6 @@ async function importFolderContents(dirHandle: FileSystemDirectoryHandle, expect
                 rootFolderName = `${originalRootName} (${counter})`;
             }
         }
-
-        // 用户把这个目录重新导进来了（之前删过）：墓碑撤掉，之后的刷新才不会把它又跳过去。
-        await clearLocalRootRemoved(rootFolderName);
 
         const traversalStartedAt = performance.now();
         const allSongs = await getLocalSongs();
@@ -1312,14 +1312,6 @@ async function importFolderContents(dirHandle: FileSystemDirectoryHandle, expect
         void hydrateImportedSongsInBackground(rootFolderName, songsToPersist).catch(error => {
             console.error(`[LocalMusic][Import] Background metadata hydration failed for "${rootFolderName}":`, error);
         });
-        /*
-         * 联网补封面与后台抽内嵌封面并行跑，不等后者。
-         *
-         * 文件里没有内嵌封面的歌，原先要等「播到它」才在歌词匹配里顺手带回在线封面 ——
-         * 于是刚导入完的这一屏全是占位色。这里立刻补；两边撞车（hydration 随后抽出了内嵌
-         * 封面）由 localCoverAutoFetch 落库前重读一次解决，内嵌的那张优先。
-         */
-        fetchOnlineCoversForImportedSongs(importedSongs);
 
         return importedSongs;
     } catch (error) {
@@ -1395,7 +1387,7 @@ export async function matchLyrics(song: LocalSong): Promise<LyricData | null> {
                     matchContext.durationMs,
                     {
                         album: matchContext.album,
-                        // 本地文件没有平台来源，跟不了「跟随播放平台」，直接落到「本地歌曲的歌词来源」。
+                        // 「跟随播放平台来源」要先落成具体平台：本地歌没有 sourceRef，会退回本地歌词来源。
                         preferredSource: shouldUseBestLyric ? resolveLyricSourcePreference(settingsLyricSettings) : undefined,
                         metadataCandidate: matchContext.metadataCandidate,
                         exactMatchOnly: Boolean(matchContext.metadataCandidate && !shouldUseBestLyric),
@@ -1534,15 +1526,12 @@ export async function matchLyrics(song: LocalSong): Promise<LyricData | null> {
     }
 }
 
-// Delete local song
-export async function deleteLocalSong(id: string): Promise<void> {
-    // Remove fileHandle from memory
-    fileHandleMap.delete(id);
-    await Promise.all([
-        dbDeleteLocalSong(id),
-        removeCachedCover(`cover_local_${id}`),
-    ]);
-}
+export {
+    deleteFolderSongs,
+    deleteLocalSong,
+    deleteSongsByIds,
+    removeImportedRoot,
+} from './localMusic/folderMutations';
 
 function getRootFolderName(song: LocalSong): string | null {
     const pathLike = song.filePath || song.folderName;
@@ -1626,7 +1615,10 @@ async function getAccessibleFileHandle(song: LocalSong): Promise<FileSystemFileH
 async function cleanupDirHandleIfUnused(rootFolderName: string): Promise<void> {
     if ((await getLocalLibrarySnapshot(rootFolderName))?.ignoredFolderPaths?.length) return;
     const allSongs = await getLocalSongs();
-    const stillUsed = allSongs.some(song => songBelongsToRootFolder(song, rootFolderName));
+    const stillUsed = allSongs.some(song => {
+        const songRoot = getRootFolderName(song);
+        return songRoot === rootFolderName;
+    });
 
     if (!stillUsed) {
         await deleteDirHandle(rootFolderName);
@@ -1635,154 +1627,20 @@ async function cleanupDirHandleIfUnused(rootFolderName: string): Promise<void> {
     }
 }
 
-type NativeAudioProbe = 'ok' | 'missing' | 'blocked';
-
-/**
- * 播放前先问一次本机回环服务：这个 ref 到底还能不能取到字节。
- *
- * 之前是把 http://127.0.0.1:<port>/audio/<ref> 直接丢给 <audio> —— 副本丢了、空了、
- * 或者请求被网络栈（明文 / CORS / Range）挡掉，浏览器报出来**一模一样**：
- * networkState=3、mediaErrorCode=4，就一句 "MEDIA_ELEMENT_ERROR: Format error"。
- * 拿 1 个字节的 Range 请求先探一次，三种情况就能分开处理。
- */
-async function probeNativeAudioUrl(url: string): Promise<NativeAudioProbe> {
-    try {
-        const response = await fetch(url, { headers: { Range: 'bytes=0-0' } });
-        if (response.ok) return 'ok';
-        // 服务侧对「文件不存在」和「文件是空的」都回 404（并把原因写进 logcat）。
-        return response.status === 404 ? 'missing' : 'blocked';
-    } catch {
-        // fetch 直接抛：连字节都没拿到，属于网络层被挡，不是文件本身的问题。
-        return 'blocked';
-    }
-}
-
-/**
- * 把整首取成本地 Blob 再换 object URL。
- *
- * 这是非安卓本地播放一直在走的路（getAudioFromFile 也是 object URL）。换成它之后，
- * 回环地址在 <audio> 上可能遇到的 CORS / Range / 明文 / 混合内容这些环节全部不存在 ——
- * object URL 是同源资源。只在「流式那条路走不通」时才用，正常情况不花这个内存。
- */
-async function blobUrlFromNativeAudioUrl(url: string): Promise<string | null> {
-    try {
-        const response = await fetch(url);
-        if (!response.ok) return null;
-        return createSafeObjectUrl(await response.blob());
-    } catch {
-        return null;
-    }
-}
-
-/**
- * 按 ref 取一个能播的地址：拿得到就流式播，取不到字节就整首取成 Blob。
- * 返回 null 表示这个 ref 彻底不行（调用方据此决定要不要自己复制一份）。
- */
-/**
- * 上一次播放失败的原因。
- *
- * 没有 logcat 的机器上，「无法访问文件，请重新导入文件夹」这一句等于什么都没说：
- * 副本丢了、请求被网络栈挡了、端口没拿到 —— 三种的处理方式完全不同。
- * 记下来交给界面显示，用户一眼就能把范围报出来。
- */
-export type LocalAudioFailureReason = 'missing' | 'blocked' | 'no-ref' | 'no-server' | null;
-let lastLocalAudioFailure: LocalAudioFailureReason = null;
-export const getLastLocalAudioFailureReason = (): LocalAudioFailureReason => lastLocalAudioFailure;
-
-async function playableUrlForNativeRef(ref: string): Promise<string | null> {
-    const nativeUrl = await nativeAudioUrlForRef(ref);
-    if (!nativeUrl) {
-        lastLocalAudioFailure = 'no-server';
-        return null;
-    }
-    const probe = await probeNativeAudioUrl(nativeUrl);
-    if (probe === 'ok') {
-        lastLocalAudioFailure = null;
-        return nativeUrl;
-    }
-    if (probe === 'missing') {
-        lastLocalAudioFailure = 'missing';
-        return null;
-    }
-    const blobUrl = await blobUrlFromNativeAudioUrl(nativeUrl);
-    lastLocalAudioFailure = blobUrl ? null : 'blocked';
-    return blobUrl;
-}
-
 // Get audio blob from local song using fileHandle
 // Returns blob URL if fileHandle exists, null otherwise
-export async function getAudioFromLocalSong(song: LocalSong): Promise<string | null> {
-    // 安卓原生曲库：文件在 MediaStore 或 App 私有目录里，WebView 拿不到句柄，
-    // 走原生那个回环的小服务（地址按当前端口现拼，见 nativeAudioUrlForRef）。
-    if (song.nativeAudioRef) {
-        const direct = await playableUrlForNativeRef(song.nativeAudioRef);
-        if (direct) {
-            lastLocalAudioFailure = null;
-            return direct;
-        }
-
-        /*
-         * 自己复制一份。
-         *
-         * MediaStore 那一路（扫描设备音乐库）是按 id **现读用户原文件**的：
-         * 文件被搬走、媒体库还没刷新、某个 ROM 不给读，播放就只剩一句
-         * 「无法访问文件，请重新导入」—— 而用户的原文件根本没动过，
-         * 让人重新导入整个文件夹毫无道理。这里把源文件的字节拷进 App 私有目录，
-         * 之后这首歌只认那份副本，和「挑选导入」那条路一样，与 MediaStore 和权限脱钩。
-         *
-         * 只在真播不出来时拷这一首，不是扫描时整库复制 —— 那会平白占几个 G。
-         */
-        const copiedRef = await copyAndroidLocalAudio(song.nativeAudioRef, song.fileName, song.fileSize);
-        if (copiedRef && copiedRef !== song.nativeAudioRef) {
-            const copiedUrl = await playableUrlForNativeRef(copiedRef);
-            if (copiedUrl) {
-                // 记住新 ref：下次直接播副本，不用再拷贝一次。
-                song.nativeAudioRef = copiedRef;
-                void saveLocalSong(song).catch((error) => {
-                    console.warn('[LocalMusic] Failed to persist the copied audio ref:', error);
-                });
-                return copiedUrl;
-            }
-        }
-
-        // 原因必须写进日志：副本丢了 / 被网络栈挡了 / 服务没起来，三种的处理完全不同，
-        // 而真机上那句「无法访问文件」本身看不出任何区别。
-        console.warn(
-            `[LocalMusic] Native audio unreachable for ${song.id}: ${song.nativeAudioRef}`
-            + ` (reason: ${lastLocalAudioFailure ?? 'unknown'})`,
-        );
-        return null;
-    }
-    lastLocalAudioFailure = 'no-ref';
-
-    const fileHandle = await getAccessibleFileHandle(song);
-
-    if (fileHandle) {
-        try {
-            const file = await fileHandle.getFile();
-            return await getAudioFromFile(file);
-        } catch (error) {
-            console.error('[LocalMusic] Failed to get file from handle:', error);
-            // File may have been moved or the stored handle may have become stale.
-            fileHandleMap.delete(song.id);
-        }
-    }
-
-    const recoveredHandle = await recoverFileHandleFromPersistedDirectory(song);
-    if (recoveredHandle) {
-        try {
-            const file = await recoveredHandle.getFile();
-            return await getAudioFromFile(file);
-        } catch (error) {
-            console.error('[LocalMusic] Failed to get file from recovered directory handle:', error);
-            fileHandleMap.delete(song.id);
-        }
-    }
-
-    // No accessible handle available - permission may need to be restored or the file moved.
-    console.warn(`[LocalMusic] No accessible handle for song ${song.id}. Permission restore or re-import is required.`);
-    return null;
-}
+/**
+ * ⚠️ 这里以前有**第二份**实现，而且完全没有安卓分支 —— 它只认 File System Access API
+ * 拿到的 fileHandle，安卓 WebView 根本没有这种东西。
+ *
+ * `components/app/playback/source/songAudioSource.ts` 导入的是**这一份**，
+ * 于是安卓上每首歌都会落到「No accessible handle … 请重新导入」：
+ * 原生明明把音频复制进了私有目录、回环服务也能正常吐 206，Web 层却从来没去问过它。
+ *
+ * 现在一律委托给 `localMusic/playbackFiles.ts` —— 那里先看 `song.nativeAudioRef`
+ * 走原生回环，再退回 fileHandle，两套运行环境都能走对路。**不要再在这里长第二份实现**。
+ */
+export { getAudioFromLocalSong } from './localMusic/playbackFiles';
 
 /** Resolves the current File for playback recovery without changing the song or minting a URL. */
 export async function getFileFromLocalSong(song: LocalSong): Promise<File | null> {
@@ -1833,17 +1691,12 @@ export async function getLocalSongArrayBuffer(song: LocalSong): Promise<ArrayBuf
 // Extracts and persists one song's embedded cover after an explicit playback-time request.
 async function extractAndPersistSongCover(
     song: LocalSong,
-    fileHandle: FileSystemFileHandle | null,
-    file?: File,
+    fileHandle: FileSystemFileHandle,
 ): Promise<LocalSong> {
-    // 安卓没有 File System Access 句柄，字节只能从原生回环服务那份 File 里来；桌面走句柄。
-    const source = file ?? await fileHandle?.getFile();
-    if (!source) return song;
-    // 抽不出封面的文件按「内容修订」记一笔：同一首歌反复进屏时不再重复解一遍整段元数据。
-    // 安卓那条路只取头部 1MB，截断文件的修订与整份不同，所以整份路径仍会再试一次。
-    const fileRevision = `${source.size}:${source.lastModified}`;
+    const file = await fileHandle.getFile();
+    const fileRevision = `${file.size}:${file.lastModified}`;
     if (songsWithoutEmbeddedCover.get(song.id) === fileRevision) return song;
-    const metadata = await extractEmbeddedMetadata(source, true);
+    const metadata = await extractEmbeddedMetadata(file, true);
     if (!metadata.cover || !metadata.coverAssetId) {
         songsWithoutEmbeddedCover.set(song.id, fileRevision);
         return song;
@@ -1851,60 +1704,21 @@ async function extractAndPersistSongCover(
     songsWithoutEmbeddedCover.delete(song.id);
     stageLocalCoverAsset(metadata.coverAssetId, metadata.cover);
 
-    const previousAssetId = song.localCoverAssetId;
     const updatedSong: LocalSong = {
         ...song,
         localCoverAssetId: metadata.coverAssetId,
         localCoverSource: 'embedded',
-        // 安卓没有 File System Access 句柄，这里不能凭空塞一个：留原值（undefined）。
-        ...(fileHandle ? { fileHandle } : {}),
+        fileHandle,
     };
     Object.assign(song, updatedSong);
     await saveLocalSong(updatedSong);
-    /*
-     * 封面是**现在**才有的。曲库列表直接按记录的 `localCoverAssetId` 现算，管不到；
-     * 队列（磁贴墙）烤的是建队那一刻的快照，只有靠这个事件去补。
-     */
-    if (previousAssetId !== updatedSong.localCoverAssetId) {
-        notifyLocalCoverReady(updatedSong.id, metadata.coverAssetId);
-    }
     return updatedSong;
-}
-
-/** 只取文件头部多少字节来找内嵌封面。 */
-const COVER_HEAD_BYTES = 1024 * 1024;
-
-/**
- * 安卓上把音频取回来当 File。
- *
- * 本地歌在安卓走的是原生回环服务（`nativeAudioRef`），**没有 File System Access 句柄** ——
- * 而 ensureLocalSongCoverAsset 之前只认句柄，拿不到就直接放弃。
- * 结果是：安卓本地歌的封面**只有导入那一次**有机会抽出来（导入时解析内嵌元数据），
- * 那一趟一旦失败（比如副本那次 fetch 404），这首歌就永远没有封面 ——
- * 队列磁贴、播放页全是空白。这里让封面抽取也能从原生回环那份字节里拿。
- *
- * `headOnly` 只取前 1MB：内嵌封面（ID3 的 APIC、FLAC 的 picture 块）几乎都在文件头部，
- * 而整首拉回来对一首 8 分钟的 FLAC 就是几十 MB —— 给一整屏卡片补封面时不该付这个代价。
- * 取不到就返回 null，调用方（播放时那条路径）会再不带限制地试一次。
- */
-async function nativeAudioFile(song: LocalSong, headOnly = false): Promise<File | null> {
-    if (!song.nativeAudioRef) return null;
-    const url = await nativeAudioUrlForRef(song.nativeAudioRef);
-    if (!url) return null;
-    try {
-        const response = await fetch(url, headOnly ? { headers: { Range: `bytes=0-${COVER_HEAD_BYTES - 1}` } } : undefined);
-        // 原生回环服务支持 Range，回了 206 也算成功。
-        if (!response.ok && response.status !== 206) return null;
-        const blob = await response.blob();
-        if (blob.size <= 0) return null;
-        return new File([blob], song.fileName || 'audio', { type: song.mimeType || 'audio/*' });
-    } catch {
-        return null;
-    }
 }
 
 export async function ensureLocalSongCoverAsset(
     song: LocalSong,
+    // 一屏卡片补封面时只取文件头 1MB 找内嵌封面（整首拉回来对一首几十 MB 的 FLAC 太贵）；
+    // 播放时那条路径不传，整份再试一次。实现见 ./localMusic/covers。
     options?: { preferHeadBytes?: boolean },
 ): Promise<LocalSong> {
     if (song.localCoverAssetId && await hasLocalCoverBinary(song.localCoverAssetId)) return song;
@@ -1914,15 +1728,7 @@ export async function ensureLocalSongCoverAsset(
         localCoverAssetRequestMap.set(song.id, (async () => {
             const fileHandle = await getAccessibleFileHandle(song);
             if (!fileHandle) {
-                // 安卓没有句柄，但字节还能从原生回环服务取回来 —— 别就这么放弃。
-                const nativeFile = await nativeAudioFile(song, options?.preferHeadBytes === true);
-                if (!nativeFile) return song;
-                try {
-                    return await extractAndPersistSongCover(song, null, nativeFile);
-                } catch (error) {
-                    console.warn(`[LocalMusic] Failed to ensure native embedded cover for ${song.fileName}:`, error);
-                    return song;
-                }
+                return song;
             }
 
             try {
@@ -1958,409 +1764,8 @@ export async function getAudioFromFile(file: File): Promise<string> {
     return url;
 }
 
-// Delete songs by their specific IDs
-export async function deleteSongsByIds(songIds: string[]): Promise<void> {
-    const uniqueSongIds = Array.from(new Set(songIds));
-    if (uniqueSongIds.length === 0) return;
-    const allSongs = await getLocalSongs();
-    const deletedIdSet = new Set(uniqueSongIds);
-    const deletedSongs = allSongs.filter(song => deletedIdSet.has(song.id));
-    const affectedRoots = new Set(
-        deletedSongs
-            .map(getRootFolderName)
-            .filter((root): root is string => Boolean(root)),
-    );
-    // 安卓「挑选导入」的音频是复制进 App 私有目录的：库里删了，那份副本也得跟着删，
-    // 否则它会一直留着占空间（只清自己写出的 imported-*，MediaStore 的歌是引用不删）。
-    void deleteAndroidImportedAudio(
-        deletedSongs
-            .map(song => song.nativeAudioRef)
-            .filter((ref): ref is string => Boolean(ref)),
-    ).catch(error => console.warn('[LocalMusic] Failed to delete imported android audio:', error));
-    uniqueSongIds.forEach(id => {
-        fileHandleMap.delete(id);
-        localCoverAssetRequestMap.delete(id);
-        songsWithoutEmbeddedCover.delete(id);
-    });
-    await Promise.all([
-        dbDeleteLocalSongs(uniqueSongIds),
-        ...uniqueSongIds.map(id => removeCachedCover(`cover_local_${id}`)),
-    ]);
-    await removeDeletedSongIdsFromPlaylists(uniqueSongIds);
-    await Promise.all(Array.from(affectedRoots).map(cleanupDirHandleIfUnused));
-    notifyLocalMusicUpdated();
-    console.log(`[LocalMusic] Deleted ${uniqueSongIds.length} songs by ID`);
-}
-
-// ——— 重命名 ———
-//
-// 「管理歌曲」里的重命名在两端不是一回事：
-//   · 桌面（含 Electron）拿的是用户自己那个文件的 FileSystemFileHandle，能把磁盘上的文件名
-//     真改掉（handle.move）；同名 sidecar 歌词必须一起改 —— 歌词是按「去扩展名的 stem」配对的，
-//     音频改了名、歌词没改，下次刷新就配不上，本地歌词直接丢。
-//   · 安卓没有这条路：MediaStore 扫来的歌 App 没有写权限（分区存储会抛
-//     RecoverableSecurityException）；挑选导入的歌是复制进 App 私有目录的副本，改它也只是改副本，
-//     还得让原生回写 ref，否则下次播放会按旧名再拷一份。所以安卓只改曲库里显示的那个名字。
-//
-// 名字改完必须立刻把 song.filePath 一起改掉：重扫是按 filePath 认歌的（existingSongsByPath），
-// 不同步改就会被判成「旧的那首删了 + 新的一首来了」—— id 换掉，歌单归属全丢。
-
-export type LocalSongRenameResult = {
-    ok: boolean;
-    /** 磁盘上的文件名真的改了（只有桌面持句柄时能做到）。 */
-    renamedFile: boolean;
-    /** 改名之后的显示名；失败时是调用方传进来的原样。 */
-    title: string;
-    reason?: 'invalid' | 'not-found' | 'conflict' | 'no-handle' | 'unsupported' | 'error';
-};
-
-type MovableFileHandle = FileSystemFileHandle & { move?: (name: string) => Promise<void>; };
-
-type SidecarLyricRename = {
-    handle: FileSystemFileHandle;
-    relativePath: string;
-    newRelativePath: string;
-    newName: string;
-};
-
-const RENAME_FORBIDDEN_CHARS = /[\\/]/;
-
-const normalizeRenameInput = (raw: string): string | null => {
-    const trimmed = raw.trim().replace(/\s+/g, ' ');
-    if (!trimmed || trimmed === '.' || trimmed === '..') return null;
-    // 只收一个名字，不带路径：顺手挡掉把歌挪进别的目录这种超出重命名范围的操作。
-    if (RENAME_FORBIDDEN_CHARS.test(trimmed)) return null;
-    return trimmed;
-};
-
-const getAudioFileNameExtension = (fileName: string): string => (
-    fileName.match(KNOWN_AUDIO_EXTENSIONS)?.[0] ?? ''
-);
-
-const domExceptionName = (error: unknown): string => (
-    error instanceof DOMException ? error.name : ''
-);
-
-async function ensureDirectoryPermission(
-    handle: FileSystemDirectoryHandle,
-    mode: 'read' | 'readwrite',
-): Promise<boolean> {
-    const permissionAware = handle as FileSystemDirectoryHandle & {
-        queryPermission?: (descriptor: { mode: 'read' | 'readwrite'; }) => Promise<PermissionState>;
-        requestPermission?: (descriptor: { mode: 'read' | 'readwrite'; }) => Promise<PermissionState>;
-    };
-    if (typeof permissionAware.queryPermission !== 'function') {
-        // 拿不到权限接口（老浏览器 / 非 Chromium）：句柄本来就是用户挑的，直接试。
-        return true;
-    }
-
-    try {
-        if (await permissionAware.queryPermission({ mode }) === 'granted') return true;
-        if (typeof permissionAware.requestPermission !== 'function') return false;
-        return await permissionAware.requestPermission({ mode }) === 'granted';
-    } catch (error) {
-        console.warn('[LocalMusic] Failed to query directory permission:', error);
-        return false;
-    }
-}
-
-async function resolveDirectoryHandleFromRoot(
-    rootDirHandle: FileSystemDirectoryHandle,
-    relativePathFromRoot: string,
-): Promise<FileSystemDirectoryHandle> {
-    let currentDir = rootDirHandle;
-    for (const segment of relativePathFromRoot.split('/').filter(Boolean)) {
-        currentDir = await currentDir.getDirectoryHandle(segment);
-    }
-    return currentDir;
-}
-
-/**
- * 歌词 sidecar 有两种命名："track.lrc" 与 "track.mp3.lrc"，两种都要跟着音频改。
- * 前缀匹配就够：命中哪个前缀就用哪个新前缀替换尾部。
- */
-const deriveSidecarName = (
-    lyricName: string,
-    oldAudioName: string,
-    newAudioName: string,
-    oldStem: string,
-    newStem: string,
-): string | null => {
-    if (oldAudioName && lyricName.startsWith(oldAudioName)) {
-        return `${newAudioName}${lyricName.slice(oldAudioName.length)}`;
-    }
-    if (oldStem && lyricName.startsWith(oldStem)) {
-        return `${newStem}${lyricName.slice(oldStem.length)}`;
-    }
-    return null;
-};
-
-async function collectSidecarLyricRenames(
-    rootDirHandle: FileSystemDirectoryHandle,
-    rootFolderName: string,
-    parentPath: string,
-    oldAudioRelativePath: string,
-    newAudioName: string,
-): Promise<SidecarLyricRename[]> {
-    if (parentPath !== rootFolderName && !parentPath.startsWith(`${rootFolderName}/`)) {
-        return [];
-    }
-    const parentPathFromRoot = parentPath === rootFolderName
-        ? ''
-        : parentPath.slice(rootFolderName.length + 1);
-
-    let parentDir: FileSystemDirectoryHandle;
-    try {
-        parentDir = parentPathFromRoot
-            ? await resolveDirectoryHandleFromRoot(rootDirHandle, parentPathFromRoot)
-            : rootDirHandle;
-    } catch (error) {
-        console.warn(`[LocalMusic] Failed to open "${parentPath}" for lyric renaming:`, error);
-        return [];
-    }
-
-    const oldAudioName = oldAudioRelativePath.split('/').pop() || '';
-    const oldStem = getAudioBasePath(oldAudioName);
-    const newStem = getAudioBasePath(newAudioName);
-    const oldAudioBasePath = getAudioBasePath(oldAudioRelativePath);
-
-    const entries: FileSystemFileHandle[] = [];
-    try {
-        // @ts-ignore - values() 不在所有 TypeScript 定义里
-        for await (const entry of parentDir.values()) {
-            if (entry.kind !== 'file') continue;
-            entries.push(entry as FileSystemFileHandle);
-        }
-    } catch (error) {
-        console.warn(`[LocalMusic] Failed to list "${parentPath}" for lyric renaming:`, error);
-        return [];
-    }
-
-    return entries.reduce<SidecarLyricRename[]>((plan, handle) => {
-        const relativePath = `${parentPath}/${handle.name}`;
-        const kind = getSnapshotFileKind(handle.name);
-        if (kind !== 'lyric' && kind !== 'translationLyric') return plan;
-        if (getSidecarLyricBasePath(relativePath, kind) !== oldAudioBasePath) return plan;
-
-        const newName = deriveSidecarName(handle.name, oldAudioName, newAudioName, oldStem, newStem);
-        if (!newName || newName === handle.name) return plan;
-
-        plan.push({ handle, relativePath, newName, newRelativePath: `${parentPath}/${newName}` });
-        return plan;
-    }, []);
-}
-
-/** 把快照树里这几个路径换成新路径，并自底向上重算 hash（hash 参与「目录变没变」的判定）。 */
-function applyPathRenamesToSnapshot(
-    node: LocalLibrarySnapshotNode,
-    renames: ReadonlyMap<string, string>,
-): boolean {
-    let changed = false;
-    node.children.forEach((child) => {
-        if (applyPathRenamesToSnapshot(child, renames)) changed = true;
-    });
-    node.files.forEach((file) => {
-        const nextPath = renames.get(file.relativePath);
-        if (!nextPath || nextPath === file.relativePath) return;
-        file.relativePath = nextPath;
-        file.name = nextPath.split('/').pop() || file.name;
-        file.signature = buildFileSignature(nextPath, file.size, file.lastModified);
-        changed = true;
-    });
-    if (changed) {
-        node.hash = hashSnapshotNode(node.relativePath, node.files, node.children);
-    }
-    return changed;
-}
-
-/** 只改曲库里显示的名字（安卓，或桌面拿不到句柄时的退路）。 */
-async function persistDisplayNameRename(
-    song: LocalSong,
-    title: string,
-    reason?: LocalSongRenameResult['reason'],
-): Promise<LocalSongRenameResult> {
-    // 'manual' 是重扫时的护身符：buildImportedSong 与 hydrateSongMetadata 只在
-    // titleOrigin === 'import' 时用导入的标题覆盖，手动改的名字不会被冲掉。
-    await saveLocalSong({ ...song, title, titleOrigin: 'manual' });
-    notifyLocalMusicUpdated();
-    return { ok: true, renamedFile: false, title, reason };
-}
-
-export async function renameLocalSong(songId: string, rawName: string): Promise<LocalSongRenameResult> {
-    const name = normalizeRenameInput(rawName);
-    if (!name) {
-        return { ok: false, renamedFile: false, title: rawName.trim(), reason: 'invalid' };
-    }
-
-    const allSongs = await getLocalSongs();
-    const song = allSongs.find(entry => entry.id === songId);
-    if (!song) {
-        return { ok: false, renamedFile: false, title: name, reason: 'not-found' };
-    }
-
-    if (isAndroidNativeRuntime()) {
-        return await persistDisplayNameRename(song, name);
-    }
-
-    const handle = await getAccessibleFileHandle(song);
-    if (!handle) {
-        return await persistDisplayNameRename(song, name, 'no-handle');
-    }
-    const movable = handle as MovableFileHandle;
-    if (typeof movable.move !== 'function') {
-        return await persistDisplayNameRename(song, name, 'unsupported');
-    }
-
-    const extension = getAudioFileNameExtension(song.fileName);
-    const newFileName = extension && !name.toLowerCase().endsWith(extension.toLowerCase())
-        ? `${name}${extension}`
-        : name;
-    const oldRelativePath = song.filePath;
-    const parentPath = getParentRelativePath(oldRelativePath);
-    const newRelativePath = parentPath ? `${parentPath}/${newFileName}` : newFileName;
-
-    // 名字没变（只改了大小写之外的东西 / 用户就是想改显示名）：不用动磁盘。
-    if (!oldRelativePath || newFileName === song.fileName) {
-        return await persistDisplayNameRename(song, name);
-    }
-
-    const pathRenames = new Map<string, string>([[oldRelativePath, newRelativePath]]);
-    const rootFolderName = getRootFolderName(song);
-    const dirHandles = await getDirHandles();
-    const rootDirHandle = rootFolderName ? dirHandles?.[rootFolderName] : undefined;
-    // 改名要写权限：导入那会儿只申请了 'read'。趁点击带来的用户手势还在把权限问到手 ——
-    // 拿到一次，音频与歌词两边都够用；拿不到就只改音频（歌词没跟着改，总比改坏强）。
-    const canWriteToRoot = rootDirHandle ? await ensureDirectoryPermission(rootDirHandle, 'readwrite') : false;
-
-    try {
-        await movable.move(newFileName);
-    } catch (error) {
-        console.warn(`[LocalMusic] Failed to rename "${oldRelativePath}" to "${newFileName}":`, error);
-        const errorName = domExceptionName(error);
-        if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
-            return await persistDisplayNameRename(song, name, 'no-handle');
-        }
-        return {
-            ok: false,
-            renamedFile: false,
-            title: song.title,
-            reason: errorName === 'InvalidModificationError' ? 'conflict' : 'error',
-        };
-    }
-
-    if (rootFolderName && rootDirHandle && canWriteToRoot) {
-        try {
-            const sidecars = await collectSidecarLyricRenames(
-                rootDirHandle,
-                rootFolderName,
-                parentPath,
-                oldRelativePath,
-                newFileName,
-            );
-            for (const sidecar of sidecars) {
-                const movableSidecar = sidecar.handle as MovableFileHandle;
-                if (typeof movableSidecar.move !== 'function') continue;
-                try {
-                    await movableSidecar.move(sidecar.newName);
-                    pathRenames.set(sidecar.relativePath, sidecar.newRelativePath);
-                } catch (error) {
-                    console.warn(`[LocalMusic] Failed to rename lyric file "${sidecar.relativePath}":`, error);
-                }
-            }
-        } catch (error) {
-            console.warn('[LocalMusic] Failed to collect sidecar lyric renames:', error);
-        }
-    }
-
-    let file: File | null = null;
-    try {
-        file = await handle.getFile();
-    } catch (error) {
-        console.warn(`[LocalMusic] Failed to re-read renamed file "${newRelativePath}":`, error);
-    }
-
-    const renamed: LocalSong = { ...song };
-    renamed.fileName = file?.name || newFileName;
-    renamed.filePath = newRelativePath;
-    if (file) {
-        renamed.fileSize = file.size;
-        renamed.fileLastModified = file.lastModified;
-    }
-    renamed.fileSignature = buildFileSignature(
-        newRelativePath,
-        renamed.fileSize ?? song.fileSize ?? 0,
-        renamed.fileLastModified ?? song.fileLastModified ?? 0,
-    );
-    renamed.title = name;
-    renamed.titleOrigin = 'manual';
-    fileHandleMap.set(renamed.id, handle);
-    renamed.fileHandle = handle;
-    await saveLocalSong(renamed);
-
-    if (rootFolderName) {
-        const snapshot = await getLocalLibrarySnapshot(rootFolderName);
-        if (snapshot && applyPathRenamesToSnapshot(snapshot.tree, pathRenames)) {
-            await saveLocalLibrarySnapshot(snapshot).catch(error => (
-                console.warn(`[LocalMusic] Failed to update snapshot for ${rootFolderName}:`, error)
-            ));
-        }
-    }
-
-    notifyLocalMusicUpdated();
-    console.log(`[LocalMusic] Renamed "${oldRelativePath}" to "${newRelativePath}"`);
-    return { ok: true, renamedFile: true, title: name };
-}
-
-// Removes an imported root from the app, including empty roots, without deleting disk files.
-export function removeImportedRoot(rootFolderName: string): Promise<void> {
-    return runLocalFolderMutation(() => removeImportedRootContents(rootFolderName));
-}
-
-async function removeImportedRootContents(rootFolderName: string): Promise<void> {
-    const normalizedRoot = normalizeLocalFolderPath(rootFolderName).split('/')[0];
-    if (!normalizedRoot) return;
-    removedRootGenerations.set(normalizedRoot, (removedRootGenerations.get(normalizedRoot) || 0) + 1);
-
-    const allSongs = await getLocalSongs();
-    const songIds = allSongs
-        .filter(song => songBelongsToRootFolder(song, normalizedRoot))
-        .map(song => song.id);
-
-    if (songIds.length > 0) {
-        await deleteSongsByIds(songIds);
-    }
-    await Promise.all([
-        deleteDirHandle(normalizedRoot),
-        // 原来是 deleteLocalLibrarySnapshot：那样只把快照抹掉，而安卓上「刷新」等于整库重扫，
-        // 歌一首不少地回来 —— 删了跟没删一样。改成留一条墓碑，刷新那条路照它跳过。
-        markLocalRootRemoved(normalizedRoot),
-    ]);
-    notifyLocalMusicUpdated();
-}
-
-/**
- * 这首歌属不属于这个根目录。
- *
- * 不能只按 `getRootFolderName` 判：那个函数先看 `filePath`，而安卓上 filePath 是
- * `Android/MediaStore/<id>` 这种伪路径 —— 推出来的根是 "Android"，可目录卡片上的名字
- * 是 "Android 本地音乐"。一头一尾对不上，于是「删除文件夹」一首歌都没匹配到：
- * 点了删除，目录原封不动，用户看到的就是「删不掉」。
- *
- * 所以两个来源都认：逻辑目录 folderName（一定带根目录名）命中，或者 filePath 推出来的
- * 根命中。
- */
-function songBelongsToRootFolder(song: LocalSong, rootFolderName: string): boolean {
-    if (song.folderName === rootFolderName) return true;
-    if (song.folderName?.startsWith(`${rootFolderName}/`)) return true;
-    return getLocalSongRootFolderName(song) === rootFolderName;
-}
-
 // Resync folder: refresh an imported folder in place using the persisted root handle
 export async function resyncFolder(folderName: string): Promise<LocalSong[] | null> {
-    // 安卓没有持久化的目录句柄可重扫：那边的歌来自设备音乐库，整库重扫走 resyncAllFolders，
-    // 这里不能转去 importFolder —— 那会弹一次系统文件选择器，而用户点的是「刷新」。
-    if (isAndroidNativeRuntime()) return null;
-
     // Only root imports have persisted directory handles. Derived child folders
     // should resync through their imported root folder handle.
     const rootFolderName = folderName.split('/')[0] || folderName;
@@ -2382,10 +1787,6 @@ function getLocalSongRootFolderName(song: LocalSong): string | null {
 
 // Resyncs all imported local roots once, even when the song list contains nested folders.
 export async function resyncAllFolders(): Promise<LocalSong[] | null> {
-    // 安卓：设备音乐库重扫一次就够了。挑文件夹导入的那些文件已经在 App 私有目录里，
-    // 不存在「按根重扫」这回事 —— 逐个根去调 importFolder 会连着弹好几次系统选择器。
-    if (isAndroidNativeRuntime()) return await scanAndroidDeviceMusic();
-
     const allSongs = await getLocalSongs();
     const handles = await getDirHandles();
     const rootFolderNames = Array.from(new Set(
@@ -2400,8 +1801,6 @@ export async function resyncAllFolders(): Promise<LocalSong[] | null> {
 
     const importedSongs: LocalSong[] = [];
     for (const rootFolderName of rootFolderNames) {
-        // 删掉的根目录不该被刷新收回来（墓碑由「删除文件夹」写下，重新导入时撤掉）。
-        if (await isLocalRootRemoved(rootFolderName)) continue;
         const rootSongs = await importFolder(rootFolderName);
         importedSongs.push(...rootSongs);
     }
@@ -2418,37 +1817,4 @@ export async function clearFolderIgnore(folderName: string): Promise<void> {
         await setLocalFolderIgnored(folderName, false);
         await importFolderContents(dirHandle, rootFolderName);
     });
-}
-
-// Delete all songs from a specific folder (and its nested children)
-export function deleteFolderSongs(folderName: string): Promise<void> {
-    return runLocalFolderMutation(() => deleteFolderContents(folderName));
-}
-
-async function deleteFolderContents(folderName: string): Promise<void> {
-    folderName = normalizeLocalFolderPath(folderName);
-    if (!folderName.includes('/')) return removeImportedRootContents(folderName);
-    await setLocalFolderIgnored(folderName, true);
-    // Get all local songs
-    const allSongs = await getLocalSongs();
-
-    // Filter songs that belong to this folder OR are nested under it
-    const songsToDelete = allSongs.filter(song =>
-        song.folderName === folderName || (song.folderName && song.folderName.startsWith(`${folderName}/`))
-    );
-
-    const songIdsToDelete = songsToDelete.map(song => song.id);
-    songIdsToDelete.forEach(id => {
-        fileHandleMap.delete(id);
-        localCoverAssetRequestMap.delete(id);
-        songsWithoutEmbeddedCover.delete(id);
-    });
-    await Promise.all([
-        dbDeleteLocalSongs(songIdsToDelete),
-        ...songIdsToDelete.map(id => removeCachedCover(`cover_local_${id}`)),
-    ]);
-    await removeDeletedSongIdsFromPlaylists(songIdsToDelete);
-
-    notifyLocalMusicUpdated();
-    console.log(`[LocalMusic] Deleted ${songsToDelete.length} songs from folder tree: ${folderName}`);
 }

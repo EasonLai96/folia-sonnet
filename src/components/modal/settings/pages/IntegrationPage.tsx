@@ -7,12 +7,16 @@ import { useStageSettingsStore } from '../../../../stores/useStageSettingsStore'
 import { Button, CopyValue, Group, Reveal, Row, Status, Toggle, Value, type SettingsOptionDef } from '../kit';
 import NavidromeRows from './integration/NavidromeRows';
 import { O, SERVICES, STREAMING, SYSTEM_LYRICS } from './integration/options';
+import { MARKET, M } from './integration/market';
+import MarketPage from './integration/MarketPage';
+import { openMarketPanel } from './integration/market/MarketEntryButton';
 import AndroidLyriconSetting from '../AndroidLyriconSetting';
 import AndroidColorOsLyricsSetting from '../AndroidColorOsLyricsSetting';
 import { isCapacitorAndroid } from '../../../../platform/runtime';
 import { DesktopStageRows, WebStageRows } from './integration/StageModeRows';
 import SyncServerRows from './integration/SyncServerRows';
 import { useSettingsPage } from './settingsPageContext';
+import { LxSourcePanel } from '../../../lxmusic/LxSourcePanel';
 
 // src/components/modal/settings/pages/IntegrationPage.tsx
 // The 连接与集成 page: what Folia connects to and what it shows to other programs. Services first
@@ -44,6 +48,11 @@ const IntegrationPage: React.FC = () => {
             <Group def={SERVICES}>
                 <NavidromeRows />
                 <SyncServerRows />
+                {/*
+                 * 洛雪音源：导入 / 启停音源脚本。选中洛雪（免登录）后首页的搜索、歌单广场、榜单
+                 * 与其它平台走同一套主页流程，音源管理在这里，不再依赖那个独立工作台。
+                 */}
+                <LxSourcePanel />
                 {isElectron && (
                     <>
                         <Row option={O.discord} hint={t('options.discordRichPresenceDesc')}>
@@ -127,6 +136,22 @@ const IntegrationPage: React.FC = () => {
                     </>
                 )}
                 {isElectron ? <DesktopStageRows /> : <WebStageRows />}
+            </Group>
+
+            {/*
+             * 背景与字体市场。
+             *
+             * 这两个市场原先散在多处（壁纸设置的字体市场、歌词设置的字体市场、
+             * 可视化字体选择器里的「字体市场」按钮），同一件事三个入口、行为还各不一样。
+             * 现在统一收到这里，应用范围也在这里改。
+             */}
+            <Group def={MARKET}>
+                <Row option={M.background} hint={t('options.backgroundMarketDesc')}>
+                    {/* 市场面板挂在 SettingsModal 顶层，这里只负责广播打开请求。 */}
+                    <Button onClick={() => openMarketPanel('background')}>
+                        {t('options.marketOpen')}
+                    </Button>
+                </Row>
             </Group>
 
             {/*

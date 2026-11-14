@@ -1,4 +1,5 @@
 import type {
+    SettingsConfirmation,
     SyncProviderConfig,
     SyncRemoteState,
     SyncThemeManifest,
@@ -41,12 +42,21 @@ const buildUrl = (config: SyncProviderConfig, path: string) => (
     `${config.workerBaseUrl.replace(/\/+$/, '')}${path}`
 );
 
+/**
+ * 同步接口允许整段回传的上限：16MiB，比桥的默认 8MiB 宽一档。
+ *
+ * 这里是**用户自建服务**，一次可能拿回几百条主题（`/themes/list?limit=500`，每条是一个
+ * 完整主题 JSON）。撞上默认上限时原生会直接 reject，重试多少次都一样，而界面上只能显示
+ * 「同步失败」—— 与其让用户去猜，不如给足余量；再大就不是主题数据了。
+ */
+const SYNC_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+
 const requestJson = async <T,>(
     config: SyncProviderConfig,
     path: string,
     init: RequestInit = {},
 ): Promise<T> => {
-    const response = await createAiFetch()(buildUrl(config, path), {
+    const response = await createAiFetch(SYNC_MAX_RESPONSE_BYTES)(buildUrl(config, path), {
         ...init,
         headers: {
             Accept: 'application/json',
@@ -83,11 +93,37 @@ export const getRemoteSettings = async (config: SyncProviderConfig): Promise<Syn
     parseSyncedSettingsRecord(await requestJson(config, '/settings'))
 );
 
-export const putRemoteSettings = async (config: SyncProviderConfig, record: SyncedSettingsRecord) => {
-    await requestJson(config, '/settings', {
+const parseSettingsConfirmation = (value: unknown): SettingsConfirmation => {
+    const response = value as Partial<SettingsConfirmation> | null;
+    const record = parseSyncedSettingsRecord(response?.record);
+    if (response?.protocol !== 'settings-cas-v1'
+        || (response.revision !== null && (typeof response.revision !== 'string' || !/^[a-f0-9]{64}$/.test(response.revision)))
+        || (response.revision === null ? response.record !== null : !record)) {
+        throw new Error('Sync server does not support settings confirmation; upgrade the server');
+    }
+    return { protocol: response.protocol, revision: response.revision, record };
+};
+
+export const getRemoteSettingsConfirmation = async (config: SyncProviderConfig): Promise<SettingsConfirmation> => (
+    parseSettingsConfirmation(await requestJson(config, '/settings/confirmation', { cache: 'no-store' }))
+);
+
+export const putRemoteSettings = async (
+    config: SyncProviderConfig,
+    record: SyncedSettingsRecord,
+    expectedRevision: string | null,
+): Promise<SettingsConfirmation> => {
+    const response = await requestJson<{ accepted?: boolean; record?: SyncedSettingsRecord }>(config, '/settings', {
         method: 'PUT',
-        body: JSON.stringify(record),
+        body: JSON.stringify({ ...record, expectedRevision }),
     });
+    const confirmed = parseSettingsConfirmation(response);
+    // Check the complete raw payload before parsing can discard fields; updatedAt is server-owned.
+    if (response.accepted !== true || !confirmed.record || !confirmed.revision
+        || JSON.stringify(response.record?.data) !== JSON.stringify(record.data)) {
+        throw new Error('Sync server did not confirm the uploaded settings');
+    }
+    return confirmed;
 };
 
 export const getRemoteThemes = async (

@@ -1,5 +1,6 @@
 import { normalizeRandomVisualizerModes } from '../../utils/randomVisualizerModes';
 import { sanitizeDualTheme } from '../themeSanitizer';
+import { parseSubtitleOverlayLayout } from '../../utils/lyrics/subtitleOverlayLayout';
 // 背景模式没有 mod 投稿通道，静态清单与活注册表在任何时刻都等价。
 import { isBuiltinVisualizerBackgroundMode } from '../../types/visualizerModes';
 import {
@@ -24,7 +25,8 @@ const isIsoDateString = (value: unknown): value is string => (
     typeof value === 'string' && !Number.isNaN(Date.parse(value))
 );
 
-const isSchemaCompatible = (value: unknown) => value === SYNC_SCHEMA_VERSION;
+// The server advertises wire v2; visual settings and library exports also exist as v1.
+const isSchemaCompatible = (value: unknown) => value === SYNC_SCHEMA_VERSION || value === 2;
 
 const isFiniteNumber = (value: unknown): value is number => (
     typeof value === 'number' && Number.isFinite(value)
@@ -58,6 +60,8 @@ const parseSyncedVisualSettings = (value: Record<string, unknown>): SyncedVisual
     if (value.subtitleContentMode === 'translation' || value.subtitleContentMode === 'romanization' || value.subtitleContentMode === 'both' || value.subtitleContentMode === 'none') {
         settings.subtitleContentMode = value.subtitleContentMode;
     }
+    const subtitleOverlayLayout = parseSubtitleOverlayLayout(value.subtitleOverlayLayout);
+    if (subtitleOverlayLayout) settings.subtitleOverlayLayout = subtitleOverlayLayout;
     if (typeof value.subtitleOverlayBackground === 'boolean') settings.subtitleOverlayBackground = value.subtitleOverlayBackground;
     if (typeof value.subtitleUpcomingLyricsBlur === 'boolean') settings.subtitleUpcomingLyricsBlur = value.subtitleUpcomingLyricsBlur;
     if (isFontStyle(value.lyricsFontStyle)) settings.lyricsFontStyle = value.lyricsFontStyle;
@@ -90,6 +94,7 @@ const parseSyncedVisualSettings = (value: Record<string, unknown>): SyncedVisual
     if (value.monetTuning !== undefined) settings.monetTuning = value.monetTuning;
     if (value.pendoloTuning !== undefined) settings.pendoloTuning = value.pendoloTuning;
     if (value.sonnetTuning !== undefined) settings.sonnetTuning = value.sonnetTuning;
+    if (value.smartBeat !== undefined) settings.smartBeat = value.smartBeat;
     if (value.temperaTuning !== undefined) settings.temperaTuning = value.temperaTuning;
     if (value.lumiereTuning !== undefined) settings.lumiereTuning = value.lumiereTuning;
     if (Array.isArray(value.urlBackgroundList)) settings.urlBackgroundList = value.urlBackgroundList;

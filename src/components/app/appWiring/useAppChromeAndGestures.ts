@@ -10,9 +10,16 @@ import { useHdrExitConfirm, useHdrProjectionActive } from '../../../hooks/useHdr
 import { useIdleCursorHide } from '../../../hooks/useIdleCursorHide';
 import { usePersonalFmModeController } from '../../../hooks/usePersonalFmModeController';
 import { usePlayerSwipeGesture } from '../../../hooks/usePlayerSwipeGesture';
+import { hasFreeCamera } from '../../visualizer/backgrounds/freeCameraModes';
+import { usePlayerTapGesture } from '../../../hooks/usePlayerTapGesture';
 import { DAYLIGHT_THEME, DEFAULT_THEME } from '../../../services/baseThemes';
+import { useHifiTrackStore } from '../../../services/hifi/hifiPlayback';
+import { omni } from '../../../services/onlineMusic/omni';
+import { usePlaybackStore } from '../../../stores/usePlaybackStore';
+import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { disableHdrProjection } from '../../../services/hdrProjection';
 import { setStatusMessage as setStatusMsg } from '../../../stores/useStatusMessageStore';
+import type { TapEvent } from '../../../utils/doubleTap';
 import { PlayerChromeVisibilityMode } from '../../../types/remoteControl';
 import { buildAppStyle } from '../presentation/buildAppStyle';
 import { buildPlayerViewFlags } from '../presentation/buildPlayerViewFlags';
@@ -31,6 +38,12 @@ type Input =
     & AppPlaybackQueue
     & AppPlaybackBridges;
 
+/*
+ * 画面自己在横向拖动上做事情的样式：横滑切歌会跟它抢同一次拖动，这些样式里只让画面接手势。
+ * 町景的镜头就是靠横拖绕场景转的（陀螺仪适配开着时更是靠它）。
+ */
+const PLAYER_SWIPE_OWNED_VISUALIZERS = new Set<string>(['machi']);
+
 export const useAppChromeAndGestures = (model: Input) => {
     const {
         activePlaybackContext, audioSrc, autoHideCursorWithPlayerChrome, bgMode, currentSong, currentView,
@@ -42,8 +55,96 @@ export const useAppChromeAndGestures = (model: Input) => {
         navigateBackFromPlayer, navigateToPlayer, playSong, playerChromeVisibilityMode, setIsPanelOpen,
         setIsPlayerChromeHidden, setPlayerChromeVisibilityModeTo, stageActiveEntryKind, subtitleFontFallbackFamilies,
         subtitleFontFamily, subtitleFontInheritsLyrics, subtitleFontStyle, subtitleFontWeight, t, theme,
-        transparentPlayerBackground, visualizerMode, wallpaperMode
+        togglePlay, transparentPlayerBackground, visualizerMode, wallpaperMode
     } = model;
+    /*
+     * HDR 投影的二次确认：投到挡风玻璃上时屏幕是反着看的，误触概率比平时高得多，
+     * 而界面一收反射里就只剩一块黑。所以那档里「点空白收起界面」要连点两次。
+     * 开关状态从服务那边订阅 —— 这颗开关在控制面板里，App 拿不到它的 props。
+     */
+    const hdrProjectionActive = useHdrProjectionActive();
+    const confirmHdrExit = useHdrExitConfirm({
+        enabled: hdrProjectionActive,
+        hint: t('ui.hdrProjectionExitHint', '再点一次退出'),
+    });
+
+    const isPlayerSwipeEnabled = currentView === 'player' && !isPanelOpen;
+    /*
+     * 3D 舞台背景（粒子 / 星河 / 安魂 / 音域回响）自己吃横向拖动 —— 拖动在那里是「转视角」。
+     *
+     * 同一个拖动不能有两种意思，所以这几档里横滑切歌整个关掉。
+     * 判定放在 backgrounds/freeCameraModes.ts：渲染层要用同一份清单决定
+     * 挂不挂拖动监听，两边各写一份迟早对不上。
+     *
+     * ★ 这里必须读 **背景模式**（visualizerBackgroundMode），不是 model.bgMode。
+     *   bgMode 是「主题来源」（default / custom / ai），和背景完全无关 ——
+     *   早先误用了它，于是 hasFreeCamera 永远返回 false，3D 背景里横滑照样切歌。
+     */
+    const visualizerBackgroundMode = useVisualizerSettingsStore(state => state.visualizerBackgroundMode);
+    const freeCameraStage = hasFreeCamera(visualizerBackgroundMode);
+    // 横滑切歌只管「换歌」这一件：画面自己吃横向拖动的样式（见 PLAYER_SWIPE_OWNED_VISUALIZERS）里不接。
+    const isPlayerSwipeSwitchingEnabled = isPlayerSwipeEnabled
+        && !PLAYER_SWIPE_OWNED_VISUALIZERS.has(visualizerMode)
+        && !freeCameraStage;
+    /*
+     * 双击在 3D 舞台上改成「回正视角」（由背景层自己接，见 FreeCameraSurface），
+     * 所以双击暂停在这两档里关掉。陀螺仪投影开着时同理。
+     */
+    const isPlayerDoubleTapPauseEnabled = isPlayerSwipeEnabled && !hdrProjectionActive && !freeCameraStage;
+
+    /*
+     * 单击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
+     *
+     * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，
+     * 所以先只收面板。（面板由 handleContainerClick 管，它在别处也挂着这个语义。）
+     *
+     * 这一层只铺着可视化渲染：播放条、按钮、标题栏都是它的兄弟节点，点控件不会冒泡到这里，
+     * 所以「空白」不用再自己判断点到了哪儿。
+     *
+     * 只有歌词页算数：这一层在首页和 Lattice 底下也铺着（当背景），在那里翻出来的是
+     * 「下次进歌词页控件是藏着的」，而点的人当时什么也没看见。
+     *
+     * auto-hide 模式下不动手：那边 pointerdown / pointerup 会在每次点击时先把控件显出来
+     * （见 usePlayerChromeAutoHide），因此这里的 toggle 永远读到「显」、只会一路藏下去，
+     * 「再点一下恢复」当场失效。那一档的显隐本来归空闲时钟管，点一下让它显出来正是它的语义。
+     *
+     * HDR 投影下多一道确认（useHdrProjectionExit）：投到挡风玻璃上时屏幕是反着看的，
+     * 误触概率高得多，而界面一收反射里只剩一块黑 —— 连该点哪儿叫回来都看不出来。
+     * 所以那档里第一次点只弹一句提示，再点一次才收。**不铺遮罩**，滑动切歌照旧。
+     */
+    const handleVisualSurfaceTap = useCallback(() => {
+        if (isPanelOpen) {
+            handleContainerClick();
+            return;
+        }
+        if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
+            /*
+             * HDR 下「点空白退出」退的是**投影本身**（横屏 / 镜像 / 亮度一起还原），
+             * 不是把收起来的界面再翻出来 —— 界面本来就是整屏收着的，翻出来翻回去看着
+             * 跟没反应一样，而用户要的是退出这个模式。
+             */
+            confirmHdrExit(hdrProjectionActive
+                ? disableHdrProjection
+                : () => setIsPlayerChromeHidden(prev => !prev));
+        }
+    }, [confirmHdrExit, currentView, handleContainerClick, hidePlayerChromeOnTap, hdrProjectionActive, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
+
+    /*
+     * 双击歌词页的空白：暂停 / 继续。
+     *
+     * 单击要等一个双击窗口、确认没有第二下才执行（见 usePlayerTapGesture），所以这一层开着
+     * 时单击控件显隐会晚一个双击窗口。HDR 与面板打开时不开：HDR 把连点两下用在退出投影上，
+     * 面板把第一下用在关面板上，那两处保持原来一点就响。
+     */
+    const {
+        onClick: handlePlayerTap,
+        resetTapSequence: resetPlayerTapSequence,
+    } = usePlayerTapGesture({
+        enabled: isPlayerDoubleTapPauseEnabled,
+        onTap: handleVisualSurfaceTap,
+        onDoubleTap: togglePlay,
+    });
+
     /*
      * 歌词页左右滑动切歌：左滑下一首，右滑上一首。
      *
@@ -55,14 +156,15 @@ export const useAppChromeAndGestures = (model: Input) => {
      * 是既看不见也猜不到的。
      */
     const handlePlayerSwipeNext = useCallback(() => {
+        // 滑动一旦成立，滑动前那一下点击就不是单击了，别再补翻控件显隐。
+        resetPlayerTapSequence();
         void handleNextTrack();
-    }, [handleNextTrack]);
+    }, [handleNextTrack, resetPlayerTapSequence]);
 
     const handlePlayerSwipePrev = useCallback(() => {
+        resetPlayerTapSequence();
         handlePrevTrack();
-    }, [handlePrevTrack]);
-
-    const isPlayerSwipeEnabled = currentView === 'player' && !isPanelOpen;
+    }, [handlePrevTrack, resetPlayerTapSequence]);
 
     const {
         onPointerDown: handleSwipePointerDown,
@@ -71,21 +173,18 @@ export const useAppChromeAndGestures = (model: Input) => {
         onPointerCancel: handleSwipePointerCancel,
         consumeSuppressedClick: consumeSwipeSuppressedClick,
     } = usePlayerSwipeGesture({
-        enabled: isPlayerSwipeEnabled,
+        enabled: isPlayerSwipeSwitchingEnabled,
         onNext: handlePlayerSwipeNext,
         onPrev: handlePlayerSwipePrev,
     });
 
     /*
-     * HDR 投影的二次确认：投到挡风玻璃上时屏幕是反着看的，误触概率比平时高得多，
-     * 而界面一收反射里就只剩一块黑。所以那档里「点空白收起界面」要连点两次。
-     * 开关状态从服务那边订阅 —— 这颗开关在控制面板里，App 拿不到它的 props。
+     * 滑动切完歌浏览器照旧补一个 click，那不是「点了一下空白」，别让它进双击判定。
      */
-    const hdrProjectionActive = useHdrProjectionActive();
-    const confirmHdrExit = useHdrExitConfirm({
-        enabled: hdrProjectionActive,
-        hint: t('ui.hdrProjectionExitHint', '再点一次退出'),
-    });
+    const handleVisualSurfaceClick = useCallback((event: TapEvent) => {
+        if (consumeSwipeSuppressedClick()) return;
+        handlePlayerTap(event);
+    }, [consumeSwipeSuppressedClick, handlePlayerTap]);
 
     /*
      * HDR 投影下界面**整个收掉**：投到玻璃上时进度条、按钮、标题栏全是多余的，
@@ -134,49 +233,10 @@ export const useAppChromeAndGestures = (model: Input) => {
         if (!hdrProjectionActive) return;
         setStatusMsg({
             type: 'info',
-            text: t('ui.hdrProjectionOnHint', 'HDR 投影已开启 · 点两次空白退出'),
+            text: t('ui.hdrProjectionOnHint', 'HUD 投影已开启 · 点两次空白退出'),
             nonce: Date.now(),
         });
     }, [hdrProjectionActive, setStatusMsg, t]);
-
-    /*
-     * 点击歌词页的空白：控件显隐翻一下，「再点一下恢复」就是翻回来。
-     *
-     * 面板开着的时候这一次点击的意思是「关掉它」——顺手把整页控件也藏起来等于连着两个动作，
-     * 所以先只收面板。（面板由 handleContainerClick 管，它在别处也挂着这个语义。）
-     *
-     * 这一层只铺着可视化渲染：播放条、按钮、标题栏都是它的兄弟节点，点控件不会冒泡到这里，
-     * 所以「空白」不用再自己判断点到了哪儿。
-     *
-     * 只有歌词页算数：这一层在首页和 Lattice 底下也铺着（当背景），在那里翻出来的是
-     * 「下次进歌词页控件是藏着的」，而点的人当时什么也没看见。
-     *
-     * auto-hide 模式下不动手：那边 pointerdown / pointerup 会在每次点击时先把控件显出来
-     * （见 usePlayerChromeAutoHide），因此这里的 toggle 永远读到「显」、只会一路藏下去，
-     * 「再点一下恢复」当场失效。那一档的显隐本来归空闲时钟管，点一下让它显出来正是它的语义。
-     *
-     * HDR 投影下多一道确认（useHdrProjectionExit）：投到挡风玻璃上时屏幕是反着看的，
-     * 误触概率高得多，而界面一收反射里只剩一块黑 —— 连该点哪儿叫回来都看不出来。
-     * 所以那档里第一次点只弹一句提示，再点一次才收。**不铺遮罩**，滑动切歌照旧。
-     */
-    const handleVisualSurfaceClick = useCallback(() => {
-        // 滑动切完歌浏览器照旧补一个 click，那不是「点了一下空白」，别翻控件显隐。
-        if (consumeSwipeSuppressedClick()) return;
-        if (isPanelOpen) {
-            handleContainerClick();
-            return;
-        }
-        if (hidePlayerChromeOnTap && currentView === 'player' && playerChromeVisibilityMode !== 'auto-hide') {
-            /*
-             * HDR 下「点空白退出」退的是**投影本身**（横屏 / 镜像 / 亮度一起还原），
-             * 不是把收起来的界面再翻出来 —— 界面本来就是整屏收着的，翻出来翻回去看着
-             * 跟没反应一样，而用户要的是退出这个模式。
-             */
-            confirmHdrExit(hdrProjectionActive
-                ? disableHdrProjection
-                : () => setIsPlayerChromeHidden(prev => !prev));
-        }
-    }, [confirmHdrExit, consumeSwipeSuppressedClick, currentView, handleContainerClick, hidePlayerChromeOnTap, hdrProjectionActive, isPanelOpen, playerChromeVisibilityMode, setIsPlayerChromeHidden]);
 
     const { personalFmSelection, personalFmSelectionLabel, isPersonalFmModeSupported, setPersonalFmSelection } = usePersonalFmModeController({
         isFmMode,
@@ -200,8 +260,8 @@ export const useAppChromeAndGestures = (model: Input) => {
     }), [bgMode, isDaylight, shouldUseTransparentAppBackground, theme]);
     /*
      * 主题变量原本只挂在 App 根节点的 inline style 上，而弹层、面板这些 portal 到 body 的
-     * 节点读不到它 —— 关掉毛玻璃时它们要靠 --bg-color 撑出不透明底色，拿不到就会掉回
-     * 深色兜底，在浅色主题下变成一块黑板。这里往 <html> 同步一份。
+     * 节点读不到它 —— 半透明面板要靠 --bg-color 撑出兜底底色，拿不到就会掉回深色兜底，
+     * 在浅色主题下变成一块黑板。这里往 <html> 同步一份。
      */
     useEffect(() => {
         const backgroundColor = (appStyle as Record<string, string>)['--bg-color'];
@@ -246,6 +306,12 @@ export const useAppChromeAndGestures = (model: Input) => {
     ]);
     const isNowPlayingControlDisabled = isNowPlayingStageActive;
 
+    // Which engine sounds the current song, and whether the song on screen plays outside this app:
+    // buildPlayerViewFlags needs both to tell "nothing to toggle" from "someone else is playing".
+    const playbackRoute = usePlaybackStore(state => state.playbackRoute);
+    const hasHifiTrack = useHifiTrackStore(state => state.current !== null);
+    const hasExternalSong = Boolean(currentSong && omni.canPlayExternally(currentSong));
+
     useElectronWindowChrome();
     const {
         isPlayerView,
@@ -265,16 +331,22 @@ export const useAppChromeAndGestures = (model: Input) => {
         stageActiveEntryKind,
         audioSrc,
         duration,
+        playbackRoute,
+        hasHifiTrack,
+        hasExternalSong,
     }), [
         activePlaybackContext,
         audioSrc,
         currentView,
         disableHomeDynamicBackground,
         duration,
+        hasExternalSong,
+        hasHifiTrack,
         hidePlayerProgressBar,
         hidePlayerRightPanelButton,
         hidePlayerTranslationSubtitle,
         isNowPlayingControlDisabled,
+        playbackRoute,
         stageActiveEntryKind,
     ]);
     // 播放页空闲时连指针一起隐藏。复用控制栏的自动隐藏时钟（3 秒无鼠标移动），不新开计时器：

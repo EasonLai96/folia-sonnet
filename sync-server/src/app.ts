@@ -6,14 +6,20 @@ import adminAuthRoutes, {
   readAdminSession,
   requireAdmin,
   touchAdminSession,
+  readAdminCredentials,
+  isSameOriginAdminMutation,
+  readAdminPublicOrigin,
 } from './admin.js';
 import { renderLoginPage, renderPanelPage } from './panel.js';
-import { aiCacheRoutes, adminCacheBackupRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
+import { aiCacheRoutes, adminCacheRoutes, readCacheStats } from './aiCache.js';
+import { adminCacheBackupRoutes } from './aiCacheBackups.js';
 import { adminCachePages } from './adminCachePages.js';
 import { adminFontRoutes, fontRoutes, readFontStats } from './fonts.js';
 import { adminStatsImageRoutes } from './statsImage.js';
 import { galleryApiRoutes, galleryPageRoutes } from './stageGallery.js';
 import type { FontBlobStore } from './fontBlobs.js';
+import { ensureAdminSessionSchema } from './adminSchema.js';
+import { compareAndSetSettings, readSettingsRow, settingsConfirmation, settingsRevision } from './settingsConfirmation.js';
 
 export type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement;
@@ -31,9 +37,11 @@ export type Env = {
   FOLIA_SYNC_DB: D1Database;
   SYNC_TOKEN: string;
   DASHBOARD_TOKEN?: string;
-  /** Panel credentials. Defaults to the shipped account when unset. */
+  /** Explicit panel credentials; missing/weak configuration disables admin access. */
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD?: string;
+  /** Explicit browser origin for trusted HTTPS reverse-proxy deployments. */
+  ADMIN_PUBLIC_ORIGIN?: string;
   /** Where the font bytes go. Absent means "fall back to D1". See src/fontBlobs.ts. */
   FONT_BLOBS?: FontBlobStore;
   /**
@@ -68,10 +76,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
-let schemaEnsured = false;
+const schemaInitializations = new WeakMap<D1Database, Promise<void>>();
 
-const ensureSchema = async (db: D1Database) => {
-  if (schemaEnsured) return;
+const initializeSchema = async (db: D1Database) => {
   await db.batch([
     db.prepare(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -148,6 +155,26 @@ const ensureSchema = async (db: D1Database) => {
       )
     `),
     /*
+     * 歌名的倒排索引：`ai_cache` 里每条的 `song_title` 拆成几种 token 各存一行，
+     * 于是 `POST /api/ai-cache/resolve` 的按歌名找候选不再需要 `LIKE '%…%'` 全表扫，
+     * 而是按 token 精确命中走索引（实测 4 万条时 14ms → 0.03ms，且与库大小无关）。
+     *
+     * 冗余存 `song_title`、`updated_at` 是为了命中之后**不必回主表**就能排序截断 ——
+     * 主表每行带最大 64KB 的 payload，那才是「一碰整表就慢」的根源。
+     * 这张表由写入路径维护（见 aiCache.ts 的 `writeTitleTokens`），不回填历史数据：
+     * 老条目靠**首次命中时补写**（见 `backfillTitleTokens`），不阻塞启动。
+     */
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_cache_title_token (
+        kind TEXT NOT NULL,
+        token TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        song_title TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (kind, token, cache_key)
+      )
+    `),
+    /*
      * 每次被覆盖之前的那一版。
      *
      * 上传是公开的（没填 Key 的人也要能推），所以「有人用空数据把别人做好的那条盖掉」
@@ -193,7 +220,20 @@ const ensureSchema = async (db: D1Database) => {
     `),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_font_market_enabled ON font_market(enabled)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_updated_at ON ai_cache(updated_at)'),
+    /*
+     * 命中流水只按时间读、也只按时间清（「最近 N 分钟」、24 小时分桶、七天前的那一批），
+     * 而这里**原来从没建过 `at` 上的索引** —— 于是每一条这样的查询都是整表扫。
+     * 命中一多，流水表就是这个库里长得最快的一张：20w 行时一条 `DELETE ... WHERE at <`
+     * 要扫 56ms，每小时一次，每次都把整个进程的事件循环按在地上。
+     */
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_hits_at ON ai_cache_hits(at)'),
+    /*
+     * 管理列表的排序入口：`kind` 在最前面，带 kind 筛选时 SQL 能顺着索引取够一页就停。
+     * 覆盖索引 `idx_ai_cache_kind_updated` 管的是「某个 kind 下按时间 + 只取几列」，
+     * 而管理列表要的是整行的元数据列，用不上它；没有这条索引时带 kind 的列表会把
+     * 整个 kind 分支取回来再排（实测 4w 行 339ms）。
+     */
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_kind_updated_at ON ai_cache(kind, updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_backups_key ON ai_cache_backups(kind, cache_key, archived_at)'),
     /*
      * 覆盖索引一：按 (kind, updated_at) 排序/扫描的入口 —— 访客检索页、管理列表、
@@ -204,22 +244,37 @@ const ensureSchema = async (db: D1Database) => {
      */
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_kind_updated ON ai_cache(kind, updated_at, song_title, cache_key)'),
     /*
-     * 覆盖索引二：/songs 的 `GROUP BY song_title` + `COUNT(DISTINCT song_title)`。
+     * 覆盖索引二：/songs 的 `GROUP BY song_title`。
      * SELECT 里要的每一列（updated_at/hits/cache_key/platform）都在索引里，
-     * 分组与聚合全程只扫索引，不碰大字段。
+     * 分组与聚合全程只扫索引，不碰大字段；按 `song_title` 排序时也能顺着它取够一页就停。
      */
-    db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_song_group ON ai_cache(song_title, updated_at, hits, cache_key, platform)'),
   ]);
 
-  /*
-   * 老库建表时还没有 platform 列：`CREATE TABLE IF NOT EXISTS` 对已经存在的表什么都不做，
-   * 那一列就永远加不上。SQLite 没有「加列 IF NOT EXISTS」，所以单独 ALTER 一次、
-   * 已经存在（报 duplicate column）就当没事 —— 与 pruneHitLog 一样，升级不该因为
-   * 这条语句报错而把整个服务挡在门外。
-   */
-  await db.prepare('ALTER TABLE ai_cache ADD COLUMN platform TEXT').run().catch(() => undefined);
+  // Upgrade legacy tables before creating indexes that reference newer columns.
+  for (const table of ['ai_cache', 'ai_cache_backups']) {
+    const columns = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    if (!columns.results?.some((column) => column.name === 'platform')) {
+      try {
+        await db.prepare(`ALTER TABLE ${table} ADD COLUMN platform TEXT`).run();
+      } catch (error) {
+        const after = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+        if (!after.results?.some((column) => column.name === 'platform')) throw error;
+      }
+    }
+  }
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_ai_cache_song_group ON ai_cache(song_title, updated_at, hits, cache_key, platform)').run();
+  await ensureAdminSessionSchema(db);
+};
 
-  schemaEnsured = true;
+const ensureSchema = (db: D1Database): Promise<void> => {
+  const pending = schemaInitializations.get(db);
+  if (pending) return pending;
+  const initialization = initializeSchema(db).catch((error) => {
+    schemaInitializations.delete(db);
+    throw error;
+  });
+  schemaInitializations.set(db, initialization);
+  return initialization;
 };
 
 const parseThemeInput = (value: unknown) => {
@@ -265,11 +320,21 @@ const getThemeManifest = async (db: D1Database) => {
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use('*', cors({
+const publicCors = cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Authorization', 'Content-Type'],
-}));
+});
+app.use('*', async (c, next) => {
+  if (c.req.path === '/admin' || c.req.path.startsWith('/admin/')) {
+    c.header('Cache-Control', 'no-store');
+    if (!readAdminCredentials(c.env) || !readAdminPublicOrigin(c)) return c.json({ ok: false, error: 'admin_not_configured' }, 503);
+    if (!isSameOriginAdminMutation(c)) return c.json({ ok: false, error: 'invalid_origin' }, 403);
+    await next();
+    return;
+  }
+  return publicCors(c, next);
+});
 
 // Token length validation middleware
 app.use('*', async (c, next) => {
@@ -494,10 +559,29 @@ api.get('/settings', async (c) => {
 
 api.get('/themes/manifest', async (c) => c.json(await getThemeManifest(c.env.FOLIA_SYNC_DB)));
 
+api.get('/settings/confirmation', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.json(await settingsConfirmation(await readSettingsRow(c.env.FOLIA_SYNC_DB)));
+});
+
 api.put('/settings', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
-  if (!body || body.schemaVersion !== SCHEMA_VERSION || typeof body.updatedAt !== 'string' || !isRecord(body.data)) {
+  // Settings exports shipped as v1 even after the server's wire metadata moved to v2.
+  if (!body || (body.schemaVersion !== 1 && body.schemaVersion !== SCHEMA_VERSION) || typeof body.updatedAt !== 'string' || !isRecord(body.data)) {
     return c.json({ ok: false, error: 'invalid_settings' }, 400);
+  }
+  if ('expectedRevision' in body) {
+    c.header('Cache-Control', 'no-store');
+    if (body.expectedRevision !== null && (typeof body.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedRevision))) {
+      return c.json({ ok: false, error: 'invalid_revision' }, 400);
+    }
+    const observed = await readSettingsRow(c.env.FOLIA_SYNC_DB);
+    if (await settingsRevision(observed) !== body.expectedRevision) {
+      return c.json({ ok: false, error: 'settings_conflict' }, 409);
+    }
+    const written = await compareAndSetSettings(c.env.FOLIA_SYNC_DB, observed, body);
+    if (!written) return c.json({ ok: false, error: 'settings_conflict' }, 409);
+    return c.json({ ok: true, accepted: true, ...await settingsConfirmation(written) });
   }
   await c.env.FOLIA_SYNC_DB
     .prepare(`
@@ -692,6 +776,13 @@ app.get('/admin', async (c) => {
 });
 app.route('/admin/api/fonts', adminFontRoutes);
 app.route('/admin/api/ai-cache', adminCacheRoutes);
+/*
+ * 旧版列表与「捞回某一版」。恢复之后要让 `/songs` 的总数缓存作废 —— 捞回来的那条
+ * 可能带着一个当前库里已经没有的歌名（原因见 aiCacheSongTotal.ts）。
+ *
+ * 这里用一个包装好的模块级实例、并以**导入名**挂载：契约提取脚本（ci/contracts/extract.ts）
+ * 按 `app.route('前缀', 标识符)` 回溯到 import 表，内联调用或另起局部常量它都找不到。
+ */
 app.route('/admin/api/ai-cache-backups', adminCacheBackupRoutes);
 /*
  * 管理面板的缓存详情页面：`/admin/cache/:kind/:key`。

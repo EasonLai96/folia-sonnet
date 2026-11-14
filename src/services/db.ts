@@ -159,6 +159,7 @@ export const getCacheUsageByCategory = async (): Promise<{
   cover: number;
   media: number;
   analysis: number;
+  volumeBalance: number;
   mediaCount: number;
 }> => {
   try {
@@ -179,7 +180,7 @@ export const getCacheUsageByCategory = async (): Promise<{
     usage.cover += await getCoverAssetUsage();
     return usage;
   } catch {
-    return { playlist: 0, lyrics: 0, cover: 0, media: 0, analysis: 0, mediaCount: 0 };
+    return { playlist: 0, lyrics: 0, cover: 0, media: 0, analysis: 0, volumeBalance: 0, mediaCount: 0 };
   }
 };
 
@@ -243,6 +244,20 @@ export const deleteLocalSongs = async (ids: string[]): Promise<void> => {
     await deleteSongAssignments(ids);
   } catch (error) {
     console.error('Failed to delete local songs', error);
+  }
+};
+
+/** 存储页逐行列出的缓存类别：都能重新下载或重新计算。 */
+const REBUILDABLE_CACHE_CATEGORIES: CacheCategory[] = ['playlist', 'lyrics', 'cover', 'media', 'analysis'];
+
+/**
+ * 「全部清空」：只清能重建的缓存，也就是存储页逐行列出的那几类。
+ * 本地曲库（歌曲记录、手工合并 / 拆分 / 分配过的歌手与专辑）、本地文件提取的封面、主题、
+ * 导入文件夹的授权与快照、播放会话都不是缓存，重新扫描也还原不了手工整理，所以不动。
+ */
+export const clearAllCaches = async (): Promise<void> => {
+  for (const category of REBUILDABLE_CACHE_CATEGORIES) {
+    await clearCacheByCategory(category);
   }
 };
 
