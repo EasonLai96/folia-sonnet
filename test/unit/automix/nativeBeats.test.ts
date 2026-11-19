@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as BeatsModuleNs from '../../../src/services/automix/nativeBeats';
 
 // 使用真实 Capacitor 注册代理和排程，只替换门禁取值与原生传输端。
 const { blockedReason } = vi.hoisted(() => ({ blockedReason: vi.fn<() => string | null>() }));
@@ -7,7 +8,7 @@ vi.mock('../../../src/services/aiMemoryGate', () => ({
     localInferenceBlockedReason: blockedReason,
 }));
 
-type BeatsModule = typeof import('../../../src/services/automix/nativeBeats');
+type BeatsModule = typeof BeatsModuleNs;
 const pluginName = 'FoliaAutomixModels';
 const grid = { beats: [], fps: 50, frames: 50 };
 const nativePromise = vi.fn<(plugin: string, method: string, options: unknown) => Promise<unknown>>();
