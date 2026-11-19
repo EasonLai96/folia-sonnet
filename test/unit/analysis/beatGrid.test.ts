@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // test/unit/analysis/beatGrid.test.ts
 // A whole track's beats - final0's, shared by automix and the beat FX: stored, joined while in flight,
 // run once, with the accents a GPU run measures alongside.
 
 const store = new Map<string, unknown>();
+const readStored = async (key: string) => store.get(key) ?? null;
+const getFromCache = vi.fn(readStored);
 vi.mock('@/services/db', () => ({
-    getFromCache: vi.fn(async (key: string) => store.get(key) ?? null),
+    getFromCache,
     saveToCache: vi.fn(async (key: string, data: unknown) => {
         store.set(key, data);
     }),
@@ -23,6 +25,19 @@ vi.mock('@/services/analysis/beatThis', async () => ({
     canRunBeatThis,
 }));
 vi.mock('@/services/automix/analysisOffThread', () => ({ melSpectrogramOffThread: vi.fn(async () => ({ data: new Float32Array(0), frames: 0 })) }));
+
+const native = vi.hoisted(() => ({ android: false, blocked: false, analyzeBeatsFromUrl: vi.fn(), addListener: vi.fn() }));
+vi.mock('@/platform/runtime', () => ({
+    isAndroidAppShell: () => native.android,
+    isCapacitorAndroid: () => native.android,
+}));
+vi.mock('@/services/aiMemoryGate', () => ({
+    AI_MEMORY_GUARDED: 'ai-memory-guarded:',
+    localInferenceBlockedReason: () => native.blocked ? 'disabled-in-settings' : null,
+    isLocalInferenceAllowed: () => !native.blocked,
+}));
+vi.mock('@/services/automix/nativeModels', () => ({ cancelNativeSeparation: vi.fn() }));
+vi.mock('@capacitor/core', () => ({ registerPlugin: () => native }));
 
 const { readStoredBeatGrid, storeBeatGrid, getTrackBeatGrid, getTrackBeatAccents } = await import('@/services/analysis/beatGrid');
 
@@ -139,6 +154,84 @@ describe('getTrackBeatGrid', () => {
         const stored = await readStoredBeatGrid('song-3');
         expect(stored).not.toHaveProperty('percussive');
         expect(stored?.accents?.rhythmic.slice(0, 5)).toEqual([0, 0, 0, 0, 1]);
+    });
+});
+
+describe('Android BeatFX grid recovery', () => {
+    const source = '/local-fixture';
+    const full = { beats: GRID.beats.map(time => ({ time, downbeat: GRID.downbeats.includes(time), confidence: 1 })), fps: 50, frames: 100 };
+    const options = { nativeSourceUrl: () => Promise.resolve(source), reportNativeGateDeferral: true };
+
+    beforeEach(() => {
+        store.clear();
+        native.android = true;
+        native.blocked = false;
+        native.analyzeBeatsFromUrl.mockReset().mockResolvedValue(full);
+        native.addListener.mockReset().mockResolvedValue({ remove: () => Promise.resolve() });
+        vi.stubGlobal('window', { Capacitor: {
+            PluginHeaders: [{
+                name: 'FoliaAutomixModels',
+                methods: [{ name: 'analyzeBeatsFromUrl', rtype: 'promise' }],
+            }],
+            nativePromise: (_plugin: string, _method: string, options: { url: string }) => native.analyzeBeatsFromUrl(options),
+        } });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        native.android = false;
+        native.blocked = false;
+        getFromCache.mockReset();
+        getFromCache.mockImplementation(readStored);
+    });
+
+    it('exposes a partial cached list at once and completes it through native IPC', async () => {
+        const head = { beats: [0.5], downbeats: [0.5] };
+        await storeBeatGrid('partial', head, 1);
+        const cached = await getTrackBeatGrid('partial', mid, { ...options, storedOnly: true });
+        expect(cached).toEqual({ ...head, partialUntil: 1 });
+        expect(native.analyzeBeatsFromUrl).not.toHaveBeenCalled();
+        const started = await getTrackBeatGrid('partial', mid, options);
+        expect(started).toMatchObject(cached as NonNullable<typeof cached>);
+        expect(await started?.completion).toEqual(GRID);
+        expect(await getTrackBeatGrid('partial', mid, options)).toEqual(GRID);
+        expect(native.analyzeBeatsFromUrl).toHaveBeenCalledExactlyOnceWith({ url: source });
+    });
+
+    it.each(['cache read', 'address resolution', 'listener registration'] as const)('defers only if the gate closes during %s before native IPC', async (step) => {
+        let release!: () => void;
+        const held = new Promise<void>(done => { release = done; });
+        const pause = vi.fn(() => held);
+        if (step === 'cache read') getFromCache.mockImplementationOnce(async (key) => { await pause(); return readStored(key); });
+        if (step === 'listener registration') native.addListener.mockImplementationOnce(async () => {
+            await pause();
+            return { remove: () => Promise.resolve() };
+        });
+        const lookup = getTrackBeatGrid(step, mid, step === 'address resolution' ? {
+            ...options,
+            nativeSourceUrl: async () => { await pause(); return source; },
+        } : options);
+        await vi.waitFor(() => { expect(pause).toHaveBeenCalledTimes(1); });
+        native.blocked = true;
+        release();
+        await expect(lookup).rejects.toThrow(/^ai-memory-guarded:/);
+        expect(native.analyzeBeatsFromUrl).not.toHaveBeenCalled();
+        native.blocked = false;
+        await expect(getTrackBeatGrid(step, mid, options)).resolves.toEqual(GRID);
+        expect(native.analyzeBeatsFromUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not disguise a true native error as a deferral even after the gate closes', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        native.analyzeBeatsFromUrl.mockImplementationOnce(() => {
+            native.blocked = true;
+            return Promise.reject(new Error('native inference failed'));
+        });
+        try {
+            await expect(getTrackBeatGrid('failed', mid, options)).resolves.toBeNull();
+            expect(native.analyzeBeatsFromUrl).toHaveBeenCalledTimes(1);
+        } finally {
+            warn.mockRestore();
+        }
     });
 });
 

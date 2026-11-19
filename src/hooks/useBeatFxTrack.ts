@@ -12,6 +12,7 @@ import { modelsPresent, subscribeModelAvailability } from '../services/analysis/
 import { isNativeModelsAvailable, modelWillBeAvailable, STEM_MODEL, subscribeModelAvailability as subscribeNativeModels } from '../services/automix/nativeModels';
 import { drumHitsSettled, setWantedDrumTrack } from '../services/analysis/drumHits';
 import { setStemDrumsWanted } from '../services/analysis/stemRange';
+import { isLocalInferenceAllowed, localInferenceBlockedReason, subscribeAiMemoryGate } from '../services/aiMemoryGate';
 
 // src/hooks/useBeatFxTrack.ts
 // Loads the beat list of the on-screen track into the live beat clock whenever the track changes,
@@ -138,9 +139,32 @@ export function useBeatFxTrack(): boolean {
         }
         let cancelled = false;
         let retryTimer: ReturnType<typeof setTimeout> | null = null;
+        let unsubscribeGate: (() => void) | undefined;
         let begunKey: string | null = null;
-        const load = (attempt: number) => {
-            const { key, beats } = loadBeatFxTrackBeats(song, { storedOnly });
+        const initialGateReason = localInferenceBlockedReason();
+        const mayRecover = !storedOnly && (initialGateReason === null || initialGateReason === 'native-not-ready');
+        const waitForNative = () => {
+            const recover = () => {
+                if (cancelled || !isLocalInferenceAllowed()) return;
+                unsubscribeGate?.();
+                unsubscribeGate = undefined;
+                // A store update can precede React's cleanup; never restart an obsolete lookup.
+                const current = selectDisplaySong(usePlaybackStore.getState());
+                if (!current || getPlaybackAnalysisKey(current) !== identity || useThemeSettingsStore.getState().staticMode) return;
+                const chrome = usePlayerChromeSettingsStore.getState();
+                const visualizer = useVisualizerSettingsStore.getState();
+                if (!smartBeatMayAnalyse(visualizer.smartBeat) || !visualizerWantsBeats({
+                    ...visualizer,
+                    pageTransparent: chrome.transparentPlayerBackground || chrome.enablePlayerPageNativeBlur,
+                })) return;
+                load(0, current);
+            };
+            unsubscribeGate = subscribeAiMemoryGate(recover);
+            // ACK or settings can already have reopened the gate during lookup/cleanup.
+            recover();
+        };
+        const load = (attempt: number, track = song, awaitingNative = false) => {
+            const { key, beats } = loadBeatFxTrackBeats(track, { storedOnly: storedOnly || awaitingNative });
             // A retry may resolve another key (a transcode registered meanwhile); the clock follows it.
             if (key !== begunKey) {
                 beginBeatFxTrack(key);
@@ -148,10 +172,24 @@ export function useBeatFxTrack(): boolean {
             }
             void beats.then((result) => {
                 if (cancelled) return;
-                setBeatFxEvents(key, result.events, result.source, result.note, result.trackScale);
+                if (!result.nativeGateDeferred || !mayRecover) {
+                    setBeatFxEvents(key, result.events, result.source, result.note, result.trackScale);
+                }
+                if (mayRecover && (result.nativeGateDeferred || (awaitingNative && ((result.source === 'none' && !result.settled) || result.partial)))) {
+                    waitForNative();
+                    return;
+                }
+                void result.completion?.then((full) => {
+                    if (cancelled || !full) return;
+                    if (full.nativeGateDeferred) {
+                        if (mayRecover) waitForNative();
+                    } else {
+                        setBeatFxEvents(key, full.events, full.source, full.note, full.trackScale);
+                    }
+                });
                 // An online track whose stream URL playback has not resolved yet: asked again shortly.
                 if (result.source === 'none' && result.retry && attempt < RETRY_ATTEMPTS) {
-                    retryTimer = setTimeout(() => load(attempt + 1), RETRY_DELAY_MS);
+                    retryTimer = setTimeout(() => load(attempt + 1, track), RETRY_DELAY_MS);
                     return;
                 }
                 // 两种结果都留一行：成功时也要能确认「链路跑过、拍点是多少」，否则用户翻到的
@@ -169,9 +207,10 @@ export function useBeatFxTrack(): boolean {
                 console.warn('[BeatFx] beat lookup failed', error);
             });
         };
-        load(0);
+        load(0, song, !storedOnly && initialGateReason === 'native-not-ready');
         return () => {
             cancelled = true;
+            unsubscribeGate?.();
             if (retryTimer) clearTimeout(retryTimer);
         };
         // Keyed on the track identity and the switches only; the song object changes for unrelated reasons.

@@ -1,6 +1,7 @@
 import { getFromCache, saveToCache } from '../db';
 import { melSpectrogramOffThread } from '../automix/analysisOffThread';
-import { analyzeBeatsNative, analyzeBeatsNativeFromUrl, isNativeBeatAnalysisAvailable, type NativeBeat } from '../automix/nativeBeats';
+import { analyzeBeatsNative, analyzeBeatsNativeFromUrl, assertNativeBeatGate, isNativeBeatAnalysisAvailable, NativeBeatGateDeferred, type NativeBeat } from '../automix/nativeBeats';
+import { isAndroidAppShell } from '../../platform/runtime';
 import { analyseBeatGrid, canRunBeatThis, type BeatGrid } from './beatThis';
 import { raiseGpuUrgency, runPercussiveEnergyGpu } from './beatThisGpu';
 import type { Urgency } from './scheduler';
@@ -55,6 +56,10 @@ interface StoredBeatGrid {
 /** A beat list, with its accents when they have been measured. */
 export interface AccentedBeatGrid extends BeatGrid {
     accents?: BeatAccents;
+    /** The end of a cached partial list; absent on a whole-track result. */
+    partialUntil?: number;
+    /** A partial list is returned immediately, while this shared run finishes it. */
+    completion?: Promise<AccentedBeatGrid | null>;
 }
 
 const storageKey = (key: string) => `${BEAT_GRID_PREFIX}${key}`;
@@ -123,6 +128,10 @@ export interface TrackBeatGridOptions {
      * joined, or null - and `readMid` is never called, so nothing is decoded or read off a stream.
      */
     storedOnly?: boolean;
+    /** Let BeatFX distinguish a halt before native IPC from a completed (possibly failed) attempt. */
+    reportNativeGateDeferral?: boolean;
+    /** Called when a lookup without cached beats waits for an existing run. */
+    onJoin?: () => void;
     /** How the GPU scheduler orders a run started here (scheduler.ts); automix's default, 'background'. */
     urgency?: Urgency;
     /**
@@ -211,6 +220,7 @@ const startRun = (
          * 强弱控制失真。没有 accents 时下游会退回按拍点平均分配，
          * 那是「不知道强弱」该有的样子，不是编一个出来。
          */
+        if (isAndroidAppShell()) assertNativeBeatGate();
         if (isNativeBeatAnalysisAvailable()) {
             let analysis: Awaited<ReturnType<typeof analyzeBeatsNative>> | null = null;
             const sourceUrl = nativeSourceUrl ? await nativeSourceUrl() : null;
@@ -226,10 +236,12 @@ const startRun = (
                     console.info(`[BeatGrid] native analysis from ${where}`);
                     analysis = await analyzeBeatsNativeFromUrl(sourceUrl, undefined, handlePartial);
                 } catch (error) {
+                    if (error instanceof NativeBeatGateDeferred) throw error;
                     console.warn('[BeatGrid] native analysis failed', error);
                     return null;
                 }
             } else {
+                assertNativeBeatGate();
                 /*
                  * 退路：PCM 已经在 JS 手里、又没有可交出去的地址。
                  *
@@ -308,7 +320,11 @@ export const getTrackBeatGrid = async (
     readMid: () => Promise<Float32Array | null>,
     options: TrackBeatGridOptions = {},
 ): Promise<AccentedBeatGrid | null> => {
-    const { cpuFallback = false, storedOnly = false, urgency = 'background' } = options;
+    const { cpuFallback = false, storedOnly = false, urgency = 'background', reportNativeGateDeferral = false } = options;
+    const settle = (run: Promise<AccentedBeatGrid | null>) => run.catch((error: unknown) => {
+        if (!reportNativeGateDeferral && error instanceof NativeBeatGateDeferred) return null;
+        throw error;
+    });
 
     const stored = await readStoredBeatGridEntry(key);
     if (stored) {
@@ -318,23 +334,26 @@ export const getTrackBeatGrid = async (
              * 不 await 那次补齐 —— 用户要的是「立刻有拍点」，补齐只把表接长，
              * 末尾与已有的重叠，时钟不会因此跳。
              */
-            void startRun(key, readMid, options).catch((error: unknown) => {
-                console.warn('[BeatGrid] finishing a stored partial beat list failed', error);
+            const completion = settle(startRun(key, readMid, options));
+            void completion.catch((error: unknown) => {
+                if (!(error instanceof NativeBeatGateDeferred)) console.warn('[BeatGrid] finishing a stored partial beat list failed', error);
             });
+            return { ...stored.grid, partialUntil: stored.until, completion };
         }
-        return stored.grid;
+        return stored.until === undefined ? stored.grid : { ...stored.grid, partialUntil: stored.until };
     }
 
     const joined = running.get(key);
     if (joined) {
+        options.onJoin?.();
         // A picture on screen joining automix's background run: its GPU unit moves up with it.
         if (urgency !== 'background') raiseGpuUrgency(key, urgency);
-        const grid = await joined.grid;
+        const grid = await settle(joined.grid);
         if (grid || joined.cpuFallback || !cpuFallback) return grid;
     }
     if (storedOnly) return null;
 
-    return startRun(key, readMid, options);
+    return settle(startRun(key, readMid, options));
 };
 
 /**

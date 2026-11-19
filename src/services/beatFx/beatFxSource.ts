@@ -15,6 +15,7 @@ import { getPlaybackAnalysisTarget } from '../playbackRecovery/representationReg
 import { isCacheableAudioResponse } from '../playbackRecovery/mediaCacheGuard';
 import { getPrefetchedData, isUrlValid, warmupSongAudio } from '../prefetchService';
 import { isNativeModelsAvailable } from '../automix/nativeModels';
+import { NativeBeatGateDeferred } from '../automix/nativeBeats';
 import { cacheNativeMediaFromUrl, hasNativeMediaCache, readNativeMediaCacheUrl } from '../mediaCacheStore';
 import { getSongResourceCacheKey } from '../onlineMusic/resourceKeys';
 import { useAudioSettingsStore } from '../../stores/useAudioSettingsStore';
@@ -72,6 +73,14 @@ export interface BeatFxTrackBeats {
     note?: string;
     /** No beats only because the track's bytes are not to be had yet; worth asking again shortly. */
     retry?: boolean;
+    /** A stored list that does not cover the whole track. */
+    partial?: boolean;
+    /** The Web gate stopped this lookup before it could send native analysis IPC. */
+    nativeGateDeferred?: boolean;
+    /** A miss is final for this play if a cache-only lookup joined a run or failed itself. */
+    settled?: boolean;
+    /** The final result of finishing a cached partial list, independent of the displayed beats. */
+    completion?: Promise<BeatFxTrackBeats | null>;
     /** The track's dynamics scale (0.45..1); 1 without accents. */
     trackScale: number;
     /** The same beats with accents, when these came without; null if they cannot be measured now. */
@@ -351,7 +360,7 @@ const resolveTrackBeats = async (
     storedOnly: boolean,
 ): Promise<BeatFxTrackBeats> => {
     let note = storedOnly ? 'none stored (智能动感模式 uses stored results only)' : 'beat_this returned no beats (no usable GPU, or a failed run)';
-    let retry = false;
+    const lookup = { retry: false, joined: false };
     let grid: Awaited<ReturnType<typeof getTrackBeatGrid>>;
     const readBytes = async () => {
         const read = await readTrackBytes(song, key, representation);
@@ -363,7 +372,7 @@ const resolveTrackBeats = async (
                 : getPlaybackSourceRef(song).kind === 'online'
                     ? '拿不到这首歌的音频：平台没有给出地址，缓存里也没有'
                     : '拿不到这首歌的音频文件';
-            retry = true;
+            lookup.retry = true;
         }
         return read;
     };
@@ -426,12 +435,22 @@ const resolveTrackBeats = async (
         }
         return readNativeMediaCacheUrl(cacheKey);
     };
+    const gateDeferred: BeatFxTrackBeats = {
+        events: [], source: 'none', note: 'native beat analysis blocked before IPC', trackScale: 1, nativeGateDeferred: true,
+    };
+    const fromGrid = (found: NonNullable<typeof grid>): BeatFxTrackBeats => ({
+        events: mergeBeatFxEvents(found.beats, found.downbeats, found.accents),
+        source: 'beat_this',
+        trackScale: found.accents?.trackScale ?? 1,
+    });
     beginBeatAnalysisProgress();
     try {
         // The picture on screen waits on these: ahead of automix's background profiles on the GPU.
         grid = await withDeadline(
             getTrackBeatGrid(key, readMid, {
                 storedOnly,
+                reportNativeGateDeferral: true,
+                onJoin: () => { lookup.joined = true; },
                 urgency: 'onScreen',
                 nativeSourceUrl,
                 onPartial: (partialBeats, seconds) => {
@@ -453,21 +472,22 @@ const resolveTrackBeats = async (
             '节拍分析',
         );
     } catch (error) {
+        if (error instanceof NativeBeatGateDeferred) return gateDeferred;
         // A throw here (a cache read, a worker, a GPU device lost mid-run) is "no beats" like any
         // other: answered, so the caller's frame falls back, and not remembered, so a later play retries.
-        return { events: [], source: 'none', note: `beat lookup failed: ${String(error)}`, trackScale: 1 };
+        return { events: [], source: 'none', note: `beat lookup failed: ${String(error)}`, trackScale: 1, settled: true };
     } finally {
         endBeatAnalysisProgress();
     }
     if (grid?.beats.length) {
         const found = grid;
-        if (found.accents || storedOnly) {
-            return {
-                events: mergeBeatFxEvents(found.beats, found.downbeats, found.accents),
-                source: 'beat_this',
-                trackScale: found.accents?.trackScale ?? 1,
-            };
+        if (found.partialUntil !== undefined) {
+            const completion = found.completion && withDeadline(found.completion, BEAT_LOOKUP_TIMEOUT_MS, '节拍分析')
+                .then((full) => full?.beats.length ? fromGrid(full) : null)
+                .catch((error: unknown) => error instanceof NativeBeatGateDeferred ? gateDeferred : null);
+            return { ...fromGrid(found), partial: true, ...(completion ? { completion } : {}) };
         }
+        if (found.accents || storedOnly) return fromGrid(found);
         // Measured on a worker after the fact; a failure only leaves the beats as they are.
         const accented = getTrackBeatAccents(key, found, readMid)
             .then((accents): BeatFxTrackBeats | null => (accents
@@ -490,7 +510,11 @@ const resolveTrackBeats = async (
             trackScale: 1,
         };
     }
-    return { events: [], source: 'none', note, trackScale: 1, ...(retry ? { retry } : {}) };
+    return {
+        events: [], source: 'none', note, trackScale: 1,
+        ...(lookup.retry ? { retry: true } : {}),
+        ...(lookup.joined ? { settled: true } : {}),
+    };
 };
 
 /**
@@ -512,8 +536,12 @@ export const loadBeatFxTrackBeats = (song: SongResult, { storedOnly = false } = 
         memory.delete(oldest);
     }
     // A failed lookup is not remembered, so a later play (e.g. once the track is cached) retries.
-    void pending.then((result) => {
-        if (result.source === 'none' && memory.get(remembered) === pending) memory.delete(remembered);
+    void pending.then(async (result) => {
+        if (result.source !== 'none' && !result.partial) return;
+        const full = result.completion ? await result.completion : null;
+        if (memory.get(remembered) !== pending) return;
+        if (full?.source === 'beat_this') memory.set(remembered, Promise.resolve(full));
+        else memory.delete(remembered);
     });
     return { key, beats: pending };
 };

@@ -9,8 +9,8 @@
 //
 // 这个模块不依赖 window.electron，与上游 Electron 版的差别就在这一层。
 
-import { registerPlugin } from '@capacitor/core';
-import { isLocalInferenceAllowed } from '../aiMemoryGate';
+import { CapacitorException, ExceptionCode, registerPlugin } from '@capacitor/core';
+import { AI_MEMORY_GUARDED, isLocalInferenceAllowed, localInferenceBlockedReason } from '../aiMemoryGate';
 import { isCapacitorAndroid } from '../../platform/runtime';
 import { cancelNativeSeparation } from './nativeModels';
 import { reportBeatAnalysisProgress } from '../beatFx/beatProgress';
@@ -78,7 +78,40 @@ type NativeBeatsPlugin = {
     setInferenceEnabled?(options: { enabled: boolean }): Promise<{ enabled?: boolean }>;
 };
 
-export const NativeBeats = registerPlugin<NativeBeatsPlugin>('FoliaAutomixModels');
+const BEATS_PLUGIN_NAME = 'FoliaAutomixModels';
+export const NativeBeats = registerPlugin<NativeBeatsPlugin>(BEATS_PLUGIN_NAME);
+
+/** Only the Web gate can produce this; a rejected or timed-out analysis IPC is not deferred. */
+export class NativeBeatGateDeferred extends Error {
+    readonly code = 'ai-memory-guarded';
+}
+
+export const assertNativeBeatGate = (): void => {
+    const reason = localInferenceBlockedReason();
+    if (reason !== null) throw new NativeBeatGateDeferred(`${AI_MEMORY_GUARDED}${reason}`);
+};
+
+// 只替换拍点分析的派发：Capacitor 代理本来会在微任务中调用 nativePromise。
+// 保留异步派发，但最后一次检查与 Android 桥的同步发送之间不能再经过代理。
+const dispatchNativeBeatAnalysis = <Method extends 'analyzeBeats' | 'analyzeBeatsFromUrl'>(
+    method: Method,
+    options: Parameters<NonNullable<NativeBeatsPlugin[Method]>>[0],
+): Promise<NativeBeatGrid> => Promise.resolve().then(() => {
+    const bridge = (window as Window & { Capacitor?: {
+        PluginHeaders?: readonly { name: string; methods: readonly { name: string; rtype?: string }[] }[];
+        nativePromise?: (plugin: string, method: string, options: object) => Promise<NativeBeatGrid>;
+    } }).Capacitor;
+    const declared = bridge?.PluginHeaders?.find(({ name }) => name === BEATS_PLUGIN_NAME)
+        ?.methods.some(({ name, rtype }) => name === method && rtype === 'promise');
+    assertNativeBeatGate();
+    if (!declared || typeof bridge?.nativePromise !== 'function') {
+        const message = method === 'analyzeBeatsFromUrl'
+            ? '当前安装包的原生插件不支持按地址分析节拍，请更新 APK'
+            : '当前安装包的原生插件不支持 PCM 节拍分析，请更新 APK';
+        throw new CapacitorException(message, ExceptionCode.Unimplemented);
+    }
+    return bridge.nativePromise(BEATS_PLUGIN_NAME, method, options);
+});
 
 /**
  * 能不能在原生侧跑分析模型（beat_this 拍点、SCNet/htdemucs 分轨）。
@@ -166,14 +199,13 @@ const toBase64 = (samples: Float32Array): string => {
  * 而「分析过了但结果为空」和「根本没分析」对排查是两件完全不同的事。
  */
 export const analyzeBeatsNative = async (samples: Float32Array): Promise<NativeBeatGrid> => {
-    if (!isNativeBeatAnalysisAvailable()) {
-        throw new Error('原生节拍分析只支持安卓 App');
-    }
+    if (!isCapacitorAndroid()) throw new Error('原生节拍分析只支持安卓 App');
+    assertNativeBeatGate();
     if (samples.length < BEAT_THIS_SAMPLE_RATE) {
         // 不到一秒的音频没有节拍可言，直接给空结果，省一次模型冷启动。
         return { beats: [], fps: BEAT_THIS_SAMPLE_RATE / 441, frames: 0 };
     }
-    return NativeBeats.analyzeBeats({ samples: toBase64(samples) });
+    return dispatchNativeBeatAnalysis('analyzeBeats', { samples: toBase64(samples) });
 };
 
 /**
@@ -189,15 +221,11 @@ export const analyzeBeatsNativeFromUrl = async (
     /** 每算完一块来的累积拍点表（`seconds` 是这块覆盖到的位置）。 */
     onPartial?: (beats: NativeBeat[], seconds: number) => void,
 ): Promise<NativeBeatGrid> => {
-    if (!isNativeBeatAnalysisAvailable()) {
-        throw new Error('原生节拍分析只支持安卓 App');
-    }
+    if (!isCapacitorAndroid()) throw new Error('原生节拍分析只支持安卓 App');
+    assertNativeBeatGate();
     if (!url) throw new Error('缺少音频地址');
-    const plugin = NativeBeats as NativeBeatsPlugin;
-    if (typeof plugin.analyzeBeatsFromUrl !== 'function') {
-        // 旧 APK 的插件没有这个方法：报错而不是退回 base64，后者在这里只会把进程拖死。
-        throw new Error('当前安装包的原生插件不支持按地址分析节拍，请更新 APK');
-    }
+    // 旧 APK 缺少 URL 方法时，派发处报错而不是退回 base64，后者在这里只会把进程拖死。
+    const plugin = NativeBeats;
     /*
      * 等太久就放弃。
      *
@@ -234,8 +262,9 @@ export const analyzeBeatsNativeFromUrl = async (
                 chunkListener = null;
             }
         }
+        assertNativeBeatGate();
         const grid = await Promise.race([
-            plugin.analyzeBeatsFromUrl({ url }),
+            dispatchNativeBeatAnalysis('analyzeBeatsFromUrl', { url }),
             new Promise<never>((_, reject) => {
                 timer = setTimeout(() => {
                     void cancelNativeSeparation();
