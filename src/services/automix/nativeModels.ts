@@ -14,6 +14,7 @@
 
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { isAndroidAppShell } from '../../platform/runtime';
+import { isLocalInferenceAllowed } from '../aiMemoryGate';
 
 /** 两个模型的标识，与 Kotlin 侧的常量一致。 */
 export type AutomixModelName = 'beat_this' | 'scnet';
@@ -457,10 +458,11 @@ export const separateStemsNativeFromUrl = async (
     url: string,
     options: NativeStemOptions = {},
 ): Promise<NativeStems | null> => {
-    if (!isNativeModelsAvailable()) return null;
+    if (!isNativeModelsAvailable() || !isLocalInferenceAllowed()) return null;
     if (!url) return null;
     // 首次用到才把权重从 assets 拷出来：界面上的开关不等这一次拷贝。
     if (!present.scnet && !(await installModel(STEM_MODEL))) return null;
+    if (!isLocalInferenceAllowed()) return null;
     try {
         const plugin = NativeAutomix as unknown as {
             separateStemsFromUrl?: (options: {
@@ -496,10 +498,11 @@ export const separateStemsNative = async (
     right: Float32Array,
     options: NativeStemOptions = {},
 ): Promise<NativeStems | null> => {
-    if (!isNativeModelsAvailable()) return null;
+    if (!isNativeModelsAvailable() || !isLocalInferenceAllowed()) return null;
     if (left.length !== right.length || left.length === 0) return null;
     // 首次用到才落盘（约 108MB）；已经就绪就不重复问。
     if (!present.scnet && !(await installModel(STEM_MODEL))) return null;
+    if (!isLocalInferenceAllowed()) return null;
     try {
         const run = NativeAutomix.separateStems({
             left: encodeChunk(left),
@@ -537,7 +540,7 @@ export type NativeDrumBands = {
  * @param url 本地绝对路径，或 http(s) 地址（媒体缓存的回环地址也算本地）。
  */
 export const analyzeDrumBandsNativeFromUrl = async (url: string): Promise<NativeDrumBands | null> => {
-    if (!isNativeModelsAvailable()) return null;
+    if (!isNativeModelsAvailable() || !isLocalInferenceAllowed()) return null;
     if (!url) return null;
     const plugin = NativeAutomix as unknown as {
         analyzeDrumBandsFromUrl?: (options: { url: string }) => Promise<{
@@ -587,7 +590,7 @@ export type NativeMusicEnvelopes = NativeStemEnvelopes & {
 };
 
 export const analyzeMusicEnvelopesNativeFromUrl = async (url: string): Promise<NativeMusicEnvelopes | null> => {
-    if (!isNativeModelsAvailable() || !url) return null;
+    if (!isNativeModelsAvailable() || !isLocalInferenceAllowed() || !url) return null;
     const plugin = NativeAutomix as unknown as {
         analyzeMusicEnvelopesFromUrl?: (options: { url: string }) => Promise<{
             fps?: number;
@@ -717,7 +720,7 @@ export const separateDrumBandsNativeFromUrl = async (
         wanted?: () => boolean;
     } = {},
 ): Promise<{ seconds: number; cancelled: boolean; done: boolean } | null> => {
-    if (!isNativeModelsAvailable()) return null;
+    if (!isNativeModelsAvailable() || !isLocalInferenceAllowed()) return null;
     if (!url) return null;
     const plugin = NativeAutomix as unknown as {
         separateDrumsBandsFromUrl?: (options: {
@@ -822,7 +825,7 @@ export const separateDrumBandsNativeFromUrl = async (
          */
         let stuck = 0;
         for (;;) {
-            if (options.wanted && !options.wanted()) {
+            if (!isLocalInferenceAllowed() || (options.wanted && !options.wanted())) {
                 cancelled = true;
                 break;
             }

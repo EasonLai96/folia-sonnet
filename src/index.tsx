@@ -70,9 +70,6 @@ setMediaDiagnosticsEnabledReader(perfDiagnosticsPort.isEnabled);
 // 本地登录的地基：把内置的接口代码挂到页面与原生之间。它是异步的（要 import 那份 JS），
 // 但装好之前页面发来的请求会被排队，装好后统一补发，所以不用 await。
 void installNativeAndroidBridge();
-// AI 低内存闸门（issue #401）：读上一回「有没有活到稳定期」算连续被杀次数，并起内存水位轮询。
-// 必须早于任何 AI 入口 —— 闸门关着时 requestAiCompletion 与原生分析模型都不发起（见 utils/aiMemoryGate）。
-installAiMemoryGate();
 // 方向属性（竖屏 / 横屏）要在首帧之前落到 <html> 上：横屏那套缩放与「强制横屏」都读它，
 // 晚一步就会先按原始尺寸铺完再变，开屏那一下看得见跳变。
 // （原来的「手机适配」总开关是废弃代码，已删；这里只剩方向。）
@@ -87,12 +84,16 @@ installHdrProjectionPreference();
  * 安卓端的模组桥：把原生 FoliaMods 插件包成桌面端那一份 `window.electron.mods`。
  *
  * 必须赶在 `./bootstrap` **之前**装上：模组 client 在启动链里就被 import 了，而它们只认
- * 这个对象；如果晚一步，第一次 reconcile 会以为没有任何模组。桌面端/网页上直接返回。
+ * 这个对象；如果晚一步，第一次 reconcile 会以为没有任何模组。App 壳先装 shim，
+ * 实际调用仍要等原生插件就绪；桌面端/网页上直接返回。
  *
  * 注意这份 shim **不带 `platform`**：`window.electron.platform` 只有 Electron 的 preload
  * 会写，所以凡是靠它判断「是不是桌面端」的代码，在安卓上仍然走非桌面分支。
  */
 installAndroidModsBridge();
+// AI 低内存闸门（issue #401）：读上一回「有没有活到稳定期」算连续被杀次数，并起内存水位轮询。
+// 在模组桥装好后、任何 AI 入口前安装，让第一次内存采样也能读到原生指标。
+installAiMemoryGate();
 
 void import('./bootstrap');
 // window.__foliaDev and the ?skipStartup / ?mockSong launch flags (src/dev/devLaunchFlags.ts).

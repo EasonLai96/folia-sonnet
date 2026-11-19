@@ -11,7 +11,7 @@
 // （Boolean(window.electron?.platform)）在这里自然为假，而「有没有 mods 能力」的判断
 // （Boolean(window.electron?.mods)）为真 —— 正是需要的区分。
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { hasElectronBridge, isAndroidAppShell, isCapacitorAndroid } from '../../platform/runtime';
 import type {
     ModClearCacheResult,
     ModExportProgress,
@@ -47,22 +47,26 @@ interface FoliaModsPluginShape {
     /** 诊断用：原生最近一次采到的设备指标（CPU / 内存 / 温度）。 */
     getDeviceMetrics(): Promise<{ metrics?: Record<string, number | string | null> | null }>;
     openModsDirectory(): Promise<{ ok?: boolean; error?: string; path?: string }>;
-    addListener(event: 'modsEvent', listener: (event: { payload?: string }) => void): Promise<{ remove: () => void }>;
+    addListener(event: 'modsEvent', listener: (event: { payload?: string }) => void): { remove: () => Promise<void> };
 }
-
-const FoliaMods = registerPlugin<FoliaModsPluginShape>('FoliaMods');
 
 /** 没有原生 ffmpeg 时的空状态，与 ipc.ts 的 EMPTY_PAYLOAD.ffmpeg 同形。 */
 const EMPTY_FFMPEG: ModFfmpegStatus = { available: false, path: null, version: null, candidates: [] };
 
-/**
- * 安卓上有没有这个原生插件（真机有，浏览器预览没有）。
- */
-export const hasAndroidModsPlugin = (): boolean => (
-    typeof window !== 'undefined'
-    && Capacitor.isNativePlatform()
-    && Capacitor.getPlatform() === 'android'
-);
+// registerPlugin 会缓存注册时的插件头；原生可能晚于 Web 入口注入，甚至替换 window.Capacitor。
+// 每次读取原生注入的插件对象，不把 Android App 壳的启动判据用作原生调用门禁。
+const readFoliaMods = (): FoliaModsPluginShape | undefined => {
+    if (!isCapacitorAndroid()) return;
+    const native = (window as unknown as { Capacitor?: {
+        nativePromise?: unknown;
+        nativeCallback?: unknown;
+        Plugins?: { FoliaMods?: FoliaModsPluginShape };
+    } }).Capacitor;
+    if (typeof native?.nativePromise !== 'function' || typeof native.nativeCallback !== 'function') return;
+    return native.Plugins?.FoliaMods;
+};
+
+export const hasAndroidModsPlugin = (): boolean => readFoliaMods() !== undefined;
 
 /*
  * 事件分发：原生侧只有一条 modsEvent 通道，payload 是 Node 发来的 JSON 文本，
@@ -75,22 +79,22 @@ const sinks = new Map<string, Set<EventSink>>();
 let listenerInstalled = false;
 
 const onType = (type: string, sink: EventSink): (() => void) => {
-    let set = sinks.get(type);
-    if (!set) {
-        set = new Set();
-        sinks.set(type, set);
-    }
+    const set = sinks.get(type) ?? new Set<EventSink>();
+    sinks.set(type, set);
     set.add(sink);
-    ensureListener();
+    const plugin = readFoliaMods();
+    if (plugin) ensureListener(plugin);
+    else void waitForFoliaMods().catch(() => { /* 后续原生调用会补装。 */ });
     return () => {
-        set?.delete(sink);
+        set.delete(sink);
+        if (set.size === 0 && sinks.get(type) === set) sinks.delete(type);
     };
 };
 
-const ensureListener = () => {
-    if (listenerInstalled) return;
+const ensureListener = (plugin: FoliaModsPluginShape) => {
+    if (listenerInstalled || sinks.size === 0) return;
     listenerInstalled = true;
-    void FoliaMods.addListener('modsEvent', (event) => {
+    void Promise.resolve().then(() => plugin.addListener('modsEvent', (event) => {
         if (typeof event?.payload !== 'string') return;
         let parsed: Record<string, unknown>;
         try {
@@ -106,7 +110,34 @@ const ensureListener = () => {
                 // 一个订阅者抛了不该影响其他订阅者。
             }
         });
+    })).catch((error: unknown) => {
+        listenerInstalled = false;
+        console.warn('[ModsBridge] 订阅原生模组事件失败', error);
     });
+};
+
+const requireFoliaMods = (): FoliaModsPluginShape => {
+    const plugin = readFoliaMods();
+    if (!plugin) throw new Error('FoliaMods 原生桥未就绪');
+    ensureListener(plugin);
+    return plugin;
+};
+
+const waitForRetry = () => new Promise((resolve) => setTimeout(resolve, 100));
+// 原生桥可能晚于 5 秒的 deviceready 警告；和其它原生启动等待一样给到 20 秒。
+const NATIVE_BRIDGE_WAIT_MS = 20_000;
+let pendingFoliaMods: Promise<FoliaModsPluginShape> | undefined;
+
+/** 首次订阅与第一次 Node 调用共用原生插件等待；设备指标读不到时仍立即回退。 */
+const waitForFoliaMods = (): Promise<FoliaModsPluginShape> => {
+    pendingFoliaMods ??= (async () => {
+        const deadline = Date.now() + NATIVE_BRIDGE_WAIT_MS;
+        while (!readFoliaMods() && Date.now() < deadline) {
+            await waitForRetry();
+        }
+        return requireFoliaMods();
+    })().finally(() => { pendingFoliaMods = undefined; });
+    return pendingFoliaMods;
 };
 
 /*
@@ -114,9 +145,10 @@ const ensureListener = () => {
  * 否则第一次 listMods 会拿到 node-not-ready 而界面显示成「没有模组」。
  */
 const waitForNode = async (attempts = 40): Promise<void> => {
+    const plugin = await waitForFoliaMods();
     for (let index = 0; index < attempts; index += 1) {
         try {
-            const state = await FoliaMods.getNodeState();
+            const state = await plugin.getNodeState();
             if (state?.ready) return;
             if (state?.failure) throw new Error(state.failure);
         } catch (error) {
@@ -222,7 +254,7 @@ export const createAndroidModsBridge = () => {
     return {
         // ---- 清单与生命周期
         listMods: () => guarded<ModsListPayload>(async () => {
-            const payload = unwrap<ModsListPayload>(await FoliaMods.listMods());
+            const payload = unwrap<ModsListPayload>(await requireFoliaMods().listMods());
             return {
                 mods: Array.isArray(payload?.mods) ? payload.mods : [],
                 ffmpeg: payload?.ffmpeg ?? { available: false, path: null, version: null, candidates: [] },
@@ -232,7 +264,7 @@ export const createAndroidModsBridge = () => {
         }, { mods: [], ffmpeg: { available: false, path: null, version: null, candidates: [] }, directories: [], startSkipped: false }),
 
         reloadMods: () => guarded<{ mods: ModRuntimeInfo[] }>(async () => {
-            const response = unwrap<{ mods?: ModRuntimeInfo[] }>(await FoliaMods.reloadMods());
+            const response = unwrap<{ mods?: ModRuntimeInfo[] }>(await requireFoliaMods().reloadMods());
             return { mods: Array.isArray(response?.mods) ? response.mods : [] };
         }, { mods: [] }),
         /**
@@ -241,7 +273,7 @@ export const createAndroidModsBridge = () => {
          */
         setModSystemEnabled: (enabled: boolean) => guarded<{ ok: boolean; mods: ModRuntimeInfo[] }>(async () => {
             const response = unwrap<{ ok?: boolean; list?: { mods?: ModRuntimeInfo[] }; error?: string }>(
-                await FoliaMods.call({ op: 'set-system-enabled', args: { enabled } }),
+                await requireFoliaMods().call({ op: 'set-system-enabled', args: { enabled } }),
             );
             return {
                 ok: response?.ok !== false,
@@ -254,7 +286,7 @@ export const createAndroidModsBridge = () => {
              * 之前读 response.mods 所以永远是空数组，而 ok 也跟着变 false。
              */
             const response = unwrap<{ ok?: boolean; list?: { mods?: ModRuntimeInfo[] }; error?: string }>(
-                await FoliaMods.setModEnabled({ id: modId, enabled }),
+                await requireFoliaMods().setModEnabled({ id: modId, enabled }),
             );
             return {
                 ok: response?.ok !== false,
@@ -269,7 +301,7 @@ export const createAndroidModsBridge = () => {
                  * install-zip 和 list/reload 不一样：它把结果平铺在回应最外层
                  * （{ ok, id, mods }），没有 `result` 这一层，所以不能用 unwrap 取。
                  */
-                const envelope = (await FoliaMods.installModFromZip({ zipPath })) as
+                const envelope = (await requireFoliaMods().installModFromZip({ zipPath })) as
                     | { ok?: boolean; id?: string; error?: string; result?: unknown }
                     | undefined;
                 const inner = (envelope?.result ?? envelope) as { ok?: boolean; id?: string; error?: string } | undefined;
@@ -284,7 +316,7 @@ export const createAndroidModsBridge = () => {
          */
         installModFromZipFile: (file: { name: string; base64: string }) => guarded<{ ok: boolean; id?: string; error?: string }>(
             async () => {
-                const envelope = (await FoliaMods.installModFromZipFile({
+                const envelope = (await requireFoliaMods().installModFromZipFile({
                     name: file.name,
                     base64: file.base64,
                 })) as { ok?: boolean; id?: string; error?: string; result?: unknown } | undefined;
@@ -302,14 +334,14 @@ export const createAndroidModsBridge = () => {
          */
         deleteMod: (modId: string) => guarded<{ ok: boolean; error?: string; mods: ModRuntimeInfo[] }>(
             async () => {
-                const envelope = (await FoliaMods.deleteMod({ modId })) as
+                const envelope = (await requireFoliaMods().deleteMod({ modId })) as
                     | { ok?: boolean; error?: string; result?: unknown }
                     | undefined;
                 const inner = (envelope?.result ?? envelope) as { ok?: boolean; error?: string } | undefined;
                 if (inner?.ok === false || envelope?.ok === false) {
                     return { ok: false, error: inner?.error ?? envelope?.error ?? 'delete-failed', mods: [] };
                 }
-                const list = unwrap<ModsListPayload>(await FoliaMods.listMods());
+                const list = unwrap<ModsListPayload>(await requireFoliaMods().listMods());
                 return {
                     ok: true,
                     mods: Array.isArray(list?.mods) ? list.mods : [],
@@ -330,18 +362,18 @@ export const createAndroidModsBridge = () => {
          * 所以这里把抛出的 message 还原成业务失败，只有真正的通道异常才往上抛。
          */
         invokeModRpc: (modId: string, name: string, args: unknown[]) => runModCall(
-            () => FoliaMods.invokeModRpc({ modId, name, args }),
+            () => requireFoliaMods().invokeModRpc({ modId, name, args }),
             'rpc-failed',
         ),
 
         invokeModStorage: (modId: string, operation: string, key?: string, value?: unknown) => runModCall(
-            () => FoliaMods.invokeModStorage({ modId, operation, key, value }),
+            () => requireFoliaMods().invokeModStorage({ modId, operation, key, value }),
             'storage-failed',
         ),
 
         getModCallStats: () => guarded<{ stats: Record<string, ModMainCallStats> }>(
             async () => {
-                const response = unwrap<{ stats?: Record<string, ModMainCallStats> }>(await FoliaMods.getModCallStats());
+                const response = unwrap<{ stats?: Record<string, ModMainCallStats> }>(await requireFoliaMods().getModCallStats());
                 return { stats: response?.stats ?? {} };
             },
             { stats: {} },
@@ -356,7 +388,7 @@ export const createAndroidModsBridge = () => {
          */
         getModStorageUsage: (modId: string) => guarded<ModStorageUsageResult>(
             async () => {
-                const envelope = (await FoliaMods.getModStorageUsage({ modId })) as
+                const envelope = (await requireFoliaMods().getModStorageUsage({ modId })) as
                     | { ok?: boolean; error?: string; result?: { data?: number; cache?: number; total?: number } }
                     | null
                     | undefined;
@@ -376,7 +408,7 @@ export const createAndroidModsBridge = () => {
 
         clearModCache: (modId: string) => guarded<ModClearCacheResult>(
             async () => {
-                const envelope = (await FoliaMods.clearModCache({ modId })) as
+                const envelope = (await requireFoliaMods().clearModCache({ modId })) as
                     | { ok?: boolean; error?: string }
                     | null
                     | undefined;
@@ -392,7 +424,7 @@ export const createAndroidModsBridge = () => {
         getFfmpegStatus: () => guarded<{ ffmpeg: ModFfmpegStatus }>(
             async () => {
                 // 宿主直接把状态对象作为 result 给出来，没有外面再包一层 ffmpeg。
-                const response = unwrap<ModFfmpegStatus & { ffmpeg?: ModFfmpegStatus }>(await FoliaMods.getFfmpegStatus());
+                const response = unwrap<ModFfmpegStatus & { ffmpeg?: ModFfmpegStatus }>(await requireFoliaMods().getFfmpegStatus());
                 const status = response?.ffmpeg ?? response;
                 return {
                     ffmpeg: status && typeof status === 'object' && typeof status.available === 'boolean'
@@ -410,7 +442,7 @@ export const createAndroidModsBridge = () => {
          */
         openModsDirectory: () => guarded<{ ok: boolean; error?: string; path?: string }>(
             async () => {
-                const response = (await FoliaMods.openModsDirectory()) as
+                const response = (await requireFoliaMods().openModsDirectory()) as
                     | { ok?: boolean; error?: string; path?: string; result?: { ok?: boolean; error?: string; path?: string } | null }
                     | undefined;
                 const value = (response?.result ?? response) as { ok?: boolean; error?: string; path?: string } | undefined;
@@ -426,7 +458,7 @@ export const createAndroidModsBridge = () => {
          */
         getDeviceMetrics: async (): Promise<{ metrics?: Record<string, number | string | null> | null }> => {
             try {
-                const response = (await FoliaMods.getDeviceMetrics()) as
+                const response = (await requireFoliaMods().getDeviceMetrics()) as
                     | { metrics?: Record<string, number | string | null> | null; result?: { metrics?: Record<string, number | string | null> | null } | null }
                     | undefined;
                 return { metrics: response?.result?.metrics ?? response?.metrics ?? null };
@@ -440,7 +472,7 @@ export const createAndroidModsBridge = () => {
         pushRuntimeSnapshot: async (snapshot: ModRuntimeSnapshot): Promise<{ ok: boolean }> => {
             try {
                 await ready();
-                await FoliaMods.call({ op: 'push-runtime-snapshot', args: { snapshot } });
+                await requireFoliaMods().call({ op: 'push-runtime-snapshot', args: { snapshot } });
                 return { ok: true };
             } catch {
                 // 快照是尽力而为的：没推上不影响模组可用。
@@ -457,7 +489,7 @@ export const createAndroidModsBridge = () => {
          */
         invokeModNetFetch: (modId: string, url: string, init?: unknown) => guarded<{ ok: boolean; result?: unknown; error?: string }>(
             async () => {
-                const envelope = (await FoliaMods.invokeModNetFetch({
+                const envelope = (await requireFoliaMods().invokeModNetFetch({
                     modId,
                     url,
                     init: (init ?? {}) as Record<string, unknown>,
@@ -522,7 +554,7 @@ const appleMusicUnsupported = async (): Promise<{ ok: false; error: string }> =>
  * 必须在任何模组 client 被 import 之前调用：模组面板与 client.mjs 都只认这个对象。
  */
 export const installAndroidModsBridge = (): void => {
-    if (typeof window === 'undefined' || !hasAndroidModsPlugin()) return;
+    if (!isAndroidAppShell() || hasElectronBridge()) return;
     // `window.electron` 的类型是按 Electron preload 的完整对象写的（一百多个必填成员），
     // 安卓这边只提供其中一小片，所以这里必须越过类型：断言成「部分对象」而不是伪造
     // 一大堆不存在的方法 —— 后者会让能力检查（`window.electron?.getSettings`）误判为真。
