@@ -102,6 +102,7 @@ object AutomixModels {
      *
      * @param onProgress 已拷贝字节数 / 总字节数，只在真的拷的时候回调。
      */
+    @Synchronized
     fun ensureLocal(
         context: Context,
         name: String,
@@ -125,17 +126,22 @@ object AutomixModels {
          */
         val part = File(target.absolutePath + ".part")
         var copied = 0L
-        context.assets.open("$ASSET_DIR/${entry.file}").use { input ->
-            part.outputStream().buffered(1 shl 20).use { output ->
-                val buffer = ByteArray(1 shl 20)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    output.write(buffer, 0, read)
-                    copied += read
-                    onProgress?.invoke(copied, entry.bytes)
+        try {
+            context.assets.open("$ASSET_DIR/${entry.file}").use { input ->
+                part.outputStream().buffered(1 shl 20).use { output ->
+                    val buffer = ByteArray(1 shl 20)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        onProgress?.invoke(copied, entry.bytes)
+                    }
                 }
             }
+        } catch (error: java.util.concurrent.CancellationException) {
+            part.delete()
+            throw error
         }
         if (copied != entry.bytes) {
             part.delete()
@@ -149,7 +155,18 @@ object AutomixModels {
         return target
     }
 
+    // Check after acquiring the same copy lock used by existing model installers.
+    @Synchronized
+    internal fun ensureScnetForInference(context: Context, permit: NativeInferenceGate.Permit, cancelled: () -> Boolean): File {
+        fun checkAuthorized() {
+            if (!permit.isCurrent() || cancelled()) throw ScnetSessionSlot.Cancelled()
+        }
+        checkAuthorized()
+        return ensureLocal(context, SCNET) { _, _ -> checkAuthorized() }.also { checkAuthorized() }
+    }
+
     /** 把已经装好的模型删掉，腾出空间。下次用到会重新从 assets 拷。 */
+    @Synchronized
     fun remove(context: Context, name: String): Boolean {
         val entry = ENTRIES[name] ?: return false
         val file = File(modelsDir(context), entry.file)

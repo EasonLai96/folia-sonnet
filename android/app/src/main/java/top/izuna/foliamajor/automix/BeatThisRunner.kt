@@ -5,11 +5,85 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.File
 import java.nio.FloatBuffer
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+
+internal class BeatThisRequest private constructor(
+    val permit: NativeInferenceGate.Permit,
+    private val ordinaryCancelled: () -> Boolean,
+) {
+    fun cancelled(): Boolean = delivery() != Delivery.ACTIVE
+
+    private enum class Delivery { ACTIVE, CANCELLED, DISABLED }
+
+    // 普通代次读取是派发决定点；随后验证不可复活的许可，撤权优先。桥发送不持锁。
+    private fun delivery(): Delivery {
+        val cancelled = ordinaryCancelled()
+        return when {
+            !permit.isCurrent() -> Delivery.DISABLED
+            cancelled -> Delivery.CANCELLED
+            else -> Delivery.ACTIVE
+        }
+    }
+
+    fun dispatchEvent(send: () -> Unit) {
+        if (delivery() == Delivery.ACTIVE) send()
+    }
+
+    fun dispatchReply(
+        cancelledResult: Boolean,
+        reply: (cancelled: Boolean) -> Unit,
+        rejectDisabled: () -> Unit,
+    ) {
+        when (delivery()) {
+            Delivery.ACTIVE -> reply(cancelledResult)
+            Delivery.CANCELLED -> reply(true)
+            Delivery.DISABLED -> rejectDisabled()
+        }
+    }
+
+    fun dispatchError(reject: () -> Unit, resolveCancelled: () -> Unit, rejectDisabled: () -> Unit) {
+        when (delivery()) {
+            Delivery.ACTIVE -> reject()
+            Delivery.CANCELLED -> resolveCancelled()
+            Delivery.DISABLED -> rejectDisabled()
+        }
+    }
+
+    companion object {
+        fun enqueue(
+            executor: Executor,
+            gate: NativeInferenceGate,
+            generation: () -> Int,
+            rejectDisabled: () -> Unit,
+            work: (BeatThisRequest) -> Unit,
+        ) {
+            // Both identities belong to the submitting call, never to the worker that dequeues it.
+            val permit = gate.acquire() ?: return rejectDisabled()
+            val queuedGeneration = generation()
+            val request = BeatThisRequest(permit) { generation() != queuedGeneration }
+            executor.execute {
+                if (!permit.isCurrent()) return@execute rejectDisabled()
+                work(request)
+            }
+        }
+    }
+}
+
+// 与 SCNet 共用加锁的窗口生命周期；不把裸会话交给频谱或桥代码。
+internal class BeatThisSessions<T : Any>(private val open: (File, NativeInferenceGate.Permit, (() -> Boolean)?) -> T, close: (T) -> Unit) {
+    private val slot = ScnetSessionSlot(close)
+
+    fun <R> use(permit: NativeInferenceGate.Permit, model: File, cancelled: (() -> Boolean)?, run: (T) -> R): R =
+        slot.use(permit, model.absolutePath, { open(model, permit, cancelled) }, cancelled, run)
+
+    fun releaseRevoked() = slot.releaseRevoked()
+}
 
 /**
  * Beat This!（CPJKU, ISMIR 2024）的本地推理。
@@ -70,18 +144,15 @@ object BeatThisRunner {
         val cancelled: Boolean = false,
     )
 
-    private var env: OrtEnvironment? = null
-    private var session: OrtSession? = null
-    private var sessionPath: String? = null
+    private data class Engine(val environment: OrtEnvironment, val session: OrtSession)
+    private val sessions = BeatThisSessions(::open) { it.session.close() }
+    private val cleanup = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "folia-beat-this-release").apply { isDaemon = true }
+    }
 
-    /** 载入（或复用）模型。多次调用只有第一次真的加载。 */
-    @Synchronized
-    fun ensureLoaded(modelFile: File): OrtSession {
-        val existing = session
-        if (existing != null && sessionPath == modelFile.absolutePath) return existing
-
-        existing?.close()
-        val environment = env ?: OrtEnvironment.getEnvironment().also { env = it }
+    private fun open(modelFile: File, permit: NativeInferenceGate.Permit, cancelled: (() -> Boolean)?): Engine {
+        permit.requireCurrent()
+        val environment = OrtEnvironment.getEnvironment()
         val options = OrtSession.SessionOptions().apply {
             /*
              * 固定 2 个推理线程。
@@ -96,17 +167,16 @@ object BeatThisRunner {
             setIntraOpNumThreads(if (cores >= 4) 2 else 1)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         }
-        val loaded = environment.createSession(modelFile.absolutePath, options)
-        session = loaded
-        sessionPath = modelFile.absolutePath
-        return loaded
+        val loaded = options.use {
+            permit.requireCurrent()
+            if (cancelled?.invoke() == true) throw ScnetSessionSlot.Cancelled()
+            environment.createSession(modelFile.absolutePath, it)
+        }
+        return Engine(environment, loaded)
     }
 
-    @Synchronized
-    fun close() {
-        session?.close()
-        session = null
-        sessionPath = null
+    internal fun releaseRevoked() {
+        cleanup.execute { sessions.releaseRevoked() }
     }
 
     /**
@@ -117,9 +187,10 @@ object BeatThisRunner {
      * `cancelled` 在每一块之前问一次：切歌、退出时正在跑的这一次不该继续占着单线程队列，
      * 后面的分析全会被它堵住（界面上就是「智能动感一直没反应」）。
      */
-    fun analyze(
+    internal fun analyze(
         mono: FloatArray,
-        cancelled: (() -> Boolean)? = null,
+        modelFile: File,
+        request: BeatThisRequest,
         /** 阶段 + 这一段的进度（0..1）。只给界面看，不影响结果。 */
         onProgress: ((stage: String, percent: Float) -> Unit)? = null,
         /**
@@ -130,23 +201,28 @@ object BeatThisRunner {
          * 剩下的算完再替换，表只会变长，不会跳。
          */
         onChunk: ((beats: List<Beat>, upToSec: Double) -> Unit)? = null,
+        yieldMel: () -> Unit = AutomixLoad::yieldPoint,
     ): Result {
-        val model = session ?: error("beat_this 还没载入")
-        val mel = melSpectrogram(mono) { done -> onProgress?.invoke("mel", done) }
+        request.permit.requireCurrent()
+        val cancelled = request::cancelled
+        if (cancelled()) return Result(emptyList(), FloatArray(0), FPS, true)
+        val mel = melSpectrogram(mono, cancelled, yieldMel) { done -> onProgress?.invoke("mel", done) }
+        request.permit.requireCurrent()
+        if (mel == null || cancelled()) return Result(emptyList(), FloatArray(0), FPS, true)
         if (mel.frames <= 0) return Result(emptyList(), FloatArray(0), FPS)
 
         val beatLogits = FloatArray(mel.frames)
         val downbeatLogits = FloatArray(mel.frames)
         /* 哪些帧已经有值了。用它而不是 isNaN 判断：FloatArray 新建出来是 0，不是 NaN。 */
         val filled = BooleanArray(mel.frames)
-        val environment = env ?: error("ORT 环境未初始化")
+        fun partial(to: Int) = Result(
+            pickPeaks(beatLogits, downbeatLogits, to), beatLogits.copyOfRange(0, to), FPS, true,
+        )
 
         var start = 0
         while (start < mel.frames) {
-            if (cancelled?.invoke() == true) {
-                // 只交回已经算完的那一截；调用方看 `cancelled` 决定是否采用。
-                return Result(pickPeaks(beatLogits, downbeatLogits, start), beatLogits.copyOfRange(0, start), FPS, true)
-            }
+            request.permit.requireCurrent()
+            if (cancelled()) return partial(start)
             val end = min(mel.frames, start + CHUNK_FRAMES)
             val length = end - start
             // 这一块要喂的切片：[1, length, 128]
@@ -154,30 +230,41 @@ object BeatThisRunner {
             System.arraycopy(mel.data, start * N_MELS, input, 0, length * N_MELS)
 
             val shape = longArrayOf(1, length.toLong(), N_MELS.toLong())
-            OnnxTensor.createTensor(environment, FloatBuffer.wrap(input), shape).use { tensor ->
-                model.run(mapOf("input_spectrogram" to tensor)).use { output ->
-                    @Suppress("UNCHECKED_CAST")
-                    val beat = (output[0].value as Array<FloatArray>)[0]
-                    @Suppress("UNCHECKED_CAST")
-                    val down = (output[1].value as Array<FloatArray>)[0]
+            try {
+                sessions.use(request.permit, modelFile, cancelled) { engine ->
+                    OnnxTensor.createTensor(engine.environment, FloatBuffer.wrap(input), shape).use { tensor ->
+                        request.permit.requireCurrent()
+                        if (cancelled()) throw ScnetSessionSlot.Cancelled()
+                        engine.session.run(mapOf("input_spectrogram" to tensor)).use { output ->
+                            @Suppress("UNCHECKED_CAST")
+                            val beat = (output[0].value as Array<FloatArray>)[0]
+                            @Suppress("UNCHECKED_CAST")
+                            val down = (output[1].value as Array<FloatArray>)[0]
 
-                    for (i in 0 until length) {
-                        val frame = start + i
-                        if (filled[frame]) {
-                            /*
-                             * 块间重叠区取平均：块边界处的预测通常略差
-                             * （没有后文可看），平均能把它抹平。
-                             */
-                            beatLogits[frame] = (beatLogits[frame] + beat[i]) / 2f
-                            downbeatLogits[frame] = (downbeatLogits[frame] + down[i]) / 2f
-                        } else {
-                            beatLogits[frame] = beat[i]
-                            downbeatLogits[frame] = down[i]
-                            filled[frame] = true
+                            for (i in 0 until length) {
+                                val frame = start + i
+                                if (filled[frame]) {
+                                    /*
+                                     * 块间重叠区取平均：块边界处的预测通常略差
+                                     * （没有后文可看），平均能把它抹平。
+                                     */
+                                    beatLogits[frame] = (beatLogits[frame] + beat[i]) / 2f
+                                    downbeatLogits[frame] = (downbeatLogits[frame] + down[i]) / 2f
+                                } else {
+                                    beatLogits[frame] = beat[i]
+                                    downbeatLogits[frame] = down[i]
+                                    filled[frame] = true
+                                }
+                            }
                         }
                     }
                 }
+            } catch (_: ScnetSessionSlot.Cancelled) {
+                request.permit.requireCurrent()
+                return partial(start)
             }
+            request.permit.requireCurrent()
+            if (cancelled()) return partial(end)
             onProgress?.invoke("infer", end.toFloat() / mel.frames)
             // 这一块的拍点已经定了：交给界面先用着。未填的帧不在 pickPeaks 的范围里。
             // 放在 break 之前 —— 只有一块的短音频（45 秒的首段）也才会收到这一次。
@@ -189,7 +276,7 @@ object BeatThisRunner {
              * 一块推理（最长约 41 秒音频）刚刚结束：这里是唯一不会打断数据流的地方。
              * 后台时让出 60ms，前台立刻返回。
              */
-            AutomixLoad.yieldUnless { cancelled?.invoke() == true }
+            AutomixLoad.yieldUnless(cancelled)
         }
 
         val beats = pickPeaks(beatLogits, downbeatLogits)
@@ -303,7 +390,7 @@ object BeatThisRunner {
      */
     fun drumBands(mono: FloatArray, cancelled: (() -> Boolean)? = null): Array<FloatArray> {
         val mel = melSpectrogram(mono)
-        if (mel.frames <= 0) return Array(3) { FloatArray(0) }
+        if (mel == null || mel.frames <= 0) return Array(3) { FloatArray(0) }
         val centres = melBandCentres()
         // 边界见 DrumBandEdges：与 Web 一致，snare（<4000）与 hat（>=6000）之间的 4–6 kHz 不属于任何一条带。
         return Array(3) { kind ->
@@ -328,7 +415,12 @@ object BeatThisRunner {
     /** 每个 mel 带的中心频率，与 Web 侧 `melBandCentresHz()` 同一条公式。 */
     private fun melBandCentres(): DoubleArray = DrumBandEdges.melBandCentres(N_MELS, F_MIN, F_MAX)
 
-    private fun melSpectrogram(mono: FloatArray, onProgress: ((Float) -> Unit)? = null): Mel {
+    private fun melSpectrogram(
+        mono: FloatArray,
+        cancelled: (() -> Boolean)? = null,
+        yieldMel: () -> Unit = AutomixLoad::yieldPoint,
+        onProgress: ((Float) -> Unit)? = null,
+    ): Mel? {
         if (mono.isEmpty()) return Mel(FloatArray(0), 0)
         val bands = filterbank ?: buildFilterbank().also { filterbank = it }
         val window = hann ?: FloatArray(N_FFT) { index ->
@@ -362,7 +454,9 @@ object BeatThisRunner {
             // 每 1024 帧（约 20 秒音频）让一次：前台只做一次优先级检查，后台让出 CPU。
             // 同一个点顺手报一次进度：频谱这一段占整曲耗时的三分之一上下。
             if (frame and 1023 == 0) {
-                AutomixLoad.yieldPoint()
+                if (cancelled?.invoke() == true) return null
+                yieldMel()
+                if (cancelled?.invoke() == true) return null
                 onProgress?.invoke(frame.toFloat() / frames)
             }
             val start = frame * HOP - pad

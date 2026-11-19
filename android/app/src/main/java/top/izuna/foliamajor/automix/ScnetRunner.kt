@@ -60,9 +60,11 @@ object ScnetRunner {
     private const val MODEL_INPUT = "mix_spec"
     private const val MODEL_OUTPUT = "stems_spec"
 
-    private var session: OrtSession? = null
-    private var environment: OrtEnvironment? = null
-    private var loadedPath: String? = null
+    private data class Engine(val environment: OrtEnvironment, val session: OrtSession)
+    private val sessions = ScnetSessionSlot<Engine> { it.session.close() }
+    private val cleanup = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "folia-scnet-release").apply { isDaemon = true }
+    }
 
     /**
      * 加载（并缓存）模型。重复调用是廉价的。
@@ -71,11 +73,13 @@ object ScnetRunner {
      * 首次装模型时若两边同时进来，不加锁会各自 release + createSession 一遍，
      * 前一个 session 没关就丢引用（内存泄漏），后一个还可能读到半初始化的状态。
      */
-    @Synchronized
-    fun ensureLoaded(file: File) {
+    internal fun ensureLoaded(file: File, permit: NativeInferenceGate.Permit, cancelled: (() -> Boolean)? = null) {
         val path = file.absolutePath
-        if (session != null && loadedPath == path) return
-        release()
+        sessions.use(permit, path, { open(path, permit, cancelled) }, cancelled) { }
+    }
+
+    private fun open(path: String, permit: NativeInferenceGate.Permit, cancelled: (() -> Boolean)?): Engine {
+        permit.requireCurrent()
         val env = OrtEnvironment.getEnvironment()
         val options = OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
@@ -92,21 +96,17 @@ object ScnetRunner {
             setMemoryPatternOptimization(false)
             setCPUArenaAllocator(false)
         }
-        session = env.createSession(path, options)
-        environment = env
-        loadedPath = path
+        val created = options.use {
+            permit.requireCurrent()
+            if (cancelled?.invoke() == true) throw ScnetSessionSlot.Cancelled()
+            env.createSession(path, it)
+        }
+        return Engine(env, created)
     }
 
-    @Synchronized
-    fun release() {
-        try {
-            session?.close()
-        } catch (_: Throwable) {
-            // 关不掉也不该拖垮下一块。
-        }
-        session = null
-        environment = null
-        loadedPath = null
+    // 与加载和窗口内的 native 访问同锁；重开后已经加载的新会话不属于这次清理。
+    internal fun releaseRevoked() {
+        cleanup.execute { sessions.releaseRevoked() }
     }
 
     /**
@@ -118,9 +118,11 @@ object ScnetRunner {
      * @param eager 用户正拨着开关等结果：播放中的让路比例降一档，尽快出活；
      *              后台预生成走默认值，把时间片尽量还给正在放的歌。
      */
-    fun separate(
+    internal fun separate(
         left: FloatArray,
         right: FloatArray,
+        permit: NativeInferenceGate.Permit,
+        model: File,
         stems: List<Int> = STEMS.indices.toList(),
         fromSample: Int = 0,
         toSample: Int = minOf(left.size, right.size),
@@ -128,8 +130,7 @@ object ScnetRunner {
         cancelled: (() -> Boolean)? = null,
         eager: Boolean = false,
     ): Result {
-        val active = session ?: error("scnet 还没加载")
-        val env = environment ?: error("ORT 环境未初始化")
+        permit.requireCurrent()
         val wanted = stems.filter { it in STEMS.indices }.distinct()
         require(wanted.isNotEmpty()) { "没有要分离的轨" }
 
@@ -177,25 +178,36 @@ object ScnetRunner {
                 }
                 stft(mono, spec, re, im)
 
-                val input = OnnxTensor.createTensor(
-                    env,
-                    FloatBuffer.wrap(spec),
-                    longArrayOf(1, 4, BINS.toLong(), FRAMES.toLong()),
-                )
-                input.use { tensor ->
-                    active.run(mapOf(MODEL_INPUT to tensor)).use { result ->
-                        /*
-                         * 必须在这个 use 里读完：会话一关，tensor 的 buffer 就失效了。
-                         * 也正因为如此，iSTFT 直接在这里做，不再把 62MB 的频谱拷出来。
-                         */
-                        val plane = (result[0] as OnnxTensor).floatBuffer
-                        for (slot in wanted.indices) {
-                            val source = wanted[slot]
-                            for (channel in 0..1) {
-                                istftInto(plane, source, channel, out[slot][channel], acc, tally, re, im, cursor, start0, length)
+                if (cancelled?.invoke() == true || !permit.isCurrent()) break
+                val path = model.absolutePath
+                try {
+                    sessions.use(permit, path, { open(path, permit, cancelled) }, cancelled) { active ->
+                        val input = OnnxTensor.createTensor(
+                            active.environment,
+                            FloatBuffer.wrap(spec),
+                            longArrayOf(1, 4, BINS.toLong(), FRAMES.toLong()),
+                        )
+                        input.use { tensor ->
+                            permit.requireCurrent()
+                            if (cancelled?.invoke() == true) throw ScnetSessionSlot.Cancelled()
+                            active.session.run(mapOf(MODEL_INPUT to tensor)).use { result ->
+                                permit.requireCurrent()
+                                /*
+                                 * 必须在这个 use 里读完：会话一关，tensor 的 buffer 就失效了。
+                                 * 也正因为如此，iSTFT 直接在这里做，不再把 62MB 的频谱拷出来。
+                                 */
+                                val plane = (result[0] as OnnxTensor).floatBuffer
+                                for (slot in wanted.indices) {
+                                    val source = wanted[slot]
+                                    for (channel in 0..1) {
+                                        istftInto(plane, source, channel, out[slot][channel], acc, tally, re, im, cursor, start0, length)
+                                    }
+                                }
                             }
                         }
                     }
+                } catch (_: ScnetSessionSlot.Cancelled) {
+                    break
                 }
                 cursor += SEGMENT
                 window += 1

@@ -175,6 +175,26 @@ internal object TrackPcmDecoder {
         return Result(left = pcm.left, right = right, sampleRate = pcm.sampleRate)
     }
 
+    /** Four-stem path: one bounded local file, fixed-size windows, and true decoder EOS only. */
+    fun decodeStemWindows(
+        context: Context,
+        file: java.io.File,
+        cancelled: () -> Boolean,
+        prepare: (expectedFrames: Long) -> Boolean,
+        window: (Result, Int) -> Boolean,
+    ): Boolean = !cancelled() && FourStemLocalInput.withFile(file) { fd, bytes ->
+        decodePcm(context, file.path, TARGET_RATE, monoOnly = false, maxSeconds = 0,
+            windows = StemWindows(fd, bytes, cancelled, prepare, window)) != null
+    } == true
+
+    private class StemWindows(
+        val descriptor: java.io.FileDescriptor,
+        val bytes: Long,
+        val cancelled: () -> Boolean,
+        val prepare: (Long) -> Boolean,
+        val accept: (Result, Int) -> Boolean,
+    )
+
     /**
      * 真正的解码循环。
      *
@@ -190,13 +210,16 @@ internal object TrackPcmDecoder {
         fromSec: Double = 0.0,
         rangeSeconds: Double = 0.0,
         onProgress: ((Float) -> Unit)? = null,
+        windows: StemWindows? = null,
     ): Pcm? {
-        if (pathOrUrl.isBlank()) return null
+        if (pathOrUrl.isBlank() || windows?.cancelled?.invoke() == true) return null
         var extractor: MediaExtractor? = null
         var codec: MediaCodec? = null
         try {
             extractor = MediaExtractor()
-            if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
+            if (windows != null) {
+                extractor.setDataSource(windows.descriptor, 0L, windows.bytes)
+            } else if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
                 extractor.setDataSource(pathOrUrl, emptyMap())
             } else {
                 extractor.setDataSource(pathOrUrl)
@@ -209,29 +232,47 @@ internal object TrackPcmDecoder {
                 val format = extractor.getTrackFormat(i)
                 val trackMime = format.getString(MediaFormat.KEY_MIME) ?: continue
                 if (trackMime.startsWith("audio/")) {
+                    // Without Media3's selected track identity, multiple audio tracks are ambiguous.
+                    if (trackIndex >= 0) return null
                     trackIndex = i
                     mime = trackMime
-                    extractor.selectTrack(i)
-                    break
+                    if (windows == null) break
                 }
             }
             if (trackIndex < 0 || mime == null) {
-                Log.w(TAG, "没有音频轨: $pathOrUrl")
+                if (windows == null) Log.w(TAG, "没有音频轨: $pathOrUrl")
                 return null
             }
 
+            extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
             val sourceRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                 format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             } else {
                 2
-            }.coerceAtLeast(1)
+            }.let { if (windows == null) it.coerceAtLeast(1) else it }
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) {
                 format.getLong(MediaFormat.KEY_DURATION)
             } else {
                 maxSeconds * 1_000_000L
             }
+            if (windows != null && (mime != MediaFormat.MIMETYPE_AUDIO_RAW || sourceRate != TARGET_RATE ||
+                !format.containsKey(MediaFormat.KEY_CHANNEL_COUNT) || channels !in 1..2 ||
+                !format.containsKey(MediaFormat.KEY_PCM_ENCODING) ||
+                format.getInteger(MediaFormat.KEY_PCM_ENCODING) != android.media.AudioFormat.ENCODING_PCM_16BIT || durationUs <= 0 ||
+                durationUs > FourStemPcmTimeline.MAX_FRAMES * 1_000_000L / TARGET_RATE ||
+                (format.containsKey(MediaFormat.KEY_ENCODER_DELAY) && format.getInteger(MediaFormat.KEY_ENCODER_DELAY) != 0) ||
+                (format.containsKey(MediaFormat.KEY_ENCODER_PADDING) && format.getInteger(MediaFormat.KEY_ENCODER_PADDING) != 0)
+            )) return null
+            val expectedStemFrames = if (windows == null) null else {
+                val expected = FourStemPcmTimeline.framesForDuration(durationUs) ?: return null
+                if (!windows.prepare(expected)) return null
+                expected
+            }
+            val timeline = if (windows == null) null else FourStemPcmTimeline(channels)
+            val inputTimeline = if (windows == null) null else FourStemPcmTimeline(channels)
+            var stemFormatConfirmed = false
             val fromUs = (fromSec * 1_000_000.0).toLong().coerceAtLeast(0L)
             /*
              * 解码到哪儿为止。
@@ -256,6 +297,7 @@ internal object TrackPcmDecoder {
              */
             if (fromUs > 0) extractor.seekTo(fromUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
+            if (windows?.cancelled?.invoke() == true) return null
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
@@ -267,10 +309,12 @@ internal object TrackPcmDecoder {
              * 单声道那条路是它的一半再一半：22050*480*4B ≈ 42MB，常规 4 分钟约 21MB。
              */
             val spanSeconds = if (rangeSeconds > 0) rangeSeconds else minOf(limitUs / 1_000_000.0, maxSeconds.toDouble())
-            val estimate = (targetRate.toLong() * spanSeconds).toInt() + targetRate
+            val estimate = if (windows != null) ScnetRunner.SEGMENT else (targetRate.toLong() * spanSeconds).toInt() + targetRate
             var left = FloatArray(estimate)
             var right: FloatArray? = if (monoOnly) null else FloatArray(estimate)
             var written = 0
+            val stemBlock = if (windows == null) null else Result(left, checkNotNull(right), targetRate)
+            var inputEos = false
             /*
              * 让路的计数：每解出这么多帧就检查一次前后台。
              * 44.1k 下 44100×2 帧 ≈ 2 秒音频，解码本身只要几十毫秒 —— 粒度足够细，
@@ -313,16 +357,22 @@ internal object TrackPcmDecoder {
             var ratio = sourceRate.toDouble() / targetRate
 
             while (!outputDone) {
+                if (windows?.cancelled?.invoke() == true) return null
                 if (!inputDone) {
                     val inIndex = codec.dequeueInputBuffer(TIMEOUT_US)
                     if (inIndex >= 0) {
                         val inBuf = codec.getInputBuffer(inIndex) ?: continue
                         val sampleSize = extractor.sampleTime
                         val size = extractor.readSampleData(inBuf, 0)
-                        if (size < 0 || (sampleSize >= 0 && sampleSize > limitUs)) {
+                        if (size < 0 || (windows == null && sampleSize >= 0 && sampleSize > limitUs)) {
+                            if (windows != null && sampleSize >= 0) return null // read failure, not extractor EOS
+                            inputEos = size < 0
                             codec.queueInputBuffer(inIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
                         } else {
+                            if (inputTimeline != null && (extractor.sampleFlags != MediaExtractor.SAMPLE_FLAG_SYNC ||
+                                !inputTimeline.accept(size, sampleSize)
+                            )) return null
                             if (firstInputUs < 0) firstInputUs = extractor.sampleTime
                             codec.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
                             extractor.advance()
@@ -341,6 +391,16 @@ internal object TrackPcmDecoder {
                          * 左右交错被当成单声道帧读，出来就是一片噪音。
                          */
                         val outFormat = codec.outputFormat
+                        if (windows != null) {
+                            if (!outFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT) ||
+                                outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) != channels ||
+                                !outFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE) ||
+                                outFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE) != TARGET_RATE ||
+                                !outFormat.containsKey(MediaFormat.KEY_PCM_ENCODING) ||
+                                outFormat.getInteger(MediaFormat.KEY_PCM_ENCODING) != android.media.AudioFormat.ENCODING_PCM_16BIT
+                            ) return null
+                            stemFormatConfirmed = true
+                        }
                         if (outFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                             channels = outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                         }
@@ -355,6 +415,7 @@ internal object TrackPcmDecoder {
                     outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         idleSpins += 1
                         if (idleSpins > idleLimit) {
+                            if (windows != null) return null
                             Log.w(TAG, "解码长时间无输出，放弃: $pathOrUrl")
                             outputDone = true
                         }
@@ -363,6 +424,10 @@ internal object TrackPcmDecoder {
                         idleSpins = 0
                         if (info.size > 0) {
                             val outBuf = codec.getOutputBuffer(outIndex)
+                            if (timeline != null && (!stemFormatConfirmed || outBuf == null ||
+                                info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0 ||
+                                !timeline.accept(info.size, info.presentationTimeUs)
+                            )) return null
                             if (outBuf != null) {
                                 outBuf.position(info.offset)
                                 outBuf.limit(info.offset + info.size)
@@ -417,6 +482,10 @@ internal object TrackPcmDecoder {
                                             right?.set(written, r)
                                         }
                                         written += 1
+                                        if (stemBlock != null && written == estimate) {
+                                            if (!checkNotNull(windows).accept(stemBlock, written)) return null
+                                            written = 0
+                                        }
                                     }
                                     yieldCountdown -= 1
                                     if (yieldCountdown <= 0) {
@@ -442,6 +511,13 @@ internal object TrackPcmDecoder {
                 }
             }
 
+            if (windows != null) {
+                if (!inputEos || windows.cancelled() || timeline?.complete(durationUs) != true ||
+                    timeline.frames != expectedStemFrames || inputTimeline?.frames != timeline.frames
+                ) return null
+                if (written > 0 && !windows.accept(checkNotNull(stemBlock), written)) return null
+                return Pcm(left, right, targetRate)
+            }
             if (written <= 0) {
                 Log.w(TAG, "解码结果为空: $pathOrUrl")
                 return null
@@ -456,7 +532,7 @@ internal object TrackPcmDecoder {
                 sampleRate = targetRate,
             )
         } catch (error: Exception) {
-            Log.w(TAG, "解码失败: ${error.message}")
+            if (windows == null) Log.w(TAG, "解码失败: ${error.message}")
             return null
         } finally {
             try {
