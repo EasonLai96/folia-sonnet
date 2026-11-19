@@ -40,12 +40,11 @@ class FoliaAutomixModelsPlugin : Plugin() {
          * 做成进程级静态量而不是实例字段：插件实例会随 Activity 重建而重建，而 ONNX 会话是
          * JVM 级资源；用实例字段会让「刚重建那一刻」偷偷放行一次。
          */
-        @Volatile
         @JvmStatic
-        var inferenceEnabled: Boolean = false
+        val inferenceEnabled: Boolean get() = NativeInferenceGate.process.acquire() != null
 
         /** 总闸关着时给 JS 的那句话（Web 侧按前缀识别，别改）。 */
-        const val INFERENCE_DISABLED_MESSAGE = "automix-inference-disabled"
+        const val INFERENCE_DISABLED_MESSAGE = NativeInferenceGate.DISABLED_MESSAGE
     }
 
     /** 拍点分析进度的事件名，与 Web 侧 nativeBeats.ts 的监听一致。 */
@@ -116,12 +115,12 @@ class FoliaAutomixModelsPlugin : Plugin() {
     @PluginMethod
     fun setInferenceEnabled(call: PluginCall) {
         val enabled = call.getBoolean("enabled") ?: false
-        inferenceEnabled = enabled
+        NativeInferenceGate.process.setEnabled(enabled)
         if (!enabled) {
-            // 主动释放：把两个 Runner 的会话与缓存权重放掉，并停掉在跑的那一趟。
+            // 先撤销授权，再异步回收旧会话，不阻塞桥线程等待当前窗口。
             cancelGeneration.incrementAndGet()
-            runCatching { BeatThisRunner.close() }
-            runCatching { ScnetRunner.release() }
+            ScnetRunner.releaseRevoked()
+            BeatThisRunner.releaseRevoked()
         }
         val result = JSObject()
         result.put("enabled", inferenceEnabled)
@@ -274,9 +273,9 @@ class FoliaAutomixModelsPlugin : Plugin() {
      * 和卡死在用户眼里没有区别，也没法判断是慢还是坏了（真机反馈 2026-11-13）。
      * 只在阶段边界与每 1024 帧报一次，整曲最多二三十条消息。
      */
-    private fun reportBeatProgress(stage: String, percent: Float) {
+    private fun reportBeatProgress(request: BeatThisRequest, stage: String, percent: Float) {
         val payload = JSObject().put("stage", stage).put("percent", percent.toDouble())
-        val emit = Runnable { notifyListeners(beatProgressEvent, payload) }
+        val emit = Runnable { request.dispatchEvent { notifyListeners(beatProgressEvent, payload) } }
         val host = activity
         if (host != null) host.runOnUiThread(emit) else emit.run()
     }
@@ -287,7 +286,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
      * 表是**累积**的（每次都是从头到 `until` 的全量），因为界面那边的时钟只需要一份完整列表；
      * 整曲四分钟也就四五百个拍点，重复发的代价可以忽略，换来的是界面不用自己做合并去重。
      */
-    private fun emitBeatChunk(beats: List<BeatThisRunner.Beat>, upToSec: Double, final: Boolean) {
+    private fun emitBeatChunk(request: BeatThisRequest, beats: List<BeatThisRunner.Beat>, upToSec: Double, final: Boolean) {
         val array = JSArray()
         for (beat in beats) {
             array.put(
@@ -298,90 +297,136 @@ class FoliaAutomixModelsPlugin : Plugin() {
             )
         }
         val payload = JSObject().put("beats", array).put("until", upToSec).put("final", final)
-        val emit = Runnable { notifyListeners(beatChunkEvent, payload) }
+        val emit = Runnable { request.dispatchEvent { notifyListeners(beatChunkEvent, payload) } }
         val host = activity
         if (host != null) host.runOnUiThread(emit) else emit.run()
     }
 
+    private fun enqueueBeatAnalysis(call: PluginCall, work: (BeatThisRequest) -> Unit) {
+        val rejectDisabled = { call.reject(INFERENCE_DISABLED_MESSAGE) }
+        BeatThisRequest.enqueue(worker, NativeInferenceGate.process, cancelGeneration::get, rejectDisabled) { request ->
+            try {
+                work(request)
+            } catch (error: Exception) {
+                rejectBeatAnalysis(call, request, "节拍分析失败: ${error.message}", error)
+            }
+        }
+    }
+
+    private fun resolveBeatAnalysis(call: PluginCall, request: BeatThisRequest, result: BeatThisRunner.Result, seconds: Double? = null) {
+        val beats = JSArray()
+        for (beat in result.beats) {
+            beats.put(
+                JSObject()
+                    .put("time", beat.time)
+                    .put("downbeat", beat.isDownbeat)
+                    .put("confidence", beat.confidence.toDouble()),
+            )
+        }
+        val payload = JSObject()
+            .put("beats", beats)
+            .put("fps", result.fps)
+            .put("frames", result.beatLogits.size)
+        // 解码器对超长音频会截断：告知前端实际分析了多长。
+        if (seconds != null) payload.put("seconds", seconds)
+        request.dispatchReply(
+            result.cancelled,
+            reply = { cancelled -> call.resolve(payload.put("cancelled", cancelled)) },
+            rejectDisabled = { call.reject(INFERENCE_DISABLED_MESSAGE) },
+        )
+    }
+
+    private fun cancelledBeatPayload(seconds: Double? = null): JSObject {
+        val payload = JSObject().put("beats", JSArray()).put("fps", BeatThisRunner.FPS)
+            .put("frames", 0).put("cancelled", true)
+        if (seconds != null) payload.put("seconds", seconds)
+        return payload
+    }
+
+    private fun rejectBeatAnalysis(
+        call: PluginCall,
+        request: BeatThisRequest,
+        message: String,
+        error: Exception? = null,
+        seconds: Double? = null,
+    ) {
+        request.dispatchError(
+            reject = { call.reject(message, error) },
+            resolveCancelled = { call.resolve(cancelledBeatPayload(seconds)) },
+            rejectDisabled = { call.reject(INFERENCE_DISABLED_MESSAGE) },
+        )
+    }
+
+    private fun finishCancelledBeatAnalysis(call: PluginCall, request: BeatThisRequest, seconds: Double? = null): Boolean {
+        request.permit.requireCurrent()
+        if (!request.cancelled()) return false
+        resolveBeatAnalysis(call, request, BeatThisRunner.Result(emptyList(), FloatArray(0), BeatThisRunner.FPS, true), seconds)
+        return true
+    }
+
     @PluginMethod
     fun analyzeBeatsFromUrl(call: PluginCall) {
-        if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE) // ONNX 总闸（#401），见 companion object
+        if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE)
         val url = call.getString("url")
         if (url.isNullOrBlank()) return call.reject("缺少 url")
         val context: Context = context
-        worker.execute {
-            try {
-                val generation = cancelGeneration.get()
-                AutomixLoad.applyThreadPriority()
-                val started = System.currentTimeMillis()
-                val file = AutomixModels.ensureLocal(context, AutomixModels.BEAT_THIS)
-                BeatThisRunner.ensureLoaded(file)
+        enqueueBeatAnalysis(call) { request ->
+            if (finishCancelledBeatAnalysis(call, request, 0.0)) return@enqueueBeatAnalysis
+            AutomixLoad.applyThreadPriority()
+            val started = System.currentTimeMillis()
+            val file = AutomixModels.ensureLocal(context, AutomixModels.BEAT_THIS)
+            if (finishCancelledBeatAnalysis(call, request, 0.0)) return@enqueueBeatAnalysis
 
-                /*
-                 * 第一段：只解前 45 秒，先让画面动起来。
-                 *
-                 * 为什么值得多花这一次：整曲「解码 + 频谱 + 六块推理」在手机上要二十秒以上，
-                 * 而 45 秒（约 22 拍）的解码、频谱、单块推理加起来两秒上下 ——
-                 * 用户按下播放后第一次看到镜面/鼓面响应，就在这个量级。
-                 *
-                 * `allowCache = false` 是关键：这一份是截断，一旦写进 20 秒缓存，
-                 * 紧接着的整曲分析会命中它，后半首就永远没有拍点了。
-                 */
-                val head = TrackPcmDecoder.decodeMono(
-                    context,
-                    url,
-                    maxSeconds = fastSeconds,
-                    allowCache = false,
+            /*
+             * 第一段：只解前 45 秒，先让画面动起来。
+             *
+             * 为什么值得多花这一次：整曲「解码 + 频谱 + 六块推理」在手机上要二十秒以上，
+             * 而 45 秒（约 22 拍）的解码、频谱、单块推理加起来两秒上下 ——
+             * 用户按下播放后第一次看到镜面/鼓面响应，就在这个量级。
+             *
+             * `allowCache = false` 是关键：这一份是截断，一旦写进 20 秒缓存，
+             * 紧接着的整曲分析会命中它，后半首就永远没有拍点了。
+             */
+            val head = TrackPcmDecoder.decodeMono(
+                context,
+                url,
+                maxSeconds = fastSeconds,
+                allowCache = false,
+            )
+            if (finishCancelledBeatAnalysis(call, request, 0.0)) return@enqueueBeatAnalysis
+            if (head != null) {
+                BeatThisRunner.analyze(
+                    mono = head,
+                    modelFile = file,
+                    request = request,
+                    onChunk = { beats, upTo -> emitBeatChunk(request, beats, upTo, final = false) },
                 )
-                if (head != null && !expired(generation)) {
-                    BeatThisRunner.analyze(
-                        mono = head,
-                        cancelled = { expired(generation) },
-                        onChunk = { beats, upTo -> emitBeatChunk(beats, upTo, final = false) },
-                    )
-                }
-
-                /*
-                 * 整曲。解码结果还会被紧接着的鼓点分析复用（TrackPcmDecoder 的短时缓存）。
-                 */
-                val mono = TrackPcmDecoder.decodeMono(context, url)
-                    ?: return@execute call.reject("无法解码音频: $url")
-                reportBeatProgress("decode", 1f)
-                val result = BeatThisRunner.analyze(
-                    mono = mono,
-                    cancelled = { expired(generation) },
-                    onProgress = { stage, percent -> reportBeatProgress(stage, percent) },
-                    onChunk = { beats, upTo -> emitBeatChunk(beats, upTo, final = false) },
-                )
-                android.util.Log.i(
-                    "Automix",
-                    "beat_this(url): ${mono.size} 样本 -> ${result.beats.size} 个拍点，" +
-                        "耗时 ${System.currentTimeMillis() - started}ms" +
-                        if (result.cancelled) "（已取消）" else "",
-                )
-
-                val beats = JSArray()
-                for (beat in result.beats) {
-                    beats.put(
-                        JSObject()
-                            .put("time", beat.time)
-                            .put("downbeat", beat.isDownbeat)
-                            .put("confidence", beat.confidence.toDouble()),
-                    )
-                }
-                call.resolve(
-                    JSObject()
-                        .put("beats", beats)
-                        .put("fps", result.fps)
-                        .put("frames", result.beatLogits.size)
-                        // 实际分析了多长：解码器对超长的现场版会截断，截断后后半首没有拍点，
-                        // 前端要能知道（原来这里不说，看上去就是「这首歌后半段没有节拍」）。
-                        .put("seconds", mono.size.toDouble() / 22050.0)
-                        .put("cancelled", result.cancelled),
-                )
-            } catch (error: Exception) {
-                call.reject("节拍分析失败: ${error.message}", error)
             }
+
+            /*
+             * 整曲。解码结果还会被紧接着的鼓点分析复用（TrackPcmDecoder 的短时缓存）。
+             */
+            if (finishCancelledBeatAnalysis(call, request, 0.0)) return@enqueueBeatAnalysis
+            val mono = TrackPcmDecoder.decodeMono(context, url)
+            val seconds = (mono?.size ?: 0).toDouble() / BeatThisRunner.SAMPLE_RATE
+            if (finishCancelledBeatAnalysis(call, request, seconds)) return@enqueueBeatAnalysis
+            if (mono == null) return@enqueueBeatAnalysis rejectBeatAnalysis(call, request, "无法解码音频: $url", seconds = seconds)
+            reportBeatProgress(request, "decode", 1f)
+            val result = BeatThisRunner.analyze(
+                mono = mono,
+                modelFile = file,
+                request = request,
+                onProgress = { stage, percent -> reportBeatProgress(request, stage, percent) },
+                onChunk = { beats, upTo -> emitBeatChunk(request, beats, upTo, final = false) },
+            )
+            android.util.Log.i(
+                "Automix",
+                "beat_this(url): ${mono.size} 样本 -> ${result.beats.size} 个拍点，" +
+                    "耗时 ${System.currentTimeMillis() - started}ms" +
+                    if (result.cancelled) "（已取消）" else "",
+            )
+
+            resolveBeatAnalysis(call, request, result, seconds)
         }
     }
 
@@ -594,20 +639,9 @@ class FoliaAutomixModelsPlugin : Plugin() {
      *
      * 现在没有兜底：加载失败就是失败，调用方拿到明确的错误，日志里只有一行原因。
      */
-    @Volatile
-    private var stemEngineReady = false
-
-    @Synchronized
-    private fun ensureStemEngine(context: Context) {
-        if (stemEngineReady) return
-        ScnetRunner.ensureLoaded(AutomixModels.ensureLocal(context, AutomixModels.SCNET))
-        stemEngineReady = true
-    }
-
-    @Synchronized
-    private fun releaseStemEngine() {
-        ScnetRunner.release()
-        stemEngineReady = false
+    private fun stemModel(context: Context, permit: NativeInferenceGate.Permit): java.io.File {
+        permit.requireCurrent()
+        return AutomixModels.ensureLocal(context, AutomixModels.SCNET)
     }
 
     /** 用 SCNet 分离一段。加载与推理的失败都往上抛，由调用方决定怎么交代。 */
@@ -616,15 +650,16 @@ class FoliaAutomixModelsPlugin : Plugin() {
         left: FloatArray,
         right: FloatArray,
         stems: List<Int>,
+        permit: NativeInferenceGate.Permit,
         cancelled: () -> Boolean,
     ): Map<String, Array<FloatArray>> {
-        ensureStemEngine(context)
-        return ScnetRunner.separate(left, right, stems = stems, cancelled = cancelled).stems
+        val model = stemModel(context, permit)
+        return ScnetRunner.separate(left, right, permit, model, stems = stems, cancelled = cancelled).stems
     }
 
     @PluginMethod
     fun separateDrumsBandsFromUrl(call: PluginCall) {
-        if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE) // ONNX 总闸（#401），见 companion object
+        val permit = NativeInferenceGate.process.acquire() ?: return call.reject(INFERENCE_DISABLED_MESSAGE)
         val url = call.getString("url")
         if (url.isNullOrBlank()) return call.reject("缺少 url")
         val context: Context = context
@@ -651,6 +686,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
          */
         val maxBlocks = (call.getInt("blocks") ?: 1).coerceIn(1, 64)
         worker.execute {
+            if (!permit.isCurrent()) return@execute call.reject(INFERENCE_DISABLED_MESSAGE)
             var from = startSeconds
             var blocks = 0
             var reachedEnd = false
@@ -658,8 +694,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
                 val generation = cancelGeneration.get()
                 AutomixLoad.applyThreadPriority()
                 val started = System.currentTimeMillis()
-                ensureStemEngine(context)
-                while (!reachedEnd && from < maxSeconds && blocks < maxBlocks && !expired(generation)) {
+                while (!reachedEnd && from < maxSeconds && blocks < maxBlocks && !expired(generation) && permit.isCurrent()) {
                     val decoded = TrackPcmDecoder.decodeRange(context, url, from, chunkSeconds)
                         ?: break
                     if (decoded.samples <= 0) break
@@ -678,6 +713,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
                             decoded.right,
                             // drums[, bass, other, vocals]
                             stems = if (withEnvelopes) listOf(0, 1, 2, 3) else listOf(0),
+                            permit = permit,
                         ) { expired(generation) }
                     }
                     val drums = separated?.get("drums")
@@ -706,7 +742,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
                         payload.put("fromSec", from)
                         payload.put("untilSec", until)
                         blocks += 1
-                        val emit = Runnable { notifyListeners(drumStemBandsEvent, payload) }
+                        val emit = Runnable { permit.dispatch { notifyListeners(drumStemBandsEvent, payload) } }
                         val host = activity
                         if (host != null) host.runOnUiThread(emit) else emit.run()
                         /*
@@ -734,35 +770,31 @@ class FoliaAutomixModelsPlugin : Plugin() {
                     reachedEnd = advanced < chunkSeconds - 0.05
                     AutomixLoad.yieldPoint()
                 }
-                call.resolve(
-                    JSObject()
-                        .put("ok", true)
-                        .put("blocks", blocks)
-                        .put("seconds", from)
-                        .put("done", reachedEnd)
-                        .put("cancelled", expired(generation)),
-                )
+                resolveStemResult(call, permit, JSObject()
+                    .put("ok", true)
+                    .put("blocks", blocks)
+                    .put("seconds", from)
+                    .put("done", reachedEnd)
+                    .put("cancelled", expired(generation)))
             } catch (error: Throwable) {
                 /*
                  * Throwable 而不是 Exception：分轨单块推理的中间张量到几十 MB，
                  * OOM 是 OutOfMemoryError —— 它是 Error 的子类，`catch (Exception)` 收不到。
                  * 收不到的后果比崩溃更难查：worker 线程被 Error 带走，这个 call 的 promise
                  * 永远不 resolve，Web 侧的「正在补齐 · 30s」就永远停在那里，重启才好。
-                 * 这里必须收下、必须 resolve/reject，并把会话卸掉 —— 下一次从干净状态重来。
+                 * 这里必须收下并 resolve/reject。只有 SCNet 自己的窗口出错才回收该会话；
+                 * 解码或桥封包出错时不能关闭其他请求仍在使用的共享会话。
                  */
                 if (error is OutOfMemoryError) {
-                    releaseStemEngine()
-                    android.util.Log.w("Automix", "鼓轨分离内存不足，已卸载会话：${error.message}")
+                    android.util.Log.w("Automix", "鼓轨分离内存不足", error)
                     // 已经算完的块仍然有效，把位置交回去，别让调用方从更早的地方重来。
-                    call.resolve(
-                        JSObject()
-                            .put("ok", false)
-                            .put("blocks", blocks)
-                            .put("seconds", from)
-                            .put("done", reachedEnd)
-                            .put("outOfMemory", true)
-                            .put("cancelled", false),
-                    )
+                    resolveStemResult(call, permit, JSObject()
+                        .put("ok", false)
+                        .put("blocks", blocks)
+                        .put("seconds", from)
+                        .put("done", reachedEnd)
+                        .put("outOfMemory", true)
+                        .put("cancelled", false))
                     return@execute
                 }
                 call.reject("鼓轨分离失败（分轨模型 ${AutomixModels.SCNET}）: ${error.message ?: error.javaClass.simpleName}")
@@ -996,7 +1028,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
      */
     @PluginMethod
     fun separateStemsFromUrl(call: PluginCall) {
-        if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE) // ONNX 总闸（#401），见 companion object
+        val permit = NativeInferenceGate.process.acquire() ?: return call.reject(INFERENCE_DISABLED_MESSAGE)
         val url = call.getString("url")
         if (url.isNullOrBlank()) return call.reject("缺少 url")
         val context: Context = context
@@ -1004,12 +1036,13 @@ class FoliaAutomixModelsPlugin : Plugin() {
         val startSeconds = call.getDouble("startSeconds") ?: 0.0
         val seconds = call.getDouble("seconds")
         worker.execute {
+            if (!permit.isCurrent()) return@execute call.reject(INFERENCE_DISABLED_MESSAGE)
             try {
                 val generation = cancelGeneration.get()
                 val started = System.currentTimeMillis()
                 val decoded = TrackPcmDecoder.decode(context, url)
                     ?: return@execute call.reject("无法解码音频: $url")
-                respondWithStems(call, decoded, stems, startSeconds, seconds, started, generation)
+                respondWithStems(call, decoded, stems, startSeconds, seconds, started, generation, permit)
             } catch (error: Exception) {
                 call.reject("四轨分离失败: ${error.message}", error)
             }
@@ -1042,8 +1075,9 @@ class FoliaAutomixModelsPlugin : Plugin() {
         seconds: Double?,
         started: Long,
         generation: Int,
+        permit: NativeInferenceGate.Permit,
     ) {
-        ensureStemEngine(context)
+        val model = stemModel(context, permit)
         val rate = decoded.sampleRate
         val from = (startSeconds * rate).toInt().coerceIn(0, decoded.samples)
         val to = if (seconds == null || seconds <= 0) {
@@ -1055,6 +1089,8 @@ class FoliaAutomixModelsPlugin : Plugin() {
         val result = ScnetRunner.separate(
             decoded.left,
             decoded.right,
+            permit,
+            model,
             stems = stems,
             fromSample = from,
             toSample = to,
@@ -1088,15 +1124,18 @@ class FoliaAutomixModelsPlugin : Plugin() {
                     .put("right", encodeFloats(channels[1])),
             )
         }
-        call.resolve(
-            JSObject()
-                .put("stems", encoded)
-                .put("sampleRate", result.sampleRate)
-                // 这一段的长度，不是整首的：取消时会更短，调用方按 fromSample 拼。
-                .put("samples", result.stems.values.firstOrNull()?.get(0)?.size ?: 0)
-                .put("fromSample", result.fromSample)
-                .put("cancelled", expired(generation)),
-        )
+        val payload = JSObject()
+            .put("stems", encoded)
+            .put("sampleRate", result.sampleRate)
+            // 这一段的长度，不是整首的：取消时会更短，调用方按 fromSample 拼。
+            .put("samples", result.stems.values.firstOrNull()?.get(0)?.size ?: 0)
+            .put("fromSample", result.fromSample)
+            .put("cancelled", expired(generation))
+        resolveStemResult(call, permit, payload)
+    }
+
+    private fun resolveStemResult(call: PluginCall, permit: NativeInferenceGate.Permit, payload: JSObject) {
+        if (!permit.dispatch { call.resolve(payload) }) call.reject(INFERENCE_DISABLED_MESSAGE)
     }
 
     /**
@@ -1112,42 +1151,22 @@ class FoliaAutomixModelsPlugin : Plugin() {
         if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE) // ONNX 总闸（#401），见 companion object
         val encoded = call.getString("samples") ?: return call.reject("缺少 samples")
         val context: Context = context
-        worker.execute {
-            try {
-                val generation = cancelGeneration.get()
-                val mono = decodeFloats(encoded) ?: return@execute call.reject("samples 不是 float32 数组")
+        enqueueBeatAnalysis(call) { request ->
+            if (finishCancelledBeatAnalysis(call, request)) return@enqueueBeatAnalysis
+            val mono = decodeFloats(encoded)
+            if (finishCancelledBeatAnalysis(call, request)) return@enqueueBeatAnalysis
+            if (mono == null) return@enqueueBeatAnalysis rejectBeatAnalysis(call, request, "samples 不是 float32 数组")
 
-                val file = AutomixModels.ensureLocal(context, AutomixModels.BEAT_THIS)
-                BeatThisRunner.ensureLoaded(file)
-                val started = System.currentTimeMillis()
-                // 命名参数：末尾那个 lambda 是 onChunk，不是 cancelled。
-                val result = BeatThisRunner.analyze(mono, cancelled = { expired(generation) })
-                android.util.Log.i(
-                    "Automix",
-                    "beat_this: ${mono.size} 样本 -> ${result.beats.size} 个拍点，" +
-                        "耗时 ${System.currentTimeMillis() - started}ms" +
-                        if (result.cancelled) "（已取消）" else "",
-                )
-
-                val beats = JSArray()
-                for (beat in result.beats) {
-                    beats.put(
-                        JSObject()
-                            .put("time", beat.time)
-                            .put("downbeat", beat.isDownbeat)
-                            .put("confidence", beat.confidence.toDouble()),
-                    )
-                }
-                call.resolve(
-                    JSObject()
-                        .put("beats", beats)
-                        .put("fps", result.fps)
-                        .put("frames", result.beatLogits.size)
-                        .put("cancelled", result.cancelled),
-                )
-            } catch (error: Exception) {
-                call.reject("节拍分析失败: ${error.message}", error)
-            }
+            val file = AutomixModels.ensureLocal(context, AutomixModels.BEAT_THIS)
+            val started = System.currentTimeMillis()
+            val result = BeatThisRunner.analyze(mono, file, request)
+            android.util.Log.i(
+                "Automix",
+                "beat_this: ${mono.size} 样本 -> ${result.beats.size} 个拍点，" +
+                    "耗时 ${System.currentTimeMillis() - started}ms" +
+                    if (result.cancelled) "（已取消）" else "",
+            )
+            resolveBeatAnalysis(call, request, result)
         }
     }
 
@@ -1167,11 +1186,12 @@ class FoliaAutomixModelsPlugin : Plugin() {
      */
     @PluginMethod
     fun separateStems(call: PluginCall) {
-        if (!inferenceEnabled) return call.reject(INFERENCE_DISABLED_MESSAGE) // ONNX 总闸（#401），见 companion object
+        val permit = NativeInferenceGate.process.acquire() ?: return call.reject(INFERENCE_DISABLED_MESSAGE)
         val leftEncoded = call.getString("left") ?: return call.reject("缺少 left")
         val rightEncoded = call.getString("right") ?: leftEncoded
         val stems = parseStems(call.getString("stems"))
         worker.execute {
+            if (!permit.isCurrent()) return@execute call.reject(INFERENCE_DISABLED_MESSAGE)
             try {
                 val generation = cancelGeneration.get()
                 val left = decodeFloats(leftEncoded) ?: return@execute call.reject("left 不是 float32 数组")
@@ -1185,6 +1205,7 @@ class FoliaAutomixModelsPlugin : Plugin() {
                     null,
                     started,
                     generation,
+                    permit,
                 )
             } catch (error: Exception) {
                 call.reject("四轨分离失败: ${error.message}", error)

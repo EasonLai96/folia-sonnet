@@ -3,10 +3,10 @@ package top.izuna.foliamajor.player.dsp
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import top.izuna.foliamajor.automix.NativeInferenceGate
 import top.izuna.foliamajor.player.FoliaNativePlayer
 import top.izuna.foliamajor.settings.FoliaSettingsStore
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
 // android/app/src/main/java/top/izuna/foliamajor/player/dsp/InstrumentalCoordinator.kt
 // 「关闭人声」的调度：决定这一刻该播原曲还是播伴奏、要不要开始生成。
@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 //
 // 它自己不认识 UI：状态靠 [status] 给插件轮询，进度靠 [notify] 往外发事件。
 //
-// 一条纪律：**换源永远走 FoliaNativePlayer.swapSource()**，不要在这里自己 setMediaItem ——
+// 一条纪律：**换源永远走 FoliaNativePlayer.swapSourceIfCurrent()**，不要在这里自己 setMediaItem ——
 // 位置、播放状态、songKey、交叉淡化收尾都在那一个方法里处理。
 
 internal object InstrumentalCoordinator {
@@ -37,7 +37,21 @@ internal object InstrumentalCoordinator {
     }
 
     /** 每次开始生成 +1。旧的活干完时对不上号就直接丢掉结果。 */
-    private val generation = AtomicInteger(0)
+    private val builds = StemBuildGate()
+    // 清理或显式意图更新后，已排队的缓存切换不再有权提交。
+    private var cacheIntent = 0L
+
+    fun <T> withTrackIntent(action: () -> T): T = builds.ordered(action)
+
+    // 进行中的同键任务不能借磁盘命中直接接管一次新的 prepare。
+    fun cachedTrackForPrepare(context: Context, url: String, songKey: String?, mode: VocalTrackMode) =
+        withTrackIntent {
+            discardRevokedBuild()
+            if (AudioSourceIdentity.from(url, songKey) == null) return@withTrackIntent null
+            val key = InstrumentalStore.keyFor(url, songKey)
+            if ((state == STATE_BUILDING && activeKey == key) || builds.blocksCache(key, AudioSourceIdentity.from(url, songKey))) return@withTrackIntent null
+            InstrumentalStore.find(context, key, mode)
+        }
 
     @Volatile private var state: String = STATE_IDLE
     @Volatile private var percent: Int = 0
@@ -76,18 +90,6 @@ internal object InstrumentalCoordinator {
     private const val SOURCE_LIKELY_STALE_MS = 45L * 60 * 1000
 
     /**
-     * 装原曲那一刻的时刻（毫秒）。与 [prepareInternal] 同一个纪律：装源时写，
-     * 切回原曲时读 —— 用来判断手上这条地址是不是已经放了很久。
-     */
-    @Volatile
-    private var preparedAtMs: Long = 0L
-
-    /** 记下「原曲是在这一刻装的」。插件 prepare 之后调一次。 */
-    fun noteSourcePrepared() {
-        preparedAtMs = System.currentTimeMillis()
-    }
-
-    /**
      * 这条原曲地址是不是**可能已经过期**（装了很久，或者带取流签名）。
      *
      * 纯函数版可单测。`signed` 由调用方按地址判断（见 [looksSigned]）。
@@ -118,7 +120,23 @@ internal object InstrumentalCoordinator {
             text.contains("expires=") || text.contains("sign=") || text.contains("token=")
     }
 
-    fun status(): Triple<String, Int, String?> = Triple(state, percent, activeKey)
+    private var buildPermit: NativeInferenceGate.Permit? = null
+
+    // 撤销是即时的；状态读写时收回已经不能完成的工作，不碰已提交的缓存。
+    private fun discardRevokedBuild() {
+        if (state != STATE_BUILDING || buildPermit?.isCurrent() != false) return
+        builds.invalidateBuild()
+        switchOnDone = false
+        buildPermit = null
+        state = STATE_IDLE
+        percent = 0
+        activeKey = null
+    }
+
+    fun status(): Triple<String, Int, String?> = withTrackIntent {
+        discardRevokedBuild()
+        Triple(state, percent, activeKey)
+    }
 
     /**
      * 拨开关 / 换歌之后的统一入口。
@@ -126,14 +144,17 @@ internal object InstrumentalCoordinator {
      * 播哪一轨由 [NativeEqualizerState.activeMode] 决定（两个开关互斥），
      * 调用方不要再传布尔 —— 之前那种「两个都开」会一会儿换伴奏一会儿换清唱。
      *
-     * @param url     这一首的原地址
-     * @param songKey 这一首的身份，缓存键优先用它
+     * 原地址与曲目身份从同一装源请求快照读取，不能混用桥侧 songKey 和播放器地址。
      */
-    fun reconcile(context: Context, player: FoliaNativePlayer?, url: String?, songKey: String?) {
-        if (player == null || url.isNullOrBlank()) {
+    fun reconcile(context: Context, player: FoliaNativePlayer?) = withTrackIntent {
+        discardRevokedBuild()
+        val current = player?.requestedAudioSource()
+        if (player == null || current == null) {
             cancel()
-            return
+            return@withTrackIntent
         }
+        val url = current.source.baseUrl
+        val songKey = current.source.mediaId
         val mode = NativeEqualizerState.activeMode()
         if (mode == null) {
             /*
@@ -154,7 +175,7 @@ internal object InstrumentalCoordinator {
              * 再加一道身份校验：url 必须与播放器记着的原曲地址一致。切歌竞态里
              * reconcile 可能拿着上一首的地址进来，少了这一条就会把旧歌装到新歌上。
              */
-            if (player.baseUrl() == url && shouldSwapVocalTrack(player.currentUrl(), url)) {
+            if (current.source.instrumental && shouldSwapVocalTrack(current.source.url, url)) {
                 /*
                  * ★ 从**分离轨**切回原曲时，手上那条原曲地址可能已经过期：先让 Web 侧要一条
                  * 新的，别把一条放不出来的地址塞给播放器。
@@ -172,10 +193,10 @@ internal object InstrumentalCoordinator {
                  * 拿到新地址后由它正常装源；这里**不**先用旧地址 swapSource，否则会先响一下
                  * 断流再跳回来。
                  */
-                if (player.isOnInstrumental()
-                    && sourceMayBeStale(preparedAtMs, System.currentTimeMillis(), looksSigned(url))
-                ) {
-                    requestFreshSource?.invoke(songKey, "switched back to the original")
+                if (sourceMayBeStale(current.source.preparedAtMs, System.currentTimeMillis(), looksSigned(url))) {
+                    player.ifRequestedAudioSource(current.ticket) {
+                        requestFreshSource?.invoke(songKey, "switched back to the original")
+                    }
                     /*
                      * 已经在分离轨上、又准备重新装源：换回原曲这一步交给 Web 侧那次装源做。
                      * 但状态要归位，否则界面还挂着「伴奏 / 人声」的进度。
@@ -186,9 +207,9 @@ internal object InstrumentalCoordinator {
                         activeKey = null
                         notify?.invoke(state, percent)
                     }
-                    return
+                    return@withTrackIntent
                 }
-                player.swapSource(url, instrumental = false)
+                queueOriginal(player, current)
             }
             // 预生成那趟还在跑：状态留着，别让下一句「这首歌没备好」的判断再发起第二趟。
             if (!prebuilding) {
@@ -197,17 +218,21 @@ internal object InstrumentalCoordinator {
                 activeKey = null
                 notify?.invoke(state, percent)
             }
-            return
+            return@withTrackIntent
         }
         val key = InstrumentalStore.keyFor(url, songKey)
-        // 先比再赋值：写成 activeKey = key 再判断会永远成立，把上一首的任务也当成这首。
-        if (state == STATE_BUILDING && activeKey == key) {
+        val source = current.ticket.takeIf { it.identity != null }
+        val sameKeyBuilding = state == STATE_BUILDING && activeKey == key
+        if (sameKeyBuilding && builds.canReuse(key, source)) {
             switchOnDone = true
-            return
+            return@withTrackIntent
         }
-        activeKey = key
-        val cached = InstrumentalStore.find(context, key, mode)
-        if (cached != null) {
+        val replacingHandoff = builds.blocksCache(key, source?.identity) && !builds.canReuse(key, source)
+        val cached = if (sameKeyBuilding || replacingHandoff) null else InstrumentalStore.find(context, key, mode)
+        if (cached != null && source != null) {
+            cancel()
+            val intent = cacheIntent
+            activeKey = key
             percent = 100
             state = STATE_READY
             notify?.invoke(state, percent)
@@ -222,33 +247,37 @@ internal object InstrumentalCoordinator {
              * 每次 reconcile 都重新 prepare 一遍）。
              */
             val target = Uri.fromFile(cached).toString()
-            if (shouldSwapVocalTrack(player.currentUrl(), target)) {
-                player.swapSource(target, instrumental = true)
-            }
-            return
+            player.swapSourceIfCurrent(source, instrumental = true, authorize = { commit ->
+                withTrackIntent {
+                    if (cacheIntent == intent && NativeEqualizerState.activeMode() == mode) commit(target)
+                }
+            })
+            return@withTrackIntent
         }
-        startBuild(context, player, url, key, songKey, wantSwitch = true)
+        startBuild(context, player, url, key, source, wantSwitch = true)
     }
 
     /**
      * 提前分析：把这首歌的两轨伴奏都备好，**不换源**。
      *
      * 这是「下次拨开关秒开」的关键 —— 用户还在听原曲时后台就把活干完了。
-     * 与 [reconcile] 共用同一条 worker 与 generation：正在为拨开关跑的任务
-     * 本来就会同时产出两轨，没必要再开一遍；反过来，预生成跑到一半用户拨了开关，
-     * generation 会让旧任务作废、新任务接手（同一首歌，进度从头开始但只跑一遍模型）。
+     * 与 [reconcile] 共用同一条 worker：仅已经绑定同一个装源请求的任务才能接管。
+     * 队列预取没有 owner，期间拨开关时重新发起，不把正在生成的结果授权给另一音源。
      */
-    fun prebuild(context: Context, url: String?, songKey: String?) {
-        if (url.isNullOrBlank()) return
+    fun prebuild(context: Context, url: String?, songKey: String?, player: FoliaNativePlayer? = null) = withTrackIntent {
+        discardRevokedBuild()
+        if (url.isNullOrBlank()) return@withTrackIntent
         val key = InstrumentalStore.keyFor(url, songKey)
-        if (state == STATE_BUILDING) return
-        if (InstrumentalStore.bothReady(context, key)) return
-        startBuild(context, null, url, key, songKey, wantSwitch = false)
+        builds.schedulePrebuild(state == STATE_BUILDING, alreadyReady = { builds.blocksCache(key, AudioSourceIdentity.from(url, songKey)) || InstrumentalStore.bothReady(context, key) }) {
+            startBuild(context, player, url, key, player?.requestedAudioSource(url, songKey), wantSwitch = false)
+        }
     }
 
     /** 换歌时调用：旧任务作废。 */
-    fun cancel() {
-        generation.incrementAndGet()
+    fun cancel(clearCache: Boolean = false) = withTrackIntent {
+        ++cacheIntent
+        builds.cancel(clearCache)
+        buildPermit = null
         switchOnDone = false
         if (state == STATE_BUILDING) {
             state = STATE_IDLE
@@ -261,35 +290,39 @@ internal object InstrumentalCoordinator {
         player: FoliaNativePlayer?,
         url: String,
         key: String,
-        songKey: String?,
+        source: AudioSourceLoads.Ticket?,
         wantSwitch: Boolean,
     ) {
-        /*
-         * 先比再赋值：同一首歌正在生成时直接返回，**不要**动 switchOnDone。
-         * 原来先写 switchOnDone = wantSwitch，prebuild(false) 撞上「用户拨开关发起的」
-         * 那一趟时，会把它的换源意图悄悄改成不换 —— 分离跑完了却不切轨。
-         */
-        if (state == STATE_BUILDING && activeKey == key) return
+        val permit = NativeInferenceGate.process.acquire() ?: return
+        buildPermit = permit
         switchOnDone = wantSwitch
-        val token = generation.incrementAndGet()
+        val job = builds.begin(key, source, permit::isCurrent)
         state = STATE_BUILDING
         percent = 0
         activeKey = key
         notify?.invoke(state, percent)
         val appContext = context.applicationContext
+        fun isCurrent() = permit.isCurrent() && builds.isCurrent(job)
         worker.execute {
+            if (!isCurrent()) return@execute
             val tracks = try {
                 InstrumentalBuilder.build(
                     appContext,
                     url,
                     key,
                     onProgress = { value ->
-                        if (token == generation.get()) {
-                            percent = value
-                            notify?.invoke(state, percent)
+                        withTrackIntent {
+                            if (isCurrent()) {
+                                percent = value
+                                notify?.invoke(state, percent)
+                            }
                         }
                     },
-                    cancelled = { token != generation.get() },
+                    permit = permit,
+                    cancelled = { !isCurrent() },
+                    publish = { commit ->
+                        withTrackIntent { permit.commit { builds.isCurrent(job) && commit() } }
+                    },
                     /*
                      * 用户拨着开关等结果的那一趟（reconcile）算 eager：播放中的
                      * 让路比例降一档，尽快出活。预生成那趟（prebuild）保持默认，
@@ -302,87 +335,57 @@ internal object InstrumentalCoordinator {
                 Log.w(TAG, "生成伴奏异常", error)
                 null
             }
-            if (token != generation.get()) return@execute
-            if (tracks == null) {
-                state = STATE_FAILED
-                percent = 0
-                /*
-                 * 失败时把这个键下的成品一并删掉（#408）。
-                 *
-                 * 「点了分离，放的却是别的」有一半是这么来的：同一个键上留着上一次的成功结果，
-                 * 这一次分离失败 → 界面报失败，但缓存里那份旧音频还在，下一次 reconcile
-                 * 直接命中它、装进播放器。删掉之后，下一次要么重新分离成功、要么老实报失败。
-                 *
-                 * 键里已经带了音频身份（见 InstrumentalStore.keyFor），所以正常不会混到别的歌；
-                 * 这里清的是「同一身份下上一次留下的残余」。
-                 */
-                InstrumentalStore.drop(context, key)
-                /*
-                 * ★ 失败就得把「要分离」的意图退回去，不能停在 vocal / instrumental 上。
-                 *
-                 * 以前这里只报一条 failed：界面照样写着「人声」，播放器却还装着原曲
-                 * （currentTrack 一直是 original）。用户看到的正是「切了分离放的还是
-                 * 原曲 / 上一首」，而且下次 reconcile 还会拿着这个空意图再并一次。
-                 * 生成不出来是「这条路走不通」，不是「用户还想要它」—— 退回全部，
-                 * 界面与音源才是一致的。
-                 */
-                if (switchOnDone && NativeEqualizerState.activeMode() != null) {
-                    NativeEqualizerState.setVocalTrackMode(
-                        FoliaSettingsStore.get(context), null,
-                    )
+            var selected: VocalTrackMode? = null
+            withTrackIntent {
+                permit.commit {
+                    if (!builds.isCurrent(job)) return@commit false
+                    if (tracks == null) {
+                        state = STATE_FAILED
+                        percent = 0
+                        InstrumentalStore.drop(appContext, key)
+                        if (switchOnDone && source != null && player != null &&
+                            player.isRequestedAudioSource(source) && NativeEqualizerState.activeMode() != null
+                        ) {
+                            NativeEqualizerState.setVocalTrackMode(FoliaSettingsStore.get(appContext), null)
+                        }
+                    } else {
+                        state = STATE_READY
+                        percent = 100
+                        activeKey = key
+                        selected = NativeEqualizerState.activeMode().takeIf { switchOnDone }
+                        builds.markReady(job, willSwitch = selected != null && player != null && source != null)
+                    }
+                    switchOnDone = false
+                    notify?.invoke(state, percent)
+                    true
                 }
-                notify?.invoke(state, percent)
-                return@execute
             }
-            state = STATE_READY
-            percent = 100
-            activeKey = key
-            // 两份成品都是刚写的，清理时都别删。
-            InstrumentalStore.trim(appContext, keep = tracks.instrumental)
-            notify?.invoke(state, percent)
-            /*
-             * ★ 生成完了要不要切过去，看的是**用户此刻开着分离**，不是当初那一趟有没有说要切。
-             *
-             * 以前这里只认 switchOnDone（发起时 wantSwitch 的快照），于是：用户先拨到「只留人声」，
-             * 这一拨立刻起了一趟生成；几十秒里又切歌 / 重进播放页，那趟被 cancel 或换成了
-             * prebuild(false)；等模型真正跑完，switchOnDone 早已是 false —— 文件写好了，
-             * 播放器却还装着原曲。用户看到的就是「分离生成完毕了，但它不自动替换正在播的音频，
-             * 要我再手动拨一次才生效」。
-             *
-             * 意图（mode）本来就一直在原生这边：mode 非空就说明用户要分离结果，
-             * 该不该动播放器由下面那段严格身份校验（stillThisSong + shouldSwapVocalTrack）兜底。
-             */
-            switchOnDone = false
-            /*
-             * 生成完就地换源：用户此刻可能已经切歌 / 关了开关 ——
-             * 由播放器此刻真正装着的身份再确认一次，不满足就不动。
-             */
-            val mode = NativeEqualizerState.activeMode() ?: return@execute
-            /*
-             * 严格身份校验（「切下一首歌却用了上一首的数据」的修复）。
-             *
-             * 旧写法 `stillThisSong = keyFor(player.baseUrl(), songKey)` 是恒真的：
-             * keyFor 在 songKey 非空时只看 songKey、不看 url，而 songKey 又是这一趟
-             * 生成时闭包里那一首的 —— 用户切到下一首之后算出来的 key 仍旧等于生成
-             * 时的 key，后台一拆完就把上一首的伴奏 / 清唱换源到了新歌上。
-             * 现在同时比原曲地址与 MediaItem 里的 songKey，少一个都不换。
-             */
-            val stillThisSong = player != null && stillPlayingGeneratedTrack(
-                player.baseUrl(), player.currentMediaId(), url, songKey,
+            if (tracks == null) return@execute
+            val wanted = if (selected == VocalTrackMode.VOCAL) tracks.vocal else tracks.instrumental
+            if (permit.isCurrent()) InstrumentalStore.trim(appContext, keep = wanted)
+            val modeToSwap = selected ?: return@execute
+            if (player == null || source == null) return@execute
+            player.swapSourceIfCurrent(
+                source, instrumental = true,
+                authorize = { commit ->
+                    builds.commit(job, modeToSwap, NativeEqualizerState::activeMode) {
+                        permit.commit {
+                            commit(Uri.fromFile(wanted).toString())
+                            true
+                        }
+                    }
+                },
+                finished = { builds.finishHandoff(job) { player.isRequestedAudioSource(source) } },
             )
-            /*
-             * 与 reconcile 的 cached 分支同一个道理：换源判据必须是「此刻播的是不是
-             * 这一轨」，不能是「在不在分离轨」。分离跑完的这几十秒里，用户可能从
-             * 「只留人声」切到了「关闭人声」—— isOnInstrumental() 对伴奏和清唱都为
-             * true，旧的 `!isOnInstrumental()` 会短路，播放器停在清唱轨上切不过去。
-             * currentUrl() 天然区分原曲 / 伴奏 / 清唱：跟目标文件不一样就切。
-             */
-            val wanted = if (mode == VocalTrackMode.VOCAL) tracks.vocal else tracks.instrumental
-            val wantedUrl = Uri.fromFile(wanted).toString()
-            if (player != null && stillThisSong && shouldSwapVocalTrack(player.currentUrl(), wantedUrl)) {
-                player.swapSource(wantedUrl, instrumental = true)
-            }
         }
+    }
+
+    private fun queueOriginal(player: FoliaNativePlayer, current: AudioSourceLoads.Installed) {
+        player.swapSourceIfCurrent(current.ticket, instrumental = false, authorize = { commit ->
+            withTrackIntent {
+                if (NativeEqualizerState.activeMode() == null) commit(current.source.baseUrl)
+            }
+        })
     }
 
     fun sweep(context: Context) {
@@ -396,14 +399,18 @@ internal object InstrumentalCoordinator {
      * 必须先 cancel()：不清掉 generation，正在跑的那趟几十秒后会把刚删掉的
      * 文件重新写回来，界面上就是「删了又自己长出来」。
      */
-    fun clear(context: Context) {
-        cancel()
+    fun clear(context: Context, player: FoliaNativePlayer?) = withTrackIntent {
+        discardRevokedBuild()
+        val current = player?.requestedAudioSource()
+        if (player != null && current != null) queueOriginal(player, current)
+        cancel(clearCache = true)
         state = STATE_IDLE
         percent = 0
         activeKey = null
         switchOnDone = false
         InstrumentalStore.clearAll(context)
         notify?.invoke(state, percent)
+        Unit
     }
 
     const val STATE_IDLE = "idle"

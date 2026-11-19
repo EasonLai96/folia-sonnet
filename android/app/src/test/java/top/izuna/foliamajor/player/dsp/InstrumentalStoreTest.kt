@@ -30,11 +30,13 @@ class InstrumentalStoreTest {
     }
 
     @Test
-    fun `同一首歌的缓存键稳定`() {
-        val first = InstrumentalStore.keyFor("http://a/1.mp3", "netease:123")
-        val second = InstrumentalStore.keyFor("http://b/2.mp3", "netease:123")
-        // 直链会换 CDN、会过期：键必须跟着 songKey 走，否则每播一次都要重新分离。
-        assertEquals(first, second)
+    fun `井号408 缓存保留签名更新前的文件名但区分音源`() {
+        val first = InstrumentalStore.keyFor("https://a/track.m4a?quality=high&token=old", "provider:123")
+        val refreshed = InstrumentalStore.keyFor("https://b/track.m4a?token=new&quality=high", "provider:123")
+        val alternate = InstrumentalStore.keyFor("https://b/mv.m4a?token=new&quality=high", "provider:123")
+        assertEquals("6af994001093a9dbf2080f75cfbd981a", first)
+        assertEquals(first, refreshed)
+        assertNotEquals(first, alternate)
     }
 
     @Test

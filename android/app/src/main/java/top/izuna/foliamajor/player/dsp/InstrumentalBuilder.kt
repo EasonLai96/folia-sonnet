@@ -7,6 +7,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.util.Log
 import top.izuna.foliamajor.automix.AutomixModels
+import top.izuna.foliamajor.automix.NativeInferenceGate
 import top.izuna.foliamajor.automix.ScnetRunner
 import top.izuna.foliamajor.automix.TrackPcmDecoder
 import java.io.File
@@ -88,9 +89,12 @@ internal object InstrumentalBuilder {
         url: String,
         key: String,
         onProgress: (Int) -> Unit,
+        permit: NativeInferenceGate.Permit,
         cancelled: () -> Boolean,
         eager: Boolean = false,
+        publish: (() -> Boolean) -> Boolean,
     ): BuiltTracks? {
+        if (!permit.isCurrent() || cancelled()) return null
         val started = System.currentTimeMillis()
         /*
          * 空间不够就别开工。
@@ -135,6 +139,7 @@ internal object InstrumentalBuilder {
         if (decoded.samples <= 0) return null
         onProgress(3)
 
+        if (!permit.isCurrent() || cancelled()) return null
         val model = AutomixModels.ensureLocal(
             context,
             AutomixModels.SCNET,
@@ -143,7 +148,8 @@ internal object InstrumentalBuilder {
                 if (total > 0) onProgress(3 + (copied * 3 / total).toInt().coerceIn(0, 3))
             },
         )
-        ScnetRunner.ensureLoaded(model)
+        if (!permit.isCurrent() || cancelled()) return null
+        ScnetRunner.ensureLoaded(model, permit, cancelled)
         onProgress(6)
 
         val tempInstrumental = InstrumentalStore.tempFor(context, key, VocalTrackMode.INSTRUMENTAL)
@@ -166,6 +172,8 @@ internal object InstrumentalBuilder {
                 val stems = ScnetRunner.separate(
                     decoded.left,
                     decoded.right,
+                    permit,
+                    model,
                     stems = listOf(STEM_VOCALS),
                     fromSample = cursor,
                     toSample = end,
@@ -180,6 +188,7 @@ internal object InstrumentalBuilder {
                     cancelled = cancelled,
                     eager = eager,
                 ).stems
+                if (cancelled()) return null
                 val vocals = stems["vocals"] ?: return null
                 val frames = end - cursor
                 writerInstrumental.write(mixMinusVocals(decoded.left, decoded.right, vocals, cursor, frames), frames)
@@ -195,24 +204,29 @@ internal object InstrumentalBuilder {
         } finally {
             try { writerInstrumental.close() } catch (_: Throwable) {}
             try { writerVocal.close() } catch (_: Throwable) {}
+            if (!finished) {
+                // 取消也可能从循环内提前返回，仍要删掉半截文件。
+                tempInstrumental.delete()
+                tempVocal.delete()
+            }
         }
-        if (!finished) {
-            // 取消或失败：半截文件留着只会占地方，下次启动虽然也会扫，但没必要等那么久。
-            tempInstrumental.delete()
-            tempVocal.delete()
-            return null
-        }
+        if (!finished) return null
 
         val targetInstrumental = InstrumentalStore.targetFor(context, key, VocalTrackMode.INSTRUMENTAL)
         val targetVocal = InstrumentalStore.targetFor(context, key, VocalTrackMode.VOCAL)
-        val okInstrumental = InstrumentalStore.commit(tempInstrumental, targetInstrumental)
-        val okVocal = InstrumentalStore.commit(tempVocal, targetVocal)
-        if (!okInstrumental || !okVocal) {
-            Log.w(TAG, "音轨落盘失败: ${targetInstrumental.absolutePath}")
+        val published = publish {
+            val okInstrumental = InstrumentalStore.commit(tempInstrumental, targetInstrumental)
+            val okVocal = InstrumentalStore.commit(tempVocal, targetVocal)
+            if (!okInstrumental || !okVocal) {
+                Log.w(TAG, "音轨落盘失败: ${targetInstrumental.absolutePath}")
+                targetInstrumental.delete()
+                targetVocal.delete()
+                false
+            } else true
+        }
+        if (!published) {
             tempInstrumental.delete()
             tempVocal.delete()
-            targetInstrumental.delete()
-            targetVocal.delete()
             return null
         }
         Log.i(

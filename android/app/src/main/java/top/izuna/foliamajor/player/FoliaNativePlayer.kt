@@ -20,6 +20,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 
 import top.izuna.foliamajor.FoliaPlaybackService
 import top.izuna.foliamajor.player.dsp.AudioPipelineTelemetry
+import top.izuna.foliamajor.player.dsp.AudioSourceIdentity
+import top.izuna.foliamajor.player.dsp.AudioSourceLoads
 import top.izuna.foliamajor.player.dsp.FoliaAudioSinkFactory
 import top.izuna.foliamajor.player.dsp.NativeEqualizerState
 import top.izuna.foliamajor.player.transition.bridge.TransitionDeckHost
@@ -141,6 +143,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      */
     var onUnreadableSource: ((url: String) -> Unit)? = null
 
+    private val sourceLoads = AudioSourceLoads()
     private var player: ExoPlayer? = null
     /** 换源时要就地改默认请求头（飞牛的会话 Cookie），所以提成字段。 */
     private var httpFactory: DefaultHttpDataSource.Factory? = null
@@ -359,29 +362,29 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         mediaId: String?,
         onPlayerThreadBeforePrepare: (() -> Unit)?,
     ) {
-        // 换源时旧缓冲状态不属于新媒体；首个新源事件到达前也必须按暂停语义处理。
-        // cachedPlaying 不在这里动：它是 play() 的「继续」判据与通知栏的播放态，prepare 后紧跟 play()，
-        // 清掉会让每次切歌多一个淡入、通知栏闪一下暂停；stall 由下面两项与 emit 的真值重算负责。
-        cachedStalled = false
-        cachedBuffering = false
-        originalUrl = baseUrl
-        onInstrumental = instrumental
-        NativeEqualizerState.instrumentalActive = instrumental
-        lastUrl = url
-        lastMediaId = mediaId
-        /*
-         * ⭐ 位置与时长在**调用线程上**立刻归零，不等播放器线程。
-         *
-         * runOnPlayer 是异步 post：原生兜底切歌（skipViaMirror → prepareFromSystem）
-         * 之后服务马上就在主线程写 MediaSession 状态，那一问走的是
-         * currentPositionMs() —— 这时 prepare 还排在播放器线程的队列里，
-         * 读到的是**上一首**的位置。通知栏那条进度条于是从旧歌的位置接着走
-         * （「下一首切换播放进度是错误的」），而状态只在边界重写，没人再来纠正它。
-         * 两个字段都是 volatile，提前写安全；真正的装源照旧在播放器线程做。
-         */
-        cachedPositionMs = if (startPositionMs > 0) startPositionMs else 0L
-        cachedDurationMs = 0L
+        val source = AudioSourceLoads.Source(baseUrl, url, mediaId, instrumental)
+        val ticket = sourceLoads.requestSource(source) {
+            // 换源时旧缓冲状态不属于新媒体；首个新源事件到达前也必须按暂停语义处理。
+            // cachedPlaying 不在这里动：它是 play() 的「继续」判据与通知栏的播放态，prepare 后紧跟 play()，
+            // 清掉会让每次切歌多一个淡入、通知栏闪一下暂停；stall 由下面两项与 emit 的真值重算负责。
+            cachedStalled = false
+            cachedBuffering = false
+            publishSource(source)
+            /*
+             * ⭐ 位置与时长在**调用线程上**立刻归零，不等播放器线程。
+             *
+             * runOnPlayer 是异步 post：原生兜底切歌（skipViaMirror → prepareFromSystem）
+             * 之后服务马上就在主线程写 MediaSession 状态，那一问走的是
+             * currentPositionMs() —— 这时 prepare 还排在播放器线程的队列里，
+             * 读到的是**上一首**的位置。通知栏那条进度条于是从旧歌的位置接着走
+             * （「下一首切换播放进度是错误的」），而状态只在边界重写，没人再来纠正它。
+             * 两个字段都是 volatile，提前写安全；真正的装源照旧在播放器线程做。
+             */
+            cachedPositionMs = if (startPositionMs > 0) startPositionMs else 0L
+            cachedDurationMs = 0L
+        }
         runOnPlayer {
+            if (!sourceLoads.beginInstall(ticket)) return@runOnPlayer
             cachedStalled = false
             cachedBuffering = false
             onPlayerThreadBeforePrepare?.invoke()
@@ -398,6 +401,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             // 每次换源都按地址重问一遍，没有就清空，别把上一首的头带给下一首。
             applySourceHeaders(url)
             current.setMediaItem(mediaItemFor(url, mediaId))
+            sourceLoads.markSourceInstalled(ticket, source)
             current.setRepeatMode(requestedRepeatMode)
             current.setVolume(requestedVolume)
             current.setPlaybackParameters(PlaybackParameters(requestedSpeed))
@@ -429,40 +433,61 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      *
      * 位置在播放器线程上现取（cachedPositionMs 是 250ms 一拍的，切源时最多会退回去小半拍）。
      */
-    fun swapSource(url: String, instrumental: Boolean) {
+    internal fun swapSourceIfCurrent(
+        expected: AudioSourceLoads.Ticket,
+        instrumental: Boolean,
+        authorize: (commit: (String) -> Unit) -> Unit,
+        finished: () -> Unit = {},
+    ) = sourceLoads.queueTrackSwap(
+        expected, instrumental,
+        enqueue = { task -> runOnPlayer(task, onRejected = finished) },
+        actual = {
+            if (released) null else player?.currentMediaItem?.let { item ->
+                AudioSourceIdentity.from(item.localConfiguration?.uri?.toString(), item.mediaId)
+            }
+        },
+        authorize = authorize,
+        publish = ::publishSource,
+        install = { installSwappedSource(it.url, it.mediaId) },
+        finished = finished,
+    )
+
+    private fun publishSource(source: AudioSourceLoads.Source) {
+        originalUrl = source.baseUrl
+        lastMediaId = source.mediaId
+        publishSwappedSource(source.url, source.instrumental)
+    }
+
+    private fun publishSwappedSource(url: String, instrumental: Boolean) {
         onInstrumental = instrumental
         NativeEqualizerState.instrumentalActive = instrumental
         /*
-         * ⭐ lastUrl 在**调用线程**上立刻更新，不等 runOnPlayer。
-         *
-         * 换源判据（InstrumentalCoordinator.shouldSwapVocalTrack）读的就是它。
-         * 原来写在播放器线程的 lambda 里：连续拨「全部 / 人声 / 伴奏」时，第二次
-         * reconcile 拿到的仍是上一轨的地址，于是把同一轨又 prepare 一遍、或者把
-         * 刚下的换源意图覆盖掉 —— 用户看到的就是「切了不生效 / 切人声放的还是全部」。
-         * prepareInternal 早就是同步写的，这里补齐同一条纪律。
+         * 普通 prepare 登记时同步发布 lastUrl；同源换轨则等播放器验证 owner 后再发布。
+         * 连续切换「全部 / 人声 / 伴奏」的判据在队列消费时重新取实装轨与最新模式。
          */
         lastUrl = url
-        runOnPlayer {
-            val current = ensurePlayer()
-            val position = current.currentPosition
-            val playing = cachedPlaying
-            // 换源即收掉在途的交叉淡化（同 prepare，见那里的注释）。
-            cancelFade()
-            applySourceHeaders(url)
-            current.setMediaItem(mediaItemFor(url, lastMediaId))
-            current.setRepeatMode(requestedRepeatMode)
-            current.setVolume(requestedVolume)
-            current.setPlaybackParameters(PlaybackParameters(requestedSpeed))
-            current.prepare()
-            if (position > 0) current.seekTo(position)
-            if (playing) current.setPlayWhenReady(true)
-            // lastUrl 已在调用线程同步写好（见方法开头），这里不再重复赋值。
-            cachedPositionMs = position
-            cachedDurationMs = 0L
-            nearEndFired = false
-            lastTickPositionMs = position
-            nearEndFloorMs = 0L
-        }
+    }
+
+    private fun installSwappedSource(url: String, mediaId: String?) {
+        val current = ensurePlayer()
+        val position = current.currentPosition
+        val playing = cachedPlaying
+        // 换源即收掉在途的交叉淡化（同 prepare，见那里的注释）。
+        cancelFade()
+        applySourceHeaders(url)
+        current.setMediaItem(mediaItemFor(url, mediaId))
+        current.setRepeatMode(requestedRepeatMode)
+        current.setVolume(requestedVolume)
+        current.setPlaybackParameters(PlaybackParameters(requestedSpeed))
+        current.prepare()
+        if (position > 0) current.seekTo(position)
+        if (playing) current.setPlayWhenReady(true)
+        // lastUrl 已与请求 / 分离接管同序发布，这里不再重复赋值。
+        cachedPositionMs = position
+        cachedDurationMs = 0L
+        nearEndFired = false
+        lastTickPositionMs = position
+        nearEndFloorMs = 0L
     }
 
     fun play() {
@@ -658,14 +683,19 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
 
     /** 停下来并丢掉当前媒体（换歌之前的收尾，以及「没有歌了」）。 */
     fun stop() {
+        val ticket = sourceLoads.request(null)
         runOnPlayer {
+            if (!sourceLoads.beginInstall(ticket)) return@runOnPlayer
             val current = player ?: return@runOnPlayer
             current.stop()
             current.setPlayWhenReady(false)
             current.clearMediaItems()
             // 真的停了：系统控件就不该再把它拉起来。
-            lastUrl = null
-            lastMediaId = null
+            sourceLoads.markInstalled(null)
+            sourceLoads.publishIfRequested(ticket) {
+                lastUrl = null
+                lastMediaId = null
+            }
             cachedPlaying = false
             cachedPositionMs = 0L
             cachedDurationMs = 0L
@@ -794,7 +824,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         // 「sending message to a Handler on a dead thread」，而系统控件（通知栏 / 耳机）
         // 在插件销毁之后仍可能来碰一次。
         if (released) return
-        released = true
+        sourceLoads.request(null) { released = true }
         handler.post {
             try {
                 stopTicking()
@@ -850,6 +880,21 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         return lastMediaId ?: ""
     }
 
+    /** 可在普通 prepare 已排队但尚未实装时签发；消费时还必须核对实装。 */
+    internal fun requestedAudioSource(url: String, mediaId: String?): AudioSourceLoads.Ticket? {
+        val identity = AudioSourceIdentity.from(url, mediaId) ?: return null
+        return if (released) null else sourceLoads.requestedFor(identity)
+    }
+
+    internal fun isRequestedAudioSource(ticket: AudioSourceLoads.Ticket): Boolean =
+        !released && sourceLoads.isRequested(ticket)
+
+    internal fun requestedAudioSource(): AudioSourceLoads.Installed? =
+        if (released) null else sourceLoads.requestedSource()
+
+    internal fun ifRequestedAudioSource(ticket: AudioSourceLoads.Ticket, action: () -> Unit) {
+        if (!released) sourceLoads.ifRequested(ticket, action)
+    }
     /** 最近一条 ended / error 事件所属曲目的 mediaId（发出那一刻在播放器线程上取）；没有时是空串。 */
     @Volatile private var eventMediaId = ""
 
@@ -916,8 +961,13 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      * 已经就在那条线程上时直接跑：`prepare` 之后紧接着的 `play` 不该被排到下一轮去
      * （那一轮的延迟会变成「点播放到出声」的手感）。
      */
-    private fun runOnPlayer(action: Runnable) {
-        if (released) return
+    private fun runOnPlayer(action: Runnable) = runOnPlayer(action, onRejected = {})
+
+    private fun runOnPlayer(action: Runnable, onRejected: () -> Unit) {
+        if (released) {
+            onRejected()
+            return
+        }
         if (Looper.myLooper() == handler.looper) {
             try {
                 action.run()
@@ -927,13 +977,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             }
             return
         }
-        handler.post {
+        val posted = handler.post {
             try {
                 action.run()
             } catch (error: Throwable) {
                 emit("error", cachedPositionMs, cachedDurationMs, error.toString())
             }
         }
+        if (!posted) onRejected()
     }
 
     /**
@@ -970,11 +1021,15 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
          * volatile，与 lastUrl 同纪律；真正的「旧那台手上有没有东西」在播放器线程里再判一次。
          */
         if (!cachedPlaying || !hasMedia()) return false
+        val source = AudioSourceLoads.Source(url, url, mediaId, instrumental = false)
+        val ticket = sourceLoads.requestSource(source)
         runOnPlayer {
+            if (!sourceLoads.beginInstall(ticket)) return@runOnPlayer
             val old = player
             val incoming = buildExtraPlayer()
-            lastUrl = url
-            lastMediaId = mediaId
+            sourceLoads.publishIfRequested(ticket) {
+                publishSource(source)
+            }
             cachedPositionMs = 0L
             cachedDurationMs = 0L
             cachedPlaying = true
@@ -1001,6 +1056,7 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             nearEndFloorMs = 0L
             applySourceHeaders(url)
             incoming.setMediaItem(mediaItemFor(url, mediaId))
+            sourceLoads.markSourceInstalled(ticket, source)
             incoming.setRepeatMode(requestedRepeatMode)
             incoming.setPlaybackParameters(PlaybackParameters(requestedSpeed))
             incoming.setVolume(0f)
@@ -1074,6 +1130,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
      * 与 crossfadeOutgoing 分开：cancelFade() 会释放后者，两条路径不能互相误收。
      */
     @Volatile private var transitionOutgoing: ExoPlayer? = null
+    private var transitionIncomingOwner: AudioSourceLoads.Ticket? = null
+    private var transitionOutgoingSource: AudioSourceLoads.Installed? = null
 
     /**
      * 能不能做过场：正在出声、手上有歌。
@@ -1089,7 +1147,10 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
     fun transitionBegin(url: String, mediaId: String?, startMs: Long): Boolean {
         // 判据只用线程安全的缓存字段，和 crossfadeTo 同一条纪律（不能从别的线程问 mediaItemCount）。
         if (!canTransition()) return false
+        val source = AudioSourceLoads.Source(url, url, mediaId, instrumental = false)
+        val ticket = sourceLoads.requestSource(source)
         runOnPlayer {
+            if (!sourceLoads.beginInstall(ticket)) return@runOnPlayer
             val old = player
             if (old == null || old.mediaItemCount == 0) {
                 // 旧那台手上已经没东西：没得交接，让调用方按普通换源处理。
@@ -1103,8 +1164,9 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             val incoming = buildExtraPlayer()
             // 新那台必须挂监听：它马上就是 player，不挂就彻底失去 ended / ready / buffering。
             incoming.addListener(playerListener)
-            lastUrl = url
-            lastMediaId = mediaId
+            sourceLoads.publishIfRequested(ticket) {
+                publishSource(source)
+            }
             cachedPositionMs = startMs
             cachedDurationMs = 0L
             cachedPlaying = true
@@ -1112,11 +1174,14 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
             lastTickPositionMs = 0L
             nearEndFloorMs = 0L
             transitionOutgoing = old
+            transitionOutgoingSource = sourceLoads.installedSource()
+            transitionIncomingOwner = ticket
             player = incoming
             activeRole.set(DeckRole.OUTGOING)
             handoverRole.set(DeckRole.INCOMING)
             applySourceHeaders(url)
             incoming.setMediaItem(mediaItemFor(url, mediaId))
+            sourceLoads.markSourceInstalled(ticket, source)
             incoming.setRepeatMode(requestedRepeatMode)
             incoming.setPlaybackParameters(PlaybackParameters(requestedSpeed))
             incoming.setVolume(0f)
@@ -1143,6 +1208,8 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         runOnPlayer {
             val outgoing = transitionOutgoing
             transitionOutgoing = null
+            transitionIncomingOwner = null
+            transitionOutgoingSource = null
             outgoing?.stop()
             outgoing?.release()
             if (outgoing != null) AudioPipelineTelemetry.notePlayerReleased()
@@ -1161,17 +1228,34 @@ class FoliaNativePlayer(context: Context, listener: Listener) {
         runOnPlayer {
             val outgoing = transitionOutgoing
             transitionOutgoing = null
-            val incoming = player
+            val incomingOwner = transitionIncomingOwner
+            val outgoingSource = transitionOutgoingSource
+            transitionIncomingOwner = null
+            transitionOutgoingSource = null
             if (outgoing != null) {
-                player = outgoing
-                outgoing.addListener(playerListener)
-                outgoing.setVolume(requestedVolume)
-                outgoing.setPlaybackParameters(PlaybackParameters(requestedSpeed))
+                val incoming = player
+                val outgoingPosition = outgoing.currentPosition
+                val outgoingDuration = outgoing.duration.coerceAtLeast(0L)
+                if (incomingOwner != null && sourceLoads.restoreOutgoing(incomingOwner, outgoingSource) { source ->
+                        publishSource(source)
+                        cachedPositionMs = outgoingPosition
+                        cachedDurationMs = outgoingDuration
+                    }
+                ) {
+                    player = outgoing
+                    outgoing.addListener(playerListener)
+                    outgoing.setVolume(requestedVolume)
+                    outgoing.setPlaybackParameters(PlaybackParameters(requestedSpeed))
+                    incoming?.removeListener(playerListener)
+                    incoming?.stop()
+                    incoming?.release()
+                    if (incoming != null) AudioPipelineTelemetry.notePlayerReleased()
+                } else {
+                    // 更新的装源已经实装，不回滚主播放器；只回收原来的出场 deck。
+                    outgoing.release()
+                    AudioPipelineTelemetry.notePlayerReleased()
+                }
             }
-            incoming?.removeListener(playerListener)
-            incoming?.stop()
-            incoming?.release()
-            if (incoming != null) AudioPipelineTelemetry.notePlayerReleased()
             activeRole.set(DeckRole.INACTIVE)
             handoverRole.set(DeckRole.INACTIVE)
             TransitionDspState.clear()

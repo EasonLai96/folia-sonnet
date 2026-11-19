@@ -19,7 +19,6 @@ import top.izuna.foliamajor.player.dsp.InstrumentalStore
 import top.izuna.foliamajor.player.dsp.NativeEqualizerState
 import top.izuna.foliamajor.player.dsp.VocalTrackMode
 import top.izuna.foliamajor.player.dsp.vocalTrackModeOf
-import top.izuna.foliamajor.player.dsp.shouldSwapVocalTrack
 import top.izuna.foliamajor.settings.FoliaSettingsStore
 import top.izuna.foliamajor.wallpaper.WallpaperLyricsState
 import top.izuna.foliamajor.player.transition.bridge.TransitionDeckHost
@@ -76,10 +75,6 @@ class FoliaNativePlayerPlugin : Plugin() {
             PLAYER_GENERATIONS.runIfCurrent(generation) { WallpaperLyricsState.clearPlayerStall() }
         }
     }
-
-    /** 当前这首的 songKey。伴奏缓存键、以及「生成完是不是还在听这首」都靠它。 */
-    @Volatile
-    private var currentSongKey: String? = null
 
     companion object {
         /** 跨插件实例共享：新实例 load() 一旦推进代数，旧实例的任何迟到写入都被挡掉。 */
@@ -699,46 +694,41 @@ class FoliaNativePlayerPlugin : Plugin() {
          * 装伴奏时 MediaItem 的 mediaId 仍然是这首歌的 songKey，
          * 通知栏 / 桌面歌词 / 镜像兜底都以为没换过东西。
          */
-        val activeMode = NativeEqualizerState.activeMode()
-        val cachedTrack = activeMode?.let { mode ->
-            InstrumentalStore.find(context, InstrumentalStore.keyFor(url, webSongKey), mode)
-        }
-        if (cachedTrack != null) {
-            current.prepareInstrumental(
-                url,
-                Uri.fromFile(cachedTrack).toString(),
-                if (startPositionMs != null) startPositionMs.toLong() else -1L,
-                webSongKey,
-            )
-        } else {
-            // 旧媒体的缓冲豁免不能跨媒体继承：清理排到播放器线程、与旧事件同序，换源前旧事件无法再写回。
-            prepareClearingStall(current, url, if (startPositionMs != null) startPositionMs.toLong() else -1L, webSongKey)
-        }
-        // Web 亲自装源 = 原生那一单派发作废，服务的 pending 换成 Web 选的这首（#182 审查 M2）。
-        MAIN.post { top.izuna.foliamajor.FoliaPlaybackService.activeService()?.onWebPrepared(webSongKey) }
-        currentSongKey = webSongKey
-        /*
-         * 记下「原曲是这一刻装的」：切回全部时用它判断手上那条地址放了多久
-         * （见 InstrumentalCoordinator.sourceMayBeStale）。放在装源之后，与
-         * currentSongKey 一起写，两者才会描述同一首歌。
-         */
-        InstrumentalCoordinator.noteSourcePrepared()
-        /*
-         * 开关开着的话：这首歌要是有现成的那一轨就直接换过去，没有就开始生成。
-         * reconcile 内部会先把旧任务作废（generation +1），不会串到上一首。
-         */
-        InstrumentalCoordinator.reconcile(context, current, url, webSongKey)
-        /*
-         * 提前拆音轨由「设置 → 存储」里的总开关说了算。
-         *
-         * 关着（默认）：只正常给智能动感提供数据，不预先跑 SCNet 拆两轨 ——
-         * 那是几十秒的推理，用户没点头就别占着播放的核。等他真拨了「伴奏 /
-         * 清唱」，reconcile 会自己现拆。
-         * 开着：装完源就把这首歌的两轨备好，拨开关秒切；下一首由 Web 的
-         * 预取队列提前备（songAssetPrecompute.ts）。
-         */
-        if (FoliaSettingsStore.get(context).getBoolean(PREBUILD_TRACKS_KEY, false)) {
-            InstrumentalCoordinator.prebuild(context, url, webSongKey)
+        InstrumentalCoordinator.withTrackIntent {
+            val activeMode = NativeEqualizerState.activeMode()
+            val cachedTrack = activeMode?.let { mode ->
+                InstrumentalCoordinator.cachedTrackForPrepare(context, url, webSongKey, mode)
+            }
+            if (cachedTrack != null) {
+                current.prepareInstrumental(
+                    url,
+                    Uri.fromFile(cachedTrack).toString(),
+                    if (startPositionMs != null) startPositionMs.toLong() else -1L,
+                    webSongKey,
+                )
+            } else {
+                // 旧媒体的缓冲豁免不能跨媒体继承：清理排到播放器线程、与旧事件同序，换源前旧事件无法再写回。
+                prepareClearingStall(current, url, if (startPositionMs != null) startPositionMs.toLong() else -1L, webSongKey)
+            }
+            // Web 亲自装源 = 原生那一单派发作废，服务的 pending 换成 Web 选的这首（#182 审查 M2）。
+            MAIN.post { top.izuna.foliamajor.FoliaPlaybackService.activeService()?.onWebPrepared(webSongKey) }
+            /*
+             * 开关开着的话：这首歌要是有现成的那一轨就直接换过去，没有就开始生成。
+             * reconcile 内部会先把旧任务作废（generation +1），不会串到上一首。
+             */
+            InstrumentalCoordinator.reconcile(context, current)
+            /*
+             * 提前拆音轨由「设置 → 存储」里的总开关说了算。
+             *
+             * 关着（默认）：只正常给智能动感提供数据，不预先跑 SCNet 拆两轨 ——
+             * 那是几十秒的推理，用户没点头就别占着播放的核。等他真拨了「伴奏 /
+             * 清唱」，reconcile 会自己现拆。
+             * 开着：装完源就把这首歌的两轨备好，拨开关秒切；下一首由 Web 的
+             * 预取队列提前备（songAssetPrecompute.ts）。
+             */
+            if (FoliaSettingsStore.get(context).getBoolean(PREBUILD_TRACKS_KEY, false)) {
+                InstrumentalCoordinator.prebuild(context, url, webSongKey, current)
+            }
         }
         val result = JSObject()
         result.put("ok", true)
@@ -903,12 +893,14 @@ class FoliaNativePlayerPlugin : Plugin() {
     @PluginMethod
     fun setVocalCancelEnabled(call: PluginCall) {
         val enabled = call.getBoolean("enabled", false) ?: false
-        NativeEqualizerState.setVocalCancelEnabled(
-            FoliaSettingsStore.get(getContext()),
-            enabled,
-        )
-        val current = player
-        InstrumentalCoordinator.reconcile(context, current, current?.baseUrl(), currentSongKey)
+        InstrumentalCoordinator.withTrackIntent {
+            NativeEqualizerState.setVocalCancelEnabled(
+                FoliaSettingsStore.get(getContext()),
+                enabled,
+            )
+            val current = player
+            InstrumentalCoordinator.reconcile(context, current)
+        }
         call.resolve()
     }
 
@@ -919,12 +911,14 @@ class FoliaNativePlayerPlugin : Plugin() {
     @PluginMethod
     fun setVocalOnlyEnabled(call: PluginCall) {
         val enabled = call.getBoolean("enabled", false) ?: false
-        NativeEqualizerState.setVocalOnlyEnabled(
-            FoliaSettingsStore.get(getContext()),
-            enabled,
-        )
-        val current = player
-        InstrumentalCoordinator.reconcile(context, current, current?.baseUrl(), currentSongKey)
+        InstrumentalCoordinator.withTrackIntent {
+            NativeEqualizerState.setVocalOnlyEnabled(
+                FoliaSettingsStore.get(getContext()),
+                enabled,
+            )
+            val current = player
+            InstrumentalCoordinator.reconcile(context, current)
+        }
         call.resolve()
     }
 
@@ -942,9 +936,11 @@ class FoliaNativePlayerPlugin : Plugin() {
     @PluginMethod
     fun setVocalTrackMode(call: PluginCall) {
         val mode = vocalTrackModeOf(call.getString("mode"))
-        NativeEqualizerState.setVocalTrackMode(FoliaSettingsStore.get(getContext()), mode)
-        val current = player
-        InstrumentalCoordinator.reconcile(context, current, current?.baseUrl(), currentSongKey)
+        InstrumentalCoordinator.withTrackIntent {
+            NativeEqualizerState.setVocalTrackMode(FoliaSettingsStore.get(getContext()), mode)
+            val current = player
+            InstrumentalCoordinator.reconcile(context, current)
+        }
         call.resolve()
     }
 
@@ -964,15 +960,10 @@ class FoliaNativePlayerPlugin : Plugin() {
          *   · 不重新发起分离：删完还开着「人声 / 伴奏」会立刻又生成一份，
          *     用户看到的就是「删了又自己长出来」，界面还会一直挂在 building 0%。
          */
-        NativeEqualizerState.setVocalTrackMode(FoliaSettingsStore.get(getContext()), null)
-        val current = player
-        val base = current?.baseUrl()
-        if (current != null && base != null && current.isOnInstrumental()
-            && shouldSwapVocalTrack(current.currentUrl(), base)
-        ) {
-            current.swapSource(base, instrumental = false)
+        InstrumentalCoordinator.withTrackIntent {
+            NativeEqualizerState.setVocalTrackMode(FoliaSettingsStore.get(getContext()), null)
+            InstrumentalCoordinator.clear(context.applicationContext, player)
         }
-        InstrumentalCoordinator.clear(context.applicationContext)
         val (usedBytes, usedCount, limitBytes) = InstrumentalStore.usage()
         val result = JSObject()
         result.put("ok", true)
@@ -1029,8 +1020,8 @@ class FoliaNativePlayerPlugin : Plugin() {
         val (state, percent, key) = InstrumentalCoordinator.status()
         val (usedBytes, usedCount, limitBytes) = InstrumentalStore.usage()
         val current = player
-        val currentKey = current?.let {
-            InstrumentalStore.keyFor(it.baseUrl().orEmpty(), currentSongKey)
+        val currentKey = current?.requestedAudioSource()?.source?.let {
+            InstrumentalStore.keyFor(it.baseUrl, it.mediaId)
         }
         val mode = NativeEqualizerState.activeMode()
         /*

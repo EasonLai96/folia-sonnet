@@ -57,63 +57,6 @@ class VocalTrackSwitchTest {
         assertTrue(shouldSwapVocalTrack(null, instrumental))
     }
 
-    // ---- 生成完换源前的严格身份校验（「切下一首歌却用了上一首的数据」回归） ----
-
-    private val firstUrl = "https://cdn.example.com/first.mp3"
-    private val secondUrl = "https://cdn.example.com/second.mp3"
-
-    @Test
-    fun `还是同一首歌时放行`() {
-        assertTrue(stillPlayingGeneratedTrack(firstUrl, "song:first", firstUrl, "song:first"))
-    }
-
-    @Test
-    fun `切到下一首歌后 上一首拆完不许换源 这是串歌的回归场景`() {
-        // 旧判据 keyFor(baseUrl, songKey) 只看 songKey（生成时那一首的），
-        // 所以切歌后仍算「同一首」，把上一首的伴奏装到了新歌上。
-        assertFalse(stillPlayingGeneratedTrack(secondUrl, "song:second", firstUrl, "song:first"))
-    }
-
-    @Test
-    fun `同一首歌签名地址刷新后分离结果仍可接管`() {
-        // 77d17e01 明确以 songKey 认歌：签名换链、切画质和 MV 注入不是切到另一首。
-        val refreshedUrl = "$firstUrl?expires=next"
-        assertTrue(stillPlayingGeneratedTrack(refreshedUrl, "song:first", firstUrl, "song:first"))
-    }
-
-    @Test
-    fun `不同歌曲即使共用同一音频地址也不许接管`() {
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "song:second", firstUrl, "song:first"))
-    }
-
-    @Test
-    fun `songKey 为空时不许换源 地址相同也不能放行`() {
-        // 旧写法在这里放行（isNullOrBlank 就只比地址）。地址根本不变、变的只是「装进去的
-        // 那个地址属于哪一首」的两种路径都靠这一条漏了过去：同一首重新装源（恢复进度、
-        // 切画质）时 baseUrl 不变；队列里两首歌解析出同一个直链时 baseUrl 也相同。
-        // 上一首那趟任务跑完就把上一首的伴奏装到当前播放器上 —— 正是用户报的
-        // 「切了人声 / 伴奏，放的却不是这首歌」。宁可白跑，不放错歌。
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "", firstUrl, null))
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "", firstUrl, ""))
-        assertFalse(stillPlayingGeneratedTrack(secondUrl, "", firstUrl, null))
-    }
-
-    @Test
-    fun `同一首重新装源时 地址不变也不能当成同一趟`() {
-        // 生成时带着 songKey，而播放器现在没有（重新装源丢了身份）：无从确认，不放行。
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "", firstUrl, "song:first"))
-        // 播放器有身份，但生成时没有：同上。
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "song:first", firstUrl, null))
-    }
-
-    @Test
-    fun `当前歌没有身份时宁可不换`() {
-        // stop() 清掉的是 currentMediaId；不能把 URL 是否存在混作歌曲身份。
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "", firstUrl, "song:first"))
-        assertFalse(stillPlayingGeneratedTrack(null, "", firstUrl, "song:first"))
-        assertFalse(stillPlayingGeneratedTrack(firstUrl, "", firstUrl, null))
-    }
-
     // ---- 三态原子接口：值 → 目标轨的映射（「切人声放的是全部、切全部放的是人声」回归） ----
 
     @Test
