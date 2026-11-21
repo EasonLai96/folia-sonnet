@@ -20,24 +20,30 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
  * `error.name === 'AbortError'` 分支继续按「请求被取消」处理。
  */
 const createTimeoutSignal = (timeoutMs: number): {
-  signal: AbortSignal;
-  /** 手动触发超时取消，用于把调用方的 signal 转发进来。 */
-  abort: () => void;
-  cleanup: () => void;
-  timedOut: () => boolean;
+    signal: AbortSignal;
+    /** 手动触发超时取消，用于把调用方的 signal 转发进来。 */
+    abort: () => void;
+    cleanup: () => void;
+    timedOut: () => boolean;
 } => {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  return {
-    signal: controller.signal,
-    abort: () => controller.abort(),
-    cleanup: () => clearTimeout(timer),
-    timedOut: () => timedOut,
-  };
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
+    return {
+        signal: controller.signal,
+        abort: () => controller.abort(),
+        cleanup: () => clearTimeout(timer),
+        timedOut: () => timedOut,
+    };
+};
+
+/** 超时报成普通 Error（不是 AbortError），fetchJsonWithRetry 据此重试；两条路径（带不带调用方 signal）共用。 */
+const timedOutError = (input: RequestInfo | URL, timeoutMs: number, cause: unknown): Error => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    return new Error(`Request timed out after ${timeoutMs}ms: ${url}`, { cause });
 };
 
 /**
@@ -47,40 +53,46 @@ const createTimeoutSignal = (timeoutMs: number): {
  * 时，任意一方 abort 都要让请求停下来，否则旧请求会一直挂着占住连接。
  */
 export const fetchWithTimeout = async (
-  input: RequestInfo | URL,
-  init: RequestInit = {},
-  timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> => {
-  const outerSignal = init.signal ?? undefined;
-  const timeout = createTimeoutSignal(timeoutMs);
+    const outerSignal = init.signal ?? undefined;
+    const timeout = createTimeoutSignal(timeoutMs);
 
-  if (outerSignal) {
-    // 已被外部取消就不必发请求了。
-    if (outerSignal.aborted) {
-      timeout.cleanup();
-      throw new DOMException('Aborted', 'AbortError');
+    if (outerSignal) {
+        // 已被外部取消就不必发请求了。
+        if (outerSignal.aborted) {
+            timeout.cleanup();
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        const forwardAbort = () => timeout.abort();
+        outerSignal.addEventListener('abort', forwardAbort, { once: true });
+        try {
+            return await fetch(input, { ...init, signal: timeout.signal });
+        } catch (error) {
+            // 调用方带了 signal 也要区分：是我们的超时（值得重试）就报超时，调用方自己 abort 的仍是 AbortError。
+            if (timeout.timedOut() && !outerSignal.aborted) {
+                throw timedOutError(input, timeoutMs, error);
+            }
+            throw error;
+        } finally {
+            outerSignal.removeEventListener('abort', forwardAbort);
+            timeout.cleanup();
+        }
     }
-    const forwardAbort = () => timeout.abort();
-    outerSignal.addEventListener('abort', forwardAbort, { once: true });
+
     try {
-      return await fetch(input, { ...init, signal: timeout.signal });
+        return await fetch(input, { ...init, signal: timeout.signal });
+    } catch (error) {
+        if (timeout.timedOut()) {
+            // 超时和调用方主动取消要能区分开：前者值得重试，后者不。
+            throw timedOutError(input, timeoutMs, error);
+        }
+        throw error;
     } finally {
-      outerSignal.removeEventListener('abort', forwardAbort);
-      timeout.cleanup();
+        timeout.cleanup();
     }
-  }
-
-  try {
-    return await fetch(input, { ...init, signal: timeout.signal });
-  } catch (error) {
-    if (timeout.timedOut()) {
-      // 超时和调用方主动取消要能区分开：前者值得重试，后者不。
-      throw new Error(`Request timed out after ${timeoutMs}ms: ${String(input)}`, { cause: error });
-    }
-    throw error;
-  } finally {
-    timeout.cleanup();
-  }
 };
 
 /**
@@ -91,31 +103,31 @@ export const fetchWithTimeout = async (
  * 真正持续失败时该走原有的错误上报，不在这里无限重试。
  */
 export const fetchJsonWithRetry = async <T>(
-  input: RequestInfo | URL,
-  init: RequestInit = {},
-  options: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {},
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+    options: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {},
 ): Promise<T> => {
-  const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, retries = 1, retryDelayMs = 800 } = options;
-  let lastError: unknown;
+    const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, retries = 1, retryDelayMs = 800 } = options;
+    let lastError: unknown;
 
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout(input, init, timeoutMs);
-      if (!response.ok) {
-        throw new Error(`Request failed with HTTP ${response.status}: ${String(input)}`);
-      }
-      return (await response.json()) as T;
-    } catch (error) {
-      lastError = error;
-      // 调用方主动取消不重试。
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw error;
-      }
-      if (attempt < retries) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-      }
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            const response = await fetchWithTimeout(input, init, timeoutMs);
+            if (!response.ok) {
+                throw new Error(`Request failed with HTTP ${response.status}: ${String(input)}`);
+            }
+            return (await response.json()) as T;
+        } catch (error) {
+            lastError = error;
+            // 调用方主动取消不重试。
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw error;
+            }
+            if (attempt < retries) {
+                await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            }
+        }
     }
-  }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
 };
