@@ -79,8 +79,19 @@ export const subscribeCollectionOpen = (listener: CollectionOpenListener): (() =
     };
 };
 
+// 逐个调用监听者：一个抛错只记日志并跳过，不打断其余监听者，也不打断调用方（openRoot / push 已经改了 store，弹栈还要接着走）。
+function callListenersSafely<Args extends unknown[]>(listeners: Set<(...args: Args) => void>, ...args: Args) {
+    listeners.forEach(listener => {
+        try {
+            listener(...args);
+        } catch (error) {
+            console.error('[CollectionNavigation] 监听者抛错，已跳过', error);
+        }
+    });
+}
+
 function notifyCollectionOpen(snapshot: CollectionNavigationSnapshot) {
-    openListeners.forEach(listener => listener(snapshot));
+    callListenersSafely(openListeners, snapshot);
 }
 
 /** 「将要弹栈」的监听者：from 是弹栈前的快照（store 此刻仍是它），to 是弹完之后的（null 表示整个关掉）。 */
@@ -118,5 +129,5 @@ export const isCollectionPop = (
 export const notifyCollectionPop = (to: CollectionNavigationSnapshot | null): void => {
     const from = useCollectionNavigationStore.getState().snapshot;
     if (!isCollectionPop(from, to)) return;
-    popListeners.forEach(listener => listener(from, to));
+    callListenersSafely(popListeners, from, to);
 };

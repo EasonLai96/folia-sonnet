@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     getActiveGridViewCollection,
     isCollectionPop,
@@ -6,6 +6,7 @@ import {
     subscribeCollectionOpen,
     subscribeCollectionPop,
     useCollectionNavigationStore,
+    type CollectionNavigationSnapshot,
 } from '@/stores/useCollectionNavigationStore';
 import type { GridViewCollectionDescriptor } from '@/library/core/collection/collection.contract';
 
@@ -189,5 +190,95 @@ describe('collection open notification', () => {
         unsubscribe();
         store.openRoot(album(4), 'search');
         expect(seen).toHaveBeenCalledTimes(2);
+    });
+});
+
+// #622：监听者之间互不牵连。一个监听者抛错只记一条 [CollectionNavigation] 日志并跳过，
+// 排在它后面的监听者照常收到通知，openRoot / push / notifyCollectionPop 本身也不抛。
+describe('collection navigation listener isolation', () => {
+    const boom = new Error('listener boom');
+    let unsubscribers: Array<() => void> = [];
+
+    beforeEach(() => {
+        useCollectionNavigationStore.setState({ snapshot: null });
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        unsubscribers.forEach(unsubscribe => unsubscribe());
+        unsubscribers = [];
+        vi.restoreAllMocks();
+    });
+
+    const expectSkippedLog = (times: number) => {
+        expect(console.error).toHaveBeenCalledTimes(times);
+        expect(console.error).toHaveBeenCalledWith('[CollectionNavigation] 监听者抛错，已跳过', boom);
+    };
+
+    it('keeps notifying open listeners after one throws on openRoot', () => {
+        const before = vi.fn();
+        const after = vi.fn();
+        unsubscribers.push(
+            subscribeCollectionOpen(before),
+            subscribeCollectionOpen(() => {
+                throw boom;
+            }),
+            subscribeCollectionOpen(after),
+        );
+
+        let root: CollectionNavigationSnapshot | undefined;
+        expect(() => {
+            root = useCollectionNavigationStore.getState().openRoot(album(1), 'home');
+        }).not.toThrow();
+
+        expect(useCollectionNavigationStore.getState().snapshot).toBe(root);
+        expect(before).toHaveBeenCalledWith(root);
+        expect(after).toHaveBeenCalledWith(root);
+        expectSkippedLog(1);
+    });
+
+    it('keeps notifying open listeners after one throws on push, and still returns the push decision', () => {
+        useCollectionNavigationStore.getState().openRoot(album(1), 'home');
+        const after = vi.fn();
+        unsubscribers.push(
+            subscribeCollectionOpen(() => {
+                throw boom;
+            }),
+            subscribeCollectionOpen(after),
+        );
+
+        const decision = useCollectionNavigationStore.getState().push(artist(2));
+
+        expect(decision.kind).toBe('push');
+        const snapshot = useCollectionNavigationStore.getState().snapshot;
+        expect(snapshot?.stack).toHaveLength(2);
+        expect(after).toHaveBeenCalledTimes(1);
+        expect(after).toHaveBeenCalledWith(snapshot);
+        expectSkippedLog(1);
+    });
+
+    it('keeps notifying pop listeners after one throws', () => {
+        const store = useCollectionNavigationStore.getState();
+        store.openRoot(album(1), 'home');
+        store.push(artist(2));
+        const from = useCollectionNavigationStore.getState().snapshot!;
+        const before = vi.fn();
+        const after = vi.fn();
+        unsubscribers.push(
+            subscribeCollectionPop(before),
+            subscribeCollectionPop(() => {
+                throw boom;
+            }),
+            subscribeCollectionPop(after),
+        );
+
+        const to = { ...from, stack: [album(1)] };
+        expect(() => notifyCollectionPop(to)).not.toThrow();
+
+        expect(before).toHaveBeenCalledWith(from, to);
+        expect(after).toHaveBeenCalledWith(from, to);
+        // 通知只是「将要弹栈」，store 仍是弹栈前的快照。
+        expect(useCollectionNavigationStore.getState().snapshot).toBe(from);
+        expectSkippedLog(1);
     });
 });
