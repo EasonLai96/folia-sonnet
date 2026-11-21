@@ -4,8 +4,13 @@
 // 那条转发本身与 AI 无关，已经抽到 services/nativeHttpFetch（别处也在用它绕过同源检查）；
 // 这里是 AI 这个**用法**：更宽的超时 + 云缓存那条旁路。
 
+import { isAndroidAppShell } from '../platform/runtime';
 import { createNativeFetch, isNativeHttpFetchAvailable, type NativeHttpPlugin } from './nativeHttpFetch';
 import { getNativePlugin as getNativePluginFromBridge, isCapacitorAndroidPlatform } from './nativePluginAccess';
+
+/** 安卓冷启动时等待 Capacitor 原生桥就绪的上限，避免首帧请求提前退回浏览器 fetch 撞 CORS（#353）。 */
+const NATIVE_BRIDGE_WAIT_TIMEOUT_MS = 3000;
+const NATIVE_BRIDGE_POLL_INTERVAL_MS = 50;
 
 /** AI 请求通常比接口调用慢，给一个比默认 45s 更宽的上限。 */
 export const AI_REQUEST_TIMEOUT_MS = 180_000;
@@ -34,7 +39,10 @@ type NativeAiPlugin = NativeHttpPlugin & {
     }) => Promise<{ ok?: boolean; status?: number; body?: string } | null>;
 };
 
-const getNativePlugin = (): NativeAiPlugin | null => getNativePluginFromBridge<NativeAiPlugin>('FoliaNative', () => isCapacitorAndroidPlatform());
+// 判据用不依赖桥的 isAndroidAppShell：AI 请求冷启动就会被问到，「桥还没起来」要和「不是 App」分开（#353）。
+// 仍并上原来的 isCapacitorAndroidPlatform（直接读 window.Capacitor），新判据只放宽、不比原来窄。
+const isAiNativePlatform = (): boolean => isAndroidAppShell() || isCapacitorAndroidPlatform();
+const getNativePlugin = (): NativeAiPlugin | null => getNativePluginFromBridge<NativeAiPlugin>('FoliaNative', isAiNativePlatform);
 
 export const isAiBridgeFetchAvailable = (): boolean => isNativeHttpFetchAvailable();
 
@@ -99,6 +107,21 @@ export const requestAiViaNative = async (
     }
 };
 
+/** App 壳里桥还没注入插件时，每 50ms 再问一次，最多等 3 秒；不是 App 壳就不等。 */
+const waitForNativePlugin = async (
+    timeoutMs: number = NATIVE_BRIDGE_WAIT_TIMEOUT_MS,
+): Promise<NativeAiPlugin | null> => {
+    const immediate = getNativePlugin();
+    if (immediate || !isAndroidAppShell()) return immediate;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, NATIVE_BRIDGE_POLL_INTERVAL_MS));
+        const ready = getNativePlugin();
+        if (ready) return ready;
+    }
+    return getNativePlugin();
+};
+
 /**
  * 返回一个与 fetch 同形的函数：安卓上走原生桥，其他平台回落到全局 fetch。
  * 只覆盖 AI 需要的用法（JSON 文本请求体），不做流式读取。
@@ -116,11 +139,16 @@ export const requestAiViaNative = async (
  */
 export const createAiFetch = (maxBytes?: number): typeof fetch => {
     // 上限默认跟着 nativeHttpFetch 走（8MiB）；调用方知道自己的响应会更大时按需放宽。
-    const base = createNativeFetch(AI_REQUEST_TIMEOUT_MS, maxBytes);
-    const plugin = getNativePlugin();
-    if (!plugin?.aiRequest) return base;
+    const immediatePlugin = getNativePlugin();
+    if (!immediatePlugin && !isAndroidAppShell()) {
+        return createNativeFetch(AI_REQUEST_TIMEOUT_MS, maxBytes);
+    }
 
     return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const plugin = getNativePlugin() ?? await waitForNativePlugin();
+        const base = createNativeFetch(AI_REQUEST_TIMEOUT_MS, maxBytes);
+        if (!plugin?.aiRequest) return base(input, init);
+
         const request = typeof Request !== 'undefined' && input instanceof Request ? input : null;
         const url = request?.url ?? String(input);
         const headers = new Headers(request?.headers || init?.headers || {});
