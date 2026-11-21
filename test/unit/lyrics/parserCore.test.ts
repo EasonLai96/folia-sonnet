@@ -523,3 +523,41 @@ describe('estimated line timing after an interlude', () => {
         expect(lastWord.endTime).toBeGreaterThan(line!.startTime);
     });
 });
+
+describe('estimated line timing counts sung characters, not UTF-16 units (#624)', () => {
+    // 语速样本按 lyricCharCount 算（空白不算、一个码点算一个字），收紧长行时也必须按同一把尺子量，
+    // 否则空格、emoji 和扩展区汉字会被多算，字唱完的时刻被推后。前四行每字 0.375 秒。
+    const lrcWithLongLine = (longLine: string) => [
+        '[00:00.00]第一句歌词八个字',
+        '[00:03.00]第二句歌词八个字',
+        '[00:06.00]第三句歌词八个字',
+        '[00:09.00]第四句歌词八个字',
+        `[00:12.00]${longLine}`,
+        '[00:28.00]下一句',
+    ].join('\n');
+
+    const expectPackedToSixChars = (longLine: string) => {
+        const line = parseLRC(lrcWithLongLine(longLine)).lines.find(item => item.fullText === longLine);
+        expect(line).toBeTruthy();
+        // 六个要唱的字：12 + 6 × 0.375 = 14.25 秒唱完，行尾再留两秒尾韵。
+        expect(line!.endTime).toBeCloseTo(16.25, 3);
+        // 末字在 14.25 之前收住（buildTimedWords 自己还会留一点行尾白）。
+        const lastWord = line!.words[line!.words.length - 1];
+        expect(lastWord.endTime).toBeLessThanOrEqual(14.25 + 1e-9);
+        expect(lastWord.endTime).toBeGreaterThan(13.5);
+    };
+
+    it('ignores spaces and counts an emoji as one character', () => {
+        // fullText.length 是 12（五个空格 + emoji 占两个 UTF-16 单元），要唱的只有 6 个字。
+        const longLine = '看 见 你 了 🎵 啊';
+        expect(longLine.length).toBe(12);
+        expectPackedToSixChars(longLine);
+    });
+
+    it('counts extended CJK characters (surrogate pairs) as one character each', () => {
+        // 扩展 B 区的字每个占两个 UTF-16 单元：fullText.length 是 9，要唱的是 6 个字。
+        const longLine = '𠀀𠀁𠀂唱三字';
+        expect(longLine.length).toBe(9);
+        expectPackedToSixChars(longLine);
+    });
+});

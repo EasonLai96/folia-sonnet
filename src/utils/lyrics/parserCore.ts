@@ -86,7 +86,7 @@ const rebalanceEstimatedLineTimings = (lines: Line[], estimatedIndexes: number[]
             return;
         }
 
-        const count = line.fullText.length;
+        const count = lyricCharCount(line.fullText);
         if (count === 0) {
             return;
         }
