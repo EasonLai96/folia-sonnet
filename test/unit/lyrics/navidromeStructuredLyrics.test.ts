@@ -6,6 +6,7 @@ import {
     selectPreferredNavidromeStructuredLyric,
 } from '@/utils/lyrics/navidromeStructuredLyrics';
 import { normalizeEmbeddedLrcText, normalizeEmbeddedStructuredLyrics } from '@/utils/lyrics/embeddedLrcNormalization';
+import { estimateLrcLineEndTime } from '@/utils/lyrics/estimatedLineTiming';
 import { parseEnhancedLRC, parseLRC } from '@/utils/lyrics/parserCore';
 
 // Covers OpenSubsonic songLyrics v2 cue timing emitted by Navidrome v0.63+.
@@ -170,7 +171,8 @@ describe('parseNavidromeStructuredLyrics', () => {
         expect(parsed?.lines[0].words.map(word => word.text)).toContain('る。');
         expect(parsed?.lines[1].words.map(word => word.text)).toEqual(['Line', 'two', 'goes', 'here']);
         // A line before a long gap ends after its reading time, like an LRC line, instead of at the next start.
-        expect(parsed?.lines[1].endTime).toBeCloseTo(lrc.lines[1].endTime);
+        // 比的是阅读时间估算本身：LRC 之后还会按整首语速收紧（rebalanceEstimatedLineTimings，空白不计字，#624），这里不走那一步。
+        expect(parsed?.lines[1].endTime).toBeCloseTo(estimateLrcLineEndTime('Line two goes here', 50.3, 70));
         expect(parsed?.lines[1].endTime).toBeLessThan(70);
         parsed?.lines.forEach(line => {
             expect(line.words[0].startTime).toBeCloseTo(line.startTime);
