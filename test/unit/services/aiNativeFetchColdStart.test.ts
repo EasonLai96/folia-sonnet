@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type * as RuntimeModule from '@/platform/runtime';
 import { createAiFetch } from '@/services/aiNativeFetch';
 
 // 验证 #353：安卓冷启动桥尚未挂载时，createAiFetch 会短暂等待 FoliaNative 就绪再走原生请求，不提前退回浏览器 fetch 撞 CORS。
 
 vi.mock('@/platform/runtime', async (importOriginal) => ({
-    ...await importOriginal<typeof import('@/platform/runtime')>(),
+    ...await importOriginal<typeof RuntimeModule>(),
     isAndroidAppShell: () => true,
 }));
 

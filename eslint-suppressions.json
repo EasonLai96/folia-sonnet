@@ -8566,9 +8566,6 @@
     "@typescript-eslint/no-unsafe-member-access": {
       "count": 4
     },
-    "dedicatus/log-module-prefix": {
-      "count": 1
-    },
     "dedicatus/restricted-apis": {
       "count": 3
     }

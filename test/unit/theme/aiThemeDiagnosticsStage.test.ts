@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as RuntimeModule from '@/platform/runtime';
 import { generateThemeFromLyrics, isMissingAiApiKeyError } from '@/services/gemini';
 import { generateThemeFromLyrics as generateLegacyThemeFromLyrics } from '@/services/aiText';
 import { clearAiThemeDiagnostics, readLastAiThemeAttempt } from '@/utils/aiThemeDiagnostics';
@@ -11,7 +12,7 @@ const runtimeState = vi.hoisted(() => ({
 }));
 
 vi.mock('@/platform/runtime', async (importOriginal) => ({
-    ...await importOriginal<typeof import('@/platform/runtime')>(),
+    ...await importOriginal<typeof RuntimeModule>(),
     isAndroidAppShell: () => runtimeState.androidShell,
 }));
 
